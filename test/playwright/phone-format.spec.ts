@@ -97,6 +97,47 @@ test.describe("Phone Number Formatting", () => {
     expect(content).toContain("(234) 567-8901");
   });
 
+  test("non-NANP phone displayed in National format", async ({ page }) => {
+    // Change setting to National
+    await page.goto("/settings/account");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(300);
+
+    const select = page.locator('select[name="account[phone_format]"]');
+    if ((await select.count()) > 0) {
+      await select.selectOption("national");
+      await page.getByRole("button", { name: /save/i }).first().click();
+      await page.waitForTimeout(500);
+    }
+
+    // Add a GB phone to the contact
+    await goToContact(page, contactId);
+    await addPhoneToContact(page, "+44 20 7946 0958");
+
+    // Should render in GB national format (NOT raw E.164)
+    const content = await page.content();
+    expect(content).toContain("020 7946 0958");
+  });
+
+  test("non-NANP phone displayed in International format", async ({ page }) => {
+    await page.goto("/settings/account");
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(300);
+
+    const select = page.locator('select[name="account[phone_format]"]');
+    if ((await select.count()) > 0) {
+      await select.selectOption("international");
+      await page.getByRole("button", { name: /save/i }).first().click();
+      await page.waitForTimeout(500);
+    }
+
+    await goToContact(page, contactId);
+    await addPhoneToContact(page, "+44 20 7946 0958");
+
+    const content = await page.content();
+    expect(content).toContain("+44 20 7946 0958");
+  });
+
   test("phone displayed in International format", async ({ page }) => {
     // Change setting to International
     await page.goto("/settings/account");

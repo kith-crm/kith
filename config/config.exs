@@ -10,6 +10,14 @@ import Config
 # Register .vcf (vCard) MIME type for LiveView uploads
 config :mime, :types, %{"text/vcard" => ["vcf"], "application/json" => ["json"]}
 
+# Default CLDR backend — required so ex_cldr_territories can resolve
+# locale-aware territory data without an explicit per-call backend argument.
+config :ex_cldr, default_backend: Kith.Cldr
+
+# Outbound rate limit for Monica API calls. One below the documented
+# default of 60 req/min leaves a one-call safety margin.
+config :kith, :monica_rate_limit, 55
+
 config :kith, :scopes,
   user: [
     default: true,
@@ -40,8 +48,7 @@ config :kith, Oban,
     exports: 2,
     imports: 2,
     immich: 3,
-    purge: 1,
-    photo_sync: 5
+    purge: 1
   ],
   plugins: [
     Oban.Plugins.Pruner,
@@ -118,7 +125,8 @@ config :logger, :default_formatter,
     :attempt,
     :max_attempts,
     :state,
-    :source
+    :source,
+    :import_id
   ]
 
 # Cloak encryption vault — key set per-environment

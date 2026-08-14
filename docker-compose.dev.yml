@@ -1,3 +1,14 @@
+# Kith Development Docker Compose
+#
+# Host ports are configurable via a `.env` file in the project root (auto-loaded
+# by Compose). All variables have defaults — `.env` is only needed to override.
+# See `.env.example` ("Docker Host Ports" section) for the full list.
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d                  # infra only
+#   docker compose -f docker-compose.dev.yml up -d postgres mailpit # subset
+#   docker compose -f docker-compose.dev.yml --profile app up -d    # also run app
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -16,8 +27,8 @@ services:
   mailpit:
     image: axllent/mailpit:latest
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_WEB_PORT:-8025}:8025"
 
   minio:
     image: minio/minio:latest
@@ -52,7 +63,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
     ports:
-      - "4000:4000"
+      - "${APP_PORT:-4000}:4000"
     environment:
       DB_HOST: postgres
       DB_PORT: "5432"

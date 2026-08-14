@@ -75,7 +75,7 @@ lib/kith/              # Domain layer (contexts + schemas)
   storage/             # File storage abstraction (local disk / S3)
   tasks/               # Personal tasks
   vcard/               # vCard parser + serializer
-  workers/             # 16 Oban workers across 9 queues
+  workers/             # 16 Oban workers across 7 queues
 
 lib/kith_web/          # Web layer
   controllers/api/     # REST API controllers (bearer token auth, cursor pagination)
@@ -106,7 +106,7 @@ default queries. 30-day trash before permanent purge via `ContactPurgeWorker`.
 
 ### Oban background jobs
 Workers live in `lib/kith/workers/`. Queues: default, mailers, reminders, exports,
-imports, immich, purge, photo_sync, api_supplement. Four cron jobs run nightly/weekly.
+imports, immich, purge. Four cron jobs run nightly/weekly.
 Tests use `Oban.Testing` — Oban is disabled in test env.
 
 ### REST API conventions

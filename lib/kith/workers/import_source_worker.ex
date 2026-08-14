@@ -11,6 +11,7 @@ defmodule Kith.Workers.ImportSourceWorker do
 
   alias Kith.Imports
   alias Kith.Storage
+  alias Kith.Workers.DuplicateDetectionWorker
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"import_id" => import_id}}) do
@@ -32,6 +33,9 @@ defmodule Kith.Workers.ImportSourceWorker do
 
       topic = "import:#{import.account_id}"
       Phoenix.PubSub.broadcast(Kith.PubSub, topic, {:import_complete, summary_map})
+
+      # Trigger duplicate detection for newly imported contacts
+      Oban.insert(DuplicateDetectionWorker.new(%{account_id: import.account_id}))
 
       Logger.info("Import #{import_id} completed: #{inspect(summary_map)}")
       :ok

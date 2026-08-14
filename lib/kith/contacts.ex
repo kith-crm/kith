@@ -387,8 +387,24 @@ defmodule Kith.Contacts do
     ContactField |> scope_to_account(account_id) |> Repo.get!(id)
   end
 
-  def create_contact_field(%Contact{} = contact, attrs) do
-    attrs = maybe_normalize_phone(attrs)
+  @doc """
+  Fetch a contact by ID without scope enforcement, for use by the
+  Monica misc-data worker. The worker has already verified the contact
+  belongs to an import the user authorized; we just need the row.
+
+  Returns `nil` if not found.
+  """
+  def get_contact_for_misc(id) when is_integer(id) or is_binary(id) do
+    Repo.get(Contact, id)
+  end
+
+  def create_contact_field(%Contact{} = contact, attrs, opts \\ []) do
+    attrs =
+      if Keyword.get(opts, :normalize, true) do
+        maybe_normalize_phone(attrs)
+      else
+        attrs
+      end
 
     %ContactField{contact_id: contact.id, account_id: contact.account_id}
     |> ContactField.changeset(attrs)
@@ -1740,14 +1756,28 @@ defmodule Kith.Contacts do
         end,
         set: [contact_id: survivor.id]
       )
-      # Remap photos
-      |> Ecto.Multi.update_all(
-        :remap_photos,
-        fn _changes ->
+      # Remap photos (delete duplicates by content_hash first, then move remaining)
+      |> Ecto.Multi.run(:remap_photos, fn repo, _changes ->
+        # Delete photos from non-survivor that already exist on survivor (same content_hash)
+        repo.query(
+          """
+          DELETE FROM photos
+          WHERE contact_id = $1
+            AND content_hash IS NOT NULL
+            AND content_hash IN (
+              SELECT content_hash FROM photos WHERE contact_id = $2 AND content_hash IS NOT NULL
+            )
+          """,
+          [non_survivor.id, survivor.id]
+        )
+
+        # Move remaining photos
+        {count, _} =
           from(p in Photo, where: p.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
+          |> repo.update_all(set: [contact_id: survivor.id])
+
+        {:ok, count}
+      end)
       # Remap addresses
       |> Ecto.Multi.update_all(
         :remap_addresses,

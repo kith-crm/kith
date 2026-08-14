@@ -381,7 +381,7 @@
       <div class="flex items-center justify-between">
         <div>
           <p class="text-sm text-[var(--color-text-secondary)]">
-            {length(@candidates)} potential duplicate{if length(@candidates) != 1, do: "s"} found
+            {@duplicates_total} potential duplicate{if @duplicates_total != 1, do: "s"} found
           </p>
         </div>
         <button
@@ -460,6 +460,17 @@
                   <.icon name="hero-x-mark" class="size-4" /> Dismiss
                 </button>
               </div>
+            </div>
+          <% end %>
+
+          <%= if @duplicates_has_more do %>
+            <div class="flex justify-center pt-2 pb-4">
+              <button
+                phx-click="load_more_duplicates"
+                class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-sunken)] hover:text-[var(--color-text-primary)] border border-[var(--color-border)] transition-colors cursor-pointer"
+              >
+                Load more
+              </button>
             </div>
           <% end %>
         </div>

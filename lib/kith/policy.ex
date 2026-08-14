@@ -46,6 +46,7 @@ defmodule Kith.Policy do
           | :journal
           | :duplicate_candidate
           | :reference_data
+          | :oban
 
   @doc """
   Returns true if the user is authorized to perform the given action on the resource.
@@ -57,6 +58,9 @@ defmodule Kith.Policy do
 
   # ── Admin: full access ───────────────────────────────────────────────
   defp authorized?("admin", _action, _resource), do: true
+
+  # ── Admin-only resources: deny for editor/viewer ─────────────────────
+  defp authorized?(role, _action, :oban) when role in ["editor", "viewer"], do: false
 
   # ── Editor: CRUD on contacts and content, no account/user management ─
   defp authorized?("editor", :read, resource) when resource in [:account, :audit_log], do: true

@@ -243,6 +243,25 @@ defmodule KithWeb.UserAuth do
     end
   end
 
+  def on_mount(:require_admin, params, session, socket) do
+    case on_mount(:require_authenticated, params, session, socket) do
+      {:cont, socket} ->
+        if Kith.Policy.can?(socket.assigns.current_scope.user, :manage, :oban) do
+          {:cont, socket}
+        else
+          socket =
+            socket
+            |> Phoenix.LiveView.put_flash(:error, "Admin access required.")
+            |> Phoenix.LiveView.redirect(to: ~p"/dashboard")
+
+          {:halt, socket}
+        end
+
+      {:halt, _} = halt ->
+        halt
+    end
+  end
+
   def on_mount(:require_sudo_mode, _params, session, socket) do
     socket = mount_current_scope(socket, session)
 

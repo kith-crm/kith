@@ -33,6 +33,8 @@ defmodule KithWeb.ContactLive.Index do
      |> assign(:meta, nil)
      |> assign(:tags, Contacts.list_tags(account_id))
      |> assign(:candidates, [])
+     |> assign(:duplicates_total, 0)
+     |> assign(:duplicates_has_more, false)
      |> assign(:trashed_contacts, [])}
   end
 
@@ -55,12 +57,18 @@ defmodule KithWeb.ContactLive.Index do
     |> load_contacts()
   end
 
+  @duplicates_page_size 20
+
   defp apply_action(socket, :duplicates, _params) do
-    candidates = DuplicateDetection.list_candidates(socket.assigns.account_id)
+    account_id = socket.assigns.account_id
+    candidates = DuplicateDetection.list_candidates(account_id, limit: @duplicates_page_size)
+    total_count = DuplicateDetection.pending_count(account_id)
 
     socket
     |> assign(:page_title, "Duplicate Contacts")
     |> assign(:candidates, candidates)
+    |> assign(:duplicates_total, total_count)
+    |> assign(:duplicates_has_more, length(candidates) >= @duplicates_page_size)
   end
 
   defp apply_action(socket, :trash, _params) do
@@ -245,13 +253,30 @@ defmodule KithWeb.ContactLive.Index do
 
     {:ok, _} = DuplicateDetection.dismiss_candidate(candidate)
 
-    candidates = DuplicateDetection.list_candidates(socket.assigns.account_id)
+    candidates = Enum.reject(socket.assigns.candidates, &(&1.id == candidate.id))
+    total = socket.assigns.duplicates_total - 1
 
     {:noreply,
      socket
      |> assign(:candidates, candidates)
-     |> assign(:pending_duplicates_count, length(candidates))
+     |> assign(:duplicates_total, total)
+     |> assign(:pending_duplicates_count, total)
      |> put_flash(:info, "Duplicate dismissed.")}
+  end
+
+  def handle_event("load_more_duplicates", _params, socket) do
+    offset = length(socket.assigns.candidates)
+
+    more =
+      DuplicateDetection.list_candidates(socket.assigns.account_id,
+        limit: @duplicates_page_size,
+        offset: offset
+      )
+
+    {:noreply,
+     socket
+     |> assign(:candidates, socket.assigns.candidates ++ more)
+     |> assign(:duplicates_has_more, length(more) >= @duplicates_page_size)}
   end
 
   def handle_event("scan", _params, socket) do

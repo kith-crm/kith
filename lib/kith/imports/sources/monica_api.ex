@@ -16,7 +16,14 @@ defmodule Kith.Imports.Sources.MonicaApi do
        using import_records (no API calls needed).
     3. **Extra notes** — for contacts with `statistics.number_of_notes > 3`,
        fetch remaining notes via `GET /api/contacts/{id}/notes`.
-    4. **Photos** — optionally crawl `GET /api/photos?limit=100` to import all photos.
+
+  Per-contact "misc" data (pets, calls, activities, gifts, debts, tasks,
+  reminders, conversations) is planned during Phase 1 — for each contact,
+  endpoints with `statistics.number_of_X > 0` are recorded in
+  `summary.misc_data_plan` — and dispatched separately by
+  `Kith.Workers.MonicaMiscDataWorker`. Photo import and document import
+  follow the same separate-worker pattern (`MonicaPhotoSyncWorker`,
+  `MonicaDocumentImportWorker`).
   """
 
   @behaviour Kith.Imports.Source
@@ -24,15 +31,15 @@ defmodule Kith.Imports.Sources.MonicaApi do
   import Ecto.Query, warn: false
 
   alias Kith.Contacts
+  alias Kith.Contacts.PhoneFormatter
   alias Kith.Imports
+  alias Kith.Imports.Sources.MonicaApi.RateLimiter
   alias Kith.Repo
   alias Kith.Workers.MonicaDocumentImportWorker
 
   require Logger
 
   @page_limit 100
-  @max_rate_limit_retries 3
-  @rate_limit_sleep_ms :timer.seconds(65)
 
   # ── Behaviour callbacks ───────────────────────────────────────────────
 
@@ -78,13 +85,19 @@ defmodule Kith.Imports.Sources.MonicaApi do
       user_id: user_id,
       credential: credential,
       import_job: import_job,
+      opts: opts,
       topic: "import:#{account_id}"
     }
 
     # Phase 1: Crawl contacts
-    {acc, deferred} = crawl_all_contacts(ctx)
+    {acc, deferred, ref_data} = crawl_all_contacts(ctx)
 
-    # Phase 1.5: Auto-merge definite duplicates (optional)
+    # Phase 1.4: Coverage check + backfill any silently-dropped contacts.
+    # See docs/superpowers/specs/2026-05-17-monica-import-coverage-backfill-design.md
+    {acc, _ref_data, coverage_stats} = coverage_check_and_backfill(ctx, acc, ref_data)
+
+    # Phase 1.5: Auto-merge definite duplicates (optional).
+    # Runs AFTER Phase 1.4 so backfilled contacts participate in auto-merge.
     merge_result =
       if opts["auto_merge_duplicates"] do
         auto_merge_duplicates(account_id, import_job)
@@ -103,19 +116,12 @@ defmodule Kith.Imports.Sources.MonicaApi do
         []
       end
 
-    # Phase 4: Photos (optional)
-    photo_errors =
-      if opts["photos"] do
-        crawl_all_photos(credential, account_id, import_job)
-      else
-        []
-      end
+    # Phase 4: Per-contact "misc" data (pets, calls, activities, gifts, debts,
+    # tasks, reminders, conversations) is now planned during the main crawl
+    # and dispatched as a separate `MonicaMiscDataWorker` Oban job by
+    # `MonicaApiCrawlWorker`. The plan is carried in `summary.misc_data_plan`.
 
-    # Phase 5-12: Additional data types (per-contact endpoints)
-    extra_data_errors =
-      import_extra_data_types(credential, account_id, user_id, import_job, opts)
-
-    # Phase 13: Enqueue document import jobs (async, runs after main import)
+    # Phase 5: Enqueue document import jobs (async, runs after main import)
     if opts["documents"] do
       enqueue_document_imports(credential, account_id, user_id, import_job)
     end
@@ -124,13 +130,11 @@ defmodule Kith.Imports.Sources.MonicaApi do
       acc.errors ++
         ref_errors ++
         notes_errors ++
-        photo_errors ++
-        merge_result.errors ++
-        extra_data_errors
+        merge_result.errors
 
     error_count =
-      acc.error_count + length(ref_errors) + length(notes_errors) + length(photo_errors) +
-        length(merge_result.errors) + length(extra_data_errors)
+      acc.error_count + length(ref_errors) + length(notes_errors) +
+        length(merge_result.errors)
 
     {:ok,
      %{
@@ -140,7 +144,9 @@ defmodule Kith.Imports.Sources.MonicaApi do
        skipped: acc.skipped,
        merged: merge_result.merged,
        error_count: error_count,
-       errors: Enum.take(all_errors, 50)
+       errors: Enum.take(all_errors, 50),
+       misc_data_plan: Enum.reverse(deferred.misc_data),
+       coverage_backfill: coverage_stats
      }}
   catch
     :cancelled ->
@@ -152,7 +158,8 @@ defmodule Kith.Imports.Sources.MonicaApi do
          skipped: 0,
          merged: 0,
          error_count: 1,
-         errors: ["Import cancelled"]
+         errors: ["Import cancelled"],
+         coverage_backfill: empty_backfill_stats()
        }}
   end
 
@@ -163,7 +170,12 @@ defmodule Kith.Imports.Sources.MonicaApi do
       page: 1,
       total: nil,
       acc: %{contacts: 0, notes: 0, skipped: 0, error_count: 0, errors: []},
-      deferred: %{first_met_through: [], relationships: [], extra_notes: []},
+      deferred: %{
+        first_met_through: [],
+        relationships: [],
+        extra_notes: [],
+        misc_data: []
+      },
       ref_data: nil,
       global_idx: 0
     }
@@ -177,22 +189,22 @@ defmodule Kith.Imports.Sources.MonicaApi do
         handle_contacts_page(ctx, state, contacts, meta)
 
       {:ok, %{"data" => [], "meta" => _}} ->
-        {state.acc, state.deferred}
+        {state.acc, state.deferred, state.ref_data}
 
       {:ok, unexpected} ->
         Logger.error("[MonicaApi] Unexpected contacts response: #{inspect(unexpected)}")
         acc = add_error(state.acc, "Unexpected API response format from contacts endpoint")
-        {acc, state.deferred}
+        {acc, state.deferred, state.ref_data}
 
       {:error, :rate_limited} ->
         acc = add_error(state.acc, "Rate limited by Monica API after retries")
-        {acc, state.deferred}
+        {acc, state.deferred, state.ref_data}
 
       {:error, reason} ->
         acc =
           add_error(state.acc, "Failed to fetch contacts page #{state.page}: #{inspect(reason)}")
 
-        {acc, state.deferred}
+        {acc, state.deferred, state.ref_data}
     end
   end
 
@@ -226,7 +238,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
       crawl_contacts_loop(ctx, next_state)
     else
-      {acc, deferred}
+      {acc, deferred, ref_data}
     end
   end
 
@@ -260,6 +272,214 @@ defmodule Kith.Imports.Sources.MonicaApi do
       msg = "Contact #{name}: #{Exception.message(e)}"
       Logger.error("[MonicaApi] #{msg}")
       {add_error(acc, msg), deferred}
+  end
+
+  # ── Phase 1.4: Coverage check + backfill ──────────────────────────────
+  #
+  # Monica's /api/contacts listing endpoint silently drops a subset of
+  # contacts under LIMIT/OFFSET pagination over its default sort (this is
+  # a v4 server-side issue we can't fix). We compensate by re-fetching
+  # meta.total and any IDs in [min_seen, max_seen + safety_margin] that
+  # weren't returned by the listing.
+  #
+  # See docs/superpowers/specs/2026-05-17-monica-import-coverage-backfill-design.md
+  # for full design context.
+
+  @safety_margin 50
+  @max_iterations_buffer 100
+
+  defp coverage_check_and_backfill(ctx, acc, ref_data) do
+    case fetch_meta_total(ctx.credential) do
+      {:ok, monica_total} ->
+        do_backfill(ctx, acc, ref_data, monica_total)
+
+      {:error, _reason} ->
+        # Can't determine gap; pass through with zeroed coverage stats.
+        {acc, ref_data, empty_backfill_stats()}
+    end
+  end
+
+  defp fetch_meta_total(credential) do
+    url = "#{credential.url}/api/contacts"
+
+    case api_get_json(credential, url, limit: 1, page: 1) do
+      {:ok, %{"meta" => %{"total" => total}}} when is_integer(total) -> {:ok, total}
+      _ -> {:error, :unknown_total}
+    end
+  end
+
+  defp do_backfill(ctx, acc, ref_data, monica_total) do
+    seen_ids = seen_source_ids(ctx.import_job.id)
+
+    if Enum.empty?(seen_ids) do
+      # Nothing imported by listing; refuse to scan an unbounded range.
+      {acc, ref_data, empty_backfill_stats(gap: monica_total)}
+    else
+      min_id = Enum.min(seen_ids)
+      max_id = Enum.max(seen_ids)
+      gap = monica_total - MapSet.size(seen_ids)
+
+      stats = %{
+        gap_detected: gap,
+        range_scanned: 0,
+        imported_full: 0,
+        imported_partial: 0,
+        skipped_deleted: 0,
+        skipped_inactive: 0,
+        errors: 0,
+        unresolved_gap: 0
+      }
+
+      if gap <= 0 do
+        {acc, ref_data, %{stats | unresolved_gap: 0}}
+      else
+        scan_gap_range(ctx, acc, ref_data, seen_ids, min_id, max_id, monica_total, stats)
+      end
+    end
+  end
+
+  defp seen_source_ids(import_id) do
+    from(ir in Imports.ImportRecord,
+      where:
+        ir.import_id == ^import_id and
+          ir.source_entity_type == "contact",
+      select: ir.source_entity_id
+    )
+    |> Repo.all()
+    |> Enum.flat_map(fn s ->
+      case Integer.parse(s) do
+        {n, ""} -> [n]
+        _ -> []
+      end
+    end)
+    |> MapSet.new()
+  end
+
+  defp scan_gap_range(ctx, acc, ref_data, seen_ids, min_id, max_id, monica_total, stats) do
+    scan_start = min_id
+    scan_end = max_id + @safety_margin
+    max_iterations = max_id - min_id + @max_iterations_buffer
+
+    Logger.info(
+      "[MonicaApi] Coverage backfill scanning [#{scan_start}..#{scan_end}] " <>
+        "(seen=#{MapSet.size(seen_ids)}, monica_total=#{monica_total}, gap=#{stats.gap_detected})"
+    )
+
+    candidates =
+      scan_start..scan_end
+      |> Enum.reject(&MapSet.member?(seen_ids, &1))
+      |> Enum.take(max_iterations)
+
+    initial = {acc, ref_data, stats, seen_ids}
+
+    {final_acc, final_ref_data, final_stats, final_seen} =
+      Enum.reduce_while(candidates, initial, fn id, state ->
+        step_backfill(ctx, id, state, monica_total)
+      end)
+
+    unresolved = max(0, monica_total - MapSet.size(final_seen))
+
+    if unresolved > 0 do
+      Logger.warning(
+        "[MonicaApi] Coverage backfill could not close the gap: " <>
+          "monica_total=#{monica_total}, seen=#{MapSet.size(final_seen)}, unresolved=#{unresolved}"
+      )
+    end
+
+    {final_acc, final_ref_data, %{final_stats | unresolved_gap: unresolved}}
+  end
+
+  defp step_backfill(ctx, id, {acc, ref_data, stats, seen} = state, monica_total) do
+    if MapSet.size(seen) >= monica_total do
+      {:halt, state}
+    else
+      case fetch_and_dispatch_backfill(ctx, id, acc, ref_data) do
+        {:imported_full, new_acc, new_ref_data} ->
+          {:cont,
+           {new_acc, new_ref_data,
+            %{
+              stats
+              | range_scanned: stats.range_scanned + 1,
+                imported_full: stats.imported_full + 1
+            }, MapSet.put(seen, id)}}
+
+        {:imported_partial, new_acc, new_ref_data} ->
+          {:cont,
+           {new_acc, new_ref_data,
+            %{
+              stats
+              | range_scanned: stats.range_scanned + 1,
+                imported_partial: stats.imported_partial + 1
+            }, MapSet.put(seen, id)}}
+
+        :skipped_deleted ->
+          {:cont,
+           {acc, ref_data,
+            %{
+              stats
+              | range_scanned: stats.range_scanned + 1,
+                skipped_deleted: stats.skipped_deleted + 1
+            }, seen}}
+
+        :skipped_inactive ->
+          {:cont,
+           {acc, ref_data,
+            %{
+              stats
+              | range_scanned: stats.range_scanned + 1,
+                skipped_inactive: stats.skipped_inactive + 1
+            }, seen}}
+
+        {:error, _reason} ->
+          {:cont,
+           {acc, ref_data,
+            %{stats | range_scanned: stats.range_scanned + 1, errors: stats.errors + 1}, seen}}
+      end
+    end
+  end
+
+  defp fetch_and_dispatch_backfill(ctx, monica_id, acc, ref_data) do
+    case fetch_single_contact(ctx.credential, monica_id) do
+      :not_found -> :skipped_deleted
+      {:error, reason} -> {:error, reason}
+      {:ok, api_contact} -> dispatch_accepted_contact(ctx, api_contact, acc, ref_data)
+    end
+  end
+
+  defp dispatch_accepted_contact(ctx, api_contact, acc, ref_data) do
+    case accept_backfill_response(api_contact) do
+      :skip_inactive ->
+        :skipped_inactive
+
+      verdict when verdict in [:import_full, :import_partial] ->
+        new_ref_data = build_or_update_ref_data(ctx.account_id, [api_contact], ref_data)
+
+        {new_acc, _new_deferred} =
+          safe_import_api_contact(ctx, api_contact, new_ref_data, acc, %{
+            first_met_through: [],
+            relationships: [],
+            extra_notes: [],
+            misc_data: []
+          })
+
+        case verdict do
+          :import_full -> {:imported_full, new_acc, new_ref_data}
+          :import_partial -> {:imported_partial, new_acc, new_ref_data}
+        end
+    end
+  end
+
+  defp empty_backfill_stats(opts \\ []) do
+    %{
+      gap_detected: Keyword.get(opts, :gap, 0),
+      range_scanned: 0,
+      imported_full: 0,
+      imported_partial: 0,
+      skipped_deleted: 0,
+      skipped_inactive: 0,
+      errors: 0,
+      unresolved_gap: Keyword.get(opts, :gap, 0)
+    }
   end
 
   defp import_api_contact(ctx, api_contact, ref_data, acc, deferred) do
@@ -381,7 +601,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   defp import_api_contact_children(ctx, contact, api_contact, source_id, ref_data, acc, deferred) do
     # Contact fields (embedded with ?with=contactfields)
-    import_api_contact_fields(contact, api_contact, ref_data, ctx.import_job)
+    import_api_contact_fields(contact, api_contact, ref_data, ctx)
 
     # Addresses (embedded directly)
     import_api_addresses(contact, api_contact, ctx.import_job)
@@ -393,34 +613,52 @@ defmodule Kith.Imports.Sources.MonicaApi do
     import_api_tags(contact, api_contact, ref_data)
 
     # Collect deferred data
-    deferred = collect_deferred_data(api_contact, source_id, deferred)
+    deferred = collect_deferred_data(api_contact, source_id, contact.id, deferred, ctx.opts)
 
     acc = %{acc | contacts: acc.contacts + 1, notes: acc.notes + n}
     {acc, deferred}
   end
 
-  defp import_api_contact_fields(contact, api_contact, ref_data, import_job) do
+  defp import_api_contact_fields(contact, api_contact, ref_data, ctx) do
     fields = api_contact["contactFields"] || []
 
     Enum.each(fields, fn field ->
-      import_single_contact_field(contact, field, ref_data, import_job)
+      import_single_contact_field(contact, field, ref_data, ctx)
     end)
   end
 
-  defp import_single_contact_field(contact, field, ref_data, import_job) do
+  defp import_single_contact_field(contact, field, ref_data, ctx) do
     cft_name = get_in(field, ["contact_field_type", "name"])
     cft_id = if cft_name, do: Map.get(ref_data.contact_field_types, cft_name)
-    value = field["content"]
+    raw_value = field["content"]
+    value = normalize_field_value(raw_value, cft_id, ref_data, ctx)
 
     if cft_id && value && !contact_field_duplicate?(contact.id, cft_id, value) do
-      create_contact_field(contact, field, cft_id, value, import_job)
+      create_contact_field(contact, field, cft_id, value, ctx.import_job)
     end
   end
+
+  # Normalize phone fields to E.164 at import time so detection and intra-contact
+  # dedup do simple equality. Other field types (email, social, etc) pass through.
+  defp normalize_field_value(nil, _cft_id, _ref_data, _ctx), do: nil
+
+  defp normalize_field_value(value, cft_id, ref_data, ctx) when is_binary(value) do
+    if cft_id && Map.has_key?(ref_data.phone_cft_ids, cft_id) do
+      region = parse_phone_region(ctx.opts["phone_default_region"])
+      {:ok, normalized} = PhoneFormatter.normalize(value, region)
+      normalized || value
+    else
+      value
+    end
+  end
+
+  defp parse_phone_region(region) when region in [nil, ""], do: nil
+  defp parse_phone_region(region) when is_binary(region), do: region
 
   defp create_contact_field(contact, field, cft_id, value, import_job) do
     attrs = %{"value" => value, "contact_field_type_id" => cft_id}
 
-    case Contacts.create_contact_field(contact, attrs) do
+    case Contacts.create_contact_field(contact, attrs, normalize: false) do
       {:ok, cf} ->
         maybe_record_entity(import_job, "contact_field", field["uuid"], "contact_field", cf.id)
 
@@ -506,11 +744,56 @@ defmodule Kith.Imports.Sources.MonicaApi do
     end)
   end
 
-  defp collect_deferred_data(api_contact, source_id, deferred) do
+  defp collect_deferred_data(api_contact, source_id, local_id, deferred, opts) do
     deferred
     |> collect_first_met_through(api_contact, source_id)
     |> collect_relationships(api_contact, source_id)
     |> collect_extra_notes(api_contact, source_id)
+    |> collect_misc_data(api_contact, source_id, local_id, opts)
+  end
+
+  @misc_endpoints [
+    {:calls, "number_of_calls"},
+    {:activities, "number_of_activities"},
+    {:gifts, "number_of_gifts"},
+    {:debts, "number_of_debts"},
+    {:tasks, "number_of_tasks"},
+    {:reminders, "number_of_reminders"},
+    {:conversations, "number_of_conversations"}
+  ]
+
+  # Build a plan entry for a contact's per-contact extra-data endpoints.
+  # An endpoint is included only if (a) the wizard opt for that data type is
+  # not explicitly false AND (b) Monica's `statistics.number_of_X` reports
+  # > 0 (or the stat field is missing — safer to fetch than to silently
+  # skip when Monica's payload shape is unfamiliar).
+  #
+  # `:pets` has no statistics field in Monica's contact payload, so it is
+  # included whenever the wizard opt is on. The redundant fetch for pet-free
+  # contacts is the documented cost.
+  defp collect_misc_data(deferred, api_contact, source_id, local_id, opts) do
+    stats = api_contact["statistics"] || %{}
+
+    endpoints =
+      @misc_endpoints
+      |> Enum.filter(fn {key, stat_field} ->
+        opts[Atom.to_string(key)] != false and (stats[stat_field] || 1) > 0
+      end)
+      |> Enum.map(&elem(&1, 0))
+
+    endpoints = if opts["pets"] != false, do: [:pets | endpoints], else: endpoints
+
+    if endpoints == [] do
+      deferred
+    else
+      entry = %{
+        source_id: to_string(source_id),
+        local_id: local_id,
+        endpoints: Enum.map(endpoints, &Atom.to_string/1)
+      }
+
+      %{deferred | misc_data: [entry | deferred.misc_data]}
+    end
   end
 
   defp collect_first_met_through(deferred, api_contact, source_id) do
@@ -581,21 +864,22 @@ defmodule Kith.Imports.Sources.MonicaApi do
         )
       )
 
-    # Load contacts with contact fields
+    # Load contacts with contact fields and addresses (addresses participate
+    # in the broadened definite-duplicate predicate).
     contacts =
       Repo.all(
         from(c in Contacts.Contact,
           where: c.id in ^import_records and is_nil(c.deleted_at),
-          preload: [contact_fields: :contact_field_type]
+          preload: [:addresses, contact_fields: :contact_field_type]
         )
       )
 
-    # Group by normalized name
+    # Group by trimmed-and-collapsed normalized name. CardDAV-style duplicates
+    # (monicahq/monica#6175) often differ only in trailing whitespace or
+    # double-space artifacts, so the trim is load-bearing here.
     name_groups =
       contacts
-      |> Enum.group_by(fn c ->
-        {String.downcase(c.first_name || ""), String.downcase(c.last_name || "")}
-      end)
+      |> Enum.group_by(&name_key/1)
       |> Enum.filter(fn {_key, group} -> length(group) >= 2 end)
 
     merged_ids = MapSet.new()
@@ -657,27 +941,97 @@ defmodule Kith.Imports.Sources.MonicaApi do
     end
   end
 
+  # "Definite duplicate" predicate evaluated only after callers have already
+  # grouped contacts by normalized {first_name, last_name}. The trimmed-name
+  # equality is itself a strong identity signal, so within a group a single
+  # shared {email, phone, address} suffices — this catches CardDAV-shaped
+  # duplicates (monicahq/monica#6175) where every field is identical, the
+  # "triple duplicates" case (same name + same email × N), and the original
+  # narrow case (same name + shared phone or email).
   defp definite_duplicate?(contact_a, contact_b) do
-    emails_a = extract_values_by_protocol(contact_a, "mailto")
-    emails_b = extract_values_by_protocol(contact_b, "mailto")
-
-    phones_a = extract_values_by_protocol(contact_a, "tel")
-    phones_b = extract_values_by_protocol(contact_b, "tel")
-
-    shared_email? = not MapSet.disjoint?(emails_a, emails_b)
-    shared_phone? = not MapSet.disjoint?(phones_a, phones_b)
-
-    shared_email? or shared_phone?
+    shared_emails?(contact_a, contact_b) or
+      shared_phones?(contact_a, contact_b) or
+      shared_addresses?(contact_a, contact_b)
   end
 
-  defp extract_values_by_protocol(contact, protocol_prefix) do
+  defp shared_emails?(a, b) do
+    set_a = extract_values_by_protocol(a, "mailto", &normalize_email_value/1)
+    set_b = extract_values_by_protocol(b, "mailto", &normalize_email_value/1)
+    intersects?(set_a, set_b)
+  end
+
+  defp shared_phones?(a, b) do
+    # Phone values are E.164-canonical at this point (PhoneFormatter.normalize/2
+    # ran during import for `tel`-protocol fields). Comparison is strict equality
+    # after stripping non-digit characters as a safety net for any pre-existing
+    # rows that bypassed normalization.
+    set_a = extract_values_by_protocol(a, "tel", &normalize_phone_digits/1)
+    set_b = extract_values_by_protocol(b, "tel", &normalize_phone_digits/1)
+    intersects?(set_a, set_b)
+  end
+
+  defp shared_addresses?(a, b) do
+    set_a = address_keys(a)
+    set_b = address_keys(b)
+    intersects?(set_a, set_b)
+  end
+
+  defp extract_values_by_protocol(contact, protocol_prefix, normalizer) do
     contact.contact_fields
     |> Enum.filter(fn cf ->
       cf.contact_field_type &&
         String.starts_with?(cf.contact_field_type.protocol || "", protocol_prefix)
     end)
-    |> Enum.map(fn cf -> String.downcase(cf.value || "") end)
+    |> Enum.map(fn cf -> normalizer.(cf.value) end)
+    |> Enum.reject(&(&1 in [nil, ""]))
     |> MapSet.new()
+  end
+
+  defp normalize_email_value(nil), do: nil
+  defp normalize_email_value(v) when is_binary(v), do: v |> String.trim() |> String.downcase()
+
+  defp normalize_phone_digits(nil), do: nil
+
+  defp normalize_phone_digits(v) when is_binary(v) do
+    case String.replace(v, ~r/[^0-9]/, "") do
+      "" -> nil
+      digits -> digits
+    end
+  end
+
+  defp address_keys(contact) do
+    contact.addresses
+    |> Enum.map(fn a ->
+      line1 = normalize_address_part(a.line1)
+      postal = normalize_address_part(a.postal_code)
+      if line1 != "" and postal != "", do: {line1, postal}, else: nil
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> MapSet.new()
+  end
+
+  defp normalize_address_part(nil), do: ""
+
+  defp normalize_address_part(v) when is_binary(v) do
+    v |> String.trim() |> String.downcase() |> String.replace(~r/\s+/, " ")
+  end
+
+  defp intersects?(a, b) do
+    if MapSet.size(a) == 0 or MapSet.size(b) == 0 do
+      false
+    else
+      not MapSet.disjoint?(a, b)
+    end
+  end
+
+  defp name_key(contact) do
+    {normalize_name_part(contact.first_name), normalize_name_part(contact.last_name)}
+  end
+
+  defp normalize_name_part(nil), do: ""
+
+  defp normalize_name_part(v) when is_binary(v) do
+    v |> String.trim() |> String.downcase() |> String.replace(~r/\s+/, " ")
   end
 
   defp update_import_records_after_merge(account_id, import_job, old_contact_id, new_contact_id) do
@@ -862,161 +1216,19 @@ defmodule Kith.Imports.Sources.MonicaApi do
     end)
   end
 
-  # ── Phase 4: Photo crawl ────────────────────────────────────────────
-
-  defp crawl_all_photos(credential, account_id, import_job) do
-    crawl_photos_loop(credential, account_id, import_job, _page = 1, _errors = [])
-  end
-
-  defp crawl_photos_loop(credential, account_id, import_job, page, errors) do
-    url = "#{credential.url}/api/photos"
-
-    case api_get_json(credential, url, limit: @page_limit, page: page) do
-      {:ok, %{"data" => photos, "meta" => meta}} when is_list(photos) ->
-        last_page = meta["last_page"] || 1
-
-        errors =
-          Enum.reduce(photos, errors, fn photo, errs ->
-            import_api_photo(photo, account_id, import_job, errs)
-          end)
-
-        if page < last_page do
-          crawl_photos_loop(credential, account_id, import_job, page + 1, errors)
-        else
-          errors
-        end
-
-      {:error, :rate_limited} ->
-        errors ++ ["Rate limited fetching photos"]
-
-      {:error, reason} ->
-        errors ++ ["Failed to fetch photos page #{page}: #{inspect(reason)}"]
-
-      _ ->
-        errors
-    end
-  end
-
-  defp import_api_photo(photo, account_id, import_job, errors) do
-    contact_id = get_in(photo, ["contact", "id"])
-    source_id = to_string(contact_id)
-
-    contact_rec = Imports.find_import_record(account_id, "monica_api", "contact", source_id)
-
-    if contact_rec do
-      contact = Repo.get(Contacts.Contact, contact_rec.local_entity_id)
-
-      if contact do
-        do_import_photo(contact, photo, import_job, errors)
-      else
-        errors
-      end
-    else
-      Logger.debug("[MonicaApi] Skipping photo for unknown contact #{source_id}")
-      errors
-    end
-  end
-
-  defp do_import_photo(contact, photo, import_job, errors) do
-    file_name = photo["original_filename"] || "photo.jpg"
-
-    case decode_photo_data(photo) do
-      {:ok, binary} ->
-        store_and_create_photo(contact, photo, binary, file_name, import_job, errors)
-
-      :no_data ->
-        errors
-
-      :error ->
-        errors ++ ["Failed to decode photo data for #{contact.first_name}"]
-    end
-  end
-
-  defp store_and_create_photo(contact, photo, binary, file_name, import_job, errors) do
-    content_hash = :crypto.hash(:sha256, binary) |> Base.encode16(case: :lower)
-
-    if Contacts.photo_exists_by_hash?(contact.id, content_hash) do
-      Logger.debug("[MonicaApi] Skipping duplicate photo for #{contact.first_name}")
-      errors
-    else
-      upload_and_record_photo(contact, photo, binary, file_name, content_hash, import_job, errors)
-    end
-  end
-
-  defp upload_and_record_photo(
-         contact,
-         photo,
-         binary,
-         file_name,
-         content_hash,
-         import_job,
-         errors
-       ) do
-    key = Kith.Storage.generate_key(contact.account_id, "photos", file_name)
-
-    case Kith.Storage.upload_binary(binary, key) do
-      {:ok, _} ->
-        attrs = %{
-          "file_name" => file_name,
-          "storage_key" => key,
-          "file_size" => byte_size(binary),
-          "content_type" => photo["mime_type"] || "image/jpeg",
-          "content_hash" => content_hash
-        }
-
-        create_photo_and_set_avatar(contact, photo, attrs, import_job, errors)
-
-      {:error, reason} ->
-        errors ++ ["Failed to store photo for #{contact.first_name}: #{inspect(reason)}"]
-    end
-  end
-
-  defp create_photo_and_set_avatar(contact, photo, attrs, import_job, errors) do
-    case Contacts.create_photo(contact, attrs) do
-      {:ok, photo_record} ->
-        maybe_record_entity(import_job, "photo", photo["uuid"], "photo", photo_record.id)
-
-        if is_nil(contact.avatar) do
-          contact |> Ecto.Changeset.change(avatar: attrs["storage_key"]) |> Repo.update!()
-        end
-
-        errors
-
-      {:error, reason} ->
-        Logger.warning("[MonicaApi] Photo for #{contact.first_name}: #{inspect(reason)}")
-        errors
-    end
-  end
-
-  defp decode_photo_data(%{"dataUrl" => "data:" <> _ = data_url}) do
-    case String.split(data_url, ",", parts: 2) do
-      [_meta, encoded] -> {:ok, Base.decode64!(encoded)}
-      _ -> :error
-    end
-  rescue
-    _ -> :error
-  end
-
-  defp decode_photo_data(%{"link" => link}) when is_binary(link) and link != "" do
-    case Req.get(link, receive_timeout: 30_000) do
-      {:ok, %{status: 200, body: body}} when is_binary(body) -> {:ok, body}
-      _ -> :error
-    end
-  end
-
-  defp decode_photo_data(_), do: :no_data
-
   # ── Reference data building ──────────────────────────────────────────
 
   defp build_or_update_ref_data(account_id, contacts, nil) do
     genders = collect_api_genders(contacts)
     tags = collect_api_tags(contacts)
     cfts = collect_api_contact_field_types(contacts)
+    cft_map = find_or_create_contact_field_types(account_id, cfts)
 
     %{
       genders: find_or_create_genders(account_id, genders),
       tags: find_or_create_tags(account_id, tags),
-      contact_field_types: find_or_create_contact_field_types(account_id, cfts)
+      contact_field_types: cft_map,
+      phone_cft_ids: phone_cft_id_map(account_id, Map.values(cft_map))
     }
   end
 
@@ -1036,14 +1248,23 @@ defmodule Kith.Imports.Sources.MonicaApi do
       |> collect_api_contact_field_types()
       |> Enum.reject(&Map.has_key?(ref_data.contact_field_types, &1))
 
+    added_cfts = find_or_create_contact_field_types(account_id, new_cfts)
+
+    phone_cft_ids =
+      if new_cfts == [] do
+        ref_data.phone_cft_ids
+      else
+        Map.merge(
+          ref_data.phone_cft_ids,
+          phone_cft_id_map(account_id, Map.values(added_cfts))
+        )
+      end
+
     %{
       genders: Map.merge(ref_data.genders, find_or_create_genders(account_id, new_genders)),
       tags: Map.merge(ref_data.tags, find_or_create_tags(account_id, new_tags)),
-      contact_field_types:
-        Map.merge(
-          ref_data.contact_field_types,
-          find_or_create_contact_field_types(account_id, new_cfts)
-        )
+      contact_field_types: Map.merge(ref_data.contact_field_types, added_cfts),
+      phone_cft_ids: phone_cft_ids
     }
   end
 
@@ -1119,6 +1340,22 @@ defmodule Kith.Imports.Sources.MonicaApi do
     end)
   end
 
+  # O(1)-lookup map of phone-protocol contact_field_type IDs. A plain map
+  # (`%{id => true}`) is used rather than a MapSet to keep dialyzer happy
+  # with the ref_data shape inference.
+  defp phone_cft_id_map(_account_id, []), do: %{}
+
+  defp phone_cft_id_map(account_id, cft_ids) when is_list(cft_ids) do
+    Repo.all(
+      from t in Contacts.ContactFieldType,
+        where: t.id in ^cft_ids,
+        where: is_nil(t.account_id) or t.account_id == ^account_id,
+        where: fragment("? LIKE 'tel%'", t.protocol),
+        select: t.id
+    )
+    |> Map.new(&{&1, true})
+  end
+
   defp find_or_create_relationship_type(_account_id, nil, _reverse), do: nil
 
   defp find_or_create_relationship_type(account_id, name, reverse_name) do
@@ -1140,34 +1377,43 @@ defmodule Kith.Imports.Sources.MonicaApi do
   # ── HTTP helpers ─────────────────────────────────────────────────────
 
   defp api_get(credential, url, params \\ []) do
+    RateLimiter.wait!(credential.url)
+
     headers = [{"Authorization", "Bearer #{credential.api_key}"}, {"Accept", "application/json"}]
     req_options = Map.get(credential, :req_options, [])
-    options = [headers: headers, params: params] ++ req_options
+
+    options =
+      [
+        headers: headers,
+        params: params,
+        max_retries: 5,
+        retry_log_level: :warn
+      ] ++ req_options
 
     Req.get(url, options)
   end
 
   defp api_get_json(credential, url, params) do
-    api_get_json_with_retry(credential, url, params, 0)
-  end
-
-  defp api_get_json_with_retry(_credential, _url, _params, retries)
-       when retries >= @max_rate_limit_retries do
-    {:error, :rate_limited}
-  end
-
-  defp api_get_json_with_retry(credential, url, params, retries) do
     case api_get(credential, url, params) do
-      {:ok, %{status: 200, body: body}} when is_map(body) ->
-        {:ok, body}
+      {:ok, %{status: 200, body: body}} when is_map(body) -> {:ok, body}
+      {:ok, %{status: 429}} -> {:error, :rate_limited}
+      {:ok, %{status: status}} -> {:error, "Unexpected status: #{status}"}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp fetch_single_contact(credential, monica_id) do
+    url = "#{credential.url}/api/contacts/#{monica_id}"
+
+    case api_get(credential, url, []) do
+      {:ok, %{status: 200, body: %{"data" => contact}}} when is_map(contact) ->
+        {:ok, contact}
+
+      {:ok, %{status: 404}} ->
+        :not_found
 
       {:ok, %{status: 429}} ->
-        Logger.info(
-          "[MonicaApi] Rate limited, sleeping #{@rate_limit_sleep_ms}ms (retry #{retries + 1})"
-        )
-
-        Process.sleep(@rate_limit_sleep_ms)
-        api_get_json_with_retry(credential, url, params, retries + 1)
+        {:error, :rate_limited}
 
       {:ok, %{status: status}} ->
         {:error, "Unexpected status: #{status}"}
@@ -1176,6 +1422,21 @@ defmodule Kith.Imports.Sources.MonicaApi do
         {:error, reason}
     end
   end
+
+  # Mirror Monica's listing filter on direct-GET responses:
+  # - Monica's index() chains ->real()->active() which means
+  #   is_active = 1 AND is_partial = 0.
+  # - Partials still anchor relationship targets, so we accept them
+  #   (relationship resolution depends on importing the partial stubs).
+  # - Inactive contacts are deliberately hidden by Monica's UI; skip them.
+  defp accept_backfill_response(%{"is_active" => true, "is_partial" => true}),
+    do: :import_partial
+
+  defp accept_backfill_response(%{"is_active" => true, "is_partial" => false}),
+    do: :import_full
+
+  defp accept_backfill_response(%{"is_active" => false}), do: :skip_inactive
+  defp accept_backfill_response(_other), do: :skip_inactive
 
   # ── Date parsing helpers ─────────────────────────────────────────────
 
@@ -1310,738 +1571,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
       )
     end
   end
-
-  # ── Phases 5-12: Additional per-contact data types ─────────────────
-
-  defp import_extra_data_types(credential, account_id, user_id, import_job, opts) do
-    # Get all imported contact IDs for this job
-    contact_records =
-      Repo.all(
-        from(ir in Imports.ImportRecord,
-          where:
-            ir.import_id == ^import_job.id and
-              ir.source_entity_type == "contact",
-          select: {ir.source_entity_id, ir.local_entity_id}
-        )
-      )
-
-    errors =
-      Enum.flat_map(contact_records, fn {source_id, local_id} ->
-        contact =
-          Repo.get(Contacts.Contact, local_id)
-
-        if contact && is_nil(contact.deleted_at) do
-          import_per_contact_data(
-            credential,
-            account_id,
-            user_id,
-            contact,
-            source_id,
-            import_job,
-            opts
-          )
-        else
-          []
-        end
-      end)
-
-    errors
-  end
-
-  defp import_per_contact_data(
-         credential,
-         account_id,
-         user_id,
-         contact,
-         source_id,
-         import_job,
-         opts
-       ) do
-    errors = []
-    base_url = credential.url
-
-    # Phase 5: Pets
-    errors =
-      if opts["pets"] do
-        errors ++
-          import_contact_pets(credential, base_url, account_id, contact, source_id, import_job)
-      else
-        errors
-      end
-
-    # Phase 6: Calls
-    errors =
-      if opts["calls"] do
-        errors ++
-          import_contact_calls(
-            credential,
-            base_url,
-            account_id,
-            user_id,
-            contact,
-            source_id,
-            import_job
-          )
-      else
-        errors
-      end
-
-    # Phase 7: Activities
-    errors =
-      if opts["activities"] do
-        errors ++
-          import_contact_activities(
-            credential,
-            base_url,
-            account_id,
-            user_id,
-            contact,
-            source_id,
-            import_job
-          )
-      else
-        errors
-      end
-
-    # Phase 8: Gifts
-    errors =
-      if opts["gifts"] do
-        errors ++
-          import_contact_gifts(
-            credential,
-            base_url,
-            account_id,
-            user_id,
-            contact,
-            source_id,
-            import_job
-          )
-      else
-        errors
-      end
-
-    # Phase 9: Debts
-    errors =
-      if opts["debts"] do
-        errors ++
-          import_contact_debts(
-            credential,
-            base_url,
-            account_id,
-            user_id,
-            contact,
-            source_id,
-            import_job
-          )
-      else
-        errors
-      end
-
-    # Phase 10: Tasks
-    errors =
-      if opts["tasks"] do
-        errors ++
-          import_contact_tasks(
-            credential,
-            base_url,
-            account_id,
-            user_id,
-            contact,
-            source_id,
-            import_job
-          )
-      else
-        errors
-      end
-
-    # Phase 11: Reminders
-    errors =
-      if opts["reminders"] do
-        errors ++
-          import_contact_reminders(
-            credential,
-            base_url,
-            account_id,
-            user_id,
-            contact,
-            source_id,
-            import_job
-          )
-      else
-        errors
-      end
-
-    # Phase 12: Conversations
-    errors =
-      if opts["conversations"] do
-        errors ++
-          import_contact_conversations(
-            credential,
-            base_url,
-            account_id,
-            user_id,
-            contact,
-            source_id,
-            import_job
-          )
-      else
-        errors
-      end
-
-    errors
-  end
-
-  # ── Phase 5: Pets ──────────────────────────────────────────────────
-
-  defp import_contact_pets(credential, base_url, account_id, contact, source_id, import_job) do
-    url = "#{base_url}/api/contacts/#{source_id}/pets"
-
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => pets}} when is_list(pets) ->
-        Enum.flat_map(pets, fn pet ->
-          import_single_pet(account_id, contact, pet, import_job)
-        end)
-
-      {:ok, _} ->
-        []
-
-      {:error, reason} ->
-        ["Failed to fetch pets for contact #{source_id}: #{inspect(reason)}"]
-    end
-  end
-
-  defp import_single_pet(account_id, contact, pet_data, import_job) do
-    name = pet_data["name"]
-    species = normalize_pet_species(pet_data["pet_category"] || pet_data["species"])
-
-    if pet_duplicate?(contact.id, name, species) do
-      []
-    else
-      attrs = %{
-        "contact_id" => contact.id,
-        "name" => name || "Unknown",
-        "species" => species,
-        "breed" => non_empty_string(pet_data["breed"]),
-        "notes" => non_empty_string(pet_data["notes"])
-      }
-
-      case Kith.Pets.create_pet(account_id, attrs) do
-        {:ok, pet} ->
-          maybe_record_entity(import_job, "pet", pet_data["id"], "pet", pet.id)
-          []
-
-        {:error, reason} ->
-          ["Pet import error: #{inspect_errors(reason)}"]
-      end
-    end
-  end
-
-  defp normalize_pet_species(nil), do: "other"
-
-  defp normalize_pet_species(species) when is_map(species) do
-    normalize_pet_species(species["name"])
-  end
-
-  defp normalize_pet_species(species) when is_binary(species) do
-    normalized = String.downcase(species)
-
-    if normalized in ~w(dog cat bird fish reptile rabbit hamster) do
-      normalized
-    else
-      "other"
-    end
-  end
-
-  defp normalize_pet_species(_), do: "other"
-
-  defp pet_duplicate?(contact_id, name, species) do
-    Repo.exists?(
-      from(p in Kith.Contacts.Pet,
-        where:
-          p.contact_id == ^contact_id and
-            fragment("lower(coalesce(?, ''))", p.name) ==
-              fragment("lower(coalesce(?, ''))", ^(name || "")) and
-            p.species == ^species
-      )
-    )
-  end
-
-  # ── Phase 6: Calls ─────────────────────────────────────────────────
-
-  defp import_contact_calls(
-         credential,
-         base_url,
-         account_id,
-         _user_id,
-         contact,
-         source_id,
-         import_job
-       ) do
-    url = "#{base_url}/api/contacts/#{source_id}/calls"
-
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => calls}} when is_list(calls) ->
-        Enum.flat_map(calls, fn call ->
-          import_single_call(account_id, contact, call, import_job)
-        end)
-
-      {:ok, _} ->
-        []
-
-      {:error, reason} ->
-        ["Failed to fetch calls for contact #{source_id}: #{inspect(reason)}"]
-    end
-  end
-
-  defp import_single_call(account_id, contact, call_data, import_job) do
-    occurred_at = parse_datetime(call_data["called_at"])
-
-    if is_nil(occurred_at) do
-      []
-    else
-      attrs = %{
-        "occurred_at" => occurred_at,
-        "notes" => non_empty_string(call_data["content"]),
-        "duration_mins" => call_data["duration"]
-      }
-
-      case Kith.Activities.create_call(
-             %{account_id: account_id, id: contact.id},
-             attrs
-           ) do
-        {:ok, call} ->
-          maybe_record_entity(import_job, "call", call_data["id"], "call", call.id)
-          []
-
-        {:error, reason} ->
-          ["Call import error: #{inspect_errors(reason)}"]
-      end
-    end
-  end
-
-  # ── Phase 7: Activities ────────────────────────────────────────────
-
-  defp import_contact_activities(
-         credential,
-         base_url,
-         account_id,
-         _user_id,
-         contact,
-         source_id,
-         import_job
-       ) do
-    url = "#{base_url}/api/contacts/#{source_id}/activities"
-
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => activities}} when is_list(activities) ->
-        Enum.flat_map(activities, fn activity ->
-          import_single_activity(account_id, contact, activity, import_job)
-        end)
-
-      {:ok, _} ->
-        []
-
-      {:error, reason} ->
-        ["Failed to fetch activities for contact #{source_id}: #{inspect(reason)}"]
-    end
-  end
-
-  defp import_single_activity(account_id, contact, activity_data, import_job) do
-    occurred_at =
-      parse_datetime(activity_data["happened_at"] || activity_data["date_it_happened"])
-
-    attrs = %{
-      "title" => activity_data["summary"] || activity_data["title"] || "Imported activity",
-      "description" => non_empty_string(activity_data["description"]),
-      "occurred_at" => occurred_at || DateTime.utc_now()
-    }
-
-    case Kith.Activities.create_activity(account_id, attrs, [contact.id]) do
-      {:ok, activity} ->
-        maybe_record_entity(
-          import_job,
-          "activity",
-          activity_data["id"],
-          "activity",
-          activity.id
-        )
-
-        []
-
-      {:error, reason} ->
-        ["Activity import error: #{inspect_errors(reason)}"]
-    end
-  end
-
-  # ── Phase 8: Gifts ─────────────────────────────────────────────────
-
-  defp import_contact_gifts(
-         credential,
-         base_url,
-         account_id,
-         user_id,
-         contact,
-         source_id,
-         import_job
-       ) do
-    url = "#{base_url}/api/contacts/#{source_id}/gifts"
-
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => gifts}} when is_list(gifts) ->
-        Enum.flat_map(gifts, fn gift ->
-          import_single_gift(account_id, user_id, contact, gift, import_job)
-        end)
-
-      {:ok, _} ->
-        []
-
-      {:error, reason} ->
-        ["Failed to fetch gifts for contact #{source_id}: #{inspect(reason)}"]
-    end
-  end
-
-  defp import_single_gift(account_id, user_id, contact, gift_data, import_job) do
-    direction =
-      case gift_data["is_for"] do
-        "contact" -> "given"
-        _ -> "received"
-      end
-
-    attrs = %{
-      "contact_id" => contact.id,
-      "name" => gift_data["name"] || "Imported gift",
-      "description" => non_empty_string(gift_data["comment"]),
-      "direction" => direction,
-      "status" =>
-        cond do
-          gift_data["has_been_offered"] -> "given"
-          gift_data["has_been_received"] -> "received"
-          true -> "idea"
-        end,
-      "amount" => gift_data["amount"],
-      "date" => parse_date_string(gift_data["date"])
-    }
-
-    case Kith.Gifts.create_gift(account_id, user_id, attrs) do
-      {:ok, gift} ->
-        maybe_record_entity(import_job, "gift", gift_data["id"], "gift", gift.id)
-        []
-
-      {:error, reason} ->
-        ["Gift import error: #{inspect_errors(reason)}"]
-    end
-  end
-
-  # ── Phase 9: Debts ─────────────────────────────────────────────────
-
-  defp import_contact_debts(
-         credential,
-         base_url,
-         account_id,
-         user_id,
-         contact,
-         source_id,
-         import_job
-       ) do
-    url = "#{base_url}/api/contacts/#{source_id}/debts"
-
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => debts}} when is_list(debts) ->
-        Enum.flat_map(debts, fn debt ->
-          import_single_debt(account_id, user_id, contact, debt, import_job)
-        end)
-
-      {:ok, _} ->
-        []
-
-      {:error, reason} ->
-        ["Failed to fetch debts for contact #{source_id}: #{inspect(reason)}"]
-    end
-  end
-
-  defp import_single_debt(account_id, user_id, contact, debt_data, import_job) do
-    direction =
-      case debt_data["in_debt"] do
-        "yes" -> "owed_by_me"
-        _ -> "owed_to_me"
-      end
-
-    attrs = %{
-      "contact_id" => contact.id,
-      "title" => debt_data["reason"] || "Imported debt",
-      "amount" => debt_data["amount"] || "0",
-      "direction" => direction,
-      "status" => if(debt_data["status"] == "complete", do: "settled", else: "active")
-    }
-
-    case Kith.Debts.create_debt(account_id, user_id, attrs) do
-      {:ok, debt} ->
-        maybe_record_entity(import_job, "debt", debt_data["id"], "debt", debt.id)
-        []
-
-      {:error, reason} ->
-        ["Debt import error: #{inspect_errors(reason)}"]
-    end
-  end
-
-  # ── Phase 10: Tasks ────────────────────────────────────────────────
-
-  defp import_contact_tasks(
-         credential,
-         base_url,
-         account_id,
-         user_id,
-         contact,
-         source_id,
-         import_job
-       ) do
-    url = "#{base_url}/api/contacts/#{source_id}/tasks"
-
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => tasks}} when is_list(tasks) ->
-        Enum.flat_map(tasks, fn task ->
-          import_single_task(account_id, user_id, contact, task, import_job)
-        end)
-
-      {:ok, _} ->
-        []
-
-      {:error, reason} ->
-        ["Failed to fetch tasks for contact #{source_id}: #{inspect(reason)}"]
-    end
-  end
-
-  defp import_single_task(account_id, user_id, contact, task_data, import_job) do
-    status = if task_data["completed"], do: "completed", else: "pending"
-
-    attrs = %{
-      "contact_id" => contact.id,
-      "title" => task_data["title"] || "Imported task",
-      "description" => non_empty_string(task_data["description"]),
-      "status" => status
-    }
-
-    case Kith.Tasks.create_task(account_id, user_id, attrs) do
-      {:ok, task} ->
-        maybe_record_entity(import_job, "task", task_data["id"], "task", task.id)
-        []
-
-      {:error, reason} ->
-        ["Task import error: #{inspect_errors(reason)}"]
-    end
-  end
-
-  # ── Phase 11: Reminders ────────────────────────────────────────────
-
-  defp import_contact_reminders(
-         credential,
-         base_url,
-         account_id,
-         user_id,
-         contact,
-         source_id,
-         import_job
-       ) do
-    url = "#{base_url}/api/contacts/#{source_id}/reminders"
-
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => reminders}} when is_list(reminders) ->
-        Enum.flat_map(reminders, fn reminder ->
-          import_single_reminder(account_id, user_id, contact, reminder, import_job)
-        end)
-
-      {:ok, _} ->
-        []
-
-      {:error, reason} ->
-        ["Failed to fetch reminders for contact #{source_id}: #{inspect(reason)}"]
-    end
-  end
-
-  defp import_single_reminder(account_id, user_id, contact, reminder_data, import_job) do
-    {type, frequency} = map_monica_reminder_frequency(reminder_data["frequency_type"])
-
-    next_date =
-      parse_date_string(reminder_data["next_expected_date"]) ||
-        Date.utc_today()
-
-    attrs = %{
-      "contact_id" => contact.id,
-      "type" => type,
-      "title" => reminder_data["title"] || "Imported reminder",
-      "frequency" => frequency,
-      "next_reminder_date" => next_date
-    }
-
-    case Kith.Reminders.create_reminder(account_id, user_id, attrs) do
-      {:ok, reminder} ->
-        maybe_record_entity(
-          import_job,
-          "reminder",
-          reminder_data["id"],
-          "reminder",
-          reminder.id
-        )
-
-        []
-
-      {:error, reason} ->
-        ["Reminder import error: #{inspect_errors(reason)}"]
-    end
-  end
-
-  defp map_monica_reminder_frequency("one_time"), do: {"one_time", nil}
-  defp map_monica_reminder_frequency("week"), do: {"recurring", "weekly"}
-  defp map_monica_reminder_frequency("month"), do: {"recurring", "monthly"}
-  defp map_monica_reminder_frequency("year"), do: {"recurring", "annually"}
-  defp map_monica_reminder_frequency(_), do: {"one_time", nil}
-
-  # ── Phase 12: Conversations ────────────────────────────────────────
-
-  defp import_contact_conversations(
-         credential,
-         base_url,
-         account_id,
-         user_id,
-         contact,
-         source_id,
-         import_job
-       ) do
-    url = "#{base_url}/api/contacts/#{source_id}/conversations"
-
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => convos}} when is_list(convos) ->
-        Enum.flat_map(convos, fn convo ->
-          import_single_conversation(
-            credential,
-            base_url,
-            account_id,
-            user_id,
-            contact,
-            convo,
-            import_job
-          )
-        end)
-
-      {:ok, _} ->
-        []
-
-      {:error, reason} ->
-        ["Failed to fetch conversations for contact #{source_id}: #{inspect(reason)}"]
-    end
-  end
-
-  defp import_single_conversation(
-         credential,
-         base_url,
-         account_id,
-         user_id,
-         contact,
-         convo_data,
-         import_job
-       ) do
-    platform =
-      case convo_data["contact_field_type"] do
-        %{"name" => name} -> normalize_conversation_platform(name)
-        _ -> "other"
-      end
-
-    attrs = %{
-      "contact_id" => contact.id,
-      "platform" => platform,
-      "subject" => non_empty_string(convo_data["subject"])
-    }
-
-    case Kith.Conversations.create_conversation(account_id, user_id, attrs) do
-      {:ok, conversation} ->
-        maybe_record_entity(
-          import_job,
-          "conversation",
-          convo_data["id"],
-          "conversation",
-          conversation.id
-        )
-
-        # Import messages for this conversation
-        import_conversation_messages(
-          credential,
-          base_url,
-          conversation,
-          convo_data,
-          import_job
-        )
-
-      {:error, reason} ->
-        ["Conversation import error: #{inspect_errors(reason)}"]
-    end
-  end
-
-  defp import_conversation_messages(_credential, _base_url, conversation, convo_data, import_job) do
-    messages = convo_data["messages"] || []
-
-    Enum.flat_map(messages, fn msg ->
-      attrs = %{
-        "body" => msg["content"] || msg["written_by_me_body"] || "",
-        "direction" => if(msg["written_by_me"], do: "sent", else: "received"),
-        "sent_at" => parse_datetime(msg["written_at"]) || DateTime.utc_now()
-      }
-
-      case Kith.Conversations.add_message(conversation, attrs) do
-        {:ok, message} ->
-          maybe_record_entity(import_job, "message", msg["id"], "message", message.id)
-          []
-
-        {:error, reason} ->
-          ["Message import error: #{inspect_errors(reason)}"]
-      end
-    end)
-  end
-
-  @platform_keywords [
-    {"sms", "sms"},
-    {"text", "sms"},
-    {"whatsapp", "whatsapp"},
-    {"telegram", "telegram"},
-    {"email", "email"},
-    {"instagram", "instagram"},
-    {"messenger", "messenger"},
-    {"facebook", "messenger"},
-    {"signal", "signal"}
-  ]
-
-  defp normalize_conversation_platform(name) when is_binary(name) do
-    normalized = String.downcase(name)
-
-    Enum.find_value(@platform_keywords, "other", fn {keyword, platform} ->
-      if String.contains?(normalized, keyword), do: platform
-    end)
-  end
-
-  defp normalize_conversation_platform(_), do: "other"
-
-  # ── Additional date/time helpers ───────────────────────────────────
-
-  defp parse_datetime(nil), do: nil
-
-  defp parse_datetime(str) when is_binary(str) do
-    case DateTime.from_iso8601(str) do
-      {:ok, dt, _offset} -> dt
-      _ -> nil
-    end
-  end
-
-  defp parse_datetime(_), do: nil
-
-  defp parse_date_string(nil), do: nil
-
-  defp parse_date_string(str) when is_binary(str) do
-    case parse_date_or_datetime(str) do
-      {:ok, date} -> date
-      _ -> nil
-    end
-  end
-
-  defp parse_date_string(_), do: nil
 
   # ── Phase 13: Document import (async) ──────────────────────────────
 

@@ -130,6 +130,34 @@ defmodule Kith.ContactsSubEntitiesTest do
       {:ok, _} = Contacts.delete_contact_field(field)
       assert Contacts.list_contact_fields(contact.id) == []
     end
+
+    test "create_contact_field/3 with normalize: false skips phone normalization",
+         %{contact: contact, account_id: account_id} do
+      phone_type =
+        Enum.find(Contacts.list_contact_field_types(account_id), fn t ->
+          t.protocol in ["tel", "tel:"]
+        end)
+
+      attrs = %{"contact_field_type_id" => phone_type.id, "value" => "+1 (202) 555-0100"}
+
+      assert {:ok, field} =
+               Contacts.create_contact_field(contact, attrs, normalize: false)
+
+      assert field.value == "+1 (202) 555-0100"
+    end
+
+    test "create_contact_field/3 with normalize: true (default) normalizes phone",
+         %{contact: contact, account_id: account_id} do
+      phone_type =
+        Enum.find(Contacts.list_contact_field_types(account_id), fn t ->
+          t.protocol in ["tel", "tel:"]
+        end)
+
+      attrs = %{"contact_field_type_id" => phone_type.id, "value" => "+1 (202) 555-0100"}
+
+      assert {:ok, field} = Contacts.create_contact_field(contact, attrs)
+      assert field.value == "+12025550100"
+    end
   end
 
   ## Relationships

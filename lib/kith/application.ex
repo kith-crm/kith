@@ -26,7 +26,17 @@ defmodule Kith.Application do
       {Finch, name: Swoosh.Finch, pools: %{:default => [size: 10]}},
       {Oban, Application.fetch_env!(:kith, Oban)},
       {Cachex, name: :kith_cache, expiration: expiration(default: :timer.hours(24))},
-      {Task.Supervisor, name: Kith.TaskSupervisor}
+      {Task.Supervisor, name: Kith.TaskSupervisor},
+      # PubSub lives here (not in mode_children) so worker mode also starts
+      # it. Required for cross-container progress broadcasts in the
+      # split-deployment topology (app + worker containers).
+      {Phoenix.PubSub, name: Kith.PubSub},
+      # libcluster: connects this BEAM node to its peer(s) so PubSub spans
+      # containers. Topology is configured at runtime via env-driven config
+      # in `runtime.exs`; when no peers are set (dev/test), this supervisor
+      # starts but does nothing.
+      {Cluster.Supervisor,
+       [Application.get_env(:libcluster, :topologies, []), [name: Kith.ClusterSupervisor]]}
     ]
   end
 
@@ -39,8 +49,6 @@ defmodule Kith.Application do
         [
           Kith.PromEx,
           KithWeb.Telemetry,
-          {DNSCluster, query: Application.get_env(:kith, :dns_cluster_query) || :ignore},
-          {Phoenix.PubSub, name: Kith.PubSub},
           KithWeb.Endpoint
         ]
     end

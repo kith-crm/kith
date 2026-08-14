@@ -7,5 +7,5 @@ defmodule Kith.Cldr do
   use Cldr,
     locales: ["en", "ar", "fr", "de", "es", "pt", "ja", "zh"],
     default_locale: "en",
-    providers: [Cldr.Number, Cldr.DateTime, Cldr.Calendar]
+    providers: [Cldr.Number, Cldr.DateTime, Cldr.Calendar, Cldr.Territory]
 end

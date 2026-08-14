@@ -371,11 +371,24 @@ defmodule KithWeb.Router do
       live "/contacts/:id/immich-review", ContactLive.ImmichReview, :index
 
       # Admin pages
-      live "/admin/oban", AdminLive.ObanDashboard, :index
       live "/settings/audit-log", SettingsLive.AuditLog, :index
     end
 
     post "/users/update-password", UserSessionController, :update_password
+  end
+
+  # Admin-only Oban Web dashboard.
+  # The oban_dashboard macro defines its own internal live_session, so it must
+  # be placed outside any other live_session block.
+  scope "/admin" do
+    pipe_through [:browser, :require_authenticated_user, :require_confirmed_user]
+
+    import Oban.Web.Router
+
+    oban_dashboard("/oban",
+      on_mount: [{KithWeb.UserAuth, :require_admin}],
+      csp_nonce_assign_key: :csp_nonce
+    )
   end
 
   # WebAuthn registration (authenticated, JSON over session)

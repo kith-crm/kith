@@ -215,6 +215,54 @@ if config_env() == :prod do
       backend: {Hammer.Backend.Redis, [expiry_ms: 60_000 * 60, redis_url: redis_url]}
   end
 
+  # Oban — only the worker container processes jobs in production.
+  # The web container can call `Oban.insert/1` to enqueue jobs, but
+  # runs no queues or plugins (no cron, no pruner) — so it never claims
+  # rows from `oban_jobs`. The worker container keeps the full config
+  # from `config.exs`.
+  #
+  # Dev (`config_env() == :dev`) is unaffected: this block only runs in
+  # `:prod`. Test env is pinned to `testing: :manual` in `config/test.exs`.
+  case System.get_env("KITH_MODE", "web") do
+    "worker" ->
+      :ok
+
+    _web ->
+      config :kith, Oban, queues: false, plugins: false
+  end
+
+  # libcluster — connect this BEAM node to its peer(s) so Phoenix.PubSub
+  # broadcasts span containers (web ↔ worker). Configure via
+  # `KITH_CLUSTER_HOSTS` env var: comma-separated long node names, e.g.
+  # `kith@app,kith@worker`. Leave unset to disable clustering (single-node).
+  #
+  # Each container must also set `RELEASE_DISTRIBUTION=name` and
+  # `RELEASE_NODE=kith@<hostname>` so its actual node name matches the
+  # name listed in `KITH_CLUSTER_HOSTS`. `RELEASE_COOKIE` must be shared.
+  cluster_hosts =
+    case System.get_env("KITH_CLUSTER_HOSTS") do
+      nil ->
+        []
+
+      "" ->
+        []
+
+      str ->
+        str
+        |> String.split(",", trim: true)
+        |> Enum.map(&(&1 |> String.trim() |> String.to_atom()))
+    end
+
+  if cluster_hosts != [] do
+    config :libcluster,
+      topologies: [
+        kith: [
+          strategy: Cluster.Strategy.Epmd,
+          config: [hosts: cluster_hosts]
+        ]
+      ]
+  end
+
   # Sentry error tracking (optional — only when SENTRY_DSN is set)
   if sentry_dsn = System.get_env("SENTRY_DSN") do
     config :sentry,

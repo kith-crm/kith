@@ -49,15 +49,17 @@ defmodule Kith.MonicaApiFixtures do
       },
       "addresses" => overrides[:addresses] || [],
       "tags" => overrides[:tags] || [],
-      "statistics" => %{
-        "number_of_calls" => 0,
-        "number_of_notes" => overrides[:number_of_notes] || 0,
-        "number_of_activities" => 0,
-        "number_of_reminders" => 0,
-        "number_of_tasks" => 0,
-        "number_of_gifts" => 0,
-        "number_of_debts" => 0
-      },
+      "statistics" =>
+        overrides[:statistics] ||
+          %{
+            "number_of_calls" => 0,
+            "number_of_notes" => overrides[:number_of_notes] || 0,
+            "number_of_activities" => 0,
+            "number_of_reminders" => 0,
+            "number_of_tasks" => 0,
+            "number_of_gifts" => 0,
+            "number_of_debts" => 0
+          },
       "contactFields" => overrides[:contact_fields] || [],
       "notes" => overrides[:notes] || [],
       "account" => %{"id" => 1},

@@ -61,6 +61,7 @@ services:
   app:
     image: kith:latest
     command: ["start"]
+    hostname: app
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -72,6 +73,12 @@ services:
     tmpfs:
       - /tmp:size=64M
     environment:
+      # ── BEAM distribution / clustering (libcluster Epmd strategy) ──
+      RELEASE_COOKIE: ${RELEASE_COOKIE}
+      RELEASE_DISTRIBUTION: sname
+      RELEASE_NODE: kith@app
+      KITH_CLUSTER_HOSTS: kith@app,kith@worker
+      # ── existing env vars unchanged ──
       DATABASE_URL: ${DATABASE_URL}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE}
       KITH_HOSTNAME: ${KITH_HOSTNAME:-localhost}
@@ -135,6 +142,7 @@ services:
   worker:
     image: kith:latest
     command: ["start"]
+    hostname: worker
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -148,6 +156,12 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
+      # ── BEAM distribution / clustering (libcluster Epmd strategy) ──
+      RELEASE_COOKIE: ${RELEASE_COOKIE}
+      RELEASE_DISTRIBUTION: sname
+      RELEASE_NODE: kith@worker
+      KITH_CLUSTER_HOSTS: kith@app,kith@worker
+      # ── existing env vars unchanged ──
       DATABASE_URL: ${DATABASE_URL}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE}
       KITH_HOSTNAME: ${KITH_HOSTNAME:-localhost}
@@ -202,8 +216,8 @@ services:
   caddy:
     image: caddy:2-alpine
     ports:
-      - "80:80"
-      - "443:443"
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

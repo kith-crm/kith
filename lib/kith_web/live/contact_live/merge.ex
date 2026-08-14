@@ -150,13 +150,7 @@ defmodule KithWeb.ContactLive.Merge do
     end
   end
 
-  # ── Step 3: Preview ────────────────────────────────────────────────────
-
-  def handle_event("confirm-merge", _params, socket) do
-    {:noreply, assign(socket, :step, 4)}
-  end
-
-  # ── Step 4: Execute ────────────────────────────────────────────────────
+  # ── Step 3: Preview & Execute ───────────────────────────────────────────
 
   def handle_event("execute-merge", _params, socket) do
     contact_a = socket.assigns.contact_a
@@ -233,14 +227,14 @@ defmodule KithWeb.ContactLive.Merge do
             Merge Contacts
           </h1>
           <span class="text-sm text-[var(--color-text-tertiary)]">
-            Step {@step} of 4 — {step_label(@step)}
+            Step {@step} of 3 — {step_label(@step)}
           </span>
         </div>
 
         <%!-- Step indicator (horizontal stepper) --%>
         <div class="flex gap-2">
           <div
-            :for={s <- 1..4}
+            :for={s <- 1..3}
             class={[
               "h-1 flex-1 rounded-[var(--radius-full)] transition-colors duration-300",
               if(s <= @step, do: "bg-[var(--color-accent)]", else: "bg-[var(--color-border)]")
@@ -422,35 +416,10 @@ defmodule KithWeb.ContactLive.Merge do
             </div>
 
             <div class="mt-6 flex gap-3">
-              <UI.button variant="secondary" phx-click="back">Back</UI.button>
-              <UI.button variant="danger" phx-click="confirm-merge">Confirm Merge</UI.button>
-            </div>
-          </UI.card>
-        </div>
-
-        <%!-- Step 4: Confirm & Execute --%>
-        <div :if={@step == 4}>
-          <UI.card>
-            <div class="text-center py-4">
-              <h3 class="text-lg font-semibold text-[var(--color-text-primary)] mb-4">
-                Final Confirmation
-              </h3>
-              <p class="text-[var(--color-text-secondary)] mb-6">
-                This action cannot be easily undone. Are you sure you want to merge
-                <span class="font-semibold text-[var(--color-text-primary)]">
-                  {@contact_b.display_name}
-                </span>
-                into <span class="font-semibold text-[var(--color-text-primary)]">{@contact_a.display_name}</span>?
-              </p>
-
-              <div class="flex justify-center gap-3">
-                <UI.button variant="secondary" phx-click="back" disabled={@merging}>
-                  Go Back
-                </UI.button>
-                <UI.button variant="danger" phx-click="execute-merge" disabled={@merging}>
-                  {if @merging, do: "Merging...", else: "Merge Contacts"}
-                </UI.button>
-              </div>
+              <UI.button variant="secondary" phx-click="back" disabled={@merging}>Back</UI.button>
+              <UI.button variant="danger" phx-click="execute-merge" disabled={@merging}>
+                {if @merging, do: "Merging...", else: "Merge Contacts"}
+              </UI.button>
             </div>
           </UI.card>
         </div>
@@ -463,8 +432,7 @@ defmodule KithWeb.ContactLive.Merge do
 
   defp step_label(1), do: "Select contact"
   defp step_label(2), do: "Choose fields"
-  defp step_label(3), do: "Preview"
-  defp step_label(4), do: "Confirm"
+  defp step_label(3), do: "Review & merge"
 
   defp default_field_choices do
     @mergeable_fields

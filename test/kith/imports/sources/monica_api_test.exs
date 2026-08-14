@@ -6,6 +6,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   alias Kith.Contacts
   alias Kith.Repo
 
+  import ExUnit.CaptureLog
   import Kith.AccountsFixtures
   import Kith.ContactsFixtures
   import Kith.ImportsFixtures
@@ -230,6 +231,8 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
         case page_num do
           1 -> Req.Test.json(conn, contacts_page_json(page1, 1, 2, 5))
           2 -> Req.Test.json(conn, contacts_page_json(page2, 2, 2, 5))
+          # 3 = fetch_meta_total call during coverage backfill
+          3 -> Req.Test.json(conn, contacts_page_json(page1 ++ page2, 1, 1, 5))
         end
       end)
 
@@ -237,8 +240,8 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
       assert summary.contacts == 5
 
-      # Verify both pages were fetched
-      assert Agent.get(agent, & &1) == 2
+      # Verify both pages + meta-total were fetched
+      assert Agent.get(agent, & &1) == 3
       Agent.stop(agent)
     end
 
@@ -313,6 +316,8 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
         case page_num do
           1 -> Req.Test.json(conn, contacts_page_json([alice], 1, 2, 2))
           2 -> Req.Test.json(conn, contacts_page_json([bob], 2, 2, 2))
+          # 3 = fetch_meta_total call during coverage backfill
+          3 -> Req.Test.json(conn, contacts_page_json([alice, bob], 1, 1, 2))
         end
       end)
 
@@ -579,67 +584,8 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                  "extra_notes" => true
                })
 
-      # Only the contacts page should have been fetched
-      assert Agent.get(agent, & &1) == 1
-      Agent.stop(agent)
-    end
-  end
-
-  # ── crawl/5 — photo crawl ────────────────────────────────────────────
-
-  describe "crawl/5 — photo crawl" do
-    test "imports photos from paginated photos endpoint", %{user: user, account_id: account_id} do
-      # Small 1x1 JPEG encoded as data URL
-      pixel = Base.encode64(<<0xFF, 0xD8, 0xFF, 0xE0>>)
-      data_url = "data:image/jpeg;base64,#{pixel}"
-
-      contacts = [contact_json(id: 1, first_name: "PhotoPerson")]
-
-      photos = [
-        photo_json(
-          id: 1,
-          data_url: data_url,
-          contact: contact_short_json(1, Ecto.UUID.generate(), "PhotoPerson", "Test")
-        )
-      ]
-
-      {:ok, agent} = Agent.start_link(fn -> 0 end)
-
-      Req.Test.stub(@stub_name, fn conn ->
-        call = Agent.get_and_update(agent, fn n -> {n + 1, n + 1} end)
-
-        if call == 1 do
-          Req.Test.json(conn, contacts_page_json(contacts))
-        else
-          Req.Test.json(conn, photos_page_json(photos))
-        end
-      end)
-
-      import_job = api_import_fixture(account_id, user.id)
-
-      assert {:ok, _} =
-               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{"photos" => true})
-
-      # Verify photos endpoint was called
+      # Contacts page + meta-total call during coverage backfill
       assert Agent.get(agent, & &1) == 2
-      Agent.stop(agent)
-    end
-
-    test "skips photos when opt-out", %{user: user, account_id: account_id} do
-      contacts = [contact_json(id: 1, first_name: "NoPhotos")]
-
-      {:ok, agent} = Agent.start_link(fn -> 0 end)
-
-      Req.Test.stub(@stub_name, fn conn ->
-        Agent.update(agent, &(&1 + 1))
-        Req.Test.json(conn, contacts_page_json(contacts))
-      end)
-
-      import_job = api_import_fixture(account_id, user.id)
-      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
-
-      # Only contacts page, no photos
-      assert Agent.get(agent, & &1) == 1
       Agent.stop(agent)
     end
   end
@@ -925,7 +871,202 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
         |> Enum.map(& &1.value)
         |> Enum.sort()
 
-      assert fields == ["+5551234", "fieldy@test.com"]
+      # Without a `phone_default_region` in opts, bare numbers round-trip
+      # trimmed-but-unchanged — opt-in normalization preserves user input
+      # when the importer can't safely guess a country.
+      assert fields == ["555-1234", "fieldy@test.com"]
+    end
+
+    test "normalizes phone fields to E.164 when phone_default_region is set",
+         %{user: user, account_id: account_id} do
+      contacts = [
+        contact_json(
+          id: 42,
+          first_name: "Regional",
+          contact_fields: [
+            contact_field_json(content: "(202) 555-0100", type_name: "Phone"),
+            contact_field_json(content: "+44 20 7946 0958", type_name: "Phone")
+          ]
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, _} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "phone_default_region" => "US"
+               })
+
+      rec = Imports.find_import_record(account_id, "monica_api", "contact", "42")
+
+      fields =
+        Repo.all(from cf in Contacts.ContactField, where: cf.contact_id == ^rec.local_entity_id)
+        |> Enum.map(& &1.value)
+        |> Enum.sort()
+
+      # Bare US number normalized via region hint; +-prefixed UK number ignores
+      # the US hint and uses its own country code.
+      assert "+12025550100" in fields
+      assert "+442079460958" in fields
+    end
+
+    test "phone normalization happens exactly once during import",
+         %{user: user, account_id: account_id} do
+      contacts = [
+        contact_json(
+          id: 99,
+          first_name: "OnceOnly",
+          contact_fields: [
+            contact_field_json(content: "(202) 555-0100", type_name: "Phone")
+          ]
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, _} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "phone_default_region" => "US"
+               })
+
+      rec = Imports.find_import_record(account_id, "monica_api", "contact", "99")
+
+      values =
+        Repo.all(from cf in Contacts.ContactField, where: cf.contact_id == ^rec.local_entity_id)
+        |> Enum.map(& &1.value)
+
+      assert "+12025550100" in values
+    end
+  end
+
+  describe "crawl/5 — misc-data plan" do
+    test "includes a contact when statistics.number_of_calls > 0",
+         %{user: user, account_id: account_id} do
+      contacts = [
+        contact_json(
+          id: 1,
+          first_name: "Has",
+          last_name: "Calls",
+          statistics: %{"number_of_calls" => 3}
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 1))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "calls" => true,
+                 "pets" => false
+               })
+
+      assert [%{source_id: "1", endpoints: endpoints}] = summary.misc_data_plan
+      assert "calls" in endpoints
+    end
+
+    test "excludes a contact when all opts are off",
+         %{user: user, account_id: account_id} do
+      contacts = [
+        contact_json(
+          id: 2,
+          first_name: "AllOff",
+          statistics: %{"number_of_calls" => 5, "number_of_gifts" => 5}
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 1))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "calls" => false,
+                 "gifts" => false,
+                 "pets" => false,
+                 "activities" => false,
+                 "debts" => false,
+                 "tasks" => false,
+                 "reminders" => false,
+                 "conversations" => false
+               })
+
+      assert summary.misc_data_plan == []
+    end
+
+    test "includes :pets unconditionally when opt is on (no stat field)",
+         %{user: user, account_id: account_id} do
+      contacts = [
+        contact_json(
+          id: 3,
+          first_name: "PetsOnly",
+          statistics: %{}
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 1))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "pets" => true,
+                 "calls" => false,
+                 "activities" => false,
+                 "gifts" => false,
+                 "debts" => false,
+                 "tasks" => false,
+                 "reminders" => false,
+                 "conversations" => false
+               })
+
+      assert [%{endpoints: ["pets"]}] = summary.misc_data_plan
+    end
+
+    test "missing statistic field is treated as >=1 (safe default)",
+         %{user: user, account_id: account_id} do
+      contacts = [
+        contact_json(
+          id: 4,
+          first_name: "NoStats",
+          statistics: %{}
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 1))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "calls" => true,
+                 "pets" => false,
+                 "activities" => false,
+                 "gifts" => false,
+                 "debts" => false,
+                 "tasks" => false,
+                 "reminders" => false,
+                 "conversations" => false
+               })
+
+      assert [%{endpoints: endpoints}] = summary.misc_data_plan
+      assert "calls" in endpoints
     end
   end
 
@@ -1389,6 +1530,540 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
         )
 
       assert length(active) == 1
+    end
+  end
+
+  describe "coverage_check_and_backfill" do
+    test "closes a single-ID gap via direct fetch", %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case {conn.method, conn.request_path} do
+          {"GET", "/api/contacts"} ->
+            # Listing call — return IDs 1, 2, 3, 5 (ID 4 missing) with meta.total=5
+            Req.Test.json(conn, %{
+              "data" =>
+                Enum.map([1, 2, 3, 5], fn id ->
+                  %{
+                    "id" => id,
+                    "first_name" => "Listed#{id}",
+                    "last_name" => "X",
+                    "is_active" => true,
+                    "is_partial" => false,
+                    "contactFields" => []
+                  }
+                end),
+              "meta" => %{
+                "total" => 5,
+                "last_page" => 1,
+                "current_page" => 1,
+                "per_page" => 100
+              }
+            })
+
+          {"GET", "/api/contacts/4"} ->
+            Req.Test.json(conn, %{
+              "data" => %{
+                "id" => 4,
+                "first_name" => "Backfilled4",
+                "last_name" => "X",
+                "is_active" => true,
+                "is_partial" => false,
+                "contactFields" => []
+              }
+            })
+
+          {"GET", "/api/contacts/" <> _} ->
+            conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{})
+        end
+      end)
+
+      {:ok, summary} =
+        MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+          "auto_merge_duplicates" => false
+        })
+
+      assert summary.coverage_backfill.gap_detected == 1
+      assert summary.coverage_backfill.imported_full == 1
+      assert summary.coverage_backfill.imported_partial == 0
+      assert summary.coverage_backfill.skipped_deleted == 0
+      assert summary.coverage_backfill.skipped_inactive == 0
+      assert summary.coverage_backfill.unresolved_gap == 0
+      assert summary.imported == 5
+
+      record = Imports.find_import_record(account_id, "monica_api", "contact", "4")
+      refute is_nil(record)
+    end
+
+    test "closes a 1-of-2 gap when one direct fetch 404s",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case {conn.method, conn.request_path} do
+          {"GET", "/api/contacts"} ->
+            Req.Test.json(conn, %{
+              "data" =>
+                Enum.map([1, 3, 5], fn id ->
+                  %{
+                    "id" => id,
+                    "first_name" => "L#{id}",
+                    "last_name" => "X",
+                    "is_active" => true,
+                    "is_partial" => false,
+                    "contactFields" => []
+                  }
+                end),
+              "meta" => %{
+                "total" => 5,
+                "last_page" => 1,
+                "current_page" => 1,
+                "per_page" => 100
+              }
+            })
+
+          {"GET", "/api/contacts/2"} ->
+            conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{})
+
+          {"GET", "/api/contacts/4"} ->
+            Req.Test.json(conn, %{
+              "data" => %{
+                "id" => 4,
+                "first_name" => "B4",
+                "last_name" => "X",
+                "is_active" => true,
+                "is_partial" => false,
+                "contactFields" => []
+              }
+            })
+
+          {"GET", "/api/contacts/" <> _} ->
+            conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{})
+        end
+      end)
+
+      {:ok, summary} =
+        MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert summary.coverage_backfill.gap_detected == 2
+      assert summary.coverage_backfill.imported_full == 1
+      # ID 2 is a deleted/404; the safety-margin scan past max_seen also yields 404s
+      assert summary.coverage_backfill.skipped_deleted >= 1
+      assert summary.coverage_backfill.unresolved_gap == 1
+    end
+
+    test "skips inactive contact in gap", %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case {conn.method, conn.request_path} do
+          {"GET", "/api/contacts"} ->
+            Req.Test.json(conn, %{
+              "data" => [
+                %{
+                  "id" => 1,
+                  "first_name" => "A",
+                  "last_name" => "X",
+                  "is_active" => true,
+                  "is_partial" => false,
+                  "contactFields" => []
+                }
+              ],
+              "meta" => %{
+                "total" => 2,
+                "last_page" => 1,
+                "current_page" => 1,
+                "per_page" => 100
+              }
+            })
+
+          {"GET", "/api/contacts/2"} ->
+            Req.Test.json(conn, %{
+              "data" => %{
+                "id" => 2,
+                "first_name" => "Inactive",
+                "last_name" => "X",
+                "is_active" => false,
+                "is_partial" => false,
+                "contactFields" => []
+              }
+            })
+
+          {"GET", "/api/contacts/" <> _} ->
+            conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{})
+        end
+      end)
+
+      {:ok, summary} =
+        MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert summary.coverage_backfill.skipped_inactive == 1
+      assert summary.coverage_backfill.imported_full == 0
+      assert summary.coverage_backfill.unresolved_gap == 1
+
+      refute Imports.find_import_record(account_id, "monica_api", "contact", "2")
+    end
+
+    test "imports partial contact in gap (relationships need it)",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case {conn.method, conn.request_path} do
+          {"GET", "/api/contacts"} ->
+            Req.Test.json(conn, %{
+              "data" => [
+                %{
+                  "id" => 1,
+                  "first_name" => "A",
+                  "last_name" => "X",
+                  "is_active" => true,
+                  "is_partial" => false,
+                  "contactFields" => []
+                }
+              ],
+              "meta" => %{
+                "total" => 2,
+                "last_page" => 1,
+                "current_page" => 1,
+                "per_page" => 100
+              }
+            })
+
+          {"GET", "/api/contacts/2"} ->
+            Req.Test.json(conn, %{
+              "data" => %{
+                "id" => 2,
+                "first_name" => "Partial",
+                "last_name" => "Stub",
+                "is_active" => true,
+                "is_partial" => true,
+                "contactFields" => []
+              }
+            })
+
+          {"GET", "/api/contacts/" <> _} ->
+            conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{})
+        end
+      end)
+
+      {:ok, summary} =
+        MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert summary.coverage_backfill.imported_partial == 1
+      assert summary.coverage_backfill.imported_full == 0
+      assert summary.coverage_backfill.unresolved_gap == 0
+
+      record = Imports.find_import_record(account_id, "monica_api", "contact", "2")
+      refute is_nil(record)
+    end
+
+    test "no-op when meta.total matches distinct imported",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+
+      request_count = :counters.new(1, [])
+
+      Req.Test.stub(@stub_name, fn conn ->
+        :counters.add(request_count, 1, 1)
+
+        case {conn.method, conn.request_path} do
+          {"GET", "/api/contacts"} ->
+            Req.Test.json(conn, %{
+              "data" =>
+                Enum.map([1, 2, 3], fn id ->
+                  %{
+                    "id" => id,
+                    "first_name" => "L#{id}",
+                    "last_name" => "X",
+                    "is_active" => true,
+                    "is_partial" => false,
+                    "contactFields" => []
+                  }
+                end),
+              "meta" => %{
+                "total" => 3,
+                "last_page" => 1,
+                "current_page" => 1,
+                "per_page" => 100
+              }
+            })
+
+          {"GET", "/api/contacts/" <> _} ->
+            flunk("unexpected direct-fetch when no gap exists")
+        end
+      end)
+
+      {:ok, summary} =
+        MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert summary.coverage_backfill.gap_detected == 0
+      assert summary.coverage_backfill.range_scanned == 0
+      # 1 listing call + 1 meta.total recheck = 2 API calls; no per-ID GETs.
+      assert :counters.get(request_count, 1) == 2
+    end
+
+    test "logs warning and surfaces unresolved_gap when gap can't be closed",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case {conn.method, conn.request_path} do
+          {"GET", "/api/contacts"} ->
+            Req.Test.json(conn, %{
+              "data" => [
+                %{
+                  "id" => 1,
+                  "first_name" => "A",
+                  "last_name" => "X",
+                  "is_active" => true,
+                  "is_partial" => false,
+                  "contactFields" => []
+                },
+                %{
+                  "id" => 3,
+                  "first_name" => "C",
+                  "last_name" => "X",
+                  "is_active" => true,
+                  "is_partial" => false,
+                  "contactFields" => []
+                }
+              ],
+              "meta" => %{
+                "total" => 5,
+                "last_page" => 1,
+                "current_page" => 1,
+                "per_page" => 100
+              }
+            })
+
+          {"GET", "/api/contacts/" <> _} ->
+            conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{})
+        end
+      end)
+
+      log =
+        capture_log(fn ->
+          {:ok, summary} =
+            MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+          assert summary.coverage_backfill.unresolved_gap == 3
+        end)
+
+      assert log =~ "Coverage backfill could not close the gap"
+    end
+
+    test "stops scanning once gap closes (early termination)",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case {conn.method, conn.request_path} do
+          {"GET", "/api/contacts"} ->
+            Req.Test.json(conn, %{
+              "data" => [
+                %{
+                  "id" => 1,
+                  "first_name" => "A",
+                  "last_name" => "X",
+                  "is_active" => true,
+                  "is_partial" => false,
+                  "contactFields" => []
+                },
+                %{
+                  "id" => 100,
+                  "first_name" => "Z",
+                  "last_name" => "X",
+                  "is_active" => true,
+                  "is_partial" => false,
+                  "contactFields" => []
+                }
+              ],
+              "meta" => %{
+                "total" => 3,
+                "last_page" => 1,
+                "current_page" => 1,
+                "per_page" => 100
+              }
+            })
+
+          {"GET", "/api/contacts/2"} ->
+            Req.Test.json(conn, %{
+              "data" => %{
+                "id" => 2,
+                "first_name" => "B",
+                "last_name" => "X",
+                "is_active" => true,
+                "is_partial" => false,
+                "contactFields" => []
+              }
+            })
+
+          {"GET", "/api/contacts/" <> _} ->
+            flunk("scan should have terminated after closing the gap")
+        end
+      end)
+
+      {:ok, summary} =
+        MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert summary.coverage_backfill.unresolved_gap == 0
+      assert summary.coverage_backfill.imported_full == 1
+    end
+
+    test "backfilled contact gets auto-merged when matching",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+
+      shared_phone = %{
+        "contact_field_type" => %{"type" => "phone", "name" => "Mobile", "protocol" => "tel:"},
+        "content" => "+15555550100"
+      }
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case {conn.method, conn.request_path} do
+          {"GET", "/api/contacts"} ->
+            Req.Test.json(conn, %{
+              "data" => [
+                %{
+                  "id" => 1,
+                  "first_name" => "Same",
+                  "last_name" => "Name",
+                  "is_active" => true,
+                  "is_partial" => false,
+                  "contactFields" => [shared_phone]
+                }
+              ],
+              "meta" => %{
+                "total" => 2,
+                "last_page" => 1,
+                "current_page" => 1,
+                "per_page" => 100
+              }
+            })
+
+          {"GET", "/api/contacts/2"} ->
+            Req.Test.json(conn, %{
+              "data" => %{
+                "id" => 2,
+                "first_name" => "Same",
+                "last_name" => "Name",
+                "is_active" => true,
+                "is_partial" => false,
+                "contactFields" => [shared_phone]
+              }
+            })
+
+          {"GET", "/api/contacts/" <> _} ->
+            conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{})
+        end
+      end)
+
+      {:ok, summary} =
+        MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+          "auto_merge_duplicates" => true
+        })
+
+      assert summary.coverage_backfill.imported_full == 1
+      assert summary.merged == 1
+    end
+
+    test "scans IDs past max_seen up to safety_margin",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case {conn.method, conn.request_path} do
+          {"GET", "/api/contacts"} ->
+            Req.Test.json(conn, %{
+              "data" =>
+                Enum.map([1, 2, 3, 4, 5], fn id ->
+                  %{
+                    "id" => id,
+                    "first_name" => "L#{id}",
+                    "last_name" => "X",
+                    "is_active" => true,
+                    "is_partial" => false,
+                    "contactFields" => []
+                  }
+                end),
+              "meta" => %{
+                "total" => 6,
+                "last_page" => 1,
+                "current_page" => 1,
+                "per_page" => 100
+              }
+            })
+
+          {"GET", "/api/contacts/6"} ->
+            Req.Test.json(conn, %{
+              "data" => %{
+                "id" => 6,
+                "first_name" => "PastMax",
+                "last_name" => "X",
+                "is_active" => true,
+                "is_partial" => false,
+                "contactFields" => []
+              }
+            })
+
+          {"GET", "/api/contacts/" <> _} ->
+            conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{})
+        end
+      end)
+
+      {:ok, summary} =
+        MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert summary.coverage_backfill.imported_full == 1
+      assert summary.coverage_backfill.unresolved_gap == 0
+
+      record = Imports.find_import_record(account_id, "monica_api", "contact", "6")
+      refute is_nil(record)
+    end
+
+    test "hard cap on iterations leaves unresolved_gap > 0",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case {conn.method, conn.request_path} do
+          {"GET", "/api/contacts"} ->
+            Req.Test.json(conn, %{
+              "data" => [
+                %{
+                  "id" => 1,
+                  "first_name" => "A",
+                  "last_name" => "X",
+                  "is_active" => true,
+                  "is_partial" => false,
+                  "contactFields" => []
+                }
+              ],
+              "meta" => %{
+                "total" => 1000,
+                "last_page" => 1,
+                "current_page" => 1,
+                "per_page" => 100
+              }
+            })
+
+          {"GET", "/api/contacts/" <> _} ->
+            conn |> Plug.Conn.put_status(404) |> Req.Test.json(%{})
+        end
+      end)
+
+      log =
+        capture_log(fn ->
+          {:ok, summary} =
+            MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+          assert summary.coverage_backfill.gap_detected == 999
+          assert summary.coverage_backfill.range_scanned <= 100
+          assert summary.coverage_backfill.unresolved_gap > 0
+        end)
+
+      assert log =~ "Coverage backfill could not close the gap"
     end
   end
 end

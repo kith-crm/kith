@@ -282,6 +282,55 @@ defmodule KithWeb.UserAuthTest do
     end
   end
 
+  describe "on_mount :require_admin" do
+    test "allows users with role admin", %{conn: conn, user: user} do
+      user_token = Accounts.generate_user_session_token(user)
+      session = conn |> put_session(:user_token, user_token) |> get_session()
+
+      socket = %LiveView.Socket{
+        endpoint: KithWeb.Endpoint,
+        assigns: %{__changed__: %{}, flash: %{}}
+      }
+
+      assert {:cont, updated_socket} =
+               UserAuth.on_mount(:require_admin, %{}, session, socket)
+
+      assert updated_socket.assigns.current_scope.user.id == user.id
+    end
+
+    test "halts users without admin role" do
+      editor = user_fixture(%{role: "editor"})
+      editor = %{editor | authenticated_at: DateTime.utc_now(:second)}
+      user_token = Accounts.generate_user_session_token(editor)
+
+      conn =
+        Phoenix.ConnTest.build_conn()
+        |> Map.replace!(:secret_key_base, KithWeb.Endpoint.config(:secret_key_base))
+        |> Plug.Test.init_test_session(%{})
+        |> put_session(:user_token, user_token)
+
+      session = get_session(conn)
+
+      socket = %LiveView.Socket{
+        endpoint: KithWeb.Endpoint,
+        assigns: %{__changed__: %{}, flash: %{}}
+      }
+
+      assert {:halt, _socket} = UserAuth.on_mount(:require_admin, %{}, session, socket)
+    end
+
+    test "halts when no user is logged in", %{conn: conn} do
+      session = conn |> get_session()
+
+      socket = %LiveView.Socket{
+        endpoint: KithWeb.Endpoint,
+        assigns: %{__changed__: %{}, flash: %{}}
+      }
+
+      assert {:halt, _socket} = UserAuth.on_mount(:require_admin, %{}, session, socket)
+    end
+  end
+
   describe "on_mount :require_sudo_mode" do
     test "allows users that have authenticated in the last 10 minutes", %{conn: conn, user: user} do
       user_token = Accounts.generate_user_session_token(user)

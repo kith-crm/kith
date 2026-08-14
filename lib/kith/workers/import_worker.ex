@@ -11,6 +11,7 @@ defmodule Kith.Workers.ImportWorker do
 
   alias Kith.Contacts
   alias Kith.VCard.Parser
+  alias Kith.Workers.DuplicateDetectionWorker
 
   @impl Oban.Worker
   def perform(%Oban.Job{
@@ -41,6 +42,9 @@ defmodule Kith.Workers.ImportWorker do
           topic,
           {:import_complete, results}
         )
+
+        # Trigger duplicate detection for newly imported contacts
+        Oban.insert(DuplicateDetectionWorker.new(%{account_id: account_id}))
 
         Logger.info(
           "vCard import complete for account #{account_id}: " <>

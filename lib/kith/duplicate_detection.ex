@@ -4,13 +4,19 @@ defmodule Kith.DuplicateDetection do
   alias Kith.Contacts.DuplicateCandidate
   alias Kith.Repo
 
+  @default_page_size 20
+
   def list_candidates(account_id, opts \\ []) do
     status = Keyword.get(opts, :status, "pending")
+    limit = Keyword.get(opts, :limit, @default_page_size)
+    offset = Keyword.get(opts, :offset, 0)
 
     DuplicateCandidate
     |> scope_to_account(account_id)
     |> where([d], d.status == ^status)
     |> order_by([d], desc: d.score)
+    |> limit(^limit)
+    |> offset(^offset)
     |> Repo.all()
     |> Repo.preload([:contact, :duplicate_contact])
   end

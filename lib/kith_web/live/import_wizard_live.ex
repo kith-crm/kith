@@ -11,6 +11,7 @@ defmodule KithWeb.ImportWizardLive do
 
   use KithWeb, :live_view
 
+  alias Kith.Contacts.PhoneFormatter
   alias Kith.Imports
   alias Kith.Imports.Sources.MonicaApi
   alias Kith.Policy
@@ -23,6 +24,8 @@ defmodule KithWeb.ImportWizardLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    locale = account_locale(socket)
+
     {:ok,
      socket
      |> assign(:page_title, "Import Contacts")
@@ -30,18 +33,8 @@ defmodule KithWeb.ImportWizardLive do
      |> assign(:source, "vcard")
      |> assign(:api_url, "")
      |> assign(:api_key, "")
-     |> assign(:api_options, %{
-       "photos" => false,
-       "auto_merge_duplicates" => false,
-       "pets" => true,
-       "calls" => true,
-       "activities" => true,
-       "gifts" => true,
-       "debts" => true,
-       "tasks" => true,
-       "reminders" => true,
-       "conversations" => true
-     })
+     |> assign(:api_options, default_api_options(socket))
+     |> assign(:phone_regions, build_phone_regions(locale))
      |> assign(:api_testing, false)
      |> assign(:current_import, nil)
      |> assign(:progress, nil)
@@ -53,6 +46,28 @@ defmodule KithWeb.ImportWizardLive do
        max_entries: 1
      )}
   end
+
+  defp default_api_options(socket) do
+    %{
+      "photos" => false,
+      "auto_merge_duplicates" => true,
+      "phone_default_region" => account_default_region(socket),
+      "pets" => true,
+      "calls" => true,
+      "activities" => true,
+      "gifts" => true,
+      "debts" => true,
+      "tasks" => true,
+      "reminders" => true,
+      "conversations" => true
+    }
+  end
+
+  defp account_default_region(%{assigns: %{current_scope: %{account: %{locale: locale}}}})
+       when is_binary(locale),
+       do: PhoneFormatter.region_for_locale(locale) || ""
+
+  defp account_default_region(_socket), do: ""
 
   @impl true
   def handle_params(_params, _uri, socket) do
@@ -146,23 +161,17 @@ defmodule KithWeb.ImportWizardLive do
      |> assign(:source, "vcard")
      |> assign(:api_url, "")
      |> assign(:api_key, "")
-     |> assign(:api_options, %{
-       "photos" => false,
-       "auto_merge_duplicates" => false,
-       "pets" => true,
-       "calls" => true,
-       "activities" => true,
-       "gifts" => true,
-       "debts" => true,
-       "tasks" => true,
-       "reminders" => true,
-       "conversations" => true
-     })
+     |> assign(:api_options, default_api_options(socket))
      |> assign(:api_testing, false)
      |> assign(:current_import, nil)
      |> assign(:progress, nil)
      |> assign(:results, nil)
      |> assign(:error, nil)}
+  end
+
+  def handle_event("set_phone_region", %{"region" => region}, socket) do
+    options = Map.put(socket.assigns.api_options, "phone_default_region", region)
+    {:noreply, assign(socket, :api_options, options)}
   end
 
   # ── PubSub handlers ────────────────────────────────────────────────────────
@@ -344,10 +353,27 @@ defmodule KithWeb.ImportWizardLive do
   end
 
   defp build_api_options(socket) do
+    # Pass options through unchanged so non-boolean settings (phone_default_region)
+    # survive. MonicaApi reads each key directly and treats falsy as off.
     socket.assigns.api_options
-    |> Enum.filter(fn {_k, v} -> v end)
-    |> Enum.into(%{}, fn {k, _v} -> {k, true} end)
   end
+
+  defp build_phone_regions(locale) do
+    [{"", phone_off_label(locale)} | PhoneFormatter.supported_regions(locale)]
+  end
+
+  defp account_locale(%{assigns: %{current_scope: %{account: %{locale: locale}}}})
+       when is_binary(locale),
+       do: locale
+
+  defp account_locale(_), do: "en"
+
+  defp phone_off_label("en"), do: "Don't normalize bare numbers"
+  defp phone_off_label("fr"), do: "Ne pas normaliser les numéros sans indicatif"
+  defp phone_off_label("de"), do: "Nackte Nummern nicht normalisieren"
+  defp phone_off_label("es"), do: "No normalizar números sin prefijo"
+  defp phone_off_label("pt"), do: "Não normalizar números sem prefixo"
+  defp phone_off_label(_), do: "Don't normalize bare numbers"
 
   # ── Render ──────────────────────────────────────────────────────────────────
 
@@ -554,10 +580,36 @@ defmodule KithWeb.ImportWizardLive do
                           Auto-merge definite duplicates
                         </span>
                         <p class="text-xs text-[var(--color-text-tertiary)]">
-                          Merge contacts with identical name + email or name + phone
+                          Merge contacts that share 2+ strong signals (email, phone, address) or share an email/phone and an address
                         </p>
                       </div>
                     </label>
+                    <div class="mt-2">
+                      <label class="block">
+                        <span class="text-sm text-[var(--color-text-primary)]">
+                          Default country for phone numbers without country code
+                        </span>
+                        <p class="text-xs text-[var(--color-text-tertiary)] mb-1">
+                          Phones written as <span class="font-mono">(555) 123-4567</span>
+                          will be stored in E.164 form using this region.
+                          Numbers that already start with <span class="font-mono">+</span>
+                          are unaffected.
+                        </p>
+                        <select
+                          phx-change="set_phone_region"
+                          name="region"
+                          class="mt-1 block w-full rounded border-[var(--color-border)] text-sm"
+                        >
+                          <option
+                            :for={{code, label} <- @phone_regions}
+                            value={code}
+                            selected={@api_options["phone_default_region"] == code}
+                          >
+                            {label}
+                          </option>
+                        </select>
+                      </label>
+                    </div>
                   </div>
                   <div class="mt-3 pt-3 border-t border-[var(--color-border-subtle)]">
                     <span class="text-xs font-medium text-[var(--color-text-tertiary)] uppercase tracking-wide">

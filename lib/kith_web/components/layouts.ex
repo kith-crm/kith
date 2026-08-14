@@ -97,6 +97,7 @@ defmodule KithWeb.Layouts do
             match_prefix="/settings"
           />
           <.sidebar_link
+            :if={Kith.Policy.can?(@current_scope.user, :manage, :oban)}
             path={~p"/admin/oban"}
             current_path={@current_path}
             icon="hero-queue-list"
@@ -233,6 +234,7 @@ defmodule KithWeb.Layouts do
             match_prefix="/settings"
           />
           <.mobile_nav_link
+            :if={Kith.Policy.can?(@current_scope.user, :manage, :oban)}
             path={~p"/admin/oban"}
             current_path={@current_path}
             icon="hero-queue-list"
