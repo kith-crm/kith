@@ -29,7 +29,7 @@ defmodule Kith.Workers.MonicaDocumentImportWorker do
           "documents" => documents
         }
       }) do
-    credential = %{url: credential_url, api_key: credential_api_key}
+    credential = %{url: credential_url, api_key: Imports.decrypt_credential(credential_api_key)}
     import_job = Imports.get_import!(import_id)
 
     Enum.each(documents, fn doc_data ->

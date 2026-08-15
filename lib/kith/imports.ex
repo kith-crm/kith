@@ -153,4 +153,24 @@ defmodule Kith.Imports do
     |> Ecto.Changeset.change(api_key_encrypted: nil)
     |> Repo.update()
   end
+
+  @doc """
+  Encrypts a credential secret (e.g. an API key) for safe placement in Oban
+  job args. Job args are stored as plaintext JSON in `oban_jobs` and rendered
+  as-is by the Oban Web dashboard, so raw secrets must never be put there.
+  """
+  def encrypt_credential(plaintext) when is_binary(plaintext) do
+    {:ok, ciphertext} = Kith.Vault.encrypt(plaintext)
+    Base.encode64(ciphertext)
+  end
+
+  @doc "Reverses `encrypt_credential/1`."
+  def decrypt_credential(ciphertext) when is_binary(ciphertext) do
+    {:ok, plaintext} =
+      ciphertext
+      |> Base.decode64!()
+      |> Kith.Vault.decrypt()
+
+    plaintext
+  end
 end

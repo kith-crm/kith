@@ -113,7 +113,7 @@ defmodule Kith.Workers.MonicaApiCrawlWorker do
       %{
         "import_id" => import_job.id,
         "credential_url" => import_job.api_url,
-        "credential_api_key" => import_job.api_key_encrypted
+        "credential_api_key" => Imports.encrypt_credential(import_job.api_key_encrypted)
       }
       |> MonicaPhotoSyncWorker.new()
       |> Oban.insert()
@@ -126,7 +126,7 @@ defmodule Kith.Workers.MonicaApiCrawlWorker do
     %{
       "import_id" => import_job.id,
       "credential_url" => import_job.api_url,
-      "credential_api_key" => import_job.api_key_encrypted,
+      "credential_api_key" => Imports.encrypt_credential(import_job.api_key_encrypted),
       "plan" => plan
     }
     |> MonicaMiscDataWorker.new()
