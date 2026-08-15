@@ -40,7 +40,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
 
     credential = %{
       url: credential_url,
-      api_key: credential_api_key,
+      api_key: Imports.decrypt_credential(credential_api_key),
       req_options: Application.get_env(:kith, :monica_req_options, [])
     }
 

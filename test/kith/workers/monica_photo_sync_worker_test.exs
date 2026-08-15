@@ -45,7 +45,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
     do: %{
       "import_id" => import_job.id,
       "credential_url" => "https://monica.test",
-      "credential_api_key" => "test-key"
+      "credential_api_key" => Imports.encrypt_credential("test-key")
     }
 
   defp register_imported_contact!(import_job, contact, monica_id) do

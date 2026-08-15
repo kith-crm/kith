@@ -102,4 +102,25 @@ defmodule Kith.ImportsTest do
       assert updated.started_at == now
     end
   end
+
+  describe "encrypt_credential/1 and decrypt_credential/1" do
+    test "round-trips a plaintext secret" do
+      ciphertext = Imports.encrypt_credential("super-secret-api-key")
+
+      assert Imports.decrypt_credential(ciphertext) == "super-secret-api-key"
+    end
+
+    test "ciphertext does not contain the plaintext secret" do
+      ciphertext = Imports.encrypt_credential("super-secret-api-key")
+
+      refute ciphertext =~ "super-secret-api-key"
+    end
+
+    test "ciphertext is a JSON-safe string suitable for Oban job args" do
+      ciphertext = Imports.encrypt_credential("super-secret-api-key")
+
+      assert is_binary(ciphertext)
+      assert {:ok, _} = Jason.encode(%{"credential_api_key" => ciphertext})
+    end
+  end
 end
