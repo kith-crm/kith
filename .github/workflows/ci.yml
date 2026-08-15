@@ -233,8 +233,8 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            ghcr.io/bashar-qassis/kith:latest
-            ghcr.io/bashar-qassis/kith:${{ steps.version.outputs.new_version }}
-            ghcr.io/bashar-qassis/kith:${{ github.sha }}
+            ghcr.io/kith-crm/kith:latest
+            ghcr.io/kith-crm/kith:${{ steps.version.outputs.new_version }}
+            ghcr.io/kith-crm/kith:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
