@@ -378,5 +378,57 @@ defmodule Kith.Contacts.MergeTest do
                  resolution()
                )
     end
+
+    test "rejects a nonexistent loser id", ctx do
+      assert {:error, :not_found} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [-1],
+                 resolution()
+               )
+    end
+
+    test "wraps a changeset failure as {:invalid_fields, changeset}", ctx do
+      # contact_b already references the survivor as first_met_through; resolving
+      # to that value passes held_by_member?/3, but applying it to the survivor
+      # is a self-reference, which Contact.update_changeset/2 rejects.
+      {:ok, _} =
+        ctx.contact_b
+        |> Ecto.Changeset.change(%{first_met_through_id: ctx.contact_a.id})
+        |> Repo.update()
+
+      assert {:error, {:invalid_fields, %Ecto.Changeset{} = changeset}} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [ctx.contact_b.id],
+                 resolution(%{first_met_through_id: ctx.contact_a.id})
+               )
+
+      assert %{first_met_through_id: ["cannot reference the contact itself"]} =
+               errors_on(changeset)
+    end
+
+    test "a rejected merge leaves the database unchanged", ctx do
+      before_a = Repo.get!(Kith.Contacts.Contact, ctx.contact_a.id)
+      before_b = Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id)
+
+      assert {:error, {:unknown_value, :company}} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [ctx.contact_b.id],
+                 resolution(%{company: "Never Corp"})
+               )
+
+      after_a = Repo.get!(Kith.Contacts.Contact, ctx.contact_a.id)
+      after_b = Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id)
+
+      assert after_a == before_a
+      assert after_b == before_b
+      assert after_a.deleted_at == nil
+      assert after_b.deleted_at == nil
+    end
   end
 end

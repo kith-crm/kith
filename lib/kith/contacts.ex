@@ -1690,6 +1690,11 @@ defmodule Kith.Contacts do
   Merges `loser_ids` into `survivor_id`, applying `resolution`.
 
   See `Kith.Contacts.MergeResolution` for how a resolution is produced.
+
+  Returns `{:ok, contact}` or `{:error, reason}`, where `reason` is one of
+  `:not_found`, `:trashed`, `:different_accounts`, `:survivor_in_losers`,
+  `:no_losers`, `{:unknown_value, field}`, `{:not_clearable, field}`, or
+  `{:invalid_fields, changeset}`.
   """
   def merge_cluster(scope, survivor_id, loser_ids, resolution) do
     Merge.run(scope, survivor_id, loser_ids, resolution)

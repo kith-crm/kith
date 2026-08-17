@@ -14,10 +14,23 @@ defmodule Kith.Contacts.Merge do
   alias Kith.Contacts.{Contact, MergeFields}
   alias Kith.Repo
 
+  # Policy and array fields are computed rather than picked from a member, so
+  # `held_by_member?/3` accepts any value for them without a match. Mirrors
+  # `MergeFields.policy_fields/0 ++ MergeFields.array_fields/0` at compile
+  # time (guards cannot call remote functions) — keep this in sync with that
+  # registry.
+  @computed_fields MergeFields.policy_fields() ++ MergeFields.array_fields()
+
   @doc """
   Merges `loser_ids` into `survivor_id` inside one transaction.
 
   `resolution` is `%{fields: %{atom => value | :clear}, drop: %{atom => [id]}}`.
+
+  Returns `{:ok, contact}` or `{:error, reason}`, where `reason` is one of
+  `:not_found`, `:trashed`, `:different_accounts`, `:survivor_in_losers`,
+  `:no_losers`, `{:unknown_value, field}`, `{:not_clearable, field}`, or
+  `{:invalid_fields, changeset}` if the resolved values fail changeset
+  validation on the survivor.
   """
   def run(scope, survivor_id, loser_ids, resolution) do
     Repo.transaction(fn ->
@@ -66,8 +79,12 @@ defmodule Kith.Contacts.Merge do
         # a row lock taken outside a transaction is released the instant the
         # statement returns, so it would not serialise two sessions merging
         # overlapping clusters (design-spec §2 step 1, scenario D9).
+        #
+        # order_by: c.id fixes a deterministic lock acquisition order across
+        # sessions, so two merges over overlapping clusters always contend
+        # for locks in the same order instead of deadlocking.
         members =
-          from(c in Contact, where: c.id in ^ids, lock: "FOR UPDATE")
+          from(c in Contact, where: c.id in ^ids, order_by: c.id, lock: "FOR UPDATE")
           |> Repo.all()
 
         cond do
@@ -100,7 +117,7 @@ defmodule Kith.Contacts.Merge do
   # Array and policy fields are computed rather than picked, so they are not
   # required to match a single member's stored value.
   defp held_by_member?(_members, field, _value)
-       when field in [:favorite, :is_archived, :deceased, :deceased_at, :aliases],
+       when field in @computed_fields,
        do: true
 
   defp held_by_member?(members, field, value) do
@@ -117,8 +134,9 @@ defmodule Kith.Contacts.Merge do
         {field, value} -> {field, value}
       end)
 
-    survivor
-    |> Contact.update_changeset(changes)
-    |> Repo.update()
+    case survivor |> Contact.update_changeset(changes) |> Repo.update() do
+      {:ok, contact} -> {:ok, contact}
+      {:error, changeset} -> {:error, {:invalid_fields, changeset}}
+    end
   end
 end
