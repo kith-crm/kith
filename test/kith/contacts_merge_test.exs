@@ -879,4 +879,158 @@ defmodule Kith.Contacts.MergeTest do
       end
     end
   end
+
+  describe "merge_cluster/4 deduplication" do
+    setup ctx do
+      scope = Kith.Accounts.Scope.for_user(ctx.user)
+
+      email_type =
+        Repo.one!(
+          from(t in Kith.Contacts.ContactFieldType, where: like(t.protocol, "mailto%"), limit: 1)
+        )
+
+      %{scope: scope, email_type: email_type}
+    end
+
+    test "identical contact fields collapse to one", ctx do
+      Kith.ContactsFixtures.contact_field_fixture(ctx.contact_a, ctx.email_type.id, %{
+        "value" => "sarah@example.com"
+      })
+
+      Kith.ContactsFixtures.contact_field_fixture(ctx.contact_b, ctx.email_type.id, %{
+        "value" => "sarah@example.com"
+      })
+
+      Kith.ContactsFixtures.contact_field_fixture(ctx.contact_b, ctx.email_type.id, %{
+        "value" => "other@example.com"
+      })
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      values =
+        from(f in Kith.Contacts.ContactField,
+          where: f.contact_id == ^survivor.id,
+          select: f.value
+        )
+        |> Repo.all()
+        |> Enum.sort()
+
+      assert values == ["other@example.com", "sarah@example.com"]
+    end
+
+    test "a tag on both members is kept once", ctx do
+      {:ok, tag} = Contacts.create_tag(ctx.account_id, %{name: "Design"})
+      Contacts.tag_contact(ctx.contact_a, tag)
+      Contacts.tag_contact(ctx.contact_b, tag)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      count =
+        from(ct in "contact_tags", where: ct.contact_id == ^survivor.id, select: count())
+        |> Repo.one()
+
+      assert count == 1
+    end
+
+    test "a relationship between two merged members is removed, not self-referential", ctx do
+      type = Repo.one!(from(t in Kith.Contacts.RelationshipType, limit: 1))
+      Kith.ContactsFixtures.relationship_fixture(ctx.contact_a, ctx.contact_b, type.id)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      assert Repo.aggregate(
+               from(r in Kith.Contacts.Relationship,
+                 where: r.contact_id == ^survivor.id and r.related_contact_id == ^survivor.id
+               ),
+               :count
+             ) == 0
+    end
+
+    test "a relationship between two losers is removed, not self-referential", ctx do
+      # Neither end is the survivor here — both contact_b and c are losers,
+      # so this only exercises the "both endpoints are cluster members"
+      # cleanup, not the loser-vs-survivor path already covered above.
+      c = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Carol"})
+      type = Repo.one!(from(t in Kith.Contacts.RelationshipType, limit: 1))
+      Kith.ContactsFixtures.relationship_fixture(ctx.contact_b, c, type.id)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id, c.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      assert Repo.aggregate(
+               from(r in Kith.Contacts.Relationship,
+                 where: r.contact_id == ^survivor.id and r.related_contact_id == ^survivor.id
+               ),
+               :count
+             ) == 0
+    end
+
+    test "two losers holding the same forward relationship to a third contact collapse to one",
+         ctx do
+      # contact_b -> third and c -> third, same type, same direction. The
+      # survivor holds neither, so a plain survivor-vs-loser collision check
+      # would miss this and the blanket move would violate the unique index.
+      third = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Third"})
+      c = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Carol"})
+      type = Repo.one!(from(t in Kith.Contacts.RelationshipType, limit: 1))
+      Kith.ContactsFixtures.relationship_fixture(ctx.contact_b, third, type.id)
+      Kith.ContactsFixtures.relationship_fixture(c, third, type.id)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id, c.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      assert Repo.aggregate(
+               from(r in Kith.Contacts.Relationship,
+                 where:
+                   r.contact_id == ^survivor.id and r.related_contact_id == ^third.id and
+                     r.relationship_type_id == ^type.id
+               ),
+               :count
+             ) == 1
+    end
+
+    test "two losers holding the same reverse relationship from a third contact collapse to one",
+         ctx do
+      # third -> contact_b and third -> c, same type, same direction — the
+      # mirror of the previous case on the related_contact_id side.
+      third = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Third"})
+      c = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Carol"})
+      type = Repo.one!(from(t in Kith.Contacts.RelationshipType, limit: 1))
+      Kith.ContactsFixtures.relationship_fixture(third, ctx.contact_b, type.id)
+      Kith.ContactsFixtures.relationship_fixture(third, c, type.id)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id, c.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      assert Repo.aggregate(
+               from(r in Kith.Contacts.Relationship,
+                 where:
+                   r.related_contact_id == ^survivor.id and r.contact_id == ^third.id and
+                     r.relationship_type_id == ^type.id
+               ),
+               :count
+             ) == 1
+    end
+  end
 end

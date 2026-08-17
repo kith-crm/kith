@@ -160,6 +160,35 @@ defmodule Kith.Contacts.Merge do
 
           {:ok, count}
         end)
+        |> Multi.run(:dedupe_owned, fn repo, _changes ->
+          # contact_fields has no unique index — collapsing exact duplicates
+          # here is a product decision, not a constraint guard. Tags and
+          # photos are deduped by their own remap steps above already, via
+          # `dedupe_and_move/5`; nothing to repeat here.
+          repo.query!(
+            """
+            DELETE FROM contact_fields
+            WHERE id IN (
+              SELECT cf.id FROM contact_fields cf
+              WHERE cf.contact_id = $1
+                AND EXISTS (
+                  SELECT 1 FROM contact_fields other
+                  WHERE other.contact_id = $1
+                    AND other.contact_field_type_id = cf.contact_field_type_id
+                    AND other.value = cf.value
+                    AND other.id < cf.id
+                )
+            )
+            """,
+            [survivor.id]
+          )
+
+          {:ok, :done}
+        end)
+        |> Multi.run(:remap_relationships, fn repo, _changes ->
+          loser_ids = Enum.map(losers, & &1.id)
+          remap_relationships(repo, survivor.id, loser_ids)
+        end)
         |> Multi.run(:soft_delete_losers, fn repo, _changes ->
           now = DateTime.utc_now(:second)
           ids = Enum.map(losers, & &1.id)
@@ -276,6 +305,78 @@ defmodule Kith.Contacts.Merge do
     )
 
     :ok
+  end
+
+  # Relationships are directional and carry a 4-column unique index
+  # (account_id, contact_id, related_contact_id, relationship_type_id), so a
+  # collision can appear on either endpoint, and — as with the other dedupes
+  # above — between two losers that neither one shares with the survivor.
+  #
+  # Step 1 handles self-references: any relationship with both endpoints
+  # inside the cluster (survivor or loser, in either order — including a
+  # relationship between two different losers) becomes contact_id ==
+  # related_contact_id once both sides land on the survivor, so it is
+  # dropped outright rather than deduped. What remains has exactly one
+  # cluster endpoint; the other points outside the cluster.
+  #
+  # Steps 2-3 dedupe + move the forward direction (contact_id is a loser),
+  # steps 4-5 mirror that for the reverse direction (related_contact_id is a
+  # loser) — each pass drops a loser's row when either another loser's row
+  # (ctid tie-break) or the survivor's own row already covers the same
+  # (other endpoint, type) pair, then moves what's left onto the survivor.
+  defp remap_relationships(repo, survivor_id, loser_ids) do
+    cluster_ids = [survivor_id | loser_ids]
+
+    repo.query!(
+      "DELETE FROM relationships WHERE contact_id = ANY($1) AND related_contact_id = ANY($1)",
+      [cluster_ids]
+    )
+
+    repo.query!(
+      """
+      DELETE FROM relationships r
+      WHERE r.contact_id = ANY($1)
+        AND EXISTS (
+          SELECT 1 FROM relationships o
+          WHERE o.related_contact_id = r.related_contact_id
+            AND o.relationship_type_id = r.relationship_type_id
+            AND (
+              o.contact_id = $2
+              OR (o.contact_id = ANY($1) AND o.ctid < r.ctid)
+            )
+        )
+      """,
+      [loser_ids, survivor_id]
+    )
+
+    repo.query!(
+      "UPDATE relationships SET contact_id = $1 WHERE contact_id = ANY($2)",
+      [survivor_id, loser_ids]
+    )
+
+    repo.query!(
+      """
+      DELETE FROM relationships r
+      WHERE r.related_contact_id = ANY($1)
+        AND EXISTS (
+          SELECT 1 FROM relationships o
+          WHERE o.contact_id = r.contact_id
+            AND o.relationship_type_id = r.relationship_type_id
+            AND (
+              o.related_contact_id = $2
+              OR (o.related_contact_id = ANY($1) AND o.ctid < r.ctid)
+            )
+        )
+      """,
+      [loser_ids, survivor_id]
+    )
+
+    repo.query!(
+      "UPDATE relationships SET related_contact_id = $1 WHERE related_contact_id = ANY($2)",
+      [survivor_id, loser_ids]
+    )
+
+    {:ok, :done}
   end
 
   defp apply_fields(survivor, %{fields: fields}) do
