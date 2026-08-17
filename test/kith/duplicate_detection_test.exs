@@ -237,4 +237,149 @@ defmodule Kith.DuplicateDetectionTest do
       assert DuplicateDetection.pending_count(account1.id) == 0
     end
   end
+
+  describe "resolve_after_merge/4" do
+    setup do
+      Kith.ContactsFixtures.seed_reference_data!()
+      user = Kith.AccountsFixtures.user_fixture()
+      account_id = user.account_id
+
+      names = [a: "Ann", b: "Bea", c: "Cal", d: "Dee", e: "Eve"]
+
+      contacts =
+        Map.new(names, fn {key, name} ->
+          {key, Kith.ContactsFixtures.contact_fixture(account_id, %{first_name: name})}
+        end)
+
+      %{user: user, account_id: account_id, contacts: contacts}
+    end
+
+    defp pair!(account_id, one, two, status \\ "pending") do
+      {low, high} = if one.id < two.id, do: {one, two}, else: {two, one}
+
+      Repo.insert!(%Kith.Contacts.DuplicateCandidate{
+        account_id: account_id,
+        contact_id: low.id,
+        duplicate_contact_id: high.id,
+        score: 0.9,
+        status: status,
+        detected_at: DateTime.utc_now(:second)
+      })
+    end
+
+    defp status_of(account_id, one, two) do
+      {low, high} = if one.id < two.id, do: {one, two}, else: {two, one}
+
+      Repo.one(
+        from(d in Kith.Contacts.DuplicateCandidate,
+          where:
+            d.account_id == ^account_id and d.contact_id == ^low.id and
+              d.duplicate_contact_id == ^high.id,
+          select: d.status
+        )
+      )
+    end
+
+    test "pairs inside the merged set become merged", ctx do
+      %{a: a, b: b} = ctx.contacts
+      pair!(ctx.account_id, a, b)
+
+      :ok = Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [])
+
+      assert status_of(ctx.account_id, a, b) == "merged"
+    end
+
+    test "pairs from a merged member to an unchecked member become dismissed", ctx do
+      %{a: a, b: b, d: d} = ctx.contacts
+      pair!(ctx.account_id, a, b)
+      pair!(ctx.account_id, a, d)
+
+      :ok = Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [d.id])
+
+      assert status_of(ctx.account_id, a, d) == "dismissed"
+    end
+
+    test "pairs between two unchecked members are untouched", ctx do
+      %{a: a, b: b, d: d, e: e} = ctx.contacts
+      pair!(ctx.account_id, a, b)
+      pair!(ctx.account_id, d, e)
+
+      :ok =
+        Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [d.id, e.id])
+
+      assert status_of(ctx.account_id, d, e) == "pending"
+    end
+
+    test "a loser's dismissal is repointed onto the survivor", ctx do
+      %{a: a, b: b, d: d} = ctx.contacts
+      pair!(ctx.account_id, a, b)
+      pair!(ctx.account_id, b, d, "dismissed")
+
+      :ok = Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [d.id])
+
+      assert status_of(ctx.account_id, a, d) == "dismissed"
+      assert status_of(ctx.account_id, b, d) == nil
+    end
+
+    test "repointing keeps the strongest status on collision", ctx do
+      %{a: a, b: b, d: d} = ctx.contacts
+      pair!(ctx.account_id, a, b)
+      pair!(ctx.account_id, a, d, "dismissed")
+      pair!(ctx.account_id, b, d)
+
+      :ok = Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [d.id])
+
+      assert status_of(ctx.account_id, a, d) == "dismissed"
+    end
+
+    test "pairs in an unrelated cluster are untouched", ctx do
+      %{a: a, b: b, d: d, e: e} = ctx.contacts
+      pair!(ctx.account_id, a, b)
+      pair!(ctx.account_id, d, e)
+
+      :ok = Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [])
+
+      assert status_of(ctx.account_id, d, e) == "pending"
+    end
+
+    test "two losers repointing to the same third contact collide without raising", ctx do
+      %{a: a, b: b, c: c, d: d} = ctx.contacts
+      pair!(ctx.account_id, a, b)
+      pair!(ctx.account_id, a, c)
+      pair!(ctx.account_id, b, d, "dismissed")
+      pair!(ctx.account_id, c, d)
+
+      :ok =
+        Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id, c.id], [d.id])
+
+      assert status_of(ctx.account_id, a, d) == "dismissed"
+      assert status_of(ctx.account_id, b, d) == nil
+      assert status_of(ctx.account_id, c, d) == nil
+    end
+
+    test "every merged row has at least one trashed endpoint", ctx do
+      %{a: a, b: b} = ctx.contacts
+      pair!(ctx.account_id, a, b)
+
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^b.id),
+        set: [deleted_at: DateTime.utc_now(:second)]
+      )
+
+      :ok = Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [])
+
+      merged_rows =
+        from(d in Kith.Contacts.DuplicateCandidate,
+          where: d.status == "merged",
+          join: c1 in Kith.Contacts.Contact,
+          on: c1.id == d.contact_id,
+          join: c2 in Kith.Contacts.Contact,
+          on: c2.id == d.duplicate_contact_id,
+          select: {c1.deleted_at, c2.deleted_at}
+        )
+        |> Repo.all()
+
+      assert merged_rows != []
+      assert Enum.all?(merged_rows, fn {one, two} -> one != nil or two != nil end)
+    end
+  end
 end

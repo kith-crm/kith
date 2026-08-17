@@ -343,6 +343,16 @@ defmodule Kith.Contacts.Merge do
 
           {:ok, count}
         end)
+        |> Multi.run(:resolve_pairs, fn _repo, _changes ->
+          Kith.DuplicateDetection.resolve_after_merge(
+            scope.account.id,
+            survivor.id,
+            Enum.map(losers, & &1.id),
+            Map.get(resolution, :unchecked_ids, [])
+          )
+
+          {:ok, :done}
+        end)
         |> Multi.run(:audit, fn _repo, changes ->
           survivor = changes.last_talked_to
 
