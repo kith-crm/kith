@@ -91,8 +91,20 @@ defmodule Kith.Contacts.MergeResolutionTest do
     end
 
     test "a conflict tied on count and updated_at breaks toward the lowest member id", ctx do
-      a = contact(ctx.account_id, %{first_name: "Sarah", company: "Figma"})
-      b = contact(ctx.account_id, %{first_name: "Sarah", company: "Stripe"})
+      # candidates() groups by Map.group_by, whose resulting map iterates in
+      # Erlang term order of the *values* (lexicographic for strings) —
+      # independent of member-list order or member id. "Alpha" always sorts
+      # ahead of "Zeta", so Enum.max_by/2's first-wins tie-break would hand a
+      # tie to "Alpha" regardless of which member holds it. Assigning "Alpha"
+      # to the higher-id member and "Zeta" to the lower-id one means that
+      # picking the alphabetically-first value would give the WRONG (higher
+      # id) winner — so only the explicit `-lowest_id` term in
+      # default_value/2's sort key can make this assertion pass.
+      a = contact(ctx.account_id, %{first_name: "Sarah", company: "Zeta"})
+      b = contact(ctx.account_id, %{first_name: "Sarah", company: "Alpha"})
+
+      # a is created first so a.id < b.id.
+      assert a.id < b.id
 
       # Force identical updated_at so only the id tie-break can decide.
       same_time = DateTime.utc_now() |> DateTime.truncate(:second)
@@ -100,12 +112,9 @@ defmodule Kith.Contacts.MergeResolutionTest do
       a = a |> Ecto.Changeset.change(%{updated_at: same_time}) |> Repo.update!()
       b = b |> Ecto.Changeset.change(%{updated_at: same_time}) |> Repo.update!()
 
-      [lower, _higher] = Enum.sort_by([a, b], & &1.id)
-      lower_value = lower.company
-
       res = MergeResolution.resolve([a, b], a.id)
 
-      assert res.fields.company == lower_value
+      assert res.fields.company == a.company
     end
 
     test "resolving a single member is a no-op copy", ctx do
