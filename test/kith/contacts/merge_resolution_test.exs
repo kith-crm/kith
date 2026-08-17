@@ -1,6 +1,8 @@
 defmodule Kith.Contacts.MergeResolutionTest do
   use Kith.DataCase, async: false
 
+  import Ecto.Query
+
   alias Kith.Contacts.MergeResolution
   alias Kith.ContactsFixtures
   alias Kith.AccountsFixtures
@@ -88,6 +90,24 @@ defmodule Kith.Contacts.MergeResolutionTest do
       assert res.fields.company == "Stripe"
     end
 
+    test "a conflict tied on count and updated_at breaks toward the lowest member id", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah", company: "Figma"})
+      b = contact(ctx.account_id, %{first_name: "Sarah", company: "Stripe"})
+
+      # Force identical updated_at so only the id tie-break can decide.
+      same_time = DateTime.utc_now() |> DateTime.truncate(:second)
+
+      a = a |> Ecto.Changeset.change(%{updated_at: same_time}) |> Repo.update!()
+      b = b |> Ecto.Changeset.change(%{updated_at: same_time}) |> Repo.update!()
+
+      [lower, _higher] = Enum.sort_by([a, b], & &1.id)
+      lower_value = lower.company
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.company == lower_value
+    end
+
     test "resolving a single member is a no-op copy", ctx do
       a = contact(ctx.account_id, %{first_name: "Sarah", company: "Figma"})
 
@@ -96,6 +116,181 @@ defmodule Kith.Contacts.MergeResolutionTest do
       assert res.fields.first_name == "Sarah"
       assert res.fields.company == "Figma"
       assert res.conflicts == %{}
+    end
+  end
+
+  describe "array fields" do
+    test "aliases are unioned and deduplicated", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah", aliases: ["Sarah K.", "SK"]})
+      b = contact(ctx.account_id, %{first_name: "Sarah", aliases: ["SK", "김지영"]})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert Enum.sort(res.fields.aliases) == Enum.sort(["Sarah K.", "SK", "김지영"])
+    end
+
+    test "no aliases anywhere resolves to an empty list", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah"})
+      b = contact(ctx.account_id, %{first_name: "Sarah"})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.aliases == []
+    end
+  end
+
+  describe "association ids" do
+    test "gender_id resolves like any other scalar", ctx do
+      gender = Repo.one!(from(g in Kith.Contacts.Gender, limit: 1))
+      a = contact(ctx.account_id, %{first_name: "Sarah", gender_id: nil})
+      b = contact(ctx.account_id, %{first_name: "Sarah", gender_id: gender.id})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.gender_id == gender.id
+    end
+
+    test "first_met_through pointing at a merged member is cleared", ctx do
+      b = contact(ctx.account_id, %{first_name: "Sarah"})
+      a = contact(ctx.account_id, %{first_name: "Sarah", first_met_through_id: b.id})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.first_met_through_id == :clear
+    end
+
+    test "first_met_through pointing outside the cluster is kept", ctx do
+      outsider = contact(ctx.account_id, %{first_name: "Dana"})
+      a = contact(ctx.account_id, %{first_name: "Sarah", first_met_through_id: outsider.id})
+      b = contact(ctx.account_id, %{first_name: "Sarah"})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.first_met_through_id == outsider.id
+    end
+  end
+
+  describe "policy fields" do
+    test "favorite is true if any member is favorited", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah", favorite: false})
+      b = contact(ctx.account_id, %{first_name: "Sarah", favorite: true})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.favorite == true
+    end
+
+    test "is_archived is false if any member is active", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah", is_archived: true})
+      b = contact(ctx.account_id, %{first_name: "Sarah", is_archived: false})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.is_archived == false
+    end
+
+    test "deceased_at takes the earliest non-nil date", ctx do
+      a =
+        contact(ctx.account_id, %{
+          first_name: "Sarah",
+          deceased: true,
+          deceased_at: ~D[2024-05-01]
+        })
+
+      b =
+        contact(ctx.account_id, %{
+          first_name: "Sarah",
+          deceased: true,
+          deceased_at: ~D[2023-02-11]
+        })
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.deceased == true
+      assert res.fields.deceased_at == ~D[2023-02-11]
+    end
+
+    test "deceased with no dates anywhere leaves deceased_at nil", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah", deceased: true, deceased_at: nil})
+      b = contact(ctx.account_id, %{first_name: "Sarah", deceased: false})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.deceased == true
+      assert res.fields.deceased_at == :clear
+    end
+  end
+
+  describe "immich fields" do
+    test "the survivor's link wins when it has one", ctx do
+      a =
+        contact(ctx.account_id, %{
+          first_name: "Sarah",
+          immich_person_id: "survivor-person",
+          immich_status: "linked"
+        })
+
+      b =
+        contact(ctx.account_id, %{
+          first_name: "Sarah",
+          immich_person_id: "loser-person",
+          immich_status: "linked"
+        })
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.immich_person_id == "survivor-person"
+    end
+
+    test "an unlinked survivor adopts the only linked member's whole group", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah", immich_person_id: nil})
+
+      b =
+        contact(ctx.account_id, %{
+          first_name: "Sarah",
+          immich_person_id: "loser-person",
+          immich_person_url: "https://immich.example/people/loser-person",
+          immich_status: "linked"
+        })
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.immich_person_id == "loser-person"
+      assert res.fields.immich_person_url == "https://immich.example/people/loser-person"
+      assert res.fields.immich_status == "linked"
+    end
+
+    test "with several linked members the most recently synced wins", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah", immich_person_id: nil})
+
+      b =
+        contact(ctx.account_id, %{
+          first_name: "Sarah",
+          immich_person_id: "older",
+          immich_status: "linked",
+          immich_last_synced_at: ~U[2025-01-01 00:00:00Z]
+        })
+
+      c =
+        contact(ctx.account_id, %{
+          first_name: "Sarah",
+          immich_person_id: "newer",
+          immich_status: "linked",
+          immich_last_synced_at: ~U[2026-01-01 00:00:00Z]
+        })
+
+      res = MergeResolution.resolve([a, b, c], a.id)
+
+      assert res.fields.immich_person_id == "newer"
+    end
+
+    test "nobody linked leaves the group cleared", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah"})
+      b = contact(ctx.account_id, %{first_name: "Sarah"})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.immich_person_id == :clear
     end
   end
 end

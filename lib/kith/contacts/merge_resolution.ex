@@ -29,11 +29,94 @@ defmodule Kith.Contacts.MergeResolution do
   `survivor_id` must be the id of one of `members`. It is needed by rules that
   are relative to the surviving record rather than to the set as a whole.
   """
-  def resolve(members, _survivor_id) when is_list(members) and members != [] do
-    Enum.reduce(MergeFields.choice_fields(), %__MODULE__{}, fn field, acc ->
+  def resolve(members, survivor_id) when is_list(members) and members != [] do
+    member_ids = MapSet.new(members, & &1.id)
+
+    MergeFields.choice_fields()
+    |> Enum.reduce(%__MODULE__{}, fn field, acc ->
       put_resolution(acc, field, resolve_scalar(members, field))
     end)
+    |> clear_self_reference(member_ids)
+    |> resolve_arrays(members)
+    |> resolve_policy_fields(members)
+    |> resolve_immich(members, survivor_id)
   end
+
+  # A contact cannot be met through a record it just absorbed.
+  defp clear_self_reference(acc, member_ids) do
+    case Map.get(acc.fields, :first_met_through_id) do
+      id when is_integer(id) ->
+        if MapSet.member?(member_ids, id) do
+          %{acc | fields: Map.put(acc.fields, :first_met_through_id, :clear)}
+        else
+          acc
+        end
+
+      _ ->
+        acc
+    end
+  end
+
+  defp resolve_arrays(acc, members) do
+    Enum.reduce(MergeFields.array_fields(), acc, fn field, acc ->
+      union =
+        members
+        |> Enum.flat_map(&(Map.fetch!(&1, field) || []))
+        |> Enum.uniq()
+
+      %{acc | fields: Map.put(acc.fields, field, union)}
+    end)
+  end
+
+  defp resolve_policy_fields(acc, members) do
+    favorite = Enum.any?(members, & &1.favorite)
+    is_archived = not Enum.any?(members, &(not &1.is_archived))
+    deceased = Enum.any?(members, & &1.deceased)
+
+    deceased_at =
+      members
+      |> Enum.filter(& &1.deceased)
+      |> Enum.map(& &1.deceased_at)
+      |> Enum.reject(&is_nil/1)
+      |> case do
+        [] -> :clear
+        dates -> Enum.min(dates, Date)
+      end
+
+    fields =
+      acc.fields
+      |> Map.put(:favorite, favorite)
+      |> Map.put(:is_archived, is_archived)
+      |> Map.put(:deceased, deceased)
+      |> Map.put(:deceased_at, deceased_at)
+
+    %{acc | fields: fields}
+  end
+
+  # The four Immich columns move together: an id from one record paired with
+  # another record's sync timestamp is corrupt state.
+  defp resolve_immich(acc, members, survivor_id) do
+    linked = Enum.filter(members, &(not is_nil(&1.immich_person_id)))
+    survivor = Enum.find(members, &(&1.id == survivor_id))
+
+    source =
+      cond do
+        survivor && survivor.immich_person_id -> survivor
+        linked == [] -> nil
+        true -> Enum.max_by(linked, &sync_key/1)
+      end
+
+    fields =
+      Enum.reduce(MergeFields.immich_fields(), acc.fields, fn field, fields ->
+        value = if source, do: Map.fetch!(source, field), else: nil
+        Map.put(fields, field, value || :clear)
+      end)
+
+    %{acc | fields: fields}
+  end
+
+  defp sync_key(%{immich_last_synced_at: nil}), do: 0
+  defp sync_key(%{immich_last_synced_at: at}), do: DateTime.to_unix(at)
 
   defp put_resolution(acc, field, {value, attribution, candidates}) do
     acc = %{
