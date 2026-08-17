@@ -66,36 +66,63 @@ defmodule Kith.Contacts.Merge do
         end)
         |> Multi.run(:remap_photos, fn repo, _changes ->
           # unique_index(:photos, [:contact_id, :content_hash]) means a blanket
-          # move would raise whenever a loser and the survivor share a hash.
-          # Delete the loser's colliding copy first, then move what's left —
-          # mirrors the old engine's `:remap_photos` step.
+          # move would raise whenever any two members share a hash — including
+          # two losers colliding with each other, not just a loser vs. the
+          # survivor. Dedupe across the whole cluster before moving.
           loser_ids = Enum.map(losers, & &1.id)
+          dedupe_and_move(repo, "photos", "content_hash", loser_ids, survivor.id)
+          {:ok, :done}
+        end)
+        |> Multi.run(:remap_immich_candidates, fn repo, _changes ->
+          # unique_index(:immich_candidates, [:contact_id, :immich_photo_id]) —
+          # duplicate contacts routinely have the same Immich photo suggested
+          # for both, so this collides in practice more than most.
+          loser_ids = Enum.map(losers, & &1.id)
+          dedupe_and_move(repo, "immich_candidates", "immich_photo_id", loser_ids, survivor.id)
+          {:ok, :done}
+        end)
+        |> Multi.run(:remap_birthday_reminders, fn repo, _changes ->
+          # unique_index(:reminders, [:contact_id], where: "type = 'birthday'")
+          # — birthday reminders are auto-created whenever a birthdate is set,
+          # so merging any two contacts that both have one is the single most
+          # common collision. Keep the survivor's own birthday reminder if it
+          # has one; otherwise keep the lowest-id one among the losers. Delete
+          # the rest; reminder_instances cascades (on_delete: :delete_all).
+          loser_ids = Enum.map(losers, & &1.id)
+          all_ids = [survivor.id | loser_ids]
 
-          repo.query!(
-            """
-            DELETE FROM photos
-            WHERE contact_id = ANY($1)
-              AND content_hash IS NOT NULL
-              AND content_hash IN (
-                SELECT content_hash FROM photos WHERE contact_id = $2 AND content_hash IS NOT NULL
-              )
-            """,
-            [loser_ids, survivor.id]
-          )
-
-          {count, _} =
-            repo.update_all(
-              from(p in Kith.Contacts.Photo, where: p.contact_id in ^loser_ids),
-              set: [contact_id: survivor.id]
+          %{rows: rows} =
+            repo.query!(
+              "SELECT id, contact_id FROM reminders WHERE type = 'birthday' AND contact_id = ANY($1)",
+              [all_ids]
             )
 
-          {:ok, count}
+          case rows do
+            [] ->
+              {:ok, :done}
+
+            _ ->
+              keep_id =
+                case Enum.find(rows, fn [_id, contact_id] -> contact_id == survivor.id end) do
+                  [id, _contact_id] -> id
+                  nil -> rows |> Enum.map(&hd/1) |> Enum.min()
+                end
+
+              delete_ids = for [id, _contact_id] <- rows, id != keep_id, do: id
+
+              if delete_ids != [] do
+                repo.query!("DELETE FROM reminders WHERE id = ANY($1)", [delete_ids])
+              end
+
+              {:ok, :done}
+          end
         end)
         |> Multi.run(:remap_owned, fn repo, _changes ->
           loser_ids = Enum.map(losers, & &1.id)
 
           @owned_schemas
           |> List.delete(Kith.Contacts.Photo)
+          |> List.delete(Kith.Contacts.ImmichCandidate)
           |> Enum.each(fn schema ->
             repo.update_all(
               from(r in schema, where: r.contact_id in ^loser_ids),
@@ -103,51 +130,23 @@ defmodule Kith.Contacts.Merge do
             )
           end)
 
-          {:ok, length(@owned_schemas) - 1}
+          {:ok, :done}
         end)
         |> Multi.run(:remap_contact_tags, fn repo, _changes ->
           # contact_tags is a bare join table with no Ecto schema, so it is
           # invisible to @owned_schemas but must still follow the survivor —
-          # mirrors the old engine's `:remap_contact_tags` step. Delete rows
-          # that would collide with a tag the survivor already has (unique
-          # index on (contact_id, tag_id)), then move the rest.
+          # mirrors the old engine's `:remap_contact_tags` step. unique_index
+          # on (contact_id, tag_id); two losers can share a tag the survivor
+          # doesn't have, so this dedupes across the whole cluster too.
           loser_ids = Enum.map(losers, & &1.id)
-
-          repo.query!(
-            """
-            DELETE FROM contact_tags
-            WHERE contact_id = ANY($1)
-              AND tag_id IN (SELECT tag_id FROM contact_tags WHERE contact_id = $2)
-            """,
-            [loser_ids, survivor.id]
-          )
-
-          repo.update_all(
-            from(ct in "contact_tags", where: ct.contact_id in ^loser_ids),
-            set: [contact_id: survivor.id]
-          )
-
+          dedupe_and_move(repo, "contact_tags", "tag_id", loser_ids, survivor.id)
           {:ok, :done}
         end)
         |> Multi.run(:remap_activity_contacts, fn repo, _changes ->
+          # unique_index(:activity_contacts, [:activity_id, :contact_id]) —
+          # two losers can be tagged on the same activity the survivor isn't.
           loser_ids = Enum.map(losers, & &1.id)
-
-          # Drop join rows that would collide with one the survivor already
-          # has, then move the rest.
-          repo.query!(
-            """
-            DELETE FROM activity_contacts
-            WHERE contact_id = ANY($1)
-              AND activity_id IN (SELECT activity_id FROM activity_contacts WHERE contact_id = $2)
-            """,
-            [loser_ids, survivor.id]
-          )
-
-          repo.update_all(
-            from(ac in "activity_contacts", where: ac.contact_id in ^loser_ids),
-            set: [contact_id: survivor.id]
-          )
-
+          dedupe_and_move(repo, "activity_contacts", "activity_id", loser_ids, survivor.id)
           {:ok, :done}
         end)
         |> Multi.run(:remap_inbound_first_met, fn repo, _changes ->
@@ -243,6 +242,40 @@ defmodule Kith.Contacts.Merge do
       stored = Map.fetch!(member, field)
       stored == value or (is_binary(stored) and String.trim(stored) == value)
     end)
+  end
+
+  # Moves every `table` row owned by a loser onto the survivor, first deleting
+  # whichever rows collide on `(contact_id, key_column)` — mirroring a unique
+  # index on that pair. Collisions are checked across the *whole* cluster, not
+  # just loser-vs-survivor: two losers can hold the same key value while the
+  # survivor holds none, and a plain survivor-vs-loser check would miss that,
+  # then raise when both surviving loser rows land on the same contact_id.
+  # `ctid` (Postgres's physical row identifier) breaks ties between two
+  # colliding loser rows deterministically without needing an `id` column, so
+  # this works for bare join tables (`contact_tags`) as well as tables with a
+  # primary key (`photos`, `activity_contacts`, `immich_candidates`).
+  defp dedupe_and_move(repo, table, key_column, loser_ids, survivor_id) do
+    repo.query!(
+      """
+      DELETE FROM #{table} t
+      WHERE t.contact_id = ANY($1)
+        AND t.#{key_column} IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM #{table} o
+          WHERE o.#{key_column} = t.#{key_column}
+            AND (o.contact_id = $2
+                 OR (o.contact_id = ANY($1) AND o.ctid < t.ctid))
+        )
+      """,
+      [loser_ids, survivor_id]
+    )
+
+    repo.query!(
+      "UPDATE #{table} SET contact_id = $1 WHERE contact_id = ANY($2)",
+      [survivor_id, loser_ids]
+    )
+
+    :ok
   end
 
   defp apply_fields(survivor, %{fields: fields}) do

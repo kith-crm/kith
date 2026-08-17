@@ -644,5 +644,239 @@ defmodule Kith.Contacts.MergeTest do
                :count
              ) == 0
     end
+
+    test "dedupes collisions between two losers, not just loser-vs-survivor", ctx do
+      now = DateTime.utc_now(:second)
+
+      contact_c =
+        Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Carol"})
+
+      {:ok, tag} =
+        Contacts.create_tag(ctx.account_id, %{"name" => "duplicate", "color" => "#123456"})
+
+      # Survivor holds none of these — only the two losers collide with each other.
+      Contacts.tag_contact(ctx.contact_b, tag)
+      Contacts.tag_contact(contact_c, tag)
+
+      {1, [%{id: activity_id}]} =
+        Repo.insert_all(
+          "activities",
+          [
+            %{
+              account_id: ctx.account_id,
+              title: "Group hang",
+              occurred_at: now,
+              inserted_at: now,
+              updated_at: now
+            }
+          ],
+          returning: [:id]
+        )
+
+      Repo.insert_all("activity_contacts", [
+        %{activity_id: activity_id, contact_id: ctx.contact_b.id},
+        %{activity_id: activity_id, contact_id: contact_c.id}
+      ])
+
+      Repo.insert!(%Kith.Contacts.Photo{
+        account_id: ctx.account_id,
+        contact_id: ctx.contact_b.id,
+        creator_id: ctx.user.id,
+        file_name: "b.jpg",
+        storage_key: "keys/b.jpg",
+        file_size: 100,
+        content_type: "image/jpeg",
+        content_hash: "shared-hash"
+      })
+
+      Repo.insert!(%Kith.Contacts.Photo{
+        account_id: ctx.account_id,
+        contact_id: contact_c.id,
+        creator_id: ctx.user.id,
+        file_name: "c.jpg",
+        storage_key: "keys/c.jpg",
+        file_size: 100,
+        content_type: "image/jpeg",
+        content_hash: "shared-hash"
+      })
+
+      Repo.insert!(%Kith.Contacts.ImmichCandidate{
+        account_id: ctx.account_id,
+        contact_id: ctx.contact_b.id,
+        immich_photo_id: "shared-photo",
+        immich_server_url: "https://immich.example.com",
+        thumbnail_url: "https://immich.example.com/thumb/shared",
+        suggested_at: now
+      })
+
+      Repo.insert!(%Kith.Contacts.ImmichCandidate{
+        account_id: ctx.account_id,
+        contact_id: contact_c.id,
+        immich_photo_id: "shared-photo",
+        immich_server_url: "https://immich.example.com",
+        thumbnail_url: "https://immich.example.com/thumb/shared",
+        suggested_at: now
+      })
+
+      assert {:ok, survivor} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [ctx.contact_b.id, contact_c.id],
+                 %{fields: %{}, drop: %{}}
+               )
+
+      assert Repo.aggregate(
+               from(ct in "contact_tags",
+                 where: ct.contact_id == ^survivor.id and ct.tag_id == ^tag.id
+               ),
+               :count
+             ) == 1
+
+      assert Repo.aggregate(
+               from(ac in "activity_contacts",
+                 where: ac.activity_id == ^activity_id and ac.contact_id == ^survivor.id
+               ),
+               :count
+             ) == 1
+
+      assert Repo.aggregate(
+               from(p in Kith.Contacts.Photo,
+                 where: p.contact_id == ^survivor.id and p.content_hash == "shared-hash"
+               ),
+               :count
+             ) == 1
+
+      assert Repo.aggregate(
+               from(ic in Kith.Contacts.ImmichCandidate,
+                 where: ic.contact_id == ^survivor.id and ic.immich_photo_id == "shared-photo"
+               ),
+               :count
+             ) == 1
+    end
+
+    test "keeps the survivor's birthday reminder and drops colliding loser ones", ctx do
+      birthday_a =
+        Kith.RemindersFixtures.birthday_reminder_fixture(
+          ctx.account_id,
+          ctx.contact_a.id,
+          ctx.user.id
+        )
+
+      birthday_b =
+        Kith.RemindersFixtures.birthday_reminder_fixture(
+          ctx.account_id,
+          ctx.contact_b.id,
+          ctx.user.id
+        )
+
+      Kith.RemindersFixtures.reminder_instance_fixture(birthday_b)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      remaining =
+        Repo.all(
+          from(r in Kith.Reminders.Reminder,
+            where: r.type == "birthday" and r.contact_id == ^survivor.id
+          )
+        )
+
+      assert [%{id: id}] = remaining
+      assert id == birthday_a.id
+      assert Repo.get(Kith.Reminders.Reminder, birthday_b.id) == nil
+
+      assert Repo.aggregate(
+               from(ri in Kith.Reminders.ReminderInstance,
+                 where: ri.reminder_id == ^birthday_b.id
+               ),
+               :count
+             ) == 0
+    end
+
+    test "when only losers have birthday reminders, keeps the lowest-id one", ctx do
+      c = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Carol"})
+
+      birthday_b =
+        Kith.RemindersFixtures.birthday_reminder_fixture(
+          ctx.account_id,
+          ctx.contact_b.id,
+          ctx.user.id
+        )
+
+      _birthday_c =
+        Kith.RemindersFixtures.birthday_reminder_fixture(ctx.account_id, c.id, ctx.user.id)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id, c.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      remaining =
+        Repo.all(
+          from(r in Kith.Reminders.Reminder,
+            where: r.type == "birthday" and r.contact_id == ^survivor.id
+          )
+        )
+
+      assert [%{id: id}] = remaining
+      assert id == birthday_b.id
+    end
+
+    test "moves reminders, reminder_instances, documents, calls and life_events", ctx do
+      loser_id = ctx.contact_b.id
+
+      reminder =
+        Kith.RemindersFixtures.recurring_reminder_fixture(ctx.account_id, loser_id, ctx.user.id)
+
+      Kith.RemindersFixtures.reminder_instance_fixture(reminder)
+      Kith.ContactsFixtures.document_fixture(ctx.contact_b)
+
+      Repo.insert!(%Kith.Activities.Call{
+        account_id: ctx.account_id,
+        contact_id: loser_id,
+        occurred_at: DateTime.utc_now(:second)
+      })
+
+      [life_event_type_id] =
+        Repo.all(from(t in "life_event_types", select: t.id, limit: 1))
+
+      Repo.insert!(%Kith.Activities.LifeEvent{
+        account_id: ctx.account_id,
+        contact_id: loser_id,
+        occurred_on: Date.utc_today(),
+        life_event_type_id: life_event_type_id
+      })
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [loser_id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      for schema <- [
+            Kith.Reminders.Reminder,
+            Kith.Reminders.ReminderInstance,
+            Kith.Contacts.Document,
+            Kith.Activities.Call,
+            Kith.Activities.LifeEvent
+          ] do
+        assert Repo.aggregate(
+                 from(r in schema, where: r.contact_id == ^survivor.id),
+                 :count
+               ) == 1,
+               "#{inspect(schema)} was not remapped"
+
+        assert Repo.aggregate(
+                 from(r in schema, where: r.contact_id == ^loser_id),
+                 :count
+               ) == 0,
+               "#{inspect(schema)} left behind on the loser"
+      end
+    end
   end
 end
