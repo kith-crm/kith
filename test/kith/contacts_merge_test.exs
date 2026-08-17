@@ -977,6 +977,35 @@ defmodule Kith.Contacts.MergeTest do
       assert lines == [" 123 Main St ", "456 Other Ave"]
     end
 
+    test "two addresses with no line1 or postal_code are not treated as duplicates", ctx do
+      # Both normalize to the same empty key, but they carry different
+      # cities — collapsing them would silently destroy a distinct address.
+      Kith.ContactsFixtures.address_fixture(ctx.contact_a, %{
+        "line1" => nil,
+        "postal_code" => nil,
+        "city" => "Paris"
+      })
+
+      Kith.ContactsFixtures.address_fixture(ctx.contact_b, %{
+        "line1" => nil,
+        "postal_code" => nil,
+        "city" => "Tokyo"
+      })
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      cities =
+        from(a in Kith.Contacts.Address, where: a.contact_id == ^survivor.id, select: a.city)
+        |> Repo.all()
+        |> Enum.sort()
+
+      assert cities == ["Paris", "Tokyo"]
+    end
+
     test "a tag on both members is kept once", ctx do
       {:ok, tag} = Contacts.create_tag(ctx.account_id, %{name: "Design"})
       Contacts.tag_contact(ctx.contact_a, tag)

@@ -185,12 +185,18 @@ defmodule Kith.Contacts.Merge do
             [survivor.id]
           )
 
+          # A row with neither line1 nor postal_code is not a duplicate of
+          # another such row — addresses carry city/region/country/label too,
+          # so two blank-key rows can be different places. Only dedupe when
+          # at least one of the key columns actually has content.
           repo.query!(
             """
             DELETE FROM addresses
             WHERE id IN (
               SELECT a.id FROM addresses a
               WHERE a.contact_id = $1
+                AND (lower(btrim(coalesce(a.line1, ''))) <> ''
+                     OR lower(btrim(coalesce(a.postal_code, ''))) <> '')
                 AND EXISTS (
                   SELECT 1 FROM addresses other
                   WHERE other.contact_id = $1
