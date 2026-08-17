@@ -431,4 +431,218 @@ defmodule Kith.Contacts.MergeTest do
       assert after_b.deleted_at == nil
     end
   end
+
+  describe "merge_cluster/4 remapping" do
+    setup ctx do
+      scope = Kith.Accounts.Scope.for_user(ctx.user)
+      %{scope: scope}
+    end
+
+    test "moves the six record types the old engine orphaned", ctx do
+      account_id = ctx.account_id
+      loser_id = ctx.contact_b.id
+
+      Repo.insert!(%Kith.Contacts.Debt{
+        account_id: account_id,
+        contact_id: loser_id,
+        creator_id: ctx.user.id,
+        title: "Loan",
+        amount: Decimal.new("25.00"),
+        direction: "owed_to_me",
+        status: "active"
+      })
+
+      Repo.insert!(%Kith.Contacts.Gift{
+        account_id: account_id,
+        contact_id: loser_id,
+        creator_id: ctx.user.id,
+        name: "Book",
+        direction: "given",
+        status: "given"
+      })
+
+      Repo.insert!(%Kith.Contacts.Pet{
+        account_id: account_id,
+        contact_id: loser_id,
+        name: "Mochi"
+      })
+
+      Repo.insert!(%Kith.Tasks.Task{
+        account_id: account_id,
+        contact_id: loser_id,
+        creator_id: ctx.user.id,
+        title: "Call back"
+      })
+
+      Repo.insert!(%Kith.Conversations.Conversation{
+        account_id: account_id,
+        contact_id: loser_id,
+        creator_id: ctx.user.id,
+        subject: "Catch up"
+      })
+
+      Repo.insert!(%Kith.Contacts.ImmichCandidate{
+        account_id: account_id,
+        contact_id: loser_id,
+        immich_photo_id: "photo-1",
+        immich_server_url: "https://immich.example.com",
+        thumbnail_url: "https://immich.example.com/thumb/1",
+        suggested_at: DateTime.utc_now(:second)
+      })
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [loser_id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      for schema <- [
+            Kith.Contacts.Debt,
+            Kith.Contacts.Gift,
+            Kith.Contacts.Pet,
+            Kith.Tasks.Task,
+            Kith.Conversations.Conversation,
+            Kith.Contacts.ImmichCandidate
+          ] do
+        assert Repo.aggregate(
+                 from(r in schema, where: r.contact_id == ^survivor.id),
+                 :count
+               ) == 1,
+               "#{inspect(schema)} was not remapped"
+
+        assert Repo.aggregate(
+                 from(r in schema, where: r.contact_id == ^loser_id),
+                 :count
+               ) == 0,
+               "#{inspect(schema)} left behind on the loser"
+      end
+    end
+
+    test "repoints inbound first_met_through references", ctx do
+      admirer =
+        Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Dana",
+          first_met_through_id: ctx.contact_b.id
+        })
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      assert Repo.get!(Kith.Contacts.Contact, admirer.id).first_met_through_id == survivor.id
+    end
+
+    test "moves notes and addresses from every loser", ctx do
+      c = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Alice"})
+
+      Kith.ContactsFixtures.note_fixture(ctx.contact_b, ctx.user.id)
+      Kith.ContactsFixtures.note_fixture(c, ctx.user.id)
+      Kith.ContactsFixtures.address_fixture(c)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id, c.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      assert Repo.aggregate(
+               from(n in Kith.Contacts.Note, where: n.contact_id == ^survivor.id),
+               :count
+             ) == 2
+
+      assert Repo.aggregate(
+               from(a in Kith.Contacts.Address, where: a.contact_id == ^survivor.id),
+               :count
+             ) == 1
+    end
+
+    test "deduplicates colliding tags and moves unique ones (contact_tags has no schema)", ctx do
+      {:ok, shared_tag} =
+        Contacts.create_tag(ctx.account_id, %{"name" => "shared", "color" => "#FF0000"})
+
+      {:ok, unique_tag} =
+        Contacts.create_tag(ctx.account_id, %{"name" => "unique", "color" => "#00FF00"})
+
+      Contacts.tag_contact(ctx.contact_a, shared_tag)
+      Contacts.tag_contact(ctx.contact_b, shared_tag)
+      Contacts.tag_contact(ctx.contact_b, unique_tag)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      tag_ids =
+        Repo.all(
+          from(ct in "contact_tags", where: ct.contact_id == ^survivor.id, select: ct.tag_id)
+        )
+
+      assert Enum.sort(tag_ids) == Enum.sort([shared_tag.id, unique_tag.id])
+
+      assert Repo.aggregate(
+               from(ct in "contact_tags", where: ct.contact_id == ^ctx.contact_b.id),
+               :count
+             ) == 0
+    end
+
+    test "drops a loser photo colliding with the survivor's content_hash instead of raising",
+         ctx do
+      Repo.insert!(%Kith.Contacts.Photo{
+        account_id: ctx.account_id,
+        contact_id: ctx.contact_a.id,
+        creator_id: ctx.user.id,
+        file_name: "a.jpg",
+        storage_key: "keys/a.jpg",
+        file_size: 100,
+        content_type: "image/jpeg",
+        content_hash: "same-hash"
+      })
+
+      Repo.insert!(%Kith.Contacts.Photo{
+        account_id: ctx.account_id,
+        contact_id: ctx.contact_b.id,
+        creator_id: ctx.user.id,
+        file_name: "b.jpg",
+        storage_key: "keys/b.jpg",
+        file_size: 100,
+        content_type: "image/jpeg",
+        content_hash: "same-hash"
+      })
+
+      Repo.insert!(%Kith.Contacts.Photo{
+        account_id: ctx.account_id,
+        contact_id: ctx.contact_b.id,
+        creator_id: ctx.user.id,
+        file_name: "c.jpg",
+        storage_key: "keys/c.jpg",
+        file_size: 200,
+        content_type: "image/jpeg",
+        content_hash: "different-hash"
+      })
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      survivor_hashes =
+        Repo.all(
+          from(p in Kith.Contacts.Photo,
+            where: p.contact_id == ^survivor.id,
+            select: p.content_hash
+          )
+        )
+
+      assert Enum.sort(survivor_hashes) == Enum.sort(["same-hash", "different-hash"])
+
+      assert Repo.aggregate(
+               from(p in Kith.Contacts.Photo, where: p.contact_id == ^ctx.contact_b.id),
+               :count
+             ) == 0
+    end
+  end
 end

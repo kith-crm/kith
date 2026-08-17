@@ -21,6 +21,27 @@ defmodule Kith.Contacts.Merge do
   # registry.
   @computed_fields MergeFields.policy_fields() ++ MergeFields.array_fields()
 
+  # Every schema owning a contact_id that must follow the survivor. The six
+  # after `Reminder` are the ones the previous two-contact engine silently
+  # orphaned (Bug 1 in the design spec).
+  @owned_schemas [
+    Kith.Contacts.Note,
+    Kith.Contacts.Address,
+    Kith.Contacts.ContactField,
+    Kith.Contacts.Document,
+    Kith.Contacts.Photo,
+    Kith.Activities.Call,
+    Kith.Activities.LifeEvent,
+    Kith.Reminders.Reminder,
+    Kith.Reminders.ReminderInstance,
+    Kith.Contacts.Debt,
+    Kith.Contacts.Gift,
+    Kith.Contacts.Pet,
+    Kith.Tasks.Task,
+    Kith.Conversations.Conversation,
+    Kith.Contacts.ImmichCandidate
+  ]
+
   @doc """
   Merges `loser_ids` into `survivor_id` inside one transaction.
 
@@ -42,6 +63,103 @@ defmodule Kith.Contacts.Merge do
         Multi.new()
         |> Multi.run(:survivor, fn _repo, _changes ->
           apply_fields(survivor, resolution)
+        end)
+        |> Multi.run(:remap_photos, fn repo, _changes ->
+          # unique_index(:photos, [:contact_id, :content_hash]) means a blanket
+          # move would raise whenever a loser and the survivor share a hash.
+          # Delete the loser's colliding copy first, then move what's left —
+          # mirrors the old engine's `:remap_photos` step.
+          loser_ids = Enum.map(losers, & &1.id)
+
+          repo.query!(
+            """
+            DELETE FROM photos
+            WHERE contact_id = ANY($1)
+              AND content_hash IS NOT NULL
+              AND content_hash IN (
+                SELECT content_hash FROM photos WHERE contact_id = $2 AND content_hash IS NOT NULL
+              )
+            """,
+            [loser_ids, survivor.id]
+          )
+
+          {count, _} =
+            repo.update_all(
+              from(p in Kith.Contacts.Photo, where: p.contact_id in ^loser_ids),
+              set: [contact_id: survivor.id]
+            )
+
+          {:ok, count}
+        end)
+        |> Multi.run(:remap_owned, fn repo, _changes ->
+          loser_ids = Enum.map(losers, & &1.id)
+
+          @owned_schemas
+          |> List.delete(Kith.Contacts.Photo)
+          |> Enum.each(fn schema ->
+            repo.update_all(
+              from(r in schema, where: r.contact_id in ^loser_ids),
+              set: [contact_id: survivor.id]
+            )
+          end)
+
+          {:ok, length(@owned_schemas) - 1}
+        end)
+        |> Multi.run(:remap_contact_tags, fn repo, _changes ->
+          # contact_tags is a bare join table with no Ecto schema, so it is
+          # invisible to @owned_schemas but must still follow the survivor —
+          # mirrors the old engine's `:remap_contact_tags` step. Delete rows
+          # that would collide with a tag the survivor already has (unique
+          # index on (contact_id, tag_id)), then move the rest.
+          loser_ids = Enum.map(losers, & &1.id)
+
+          repo.query!(
+            """
+            DELETE FROM contact_tags
+            WHERE contact_id = ANY($1)
+              AND tag_id IN (SELECT tag_id FROM contact_tags WHERE contact_id = $2)
+            """,
+            [loser_ids, survivor.id]
+          )
+
+          repo.update_all(
+            from(ct in "contact_tags", where: ct.contact_id in ^loser_ids),
+            set: [contact_id: survivor.id]
+          )
+
+          {:ok, :done}
+        end)
+        |> Multi.run(:remap_activity_contacts, fn repo, _changes ->
+          loser_ids = Enum.map(losers, & &1.id)
+
+          # Drop join rows that would collide with one the survivor already
+          # has, then move the rest.
+          repo.query!(
+            """
+            DELETE FROM activity_contacts
+            WHERE contact_id = ANY($1)
+              AND activity_id IN (SELECT activity_id FROM activity_contacts WHERE contact_id = $2)
+            """,
+            [loser_ids, survivor.id]
+          )
+
+          repo.update_all(
+            from(ac in "activity_contacts", where: ac.contact_id in ^loser_ids),
+            set: [contact_id: survivor.id]
+          )
+
+          {:ok, :done}
+        end)
+        |> Multi.run(:remap_inbound_first_met, fn repo, _changes ->
+          loser_ids = Enum.map(losers, & &1.id)
+
+          {count, _} =
+            repo.update_all(
+              from(c in Contact, where: c.first_met_through_id in ^loser_ids),
+              set: [first_met_through_id: survivor.id]
+            )
+
+          {:ok, count}
         end)
         |> Multi.run(:soft_delete_losers, fn repo, _changes ->
           now = DateTime.utc_now(:second)
