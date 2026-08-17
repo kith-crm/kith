@@ -342,10 +342,25 @@ defmodule Kith.DuplicateDetectionTest do
       assert status_of(ctx.account_id, d, e) == "pending"
     end
 
+    test "another account's pending pair is untouched", ctx do
+      %{a: a, b: b} = ctx.contacts
+
+      other_user = Kith.AccountsFixtures.user_fixture()
+      other_account_id = other_user.account_id
+      other_x = Kith.ContactsFixtures.contact_fixture(other_account_id, %{first_name: "Xan"})
+      other_y = Kith.ContactsFixtures.contact_fixture(other_account_id, %{first_name: "Yaz"})
+      pair!(other_account_id, other_x, other_y)
+
+      :ok = Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [])
+
+      assert status_of(other_account_id, other_x, other_y) == "pending"
+    end
+
     test "two losers repointing to the same third contact collide without raising", ctx do
       %{a: a, b: b, c: c, d: d} = ctx.contacts
       pair!(ctx.account_id, a, b)
       pair!(ctx.account_id, a, c)
+      pair!(ctx.account_id, b, c)
       pair!(ctx.account_id, b, d, "dismissed")
       pair!(ctx.account_id, c, d)
 
@@ -355,6 +370,7 @@ defmodule Kith.DuplicateDetectionTest do
       assert status_of(ctx.account_id, a, d) == "dismissed"
       assert status_of(ctx.account_id, b, d) == nil
       assert status_of(ctx.account_id, c, d) == nil
+      assert status_of(ctx.account_id, b, c) == "merged"
     end
 
     test "every merged row has at least one trashed endpoint", ctx do

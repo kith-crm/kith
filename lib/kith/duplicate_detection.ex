@@ -80,16 +80,28 @@ defmodule Kith.DuplicateDetection do
   survivor, because the survivor now *is* that contact. Without repointing, a
   dismissal recorded against a loser evaporates when the loser is trashed and
   the rejected match returns on the next scan.
+
+  Callers must run this inside their own transaction (the engine's `Multi`
+  does) — this function does not open one itself, since wrapping it here
+  would only nest inside that outer transaction and swallow a rollback
+  raised by any step, silently losing it as this function's result is
+  discarded and always `:ok`.
+
+  `unchecked_ids` is defensively subtracted from the merged set: if a caller
+  passes an id in both, treating it as "merged" wins (it's a member being
+  merged) — an id can't simultaneously be unchecked, so the overlap is
+  dropped from `unchecked_ids` before either rule runs. This guards the
+  trashed-endpoint invariant: without it, an overlapping id would let the
+  second call downgrade a `merged` row to `dismissed`.
   """
   def resolve_after_merge(account_id, survivor_id, loser_ids, unchecked_ids) do
     merged_ids = [survivor_id | loser_ids]
+    unchecked_ids = unchecked_ids -- merged_ids
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    Repo.transaction(fn ->
-      set_status(account_id, merged_ids, merged_ids, "merged", now)
-      set_status(account_id, merged_ids, unchecked_ids, "dismissed", now)
-      repoint(account_id, survivor_id, loser_ids)
-    end)
+    set_status(account_id, merged_ids, merged_ids, "merged", now)
+    set_status(account_id, merged_ids, unchecked_ids, "dismissed", now)
+    repoint(account_id, survivor_id, loser_ids)
 
     :ok
   end

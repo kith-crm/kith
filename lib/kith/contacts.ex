@@ -1690,6 +1690,10 @@ defmodule Kith.Contacts do
   Merges `loser_ids` into `survivor_id`, applying `resolution`.
 
   See `Kith.Contacts.MergeResolution` for how a resolution is produced.
+  `resolution` may include an optional `:unchecked_ids` key (default `[]`)
+  naming every candidate contact the caller's UI presented but the user did
+  not include in this merge — see `Kith.Contacts.Merge.run/4` for what
+  omitting it costs.
 
   Returns `{:ok, contact}` or `{:error, reason}`, where `reason` is one of
   `:not_found`, `:trashed`, `:different_accounts`, `:survivor_in_losers`,

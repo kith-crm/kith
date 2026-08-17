@@ -74,7 +74,17 @@ defmodule Kith.Contacts.Merge do
   @doc """
   Merges `loser_ids` into `survivor_id` inside one transaction.
 
-  `resolution` is `%{fields: %{atom => value | :clear}, drop: %{atom => [id]}}`.
+  `resolution` is `%{fields: %{atom => value | :clear}, drop: %{atom => [id]},
+  unchecked_ids: [id]}`. `:unchecked_ids` is optional (default `[]`) and
+  names every contact the caller's UI presented as a duplicate candidate but
+  the user did not include in this merge — see
+  `Kith.DuplicateDetection.resolve_after_merge/4`, which this calls to
+  settle and repoint that cluster's candidate pairs. Omitting it (or passing
+  an incomplete list) does not fail the merge, but it means a pair the user
+  actually rejected is left `pending` instead of `dismissed`, so it comes
+  back as a suggestion on the next duplicate scan — the caller is
+  responsible for passing every id it showed the user, not just the ones
+  the user visibly unchecked.
 
   `scope.user` is used as the actor recorded on the merge's audit entry.
 
