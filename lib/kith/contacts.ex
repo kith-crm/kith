@@ -21,6 +21,7 @@ defmodule Kith.Contacts do
     Gender,
     ImmichCandidate,
     LifeEventType,
+    Merge,
     Note,
     PhoneFormatter,
     Photo,
@@ -1684,6 +1685,15 @@ defmodule Kith.Contacts do
   end
 
   # ── Contact Merge ──────────────────────────────────────────────────────
+
+  @doc """
+  Merges `loser_ids` into `survivor_id`, applying `resolution`.
+
+  See `Kith.Contacts.MergeResolution` for how a resolution is produced.
+  """
+  def merge_cluster(scope, survivor_id, loser_ids, resolution) do
+    Merge.run(scope, survivor_id, loser_ids, resolution)
+  end
 
   @doc """
   Merges two contacts. The survivor keeps chosen field values and receives

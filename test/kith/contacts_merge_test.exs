@@ -270,4 +270,113 @@ defmodule Kith.Contacts.MergeTest do
       assert preview.relationships_to_dedup >= 1
     end
   end
+
+  describe "merge_cluster/4 validation" do
+    setup ctx do
+      scope = Kith.Accounts.Scope.for_user(ctx.user)
+      %{scope: scope}
+    end
+
+    defp resolution(fields \\ %{}), do: %{fields: fields, drop: %{}}
+
+    test "merges three contacts into one survivor", ctx do
+      c =
+        Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          nickname: "Al"
+        })
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(
+          ctx.scope,
+          ctx.contact_a.id,
+          [ctx.contact_b.id, c.id],
+          resolution(%{first_name: "Alice", nickname: "Al", company: "New Corp"})
+        )
+
+      assert survivor.id == ctx.contact_a.id
+      assert survivor.nickname == "Al"
+      assert survivor.company == "New Corp"
+
+      assert Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id).deleted_at != nil
+      assert Repo.get!(Kith.Contacts.Contact, c.id).deleted_at != nil
+    end
+
+    test "clears a field set to :clear", ctx do
+      {:ok, survivor} =
+        Contacts.merge_cluster(
+          ctx.scope,
+          ctx.contact_a.id,
+          [ctx.contact_b.id],
+          resolution(%{occupation: :clear})
+        )
+
+      assert survivor.occupation == nil
+    end
+
+    test "rejects clearing a required field", ctx do
+      assert {:error, {:not_clearable, :first_name}} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [ctx.contact_b.id],
+                 resolution(%{first_name: :clear})
+               )
+    end
+
+    test "rejects a value no member holds", ctx do
+      assert {:error, {:unknown_value, :company}} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [ctx.contact_b.id],
+                 resolution(%{company: "Never Corp"})
+               )
+    end
+
+    test "rejects an empty loser list", ctx do
+      assert {:error, :no_losers} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [], resolution())
+    end
+
+    test "rejects the survivor appearing among the losers", ctx do
+      assert {:error, :survivor_in_losers} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [ctx.contact_a.id],
+                 resolution()
+               )
+    end
+
+    test "rejects a contact from another account", ctx do
+      other_user = Kith.AccountsFixtures.user_fixture()
+
+      stranger =
+        Kith.ContactsFixtures.contact_fixture(other_user.account_id, %{first_name: "Zed"})
+
+      assert {:error, :different_accounts} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [stranger.id],
+                 resolution()
+               )
+    end
+
+    test "rejects an already-trashed member", ctx do
+      {:ok, _} =
+        ctx.contact_b
+        |> Ecto.Changeset.change(%{deleted_at: DateTime.utc_now(:second)})
+        |> Repo.update()
+
+      assert {:error, :trashed} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [ctx.contact_b.id],
+                 resolution()
+               )
+    end
+  end
 end
