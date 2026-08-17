@@ -40,7 +40,10 @@ unrelated rows that must be resolved one at a time.
 
 - Changing the detection algorithm, its signals, or its scoring.
 - Adding a `duplicate_groups` table. Clusters are derived, not stored.
-- Undo/restore for dismissed candidates.
+- Undo/restore for dismissed candidates. Noted as a risk: §2 makes dismissal
+  load-bearing and permanent, and there is no UI listing dismissed pairs, so a
+  mistaken uncheck is unrecoverable without direct database access. A "Dismissed"
+  view with restore is the natural follow-up.
 - Automatic or bulk merging without review.
 
 ---
@@ -49,10 +52,27 @@ unrelated rows that must be resolved one at a time.
 
 ### Derivation
 
-`Kith.DuplicateDetection.list_clusters(account_id, opts)` loads pending
-candidates for the account and computes connected components with union-find in
+`Kith.DuplicateDetection.list_clusters(account_id, opts)` loads pending **and
+dismissed** candidates for the account and computes components with union-find in
 memory. Pending pairs are bounded — name matching already caps at 500 rows per
 scan — so a recursive CTE is unnecessary.
+
+Pending pairs are positive edges; dismissed pairs are **negative edges** — a
+record that the user already reviewed those two contacts and rejected the match.
+Clustering must never place a negative edge inside a component, or a rejected
+match would silently reappear by transitivity through some third contact.
+
+The build is therefore greedy rather than a plain union of all edges:
+
+1. Sort pending pairs by score, descending.
+2. For each pair, union its endpoints **only if** the resulting component would
+   contain no dismissed pair.
+3. Skipped pairs stay `pending` and are reconsidered on the next run.
+
+This yields "closest match wins". Given a dismissed A–D and a new contact E
+matching A at 0.90 and D at 0.60, A–E unions first; D–E is then skipped because
+it would put A and D in one component. The result is `{A, E}`, with D left
+alone — not `{A, D, E}`.
 
 Each cluster is a struct carrying:
 
@@ -76,15 +96,22 @@ erroring.
 ### Membership is a selection
 
 The cluster is fixed as detected. Every member carries a checkbox, checked by
-default. Merge acts only on checked members. Unchecked members are left entirely
-untouched: their candidate pairs stay `pending`, so the next detection run
-reclusters whatever remains among them into its own group.
+default. Merge acts only on checked members.
 
-There is no per-member "not a duplicate" action and no cascade logic. A pair
-between the survivor and an unchecked member stays `pending`, so that two-member
-cluster reappears on the next visit — correct, because it genuinely is
-unresolved. "Dismiss cluster" remains available to dismiss every pair in the
-cluster at once.
+**Merging commits a review of the whole cluster.** Unchecking a member and
+merging the rest is a statement that the unchecked member is not one of them, so
+its pairs to the merged members become `dismissed` (§2). The worker already skips
+any pair recorded as `pending` or `dismissed`, so the rejected match is never
+regenerated, and the negative-edge rule above stops it reappearing by
+transitivity. The cluster does not come back.
+
+Unchecked members are otherwise untouched. Pairs *between* two unchecked members
+stay `pending` and recluster into their own group on the next run.
+
+Leaving the page without merging commits nothing — the cluster returns unchanged.
+There is no per-member "not a duplicate" action; unchecking plus merging is that
+action. "Dismiss cluster" dismisses every pair in the cluster at once, for when
+none of them belong together.
 
 ### Primary selection
 
@@ -142,12 +169,30 @@ conversations, `immich_candidates`, `reminder_instances`, and inbound
 
 ### Candidate pair resolution
 
-- Pairs wholly inside the merged set → `merged`.
-- Pairs touching a trashed loser → `merged`. Without this they would render
-  clusters pointing at trashed contacts.
-- Everything else → left `pending`, to recluster on the next run.
+Because a cluster is a full connected component, every *pending* pair touching a
+member has both endpoints inside the cluster. Dismissed pairs may reach outside
+it. Three rules, applied in order:
 
-The blanket `dismiss_candidates_for_contact/2` call is removed — see Bug 2.
+1. **Both endpoints merged** → `merged`.
+2. **One endpoint merged, the other an unchecked member** → `dismissed`. This is
+   the review record that stops the cluster returning.
+3. **Repoint through the merge.** Every remaining pair referencing a loser is
+   rewritten to reference the survivor, since the survivor now *is* that contact.
+   Without this, a dismissal recorded against a loser evaporates when the loser
+   is trashed and the rejected match returns on the next scan.
+
+Repointing must respect the table's constraints: normalize so
+`contact_id < duplicate_contact_id`, drop self-pairs, and on collision with an
+existing row keep the strongest status — `merged` over `dismissed` over
+`pending`. Implemented as delete-then-insert rather than a bare `update_all`,
+because the unique index on
+`(account_id, contact_id, duplicate_contact_id)` will otherwise reject the
+rewrite.
+
+The blanket `dismiss_candidates_for_contact/2` call is removed — see Bug 2. Note
+the distinction: that call dismisses pairs the user never looked at, which is the
+bug. These rules dismiss only pairs the user explicitly reviewed by unchecking
+them.
 
 ---
 
@@ -224,9 +269,15 @@ holds, what the engine already did, and whether anything needs a decision:
 contested stay folded and say so. The page is therefore short when nothing needs
 attention and unfolds exactly where the user is needed.
 
-**Footer** — what will happen in plain language ("2 contacts move to trash and
-stay recoverable for 30 days"), a "Dismiss cluster" secondary action, and the
-primary "Merge N contacts".
+**Footer** — what will happen in plain language, a "Dismiss cluster" secondary
+action, and the primary "Merge N contacts".
+
+The footer must state both halves of the outcome, because unchecking is a
+permanent review (§1): what happens to the merged contacts ("2 contacts move to
+trash and stay recoverable for 30 days") **and** what happens to the unchecked
+ones ("Sarah J. Kim will be marked as not a duplicate and won't be suggested
+again"). The second half is the consequence a user is most likely to trigger
+without realising.
 
 The duplicates index at `/contacts/duplicates` lists clusters instead of pairs.
 Each row shows member avatars, the top score, match reasons, and links to the
@@ -256,9 +307,10 @@ pair involving the survivor. `DuplicateDetectionWorker` then skips those pairs
 permanently, because it excludes anything already recorded as `pending` **or**
 `dismissed` (`lib/kith/workers/duplicate_detection_worker.ex:70`).
 
-This directly breaks the cluster model: an unchecked member is supposed to keep
-its pending pairs and return as its own cluster. Fixed by the targeted pair
-resolution in §2.
+This destroys pairs the user never looked at. Merging A and B wipes the pending
+A–C and A–D pairs even though the user was never shown them, and no rescan brings
+them back. Fixed by the targeted pair resolution in §2, which only dismisses
+pairs the user reviewed by unchecking.
 
 ---
 
@@ -312,10 +364,22 @@ This also means the member strip has two sources — detection and manual additi
 **Clusters** (`test/kith/duplicate_detection_test.exs`, extended):
 
 - Transitive pairs form one cluster; disjoint pairs stay separate.
-- Pair resolution after merge: inside-set → `merged`, loser-touching → `merged`,
-  outside → `pending`.
-- An unchecked member's pairs survive a merge and recluster on the next run —
-  the regression test for Bug 2.
+- Pair resolution after merge: both-merged → `merged`, merged-to-unchecked →
+  `dismissed`, pairs referencing a loser repointed to the survivor.
+- Repointing respects the ordering check constraint and the unique index, and
+  keeps the strongest status on collision.
+- Pending pairs the user was never shown survive a merge — the regression test
+  for Bug 2.
+
+**The handled-cluster scenario**, end to end, as its own test:
+
+- Given a cluster `{A, B, C, D}`, merging `A + B + C` with D unchecked leaves
+  A–D `dismissed` and repoints B–D and C–D onto A.
+- Re-running `DuplicateDetectionWorker` does not recreate A–D and does not
+  produce a cluster containing both A and D.
+- A new contact E matching A at 0.90 and D at 0.60 clusters as `{A, E}`. D is
+  excluded, and the D–E pair remains `pending`.
+- Reversing the scores puts E with D instead, and A is excluded.
 
 **LiveView** (`test/kith_web/live/contact_live/cluster_merge_test.exs`, new):
 
