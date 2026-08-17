@@ -1184,14 +1184,14 @@ defmodule Kith.Contacts.MergeTest do
       %{scope: scope, email_type: email_type}
     end
 
-    test "dropped records are removed and recorded in the audit entry", ctx do
+    test "drops a survivor-owned contact field outright and records it in the audit entry", ctx do
       keep =
         Kith.ContactsFixtures.contact_field_fixture(ctx.contact_a, ctx.email_type.id, %{
           "value" => "keep@example.com"
         })
 
       drop =
-        Kith.ContactsFixtures.contact_field_fixture(ctx.contact_b, ctx.email_type.id, %{
+        Kith.ContactsFixtures.contact_field_fixture(ctx.contact_a, ctx.email_type.id, %{
           "value" => "drop@example.com"
         })
 
@@ -1226,6 +1226,158 @@ defmodule Kith.Contacts.MergeTest do
       assert [dropped] = log.metadata["dropped"]
       assert dropped["type"] == "contact_fields"
       assert dropped["value"] == "drop@example.com"
+      assert dropped["owner_id"] == ctx.contact_a.id
+    end
+
+    test "a loser-owned dropped contact field is not deleted; it rides to trash with its loser",
+         ctx do
+      drop =
+        Kith.ContactsFixtures.contact_field_fixture(ctx.contact_b, ctx.email_type.id, %{
+          "value" => "drop@example.com"
+        })
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{contact_fields: [drop.id]}
+        })
+
+      Oban.drain_queue(queue: :default)
+
+      # Still there — untouched, still owned by the (now-trashed) loser, not
+      # hard-deleted and not remapped onto the survivor.
+      reloaded = Repo.get!(Kith.Contacts.ContactField, drop.id)
+      assert reloaded.contact_id == ctx.contact_b.id
+      refute reloaded.contact_id == survivor.id
+      assert Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id).deleted_at != nil
+
+      log =
+        Repo.one!(
+          from(l in Kith.AuditLogs.AuditLog,
+            where: l.event == "contact_merged",
+            order_by: [desc: l.id],
+            limit: 1
+          )
+        )
+
+      assert [dropped] = log.metadata["dropped"]
+      assert dropped["type"] == "contact_fields"
+      assert dropped["value"] == "drop@example.com"
+      assert dropped["owner_id"] == ctx.contact_b.id
+    end
+
+    test "drops a survivor-owned address outright and records it in the audit entry", ctx do
+      address = Kith.ContactsFixtures.address_fixture(ctx.contact_a, %{"line1" => "1 Drop St"})
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{addresses: [address.id]}
+        })
+
+      Oban.drain_queue(queue: :default)
+
+      refute Repo.get(Kith.Contacts.Address, address.id)
+
+      assert Repo.aggregate(
+               from(a in Kith.Contacts.Address, where: a.contact_id == ^survivor.id),
+               :count
+             ) == 0
+
+      log =
+        Repo.one!(
+          from(l in Kith.AuditLogs.AuditLog,
+            where: l.event == "contact_merged",
+            order_by: [desc: l.id],
+            limit: 1
+          )
+        )
+
+      assert [dropped] = log.metadata["dropped"]
+      assert dropped["type"] == "addresses"
+      assert dropped["value"] == "1 Drop St"
+      assert dropped["owner_id"] == ctx.contact_a.id
+    end
+
+    test "drops a survivor-owned tag outright and records it in the audit entry", ctx do
+      {:ok, tag} =
+        Contacts.create_tag(ctx.account_id, %{"name" => "Drop Me", "color" => "#ABCDEF"})
+
+      Contacts.tag_contact(ctx.contact_a, tag)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{tags: [tag.id]}
+        })
+
+      Oban.drain_queue(queue: :default)
+
+      assert Repo.aggregate(
+               from(ct in "contact_tags",
+                 where: ct.contact_id == ^survivor.id and ct.tag_id == ^tag.id
+               ),
+               :count
+             ) == 0
+
+      log =
+        Repo.one!(
+          from(l in Kith.AuditLogs.AuditLog,
+            where: l.event == "contact_merged",
+            order_by: [desc: l.id],
+            limit: 1
+          )
+        )
+
+      assert [dropped] = log.metadata["dropped"]
+      assert dropped["type"] == "tags"
+      assert dropped["value"] == "Drop Me"
+      assert dropped["owner_id"] == ctx.contact_a.id
+    end
+
+    test "a loser-owned dropped tag is not moved to the survivor; it rides to trash with its loser",
+         ctx do
+      {:ok, tag} =
+        Contacts.create_tag(ctx.account_id, %{"name" => "Loser Tag", "color" => "#123456"})
+
+      Contacts.tag_contact(ctx.contact_b, tag)
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{tags: [tag.id]}
+        })
+
+      Oban.drain_queue(queue: :default)
+
+      assert Repo.aggregate(
+               from(ct in "contact_tags",
+                 where: ct.contact_id == ^survivor.id and ct.tag_id == ^tag.id
+               ),
+               :count
+             ) == 0
+
+      assert Repo.aggregate(
+               from(ct in "contact_tags",
+                 where: ct.contact_id == ^ctx.contact_b.id and ct.tag_id == ^tag.id
+               ),
+               :count
+             ) == 1
+
+      assert Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id).deleted_at != nil
+
+      log =
+        Repo.one!(
+          from(l in Kith.AuditLogs.AuditLog,
+            where: l.event == "contact_merged",
+            order_by: [desc: l.id],
+            limit: 1
+          )
+        )
+
+      assert [dropped] = log.metadata["dropped"]
+      assert dropped["type"] == "tags"
+      assert dropped["value"] == "Loser Tag"
       assert dropped["owner_id"] == ctx.contact_b.id
     end
 
@@ -1242,6 +1394,17 @@ defmodule Kith.Contacts.MergeTest do
                Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
                  fields: %{},
                  drop: %{contact_fields: [field.id]}
+               })
+    end
+
+    test "rejects a dropped tag id belonging to no member", ctx do
+      {:ok, tag} =
+        Contacts.create_tag(ctx.account_id, %{"name" => "Orphan", "color" => "#000000"})
+
+      assert {:error, {:unknown_drop, :tags}} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{},
+                 drop: %{tags: [tag.id]}
                })
     end
 
@@ -1266,17 +1429,55 @@ defmodule Kith.Contacts.MergeTest do
       assert DateTime.compare(survivor.last_talked_to, newer) == :eq
     end
 
-    test "enqueues a display name recompute for the survivor", ctx do
+    test "recomputes the survivor's display_name synchronously, with no job enqueued", ctx do
       {:ok, survivor} =
         Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
-          fields: %{},
+          fields: %{last_name: "S."},
           drop: %{}
         })
 
-      assert_enqueued(
-        worker: Kith.Workers.DisplayNameRecomputeWorker,
-        args: %{contact_id: survivor.id}
-      )
+      assert survivor.display_name == "Alice S."
+
+      # DisplayNameRecomputeWorker is account-wide (recomputes every contact
+      # from `%{"account_id", "display_name_format"}`); enqueuing it with a
+      # `contact_id` arg can never match a perform/1 clause, so the merge
+      # must not enqueue it at all — `Contact.update_changeset/2` already
+      # recomputes display_name synchronously (ruling R15).
+      refute_enqueued(worker: Kith.Workers.DisplayNameRecomputeWorker)
+    end
+
+    test "a merge that fails inside the transaction rolls back every mutation", ctx do
+      note = Kith.ContactsFixtures.note_fixture(ctx.contact_b, ctx.user.id)
+
+      drop =
+        Kith.ContactsFixtures.contact_field_fixture(ctx.contact_a, ctx.email_type.id, %{
+          "value" => "drop@example.com"
+        })
+
+      # contact_b already references the survivor as first_met_through, so
+      # resolving to that value passes validate_fields/2 (a member holds it),
+      # but applying it to the survivor is a self-reference — Multi step
+      # :survivor fails via Contact.update_changeset/2, after `with` has
+      # already accepted the resolution and entered the Multi/transaction.
+      {:ok, _} =
+        ctx.contact_b
+        |> Ecto.Changeset.change(%{first_met_through_id: ctx.contact_a.id})
+        |> Repo.update()
+
+      assert {:error, {:invalid_fields, %Ecto.Changeset{}}} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{first_met_through_id: ctx.contact_a.id},
+                 drop: %{contact_fields: [drop.id]}
+               })
+
+      assert Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id).deleted_at == nil
+      assert Repo.get!(Kith.Contacts.Note, note.id).contact_id == ctx.contact_b.id
+      assert Repo.get!(Kith.Contacts.ContactField, drop.id)
+
+      assert Repo.aggregate(
+               from(l in Kith.AuditLogs.AuditLog, where: l.event == "contact_merged"),
+               :count
+             ) == 0
     end
 
     test "a rejected merge changes nothing at all", ctx do

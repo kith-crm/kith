@@ -12,9 +12,8 @@ defmodule Kith.Contacts.Merge do
 
   alias Ecto.Multi
   alias Kith.AuditLogs
-  alias Kith.Contacts.{Address, Contact, ContactField, MergeFields}
+  alias Kith.Contacts.{Address, Contact, ContactField, MergeFields, Tag}
   alias Kith.Repo
-  alias Kith.Workers.DisplayNameRecomputeWorker
 
   # Policy and array fields are computed rather than picked from a member, so
   # `held_by_member?/3` accepts any value for them without a match. Mirrors
@@ -77,6 +76,16 @@ defmodule Kith.Contacts.Merge do
         # and every dropped row's owner_id would read back as the survivor
         # regardless of which member actually held it.
         dropped_records = describe_dropped(Repo, resolution)
+
+        # A dropped record owned by a loser must not be remapped onto the
+        # survivor at all — it stays put and rides to trash with its owner
+        # when the loser is soft-deleted below. Only a dropped record already
+        # owned by the survivor is deleted outright, in `:apply_drop`. These
+        # ids are what the remap steps below exclude from their moves.
+        drop = drop_map(resolution)
+        dropped_field_ids = drop |> Map.get(:contact_fields, []) |> Enum.uniq()
+        dropped_address_ids = drop |> Map.get(:addresses, []) |> Enum.uniq()
+        dropped_tag_ids = drop |> Map.get(:tags, []) |> Enum.uniq()
 
         Multi.new()
         |> Multi.run(:survivor, fn _repo, _changes ->
@@ -141,12 +150,20 @@ defmodule Kith.Contacts.Merge do
           @owned_schemas
           |> List.delete(Kith.Contacts.Photo)
           |> List.delete(Kith.Contacts.ImmichCandidate)
+          |> List.delete(ContactField)
+          |> List.delete(Address)
           |> Enum.each(fn schema ->
             repo.update_all(
               from(r in schema, where: r.contact_id in ^loser_ids),
               set: [contact_id: survivor.id]
             )
           end)
+
+          # ContactField and Address get their own call: dropped ids owned by
+          # a loser must not move, so they stay behind and are soft-deleted
+          # with that loser instead of riding to the survivor.
+          remap_excluding(repo, ContactField, loser_ids, survivor.id, dropped_field_ids)
+          remap_excluding(repo, Address, loser_ids, survivor.id, dropped_address_ids)
 
           {:ok, :done}
         end)
@@ -156,8 +173,10 @@ defmodule Kith.Contacts.Merge do
           # mirrors the old engine's `:remap_contact_tags` step. unique_index
           # on (contact_id, tag_id); two losers can share a tag the survivor
           # doesn't have, so this dedupes across the whole cluster too.
+          # Dropped tag ids are excluded from the move: a loser's link to a
+          # dropped tag stays on the loser and rides to trash with it.
           loser_ids = Enum.map(losers, & &1.id)
-          dedupe_and_move(repo, "contact_tags", "tag_id", loser_ids, survivor.id)
+          dedupe_and_move_tags(repo, loser_ids, survivor.id, dropped_tag_ids)
           {:ok, :done}
         end)
         |> Multi.run(:remap_activity_contacts, fn repo, _changes ->
@@ -236,7 +255,12 @@ defmodule Kith.Contacts.Merge do
           remap_relationships(repo, survivor.id, loser_ids)
         end)
         |> Multi.run(:apply_drop, fn repo, _changes ->
-          Enum.each(resolution.drop || %{}, fn
+          # Only rows currently owned by the survivor are deleted outright.
+          # A dropped id owned by a loser was excluded from the remap steps
+          # above, so it is still sitting on that loser here — left alone, it
+          # rides to trash with the loser at `:soft_delete_losers` instead of
+          # being destroyed with no trash behind it (design spec §2).
+          Enum.each(drop_map(resolution), fn
             {_key, []} ->
               :ok
 
@@ -248,8 +272,15 @@ defmodule Kith.Contacts.Merge do
               )
 
             {key, ids} ->
-              schema = Map.fetch!(@drop_schemas, key)
-              repo.delete_all(from(r in schema, where: r.id in ^ids))
+              case Map.fetch(@drop_schemas, key) do
+                {:ok, schema} ->
+                  repo.delete_all(
+                    from(r in schema, where: r.id in ^ids and r.contact_id == ^survivor.id)
+                  )
+
+                :error ->
+                  :ok
+              end
           end)
 
           {:ok, :done}
@@ -289,11 +320,6 @@ defmodule Kith.Contacts.Merge do
             repo.update_all(from(c in Contact, where: c.id in ^ids), set: [deleted_at: now])
 
           {:ok, count}
-        end)
-        |> Multi.run(:recompute_display_name, fn _repo, _changes ->
-          %{contact_id: survivor.id}
-          |> DisplayNameRecomputeWorker.new()
-          |> Oban.insert()
         end)
         |> Multi.run(:audit, fn _repo, changes ->
           survivor = changes.last_talked_to
@@ -490,43 +516,81 @@ defmodule Kith.Contacts.Merge do
     {:ok, :done}
   end
 
-  defp validate_drop(members, %{drop: drop}) when is_map(drop) do
+  # `resolution.drop` may legitimately be absent — dot access would raise
+  # `KeyError` in that case, so every drop-related function goes through this.
+  defp drop_map(resolution), do: Map.get(resolution, :drop) || %{}
+
+  defp validate_drop(members, resolution) do
     member_ids = Enum.map(members, & &1.id)
 
-    Enum.reduce_while(drop, :ok, fn
+    Enum.reduce_while(drop_map(resolution), :ok, fn
       {_key, []}, :ok ->
         {:cont, :ok}
 
-      {:tags, _ids}, :ok ->
-        {:cont, :ok}
-
-      {key, ids}, :ok ->
-        schema = Map.fetch!(@drop_schemas, key)
+      {:tags, ids}, :ok ->
+        ids = Enum.uniq(ids)
 
         owned =
-          from(r in schema, where: r.id in ^ids and r.contact_id in ^member_ids, select: r.id)
+          from(ct in "contact_tags",
+            where: ct.tag_id in ^ids and ct.contact_id in ^member_ids,
+            select: ct.tag_id,
+            distinct: true
+          )
           |> Repo.all()
 
         if Enum.sort(owned) == Enum.sort(ids) do
           {:cont, :ok}
         else
-          {:halt, {:error, {:unknown_drop, key}}}
+          {:halt, {:error, {:unknown_drop, :tags}}}
+        end
+
+      {key, ids}, :ok ->
+        case Map.fetch(@drop_schemas, key) do
+          {:ok, schema} ->
+            ids = Enum.uniq(ids)
+
+            owned =
+              from(r in schema,
+                where: r.id in ^ids and r.contact_id in ^member_ids,
+                select: r.id
+              )
+              |> Repo.all()
+
+            if Enum.sort(owned) == Enum.sort(ids) do
+              {:cont, :ok}
+            else
+              {:halt, {:error, {:unknown_drop, key}}}
+            end
+
+          :error ->
+            {:halt, {:error, {:unknown_drop, key}}}
         end
     end)
   end
 
-  defp validate_drop(_members, _resolution), do: :ok
-
   # Captured before deletion so the audit trail survives the rows it describes.
-  defp describe_dropped(repo, %{drop: drop}) when is_map(drop) do
-    Enum.flat_map(drop, fn
+  defp describe_dropped(repo, resolution) do
+    Enum.flat_map(drop_map(resolution), fn
       {_key, []} ->
         []
 
       {:tags, ids} ->
-        Enum.map(ids, &%{type: "tags", value: to_string(&1), owner_id: nil})
+        ids = Enum.uniq(ids)
+
+        from(ct in "contact_tags",
+          join: t in Tag,
+          on: t.id == ct.tag_id,
+          where: ct.tag_id in ^ids,
+          select: {t.name, ct.contact_id}
+        )
+        |> repo.all()
+        |> Enum.map(fn {name, owner_id} ->
+          %{type: "tags", value: name, owner_id: owner_id}
+        end)
 
       {:addresses, ids} ->
+        ids = Enum.uniq(ids)
+
         from(a in Address, where: a.id in ^ids, select: {a.line1, a.contact_id})
         |> repo.all()
         |> Enum.map(fn {line1, owner_id} ->
@@ -534,17 +598,62 @@ defmodule Kith.Contacts.Merge do
         end)
 
       {key, ids} ->
-        schema = Map.fetch!(@drop_schemas, key)
+        case Map.fetch(@drop_schemas, key) do
+          {:ok, schema} ->
+            ids = Enum.uniq(ids)
 
-        from(r in schema, where: r.id in ^ids, select: {r.value, r.contact_id})
-        |> repo.all()
-        |> Enum.map(fn {value, owner_id} ->
-          %{type: to_string(key), value: value, owner_id: owner_id}
-        end)
+            from(r in schema, where: r.id in ^ids, select: {r.value, r.contact_id})
+            |> repo.all()
+            |> Enum.map(fn {value, owner_id} ->
+              %{type: to_string(key), value: value, owner_id: owner_id}
+            end)
+
+          :error ->
+            []
+        end
     end)
   end
 
-  defp describe_dropped(_repo, _resolution), do: []
+  # Moves every `schema` row owned by a loser onto the survivor, except rows
+  # whose id is in `excluded_ids` — those are dropped ids owned by a loser,
+  # which must stay on that loser (see the `:remap_owned` step). An empty
+  # `excluded_ids` list compiles to a no-op filter, not a special case.
+  defp remap_excluding(repo, schema, loser_ids, survivor_id, excluded_ids) do
+    from(r in schema, where: r.contact_id in ^loser_ids, where: r.id not in ^excluded_ids)
+    |> repo.update_all(set: [contact_id: survivor_id])
+
+    :ok
+  end
+
+  # Same collision handling as `dedupe_and_move/5`, specialised to
+  # `contact_tags` with one addition: a loser's link to a tag_id in
+  # `excluded_tag_ids` is neither deduped away nor moved — it is left in
+  # place so it rides to trash with that loser. An empty `excluded_tag_ids`
+  # behaves exactly like the unfiltered move.
+  defp dedupe_and_move_tags(repo, loser_ids, survivor_id, excluded_tag_ids) do
+    repo.query!(
+      """
+      DELETE FROM contact_tags t
+      WHERE t.contact_id = ANY($1)
+        AND t.tag_id IS NOT NULL
+        AND t.tag_id <> ALL($3::bigint[])
+        AND EXISTS (
+          SELECT 1 FROM contact_tags o
+          WHERE o.tag_id = t.tag_id
+            AND (o.contact_id = $2
+                 OR (o.contact_id = ANY($1) AND o.ctid < t.ctid))
+        )
+      """,
+      [loser_ids, survivor_id, excluded_tag_ids]
+    )
+
+    repo.query!(
+      "UPDATE contact_tags SET contact_id = $1 WHERE contact_id = ANY($2) AND tag_id <> ALL($3::bigint[])",
+      [survivor_id, loser_ids, excluded_tag_ids]
+    )
+
+    :ok
+  end
 
   defp inspect_fields(%{fields: fields}) do
     Map.new(fields, fn {field, value} -> {to_string(field), inspect(value)} end)
