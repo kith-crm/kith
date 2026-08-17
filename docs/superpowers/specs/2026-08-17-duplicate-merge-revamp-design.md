@@ -383,9 +383,195 @@ This also means the member strip has two sources — detection and manual additi
 
 **LiveView** (`test/kith_web/live/contact_live/cluster_merge_test.exs`, new):
 
+
 - Conflicts render as toggles; resolved fields render with attribution.
 - A section with a conflict renders open; a fully resolved one renders folded.
 - Unchecking a member recomputes conflicts and counts.
 - Merge submits the resolved payload and redirects to the survivor.
 - A bare contact id with no pending cluster renders a one-member screen, and
   adding a contact by search appends it to the strip.
+
+---
+
+## 8. User scenarios
+
+Written as the acceptance criteria for the implementation plan. Each maps to the
+section that defines its behaviour.
+
+### A. Finding duplicates
+
+**A1 — Four duplicates appear as one entry.** *(§1)*
+Given four contacts detected as duplicates of one person, when I open the
+duplicates page, then I see one cluster entry showing all four members, not six
+pair rows.
+
+**A2 — Unrelated duplicates stay separate.** *(§1)*
+Given two contacts duplicated with each other and two unrelated contacts
+duplicated with each other, when I open the duplicates page, then I see two
+cluster entries, each with two members.
+
+**A3 — The queue is ordered by confidence.** *(§1)*
+Given several clusters, when I open the duplicates page, then they are ordered by
+their highest internal match score, and each shows member avatars, that score,
+and the reasons for the match.
+
+### B. Reviewing the merge
+
+**B1 — Every field is visible.** *(§4)*
+Given a cluster, when I open it, then every scalar contact field is present —
+including `middle_name`, `aliases`, `gender`, the `first_met_*` group and the
+flags — not the eight the old wizard exposed.
+
+**B2 — Agreement resolves itself.** *(§3)*
+Given three members that all have the first name "Sarah", when I open the
+cluster, then the First name row shows "Sarah" with the attribution "all 3
+agree" and asks me nothing.
+
+**B3 — A value only one member has is kept.** *(§3)*
+Given only one member has a middle name, when I open the cluster, then the row
+shows that value attributed to its source, and I am not asked to choose.
+
+**B4 — Disagreement becomes a choice in place.** *(§3, §4)*
+Given two members hold different birthdates, when I open the cluster, then the
+Birthdate row is a toggle in its normal position in the Identity section, marked
+as needing a decision, defaulted to the value held by the most members.
+
+**B5 — A section with a conflict opens itself.** *(§4)*
+Given a cluster whose only conflicts are identity fields, when I open it, then
+the Identity section is expanded with a "2 need a decision" chip and the Contact
+details section is folded and marked as having nothing to decide.
+
+**B6 — A resolved field can still be changed.** *(§3, §4)*
+Given a field the engine resolved on its own, when I click its value, then it
+opens in place as a choice between the candidate values and "Leave empty".
+
+**B7 — Multi-valued data is combined and prunable.** *(§3)*
+Given members holding four distinct emails and one repeated email, when I expand
+Contact details, then I see the four with their sources, the repeat struck
+through as a dropped duplicate, and a checkbox on each so I can exclude one.
+
+**B8 — History is summarised, not detailed.** *(§3, §4)*
+Given members with notes, activities, calls and gifts, when I open the cluster,
+then the Carried over section reports counts per type and asks me nothing.
+
+### C. Membership and review
+
+**C1 — Excluding a member changes the result.** *(§1, §3)*
+Given a four-member cluster, when I uncheck one member, then conflicts, counts
+and attributions recompute against the remaining three, and the merge button
+reads "Merge 3 contacts".
+
+**C2 — The consequence of excluding is stated.** *(§4)*
+Given I have unchecked a member, when I read the footer, then it tells me both
+that the merged contacts move to trash recoverably and that the unchecked member
+will be marked as not a duplicate and not suggested again.
+
+**C3 — Choosing the primary.** *(§1)*
+Given a cluster, when I open it, then the member with the most attached records
+is the primary by default, and I can make another member primary by clicking its
+chip.
+
+**C4 — Leaving without merging changes nothing.** *(§1)*
+Given I uncheck a member and navigate away without merging, when the duplicates
+page reloads, then the cluster is unchanged with all members checked.
+
+### D. Merging
+
+**D1 — An N-way merge is one action.** *(§2)*
+Given a four-member cluster, when I merge, then one transaction produces one
+surviving contact, three trashed contacts, and one audit entry naming all three.
+
+**D2 — Nothing is orphaned.** *(§2, Bug 1)*
+Given losers holding debts, gifts, pets, tasks, conversations, Immich candidates
+and reminder instances, when I merge, then all of them appear on the survivor.
+*Regression test for Bug 1.*
+
+**D3 — Inbound references follow.** *(§2)*
+Given another contact whose `first_met_through` points at a loser, when I merge,
+then that reference points at the survivor.
+
+**D4 — Duplicated sub-records collapse.** *(§2, §3)*
+Given two members share an email address and a tag, when I merge, then the
+survivor has one of each.
+
+**D5 — Excluded values are not carried.** *(§2)*
+Given I unchecked an address in Contact details, when I merge, then that address
+is not on the survivor.
+
+**D6 — The merge is atomic.** *(§2)*
+Given any step fails, when I merge, then nothing is changed and I am told the
+merge failed.
+
+**D7 — Tampering is rejected.** *(§2)*
+Given a submitted scalar value that no selected member holds, or a dropped record
+id belonging to no selected member, when the merge is submitted, then it is
+rejected server-side.
+
+### E. Manual merge
+
+**E1 — Merging two contacts detection never linked.** *(§6)*
+Given a contact with no pending cluster, when I choose Merge from its page, then
+the cluster screen opens with that contact as its only member and an Add contact
+search.
+
+**E2 — A manually added member behaves like a detected one.** *(§6)*
+Given I add a contact by search, when it joins the strip, then it is checked,
+contributes to conflicts and counts, and can be unchecked.
+
+### F. After the merge
+
+**F1 — A handled cluster does not return.** *(§1, §2)*
+Given cluster `{A, B, C, D}` where I merged A, B and C with D unchecked, when the
+detection worker runs again, then A–D is not recreated and no cluster contains
+both A and D.
+
+**F2 — A new match joins the closest contact only.** *(§1)*
+Given A–D was dismissed by F1 and a new contact E matches A at 0.90 and D at
+0.60, when the worker runs, then the cluster is `{A, E}` — D is excluded, and A
+and D are not reunited by transitivity through E.
+
+**F3 — The reverse holds.** *(§1)*
+Given the same setup with E matching D more strongly than A, when the worker
+runs, then the cluster is `{D, E}` and A is excluded.
+
+**F4 — Unreviewed pairs survive.** *(§2, Bug 2)*
+Given a merge of two members of a larger cluster, when it completes, then pending
+pairs the user was never shown are still pending and still cluster.
+*Regression test for Bug 2.*
+
+**F5 — Leftover members recluster together.** *(§1)*
+Given I unchecked two members that are duplicates of each other, when the worker
+runs again, then those two form their own cluster.
+
+**F6 — Dismissing a whole cluster.** *(§1)*
+Given none of the members belong together, when I choose Dismiss cluster, then
+every pair in it is dismissed and it does not return.
+
+### G. Compatibility
+
+**G1 — The existing API keeps working.** *(§6)*
+Given a client posting `survivor_id` and `non_survivor_id` to
+`/api/contacts/merge`, when it is called, then the merge succeeds using the
+auto-resolution defaults and returns the survivor.
+
+**G2 — Permissions are enforced.** *(§2)*
+Given a user without contact update permission, when they attempt to open or
+submit a cluster merge, then it is refused.
+
+**G3 — Account isolation holds.** *(§2)*
+Given contact ids from another account, when a merge is submitted, then it is
+rejected.
+
+### Suggested slicing
+
+Four vertical slices, each independently shippable and testable:
+
+1. **Engine** — `merge_cluster/4`, the expanded remap list, pair resolution and
+   repointing. Covers D1–D7, F4, G1–G3, Bug 1, Bug 2. No UI change; the existing
+   wizard and API adapt to the new function.
+2. **Clusters** — `list_clusters/2`, negative-edge building, cluster listing on
+   the duplicates page. Covers A1–A3, F1–F3, F5–F6.
+3. **Screen** — the cluster merge LiveView, auto-resolution, conflict rendering,
+   sections. Covers B1–B8, C1–C4.
+4. **Manual merge and cleanup** — Add contact search, route changes, deleting
+   `ContactLive.Merge` and the dead `ContactLive.Duplicates`. Covers E1–E2.
