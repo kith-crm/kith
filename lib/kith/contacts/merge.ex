@@ -6,6 +6,27 @@ defmodule Kith.Contacts.Merge do
   writes was computed by `Kith.Contacts.MergeResolution` and approved by the
   caller, so a concurrent edit between resolution and submission fails
   validation rather than silently changing the result.
+
+  ## Contract: `resolution.drop` must name every row backing a dropped value
+
+  `:dedupe_owned` (which collapses `contact_fields`/`addresses` rows the
+  survivor and a loser hold with an equal, normalized value) runs *before*
+  `:apply_drop`. If the caller's drop list names only one side of such a
+  duplicate pair, the outcome depends on which row `:dedupe_owned` happened to
+  keep by row id:
+
+    * if the kept row is the one named in `drop` — it is then deleted by
+      `:apply_drop`, and the value is gone, as the caller intended.
+    * if the *other* row (the one **not** named in `drop`) is the one kept —
+      `:apply_drop`'s id matches nothing, and the value the caller meant to
+      exclude survives on the merged contact, unconditionally.
+
+  A caller building a drop list (e.g. a merge-review UI) must therefore
+  include the ids of every member's row backing a value the user chose to
+  drop, not just one. This is a caller contract, not a merge bug: reordering
+  `:apply_drop` ahead of `:dedupe_owned` does not fix it — it makes the
+  survivor's row disappear into the loser's not-yet-deduped duplicate, which
+  then gets remapped in and the dropped value comes back unconditionally.
   """
 
   import Ecto.Query, warn: false
@@ -75,7 +96,8 @@ defmodule Kith.Contacts.Merge do
         # addresses from losers to the survivor — read any later than this
         # and every dropped row's owner_id would read back as the survivor
         # regardless of which member actually held it.
-        dropped_records = describe_dropped(Repo, resolution)
+        member_ids = Enum.map(members, & &1.id)
+        dropped_records = describe_dropped(Repo, resolution, member_ids)
 
         # A dropped record owned by a loser must not be remapped onto the
         # survivor at all — it stays put and rides to trash with its owner
@@ -569,7 +591,14 @@ defmodule Kith.Contacts.Merge do
   end
 
   # Captured before deletion so the audit trail survives the rows it describes.
-  defp describe_dropped(repo, resolution) do
+  #
+  # `member_ids` matters only for the `:tags` clause: a tag_id is many-to-one
+  # with `contact_tags` rows, so without filtering by the cluster's members,
+  # dropping a widely-used tag would describe every contact in the account
+  # that happens to hold it — not just the merge's own members. The
+  # `:contact_fields`/`:addresses` clauses don't need it: their ids are row
+  # ids already pinned to a member by `validate_drop/2`.
+  defp describe_dropped(repo, resolution, member_ids) do
     Enum.flat_map(drop_map(resolution), fn
       {_key, []} ->
         []
@@ -580,7 +609,7 @@ defmodule Kith.Contacts.Merge do
         from(ct in "contact_tags",
           join: t in Tag,
           on: t.id == ct.tag_id,
-          where: ct.tag_id in ^ids,
+          where: ct.tag_id in ^ids and ct.contact_id in ^member_ids,
           select: {t.name, ct.contact_id}
         )
         |> repo.all()

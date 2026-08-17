@@ -1381,6 +1381,49 @@ defmodule Kith.Contacts.MergeTest do
       assert dropped["owner_id"] == ctx.contact_b.id
     end
 
+    test "a dropped tag's audit entry names only the cluster's own owners, not every contact holding it",
+         ctx do
+      outsider = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Outsider"})
+
+      {:ok, tag} =
+        Contacts.create_tag(ctx.account_id, %{"name" => "Widely Used", "color" => "#654321"})
+
+      Contacts.tag_contact(ctx.contact_a, tag)
+      Contacts.tag_contact(ctx.contact_b, tag)
+      Contacts.tag_contact(outsider, tag)
+
+      {:ok, _survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{tags: [tag.id]}
+        })
+
+      Oban.drain_queue(queue: :default)
+
+      log =
+        Repo.one!(
+          from(l in Kith.AuditLogs.AuditLog,
+            where: l.event == "contact_merged",
+            order_by: [desc: l.id],
+            limit: 1
+          )
+        )
+
+      owner_ids = log.metadata["dropped"] |> Enum.map(& &1["owner_id"]) |> Enum.sort()
+
+      assert owner_ids == Enum.sort([ctx.contact_a.id, ctx.contact_b.id])
+      refute outsider.id in owner_ids
+
+      # The outsider's own tag link is untouched — the merge never touched
+      # any contact outside its own cluster.
+      assert Repo.aggregate(
+               from(ct in "contact_tags",
+                 where: ct.contact_id == ^outsider.id and ct.tag_id == ^tag.id
+               ),
+               :count
+             ) == 1
+    end
+
     test "rejects a dropped id belonging to no member", ctx do
       stranger =
         Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Zed"})
