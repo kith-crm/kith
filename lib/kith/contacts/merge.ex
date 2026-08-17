@@ -161,9 +161,11 @@ defmodule Kith.Contacts.Merge do
           {:ok, count}
         end)
         |> Multi.run(:dedupe_owned, fn repo, _changes ->
-          # contact_fields has no unique index — collapsing exact duplicates
-          # here is a product decision, not a constraint guard. Tags and
-          # photos are deduped by their own remap steps above already, via
+          # contact_fields and addresses have no unique index — collapsing
+          # duplicates here is a product decision (design spec §3), not a
+          # constraint guard. Both keys are normalized (lower + trimmed) so
+          # case/whitespace-only differences still collapse. Tags and photos
+          # are deduped by their own remap steps above already, via
           # `dedupe_and_move/5`; nothing to repeat here.
           repo.query!(
             """
@@ -175,8 +177,28 @@ defmodule Kith.Contacts.Merge do
                   SELECT 1 FROM contact_fields other
                   WHERE other.contact_id = $1
                     AND other.contact_field_type_id = cf.contact_field_type_id
-                    AND other.value = cf.value
+                    AND lower(btrim(other.value)) = lower(btrim(cf.value))
                     AND other.id < cf.id
+                )
+            )
+            """,
+            [survivor.id]
+          )
+
+          repo.query!(
+            """
+            DELETE FROM addresses
+            WHERE id IN (
+              SELECT a.id FROM addresses a
+              WHERE a.contact_id = $1
+                AND EXISTS (
+                  SELECT 1 FROM addresses other
+                  WHERE other.contact_id = $1
+                    AND lower(btrim(coalesce(other.line1, ''))) =
+                        lower(btrim(coalesce(a.line1, '')))
+                    AND lower(btrim(coalesce(other.postal_code, ''))) =
+                        lower(btrim(coalesce(a.postal_code, '')))
+                    AND other.id < a.id
                 )
             )
             """,
