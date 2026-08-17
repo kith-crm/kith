@@ -3,6 +3,8 @@
 **Date:** 2026-08-17
 **Status:** Approved for planning
 **Branch:** `worktree-merge-revamp`
+**Reviewed:** `2026-08-17-duplicate-merge-revamp-review.md` — all findings folded
+in except concern 8, rejected with evidence in §9.
 
 ## Problem
 
@@ -14,13 +16,14 @@ page — the only path most users take — step 1 is already answered and is ski
 but the stepper still reports "Step 2 of 3". Steps 2 and 3 show disjoint data, so
 the user picks field values on one screen and sees unrelated counts on the next.
 
-**Poor visibility.** The field picker exposes eight fields: `first_name`,
-`last_name`, `nickname`, `birthdate`, `description`, `occupation`, `company`,
-`avatar`. Roughly thirty other contact fields — `middle_name`, `aliases`,
-`gender`, `currency`, `deceased`, `favorite`, `is_archived`, the `first_met_*`
-group, the `immich_*` group — are never shown and silently keep the survivor's
-values. The preview is a list of counts ("3 notes will be combined") with no
-sample of the underlying records and no rendering of the resulting contact.
+**Poor visibility.** `Contact.update_changeset` casts 27 fields. The merge wizard
+exposes eight: `first_name`, `last_name`, `nickname`, `birthdate`, `description`,
+`occupation`, `company`, `avatar`. The other nineteen — `middle_name`, `aliases`,
+`gender_id`, `currency_id`, `deceased`, `favorite`, `is_archived`, the
+`first_met_*` group, the `immich_*` group — are never shown and silently keep the
+survivor's values. The preview is a list of counts ("3 notes will be combined")
+with no sample of the underlying records and no rendering of the resulting
+contact.
 
 **Pairs, not clusters.** `duplicate_candidates` stores pairs
 (`contact_id`, `duplicate_contact_id`, with a check constraint enforcing
@@ -31,19 +34,20 @@ unrelated rows that must be resolved one at a time.
 ## Goals
 
 1. One screen, no wizard.
-2. Every contact field visible, with miscellaneous and historical data
+2. Every mergeable contact field visible, with miscellaneous and historical data
    summarised rather than expanded.
 3. An N-contact cluster resolved in a single merge.
-4. Fix the two data-loss bugs found during design (below).
+4. Fix the two data-loss bugs found during design (§5).
 
 ## Non-goals
 
 - Changing the detection algorithm, its signals, or its scoring.
 - Adding a `duplicate_groups` table. Clusters are derived, not stored.
-- Undo/restore for dismissed candidates. Noted as a risk: §2 makes dismissal
-  load-bearing and permanent, and there is no UI listing dismissed pairs, so a
-  mistaken uncheck is unrecoverable without direct database access. A "Dismissed"
-  view with restore is the natural follow-up.
+- A "Dismissed candidates" view with restore. Dismissal remains permanent and
+  unlisted; the recovery path is instead the contacts-page multi-select merge
+  (§6), which lets a user merge two contacts directly without resurrecting the
+  suggestion. This gives a way to *act* on a mistaken dismissal, not a way to be
+  *reminded* of one — accepted.
 - Automatic or bulk merging without review.
 
 ---
@@ -54,8 +58,14 @@ unrelated rows that must be resolved one at a time.
 
 `Kith.DuplicateDetection.list_clusters(account_id, opts)` loads all `pending` and
 `dismissed` candidates for the account and computes components with union-find in
-memory. Pending pairs are bounded — name matching already caps at 500 rows per
-scan — so a recursive CTE is unnecessary.
+memory.
+
+In-memory is the right call at this scale, but not because pair counts are
+capped — only the name query carries `LIMIT 500`
+(`duplicate_detection_worker.ex:107`); the email, phone and address queries are
+uncapped. The real justification is that pending pairs per account are small in
+practice and the negative-edge check below is awkward to express as a recursive
+CTE.
 
 Pending pairs are positive edges; dismissed pairs are **negative edges** — a
 record that the user already reviewed those two contacts and rejected the match.
@@ -64,19 +74,46 @@ match would silently reappear by transitivity through some third contact.
 
 The build is therefore greedy rather than a plain union of all edges:
 
-1. Sort pending pairs by score, descending.
+1. Sort pending pairs by `{-score, contact_id, duplicate_contact_id}`.
 2. For each pair, union its endpoints **only if** the resulting component would
    contain no dismissed pair.
 3. Skipped pairs stay `pending` and are reconsidered on the next run.
+
+**The sort must be fully deterministic.** Scores come from a small fixed set —
+0.85 email, 0.75 phone, 0.60 address, plus 0.05 per extra signal, rounded to two
+decimals — so ties are the common case, not the exception. Every email-only pair
+scores exactly 0.85. Sorting on score alone leaves the winner to arbitrary row
+order, which makes clustering nondeterministic between runs on identical data and
+makes the F2/F3 tests flaky by construction. The contact ids break the tie.
 
 This yields "closest match wins". Given a dismissed A–D and a new contact E
 matching A at 0.90 and D at 0.60, A–E unions first; D–E is then skipped because
 it would put A and D in one component. The result is `{A, E}`, with D left
 alone — not `{A, D, E}`.
 
+The negative-edge check is O(|C₁|×|C₂|) per candidate edge. Acceptable at this
+scale; noted so it is a known cost rather than a surprise.
+
 A skipped edge is invisible to the user until it resolves itself: once `{A, E}`
 merges, the D–E pair is repointed onto the already-dismissed A–D (§2). This is
 accepted, not fixed.
+
+### Cluster identity
+
+Clusters have no database row, so the route `/contacts/duplicates/cluster/:id`
+takes **any member contact id** and resolves it to the cluster containing that
+contact. The canonical key used for display and generated links is the lowest
+*active* member id.
+
+This makes the stability question moot. The canonical key does shift if a new
+member with a lower id joins the cluster between runs — but because any member id
+resolves, an old bookmark still lands on the right cluster. If the id belongs to
+no pending cluster, the screen renders a synthetic one-member cluster for manual
+merging (§6).
+
+Two tabs holding different derivations both recompute on load and both submit
+against current data; the resolution validation in §2 catches the stale one and
+aborts rather than merging something the user did not see.
 
 ### Trashed members
 
@@ -131,26 +168,39 @@ outcome.
 
 ```elixir
 %{
-  fields: %{first_name: "Sarah", birthdate: ~D[1990-03-02], nickname: :clear, ...},
-  drop:   %{contact_fields: [88, 91], addresses: [], tags: [12]}
+  fields: %{
+    first_name: "Sarah",
+    birthdate: ~D[1990-03-02],
+    nickname: :clear,
+    aliases: ["Sarah K.", "김지영"],
+    gender_id: 2,
+    first_met_through_id: :clear
+  },
+  drop: %{contact_fields: [88, 91], addresses: [], tags: [12]}
 }
 ```
 
 `fields` is complete — every mergeable field, with a concrete value or `:clear`.
-Every value must be held by one of the selected members, or be `:clear`. Every id
-in `drop` must belong to a selected member. Both are validated server-side; a
+Every value must be held by one of the selected members, or be `:clear`. Array
+fields such as `aliases` carry their fully resolved array; they are not
+expressible through `drop`, which is id-based (see §3).
+
+`drop` keys are entity types and values are **owning-record ids** — for `tags`
+the `tag_id`, since `contact_tags` is a bare join table with no Ecto schema.
+Every id must belong to a selected member. Both maps are validated server-side; a
 mismatch aborts the transaction.
 
 `drop` is destructive by design (§4): a dropped record belonging to a loser is
 simply not remapped and rides to trash with its owner, but a dropped record
-belonging to the survivor is deleted outright, with no trash behind it. The audit
-entry therefore records every dropped record with its type, value and original
-owner, so the deletion leaves a trail.
+belonging to the survivor is deleted outright, with no trash behind it.
 
 ### Steps
 
-1. **Validate** — all contacts in `scope.account`, all active (`deleted_at` is
-   nil), survivor not among losers, at least one loser, resolution well-formed.
+1. **Lock and validate** — `SELECT ... FOR UPDATE` on all member rows, then
+   confirm they are in `scope.account`, all active (`deleted_at` is nil),
+   survivor not among losers, at least one loser, resolution well-formed. The
+   lock prevents two users merging overlapping clusters concurrently; the
+   "all active" check alone is not a lock.
 2. **Apply scalars** to the survivor via changeset.
 3. **Remap** every loser's owned records to the survivor.
 4. **Deduplicate** the survivor's multi-valued records.
@@ -163,6 +213,12 @@ owner, so the deletion leaves a trail.
     `display_name` is computed and never merged directly (§3).
 11. **Audit log** — one `:contact_merged` entry naming every loser, the full
     resolution, and every dropped record.
+
+The audit entry records each dropped record's type, value and original owner, so
+a destructive `drop` leaves a trail. Note this writes contact values — emails,
+phone numbers, addresses — into `audit_logs` metadata, where they sit outside the
+contact soft-delete and purge lifecycle and are unbounded in size. Accepted as
+the cost of an auditable destructive action.
 
 ### Entities remapped
 
@@ -203,6 +259,15 @@ existing row keep the strongest status — `merged` over `dismissed` over
 because the unique index on `(account_id, contact_id, duplicate_contact_id)` will
 otherwise reject the rewrite.
 
+**Invariant: a `merged` row always has at least one trashed endpoint.** Rule 1
+only produces `merged` for pairs inside *S*, every non-survivor member of which
+is soft-deleted in step 8; loser-to-loser pairs collapse to self-pairs during
+repointing and are dropped. This matters because neither the clustering in §1 nor
+the worker's existing-pair check considers `merged` rows — so a `merged` row
+between two *active* contacts would be a permanent silent block, never clustered
+and never re-detected. The invariant guarantees none exists. Rows are ultimately
+removed by `on_delete: :delete_all` on both contact FKs when the loser is purged.
+
 The blanket `dismiss_candidates_for_contact/2` call is removed — see Bug 2. Note
 the distinction: that call dismisses pairs the user never looked at, which is the
 bug. These rules dismiss only pairs the user reviewed by unchecking.
@@ -228,12 +293,45 @@ Explicit user choices made before a selection change are **not** retained.
 | 2+ | Conflict. Toggle, defaulting to the value held by the most members, tie-broken by most recently updated. |
 
 Comparison trims whitespace. A resolved field remains user-changeable, including
-an explicit "Leave empty".
+an explicit "Leave empty" — except for non-clearable fields.
+
+**Non-clearable fields.** `first_name` is `validate_required` in both changesets
+(`contact.ex:103`, `contact.ex:140`), so `:clear` on it would abort the
+transaction at step 2 with an error the UI never predicted. The registry derives
+the non-clearable set from the changeset's `validate_required` list rather than
+maintaining it by hand, and §4's segmented control omits "Leave empty" for those
+rows. Today that set is exactly `first_name`.
 
 **Excluded from the registry.** `display_name` is computed from the name fields
 and recomputed asynchronously by `DisplayNameRecomputeWorker`; it is never a
 mergeable field, and the merge enqueues a recompute instead (§2). Also excluded:
 `account_id`, `deleted_at`, and the timestamps.
+
+### Array fields
+
+`aliases` is `{:array, :string}` on `contacts` — its elements have no ids, so it
+cannot be expressed through the id-based `drop` map. It resolves as a **scalar
+array field**: the union of all members' aliases, deduplicated on the string,
+carried in `fields` as a complete array. The UI renders it as a checklist in
+Contact details for consistency, but unchecking edits the submitted array rather
+than adding to `drop`.
+
+### Association ids
+
+`gender_id`, `currency_id` and `first_met_through_id` are `belongs_to` ids and
+follow the scalar rules above, resolving to an id rather than a label. The UI
+renders the associated record's name.
+
+`first_met_through_id` additionally needs a **self-reference clear**. Bug 1 and
+D3 cover *inbound* references — other contacts pointing at a loser. Two outbound
+cases remain:
+
+- the survivor's `first_met_through_id` points at a loser, or
+- a loser's `first_met_through_id` points at the survivor.
+
+After remap either becomes a contact met through itself, which
+`validate_first_met_through_account` does not catch. When the resolved
+`first_met_through_id` is any merged member, it is set to `nil`.
 
 ### Multi-valued data
 
@@ -244,7 +342,6 @@ Unioned, then deduplicated on a per-type key:
 | Contact fields | field type + normalized value |
 | Addresses | `line1` + `postal_code`, case-insensitive, trimmed |
 | Tags | `tag_id` |
-| Aliases | the string |
 
 Dropped duplicates are shown struck through with their source, not hidden.
 
@@ -253,9 +350,12 @@ Dropped duplicates are shown struck through with their source, not hidden.
 Policy is "the most engaged interpretation wins":
 
 - `favorite` — true if any member is favorited.
-- `deceased` — true if any member is marked deceased, taking the earliest
-  `deceased_at`.
-- `is_archived` — false if any member is active.
+- `deceased` — true if any member is marked deceased. `deceased_at` takes the
+  earliest **non-nil** date among members marked deceased; if every such member
+  has a nil date, it stays nil.
+- `is_archived` — false if any member is active. Since the column defaults to
+  false, this means a merge involving any non-archived member un-archives the
+  result. Intended: a contact worth merging is a contact in use.
 
 ### Immich fields
 
@@ -288,7 +388,7 @@ One screen at `/contacts/duplicates/cluster/:id`, replacing the wizard.
 its best linking evidence ("86% · phone"). The primary chip is marked. Unchecking
 dims the chip and recomputes every section below. An **Add contact** search sits
 at the end of the strip for manually merging contacts detection did not link
-(see §6).
+(§6).
 
 **Three folded sections**, each an ordinary disclosure whose header states what it
 holds, what the engine already did, and whether anything needs a decision:
@@ -296,8 +396,9 @@ holds, what the engine already did, and whether anything needs a decision:
 1. **Identity** — every mergeable scalar field as a row, plus the single grouped
    Immich row. Resolved rows show the value plus attribution and are
    click-to-change, opening in place as a segmented control including "Leave
-   empty". Conflicting rows are already segmented controls, tinted and dotted,
-   sitting in their natural schema position rather than lifted to the top.
+   empty" — omitted for non-clearable fields (§3). Conflicting rows are already
+   segmented controls, tinted and dotted, sitting in their natural schema
+   position rather than lifted to the top.
 2. **Contact details** — emails, phones, addresses, tags and aliases as
    checklists of real values with source labels. The list is the flat union;
    unchecking any value excludes it from the merge, including values the survivor
@@ -317,6 +418,12 @@ trash and stay recoverable for 30 days") **and** what happens to the unchecked
 ones ("Sarah J. Kim will be marked as not a duplicate and won't be suggested
 again"). The second half is the consequence a user is most likely to trigger
 without realising.
+
+**When validation aborts** — because another session edited or merged a member
+between render and submit — the screen keeps the user's place rather than
+discarding it: an inline error names what changed ("S. Kim was merged by another
+session"), and a Reload action rebuilds the cluster from current data. Field
+choices are lost on reload, consistent with §3's recompute rule.
 
 The duplicates index at `/contacts/duplicates` lists clusters instead of pairs.
 Each row shows member avatars, the top score, match reasons, and links to the
@@ -353,7 +460,7 @@ pairs the user reviewed by unchecking.
 
 ---
 
-## 6. Compatibility
+## 6. Compatibility and entry points
 
 **REST API.** `POST /api/contacts/merge` currently accepts `survivor_id` and
 `non_survivor_id` and calls `merge_contacts/3` with no field choices. It keeps
@@ -361,10 +468,14 @@ its request shape: the controller calls `MergeResolution.resolve/1` on the two
 contacts and passes the resulting complete map to
 `merge_cluster(scope, survivor_id, [non_survivor_id], resolution)`.
 
-This is a deliberate behaviour improvement for API clients. Today a loser's
-`middle_name` is discarded even when the survivor has none; under the shared
-resolver that gap is filled. A survivor's existing value is never overridden, so
-no client loses data it previously kept.
+Two deliberate behaviour improvements for API clients:
+
+- Today a loser's `middle_name` is discarded even when the survivor has none;
+  under the shared resolver that gap is filled. A survivor's existing value is
+  never overridden, so no client loses data it previously kept.
+- The API merge path writes **no audit entry at all** today
+  (`contact_controller.ex:218` — compare `restore` immediately below it, which
+  does log). Moving audit into the engine fixes that.
 
 `GET /api/duplicates` continues to return pairs. Cluster listing is a LiveView
 concern for now.
@@ -376,18 +487,24 @@ part of this work.
 **Routes.** `/contacts/:id/merge` is removed along with `ContactLive.Merge`, and
 replaced by `/contacts/duplicates/cluster/:id`.
 
-**Manual merge is preserved.** Today the wizard's step 1 lets a user merge any
-two contacts by search, independent of detection. That path must survive. The
-cluster screen therefore accepts either a detected cluster key or a bare contact
-id: when the id belongs to no pending cluster, the screen renders with that one
-contact as its only member and an **Add contact** search — backed by the existing
-`Contacts.search_contacts/2` — that appends members to the strip. Added members
-behave exactly like detected ones: checked by default, contributing to conflict
-computation, removable by unchecking. The "Merge" action on the contact show page
-points here.
+**Manual merge — search.** Today the wizard's step 1 lets a user merge any two
+contacts by search, independent of detection. That path must survive. The cluster
+screen accepts any contact id (§1); when the id belongs to no pending cluster, it
+renders that one contact as its only member with an **Add contact** search —
+backed by the existing `Contacts.search_contacts/2` — that appends members to the
+strip. The "Merge" action on the contact show page points here.
 
-This also means the member strip has two sources — detection and manual addition
-— and the merge itself does not distinguish them.
+**Manual merge — multi-select.** The contacts index gains selection checkboxes
+and a **Merge selected** action that opens the cluster screen pre-populated with
+the chosen contacts. This is the primary path for merging contacts the user
+spotted themselves, and it is also the recovery path for a mistaken dismissal:
+rather than restoring a dismissed suggestion, the user selects both contacts and
+merges them directly. An explicit selection overrides any dismissed pair between
+the members, and after the merge that pair resolves to `merged` like any other.
+
+Members added by search or selection behave exactly like detected ones: checked
+by default, contributing to conflict computation, removable by unchecking. The
+merge itself does not distinguish their origin.
 
 ---
 
@@ -397,9 +514,14 @@ This also means the member strip has two sources — detection and manual additi
 
 - 0 / 1 / 2+ distinct values produce empty, resolved and conflict states.
 - Conflict default is the most-held value; ties break by most recently updated.
-- Boolean policy: `favorite`, `deceased` + earliest `deceased_at`, `is_archived`.
+- Boolean policy: `favorite`; `deceased` with earliest non-nil `deceased_at` and
+  the all-nil case; `is_archived`.
+- `aliases` resolves to a deduplicated union array.
+- `gender_id`, `currency_id` resolve as ids; `first_met_through_id` pointing at
+  any merged member resolves to `nil`.
 - Immich fields resolve as a unit under each branch of the default rule.
-- `display_name` never appears in the resolved map.
+- `display_name` never appears in the resolved map; `first_name` is reported
+  non-clearable.
 
 **Engine** (`test/kith/contacts_merge_test.exs`, extended):
 
@@ -409,14 +531,21 @@ This also means the member strip has two sources — detection and manual additi
 - `drop` excludes loser-owned records and deletes survivor-owned ones; both are
   recorded in the audit entry.
 - Invalid `drop` ids, and scalar values held by no selected member, abort.
+- `:clear` on `first_name` is rejected before the changeset runs.
 - `last_talked_to` takes the maximum across members.
 - A `DisplayNameRecomputeWorker` job is enqueued for the survivor.
 - Cross-account members are rejected; trashed members are rejected.
-- Inbound `first_met_through` references are repointed.
+- Inbound `first_met_through` references are repointed; outbound self-references
+  are cleared.
+- Every `merged` row produced has at least one trashed endpoint.
 
 **Clusters** (`test/kith/duplicate_detection_test.exs`, extended):
 
 - Transitive pairs form one cluster; disjoint pairs stay separate.
+- Tied scores cluster deterministically — the same input produces the same
+  components across repeated runs and across insertion orders.
+- Any member contact id resolves to its cluster; the canonical key is the lowest
+  active member id.
 - Members trashed outside the merge flow are excluded, and clusters left with
   fewer than two members are dropped.
 - Pair resolution after merge and after "Not duplicates", for all three rows of
@@ -448,13 +577,19 @@ This also means the member strip has two sources — detection and manual additi
 
 - Conflicts render as toggles; resolved fields render with attribution.
 - A section with a conflict renders open; a fully resolved one renders folded.
+- Non-clearable fields render without a "Leave empty" option.
 - Unchecking a member recomputes conflicts and counts, and discards any explicit
   field choices.
 - Merge submits the resolved payload and redirects to the survivor.
 - "Not duplicates" dismisses the clique over the checked members and leaves
   unchecked-to-unchecked pairs pending.
+- A member merged by another session between render and submit produces an inline
+  error naming it, with a Reload action, rather than a silent partial merge.
 - A bare contact id with no pending cluster renders a one-member screen, and
   adding a contact by search appends it to the strip.
+- Selecting contacts on the index and choosing Merge selected opens the cluster
+  screen pre-populated.
+- A `viewer` is refused both the screen and the submit.
 
 ---
 
@@ -485,12 +620,20 @@ Given a member of a pending cluster is trashed from the contacts page, when I
 open the duplicates page, then that member is not shown, and if the cluster is
 left with one member it is not listed at all.
 
+**A5 — Clustering is stable.** *(§1)*
+Given several pairs sharing the same score, when detection runs repeatedly over
+unchanged data, then the same clusters are produced every time.
+
+**A6 — Any member's URL opens the cluster.** *(§1)*
+Given a cluster of four, when I open the cluster URL for any one of its members,
+then I see the whole cluster.
+
 ### B. Reviewing the merge
 
 **B1 — Every field is visible.** *(§4)*
 Given a cluster, when I open it, then every mergeable scalar field is present —
-including `middle_name`, `aliases`, `gender`, the `first_met_*` group and the
-flags — not the eight the old wizard exposed.
+including `middle_name`, `aliases`, gender, the first-met group and the flags —
+not the eight the old wizard exposed.
 
 **B2 — Agreement resolves itself.** *(§3)*
 Given three members that all have the first name "Sarah", when I open the
@@ -515,17 +658,21 @@ details section is folded and marked as having nothing to decide.
 Given a field the engine resolved on its own, when I click its value, then it
 opens in place as a choice between the candidate values and "Leave empty".
 
-**B7 — Multi-valued data is combined and prunable.** *(§3)*
+**B7 — Required fields cannot be emptied.** *(§3, §4)*
+Given the First name row, when I open it, then no "Leave empty" option is
+offered, and a submitted `:clear` is rejected.
+
+**B8 — Multi-valued data is combined and prunable.** *(§3)*
 Given members holding four distinct emails and one repeated email, when I expand
 Contact details, then I see the four with their sources, the repeat struck
 through as a dropped duplicate, and a checkbox on each so I can exclude one —
 including values the survivor already owns.
 
-**B8 — History is summarised, not detailed.** *(§3, §4)*
+**B9 — History is summarised, not detailed.** *(§3, §4)*
 Given members with notes, activities, calls and gifts, when I open the cluster,
 then the Carried over section reports counts per type and asks me nothing.
 
-**B9 — Immich links are one choice, not four fields.** *(§3)*
+**B10 — Immich links are one choice, not four fields.** *(§3)*
 Given two members linked to different Immich people, when I open the cluster,
 then I see one row listing each linked member by name and last sync date, not
 four rows of opaque identifiers.
@@ -570,25 +717,34 @@ and reminder instances, when I merge, then all of them appear on the survivor.
 Given another contact whose `first_met_through` points at a loser, when I merge,
 then that reference points at the survivor.
 
-**D4 — Duplicated sub-records collapse.** *(§2, §3)*
+**D4 — No contact is met through itself.** *(§3)*
+Given the survivor was first met through one of the losers, when I merge, then
+the survivor's first-met-through is cleared rather than pointing at itself.
+
+**D5 — Duplicated sub-records collapse.** *(§2, §3)*
 Given two members share an email address and a tag, when I merge, then the
 survivor has one of each.
 
-**D5 — Excluded values are not carried.** *(§2)*
+**D6 — Excluded values are not carried.** *(§2)*
 Given I unchecked an address in Contact details, when I merge, then that address
 is not on the survivor, and the audit entry records what was dropped and who
 owned it.
 
-**D6 — The merge is atomic.** *(§2)*
+**D7 — The merge is atomic.** *(§2)*
 Given any step fails, when I merge, then nothing is changed and I am told the
 merge failed.
 
-**D7 — Tampering is rejected.** *(§2)*
+**D8 — Tampering is rejected.** *(§2)*
 Given a submitted scalar value that no selected member holds, or a dropped record
 id belonging to no selected member, when the merge is submitted, then it is
 rejected server-side.
 
-**D8 — The display name is recomputed.** *(§2, §3)*
+**D9 — Concurrent merges do not interleave.** *(§2, §4)*
+Given another session merges one of my members while I have the screen open, when
+I submit, then my merge aborts with an inline error naming what changed and a
+Reload action — not a partial merge.
+
+**D10 — The display name is recomputed.** *(§2, §3)*
 Given a merge that changes the survivor's name fields, when it completes, then a
 `DisplayNameRecomputeWorker` job is enqueued for the survivor.
 
@@ -602,6 +758,15 @@ search.
 **E2 — A manually added member behaves like a detected one.** *(§6)*
 Given I add a contact by search, when it joins the strip, then it is checked,
 contributes to conflicts and counts, and can be unchecked.
+
+**E3 — Merging from the contacts list.** *(§6)*
+Given I select three contacts on the contacts page, when I choose Merge selected,
+then the cluster screen opens with those three as its members.
+
+**E4 — Merging past a dismissal.** *(§6)*
+Given I previously dismissed A and D as not duplicates and later realise they are
+the same person, when I select both on the contacts page and merge, then the
+merge proceeds and the dismissed pair resolves to `merged`.
 
 ### F. After the merge
 
@@ -640,28 +805,58 @@ not return.
 **G1 — The existing API keeps working, and improves.** *(§6)*
 Given a client posting `survivor_id` and `non_survivor_id` to
 `/api/contacts/merge`, when it is called, then the merge succeeds, the survivor
-gains any field it had no value for, no existing survivor value is overridden,
-and the survivor is returned.
+gains any field it had no value for, no existing survivor value is overridden, an
+audit entry is written, and the survivor is returned.
 
 **G2 — Permissions are enforced.** *(§2)*
-Given a user without contact update permission, when they attempt to open or
-submit a cluster merge, then it is refused.
+Given a `viewer`, when they attempt to open or submit a cluster merge, then it is
+refused by `Kith.Policy`.
 
 **G3 — Account isolation holds.** *(§2)*
 Given contact ids from another account, when a merge is submitted, then it is
 rejected.
 
-### Suggested slicing
+---
 
-Four vertical slices, each independently shippable and testable:
+## 9. Review disposition
 
-1. **Resolution and engine** — `MergeResolution`, `merge_cluster/4`, the expanded
-   remap list, pair resolution and repointing. Covers D1–D8, F4, G1–G3, Bug 1,
-   Bug 2. No UI change; the existing wizard and API adapt to the new functions.
-2. **Clusters** — `list_clusters/2`, negative-edge building, trashed-member
-   filtering, cluster listing on the duplicates page. Covers A1–A4, F1–F3,
-   F5–F6.
-3. **Screen** — the cluster merge LiveView, conflict rendering, sections, Immich
-   row. Covers B1–B9, C1–C5.
-4. **Manual merge and cleanup** — Add contact search, route changes, deleting
-   `ContactLive.Merge` and the dead `ContactLive.Duplicates`. Covers E1–E2.
+All findings from `2026-08-17-duplicate-merge-revamp-review.md` are folded in
+except one.
+
+**Concern 8 — "G2 is an acceptance criterion for a feature that does not exist" —
+is rejected.** The claim is that no authorization enforcement exists. It does:
+`Kith.Policy` (`lib/kith/policy.ex`) is a complete role-based module — `admin`
+full access, `editor` CRUD minus account and user management, `viewer`
+read-only — exposing `can?/3`, an `authorize!/3` that raises, and a
+`Plug.Exception` implementation mapping to 403. It is called in 122 places across
+`lib/`, including `contact_controller.ex:102` for contact updates and
+`merge.ex:32` in the very LiveView being replaced. A `viewer` is already denied
+`:update, :contact`, so merge is gated today. G2 costs one `Policy.can?/3` call
+and stays in scope.
+
+The review's other correction to §1 is accepted and applied: the claim that
+pending pairs are bounded by 500 was wrong — only the name query carries that
+limit.
+
+### Slicing
+
+The review's restructure is adopted; the original four slices were not
+independently shippable. Slice 1 assumed the existing wizard could adapt to the
+new engine, but the wizard passes a two-contact chooser
+(`%{"first_name" => "survivor"}`), not a resolution map — real work that a later
+slice deletes. Slice 2 shipped a cluster list linking to a screen that did not
+exist yet.
+
+1. **Engine, resolver and bug fixes.** `MergeResolution`, `merge_cluster/4`, the
+   expanded remap list, pair resolution, repointing, locking. API adapted. The
+   wizard left calling a thin `merge_contacts/3` shim over the new engine, so no
+   wizard rework is done and then thrown away.
+   Covers D1–D10, F4, G1, G3, Bug 1, Bug 2.
+2. **Clusters and screen, together.** `list_clusters/2`, negative-edge building,
+   deterministic ordering, trashed-member filtering, the index flip and the
+   cluster LiveView in one deploy.
+   Covers A1–A6, B1–B10, C1–C5, F1–F3, F5–F6, G2.
+3. **Manual merge and cleanup.** Add-contact search, contacts-index multi-select
+   with Merge selected, route changes, deleting `ContactLive.Merge` and the dead
+   `ContactLive.Duplicates`.
+   Covers E1–E4.
