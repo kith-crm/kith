@@ -11,8 +11,10 @@ defmodule Kith.Contacts.Merge do
   import Ecto.Query, warn: false
 
   alias Ecto.Multi
-  alias Kith.Contacts.{Contact, MergeFields}
+  alias Kith.AuditLogs
+  alias Kith.Contacts.{Address, Contact, ContactField, MergeFields}
   alias Kith.Repo
+  alias Kith.Workers.DisplayNameRecomputeWorker
 
   # Policy and array fields are computed rather than picked from a member, so
   # `held_by_member?/3` accepts any value for them without a match. Mirrors
@@ -42,23 +44,39 @@ defmodule Kith.Contacts.Merge do
     Kith.Contacts.ImmichCandidate
   ]
 
+  # Which schema backs each key of `resolution.drop`. Tags are the exception:
+  # `contact_tags` is a bare join table, so its ids are tag ids.
+  @drop_schemas %{
+    contact_fields: ContactField,
+    addresses: Address
+  }
+
   @doc """
   Merges `loser_ids` into `survivor_id` inside one transaction.
 
   `resolution` is `%{fields: %{atom => value | :clear}, drop: %{atom => [id]}}`.
 
+  `scope.user` is used as the actor recorded on the merge's audit entry.
+
   Returns `{:ok, contact}` or `{:error, reason}`, where `reason` is one of
   `:not_found`, `:trashed`, `:different_accounts`, `:survivor_in_losers`,
-  `:no_losers`, `{:unknown_value, field}`, `{:not_clearable, field}`, or
-  `{:invalid_fields, changeset}` if the resolved values fail changeset
-  validation on the survivor.
+  `:no_losers`, `{:unknown_value, field}`, `{:not_clearable, field}`,
+  `{:unknown_drop, key}`, or `{:invalid_fields, changeset}` if the resolved
+  values fail changeset validation on the survivor.
   """
   def run(scope, survivor_id, loser_ids, resolution) do
     Repo.transaction(fn ->
       with {:ok, members} <- lock_and_load(scope, survivor_id, loser_ids),
            survivor = Enum.find(members, &(&1.id == survivor_id)),
-           :ok <- validate_fields(members, resolution) do
+           :ok <- validate_fields(members, resolution),
+           :ok <- validate_drop(members, resolution) do
         losers = Enum.reject(members, &(&1.id == survivor_id))
+
+        # Captured now, before `:remap_owned` reassigns contact_fields and
+        # addresses from losers to the survivor — read any later than this
+        # and every dropped row's owner_id would read back as the survivor
+        # regardless of which member actually held it.
+        dropped_records = describe_dropped(Repo, resolution)
 
         Multi.new()
         |> Multi.run(:survivor, fn _repo, _changes ->
@@ -217,6 +235,52 @@ defmodule Kith.Contacts.Merge do
           loser_ids = Enum.map(losers, & &1.id)
           remap_relationships(repo, survivor.id, loser_ids)
         end)
+        |> Multi.run(:apply_drop, fn repo, _changes ->
+          Enum.each(resolution.drop || %{}, fn
+            {_key, []} ->
+              :ok
+
+            {:tags, tag_ids} ->
+              repo.delete_all(
+                from(ct in "contact_tags",
+                  where: ct.contact_id == ^survivor.id and ct.tag_id in ^tag_ids
+                )
+              )
+
+            {key, ids} ->
+              schema = Map.fetch!(@drop_schemas, key)
+              repo.delete_all(from(r in schema, where: r.id in ^ids))
+          end)
+
+          {:ok, :done}
+        end)
+        |> Multi.run(:last_talked_to, fn repo, %{survivor: survivor} ->
+          latest =
+            members
+            |> Enum.map(& &1.last_talked_to)
+            |> Enum.reject(&is_nil/1)
+            |> case do
+              [] -> nil
+              dates -> Enum.max(dates, DateTime)
+            end
+
+          if latest && latest != survivor.last_talked_to do
+            survivor |> Ecto.Changeset.change(%{last_talked_to: latest}) |> repo.update()
+          else
+            {:ok, survivor}
+          end
+        end)
+        |> Multi.run(:cancel_jobs, fn _repo, _changes ->
+          # Runs after the remap steps, not before: cancel_all_for_contact/2
+          # only cancels the Oban jobs of reminders currently owned by the
+          # given contact. By this point every loser's reminders have already
+          # moved to the survivor, so this step finds nothing on the losers —
+          # that's the correct outcome. Running it earlier would cancel jobs
+          # for reminders about to legitimately become the survivor's,
+          # silently killing live reminders.
+          Enum.each(losers, &Kith.Reminders.cancel_all_for_contact(&1.id, scope.account.id))
+          {:ok, :done}
+        end)
         |> Multi.run(:soft_delete_losers, fn repo, _changes ->
           now = DateTime.utc_now(:second)
           ids = Enum.map(losers, & &1.id)
@@ -226,9 +290,28 @@ defmodule Kith.Contacts.Merge do
 
           {:ok, count}
         end)
+        |> Multi.run(:recompute_display_name, fn _repo, _changes ->
+          %{contact_id: survivor.id}
+          |> DisplayNameRecomputeWorker.new()
+          |> Oban.insert()
+        end)
+        |> Multi.run(:audit, fn _repo, changes ->
+          survivor = changes.last_talked_to
+
+          AuditLogs.log_event(scope.account.id, scope.user, :contact_merged,
+            contact_id: survivor.id,
+            contact_name: survivor.display_name,
+            metadata: %{
+              survivor_id: survivor.id,
+              loser_ids: Enum.map(losers, & &1.id),
+              fields: inspect_fields(resolution),
+              dropped: dropped_records
+            }
+          )
+        end)
         |> Repo.transaction()
         |> case do
-          {:ok, changes} -> changes.survivor
+          {:ok, %{last_talked_to: survivor}} -> survivor
           {:error, _step, reason, _changes} -> Repo.rollback(reason)
         end
       else
@@ -405,6 +488,66 @@ defmodule Kith.Contacts.Merge do
     )
 
     {:ok, :done}
+  end
+
+  defp validate_drop(members, %{drop: drop}) when is_map(drop) do
+    member_ids = Enum.map(members, & &1.id)
+
+    Enum.reduce_while(drop, :ok, fn
+      {_key, []}, :ok ->
+        {:cont, :ok}
+
+      {:tags, _ids}, :ok ->
+        {:cont, :ok}
+
+      {key, ids}, :ok ->
+        schema = Map.fetch!(@drop_schemas, key)
+
+        owned =
+          from(r in schema, where: r.id in ^ids and r.contact_id in ^member_ids, select: r.id)
+          |> Repo.all()
+
+        if Enum.sort(owned) == Enum.sort(ids) do
+          {:cont, :ok}
+        else
+          {:halt, {:error, {:unknown_drop, key}}}
+        end
+    end)
+  end
+
+  defp validate_drop(_members, _resolution), do: :ok
+
+  # Captured before deletion so the audit trail survives the rows it describes.
+  defp describe_dropped(repo, %{drop: drop}) when is_map(drop) do
+    Enum.flat_map(drop, fn
+      {_key, []} ->
+        []
+
+      {:tags, ids} ->
+        Enum.map(ids, &%{type: "tags", value: to_string(&1), owner_id: nil})
+
+      {:addresses, ids} ->
+        from(a in Address, where: a.id in ^ids, select: {a.line1, a.contact_id})
+        |> repo.all()
+        |> Enum.map(fn {line1, owner_id} ->
+          %{type: "addresses", value: line1, owner_id: owner_id}
+        end)
+
+      {key, ids} ->
+        schema = Map.fetch!(@drop_schemas, key)
+
+        from(r in schema, where: r.id in ^ids, select: {r.value, r.contact_id})
+        |> repo.all()
+        |> Enum.map(fn {value, owner_id} ->
+          %{type: to_string(key), value: value, owner_id: owner_id}
+        end)
+    end)
+  end
+
+  defp describe_dropped(_repo, _resolution), do: []
+
+  defp inspect_fields(%{fields: fields}) do
+    Map.new(fields, fn {field, value} -> {to_string(field), inspect(value)} end)
   end
 
   defp apply_fields(survivor, %{fields: fields}) do

@@ -1,5 +1,6 @@
 defmodule Kith.Contacts.MergeTest do
   use Kith.DataCase
+  use Oban.Testing, repo: Kith.Repo
 
   alias Kith.Contacts
   alias Kith.ContactsFixtures
@@ -1168,6 +1169,154 @@ defmodule Kith.Contacts.MergeTest do
                ),
                :count
              ) == 1
+    end
+  end
+
+  describe "merge_cluster/4 side effects" do
+    setup ctx do
+      scope = Kith.Accounts.Scope.for_user(ctx.user)
+
+      email_type =
+        Repo.one!(
+          from(t in Kith.Contacts.ContactFieldType, where: like(t.protocol, "mailto%"), limit: 1)
+        )
+
+      %{scope: scope, email_type: email_type}
+    end
+
+    test "dropped records are removed and recorded in the audit entry", ctx do
+      keep =
+        Kith.ContactsFixtures.contact_field_fixture(ctx.contact_a, ctx.email_type.id, %{
+          "value" => "keep@example.com"
+        })
+
+      drop =
+        Kith.ContactsFixtures.contact_field_fixture(ctx.contact_b, ctx.email_type.id, %{
+          "value" => "drop@example.com"
+        })
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{contact_fields: [drop.id]}
+        })
+
+      Oban.drain_queue(queue: :default)
+
+      values =
+        from(f in Kith.Contacts.ContactField,
+          where: f.contact_id == ^survivor.id,
+          select: f.value
+        )
+        |> Repo.all()
+
+      assert values == ["keep@example.com"]
+      assert Repo.get(Kith.Contacts.ContactField, keep.id)
+      refute Repo.get(Kith.Contacts.ContactField, drop.id)
+
+      log =
+        Repo.one!(
+          from(l in Kith.AuditLogs.AuditLog,
+            where: l.event == "contact_merged",
+            order_by: [desc: l.id],
+            limit: 1
+          )
+        )
+
+      assert [dropped] = log.metadata["dropped"]
+      assert dropped["type"] == "contact_fields"
+      assert dropped["value"] == "drop@example.com"
+      assert dropped["owner_id"] == ctx.contact_b.id
+    end
+
+    test "rejects a dropped id belonging to no member", ctx do
+      stranger =
+        Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Zed"})
+
+      field =
+        Kith.ContactsFixtures.contact_field_fixture(stranger, ctx.email_type.id, %{
+          "value" => "zed@example.com"
+        })
+
+      assert {:error, {:unknown_drop, :contact_fields}} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{},
+                 drop: %{contact_fields: [field.id]}
+               })
+    end
+
+    test "last_talked_to takes the maximum across members", ctx do
+      older = ~U[2025-01-01 00:00:00Z]
+      newer = ~U[2026-06-01 00:00:00Z]
+
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [last_talked_to: older]
+      )
+
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [last_talked_to: newer]
+      )
+
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      assert DateTime.compare(survivor.last_talked_to, newer) == :eq
+    end
+
+    test "enqueues a display name recompute for the survivor", ctx do
+      {:ok, survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      assert_enqueued(
+        worker: Kith.Workers.DisplayNameRecomputeWorker,
+        args: %{contact_id: survivor.id}
+      )
+    end
+
+    test "a rejected merge changes nothing at all", ctx do
+      Kith.ContactsFixtures.note_fixture(ctx.contact_b, ctx.user.id)
+
+      assert {:error, {:unknown_value, :company}} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{company: "Never Corp"},
+                 drop: %{}
+               })
+
+      assert Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id).deleted_at == nil
+
+      assert Repo.aggregate(
+               from(n in Kith.Contacts.Note, where: n.contact_id == ^ctx.contact_b.id),
+               :count
+             ) == 1
+
+      assert Repo.aggregate(
+               from(l in Kith.AuditLogs.AuditLog, where: l.event == "contact_merged"),
+               :count
+             ) == 0
+    end
+
+    test "writes one audit entry naming every loser", ctx do
+      c = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Alice"})
+
+      {:ok, _survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id, c.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      Oban.drain_queue(queue: :default)
+
+      logs =
+        from(l in Kith.AuditLogs.AuditLog, where: l.event == "contact_merged") |> Repo.all()
+
+      assert length(logs) == 1
+      assert Enum.sort(hd(logs).metadata["loser_ids"]) == Enum.sort([ctx.contact_b.id, c.id])
     end
   end
 end
