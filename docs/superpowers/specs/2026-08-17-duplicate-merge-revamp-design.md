@@ -209,8 +209,24 @@ belonging to the survivor is deleted outright, with no trash behind it.
 7. **Cancel Oban jobs** for losers' reminders.
 8. **Soft-delete** losers.
 9. **Resolve candidate pairs** (below).
-10. **Enqueue** a `DisplayNameRecomputeWorker` job for the survivor, since
-    `display_name` is computed and never merged directly (§3).
+10. ~~**Enqueue** a `DisplayNameRecomputeWorker` job for the survivor, since
+    `display_name` is computed and never merged directly (§3).~~
+    **Amended 2026-08-18 during slice 1 (ruling R15) — no job is enqueued.** This
+    step rested on a false premise about that worker. `DisplayNameRecomputeWorker`
+    is account-wide: its only `perform/1` clause matches
+    `%{"account_id" => _, "display_name_format" => _}` and it exists to rewrite
+    every contact in an account after a user changes their `display_name_format`
+    preference (`lib/kith/accounts.ex`, `update_user_profile/2`). A job enqueued
+    as `%{contact_id: survivor.id}` can never match it — it fails all three
+    attempts on every merge, leaving a discarded job and error-channel noise —
+    and its `unique: [keys: [:account_id]]` declaration makes two merges within
+    60 seconds collide, so the enqueue is not even reliably present.
+    None of it is needed: `Contact.update_changeset/2` recomputes `display_name`
+    synchronously via `compute_display_name/1`, and step 2 applies the scalars
+    through exactly that changeset, so the survivor's display name is already
+    correct when the transaction commits. Adding a per-contact clause to the
+    worker was considered and rejected: that worker formats from first/last only,
+    so it would strip the middle name the changeset had just included.
 11. **Audit log** — one `:contact_merged` entry naming every loser, the full
     resolution, and every dropped record.
 
@@ -745,8 +761,13 @@ I submit, then my merge aborts with an inline error naming what changed and a
 Reload action — not a partial merge.
 
 **D10 — The display name is recomputed.** *(§2, §3)*
-Given a merge that changes the survivor's name fields, when it completes, then a
-`DisplayNameRecomputeWorker` job is enqueued for the survivor.
+Given a merge that changes the survivor's name fields, when it completes, then the
+survivor's `display_name` reflects those fields.
+*Amended 2026-08-18 (ruling R15): originally "then a `DisplayNameRecomputeWorker`
+job is enqueued for the survivor". That worker is account-wide and cannot act on a
+single contact — see §2 step 10. The merge's own changeset recomputes
+`display_name` synchronously, so the criterion is now asserted on the result
+rather than on an enqueued job.*
 
 ### E. Manual merge
 
