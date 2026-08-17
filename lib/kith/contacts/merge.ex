@@ -366,16 +366,20 @@ defmodule Kith.Contacts.Merge do
         |> Multi.run(:audit, fn _repo, changes ->
           survivor = changes.last_talked_to
 
-          AuditLogs.log_event(scope.account.id, scope.user, :contact_merged,
-            contact_id: survivor.id,
-            contact_name: survivor.display_name,
-            metadata: %{
-              survivor_id: survivor.id,
-              loser_ids: Enum.map(losers, & &1.id),
-              fields: inspect_fields(resolution),
-              dropped: dropped_records
-            }
-          )
+          if scope.user do
+            AuditLogs.log_event(scope.account.id, scope.user, :contact_merged,
+              contact_id: survivor.id,
+              contact_name: survivor.display_name,
+              metadata: %{
+                survivor_id: survivor.id,
+                loser_ids: Enum.map(losers, & &1.id),
+                fields: inspect_fields(resolution),
+                dropped: dropped_records
+              }
+            )
+          else
+            {:ok, :skipped}
+          end
         end)
         |> Repo.transaction()
         |> case do

@@ -9,7 +9,7 @@ defmodule KithWeb.API.ContactController do
   use KithWeb, :controller
 
   alias Kith.{Contacts, Policy}
-  alias Kith.Contacts.Contact
+  alias Kith.Contacts.{Contact, MergeResolution}
   alias Kith.Scope, as: TenantScope
   alias KithWeb.API.{ContactJSON, ErrorJSON, Includes, Pagination}
 
@@ -223,9 +223,13 @@ defmodule KithWeb.API.ContactController do
     with true <- Policy.can?(user, :update, :contact),
          :ok <- validate_merge_ids(survivor_id, non_survivor_id),
          survivor when not is_nil(survivor) <- Contacts.get_contact(account_id, survivor_id),
-         non_survivor when not is_nil(non_survivor) <-
-           Contacts.get_contact(account_id, non_survivor_id),
-         {:ok, merged} <- Contacts.merge_contacts(survivor.id, non_survivor.id) do
+         loser when not is_nil(loser) <- Contacts.get_contact(account_id, non_survivor_id),
+         resolution = MergeResolution.resolve([survivor, loser], survivor.id),
+         {:ok, merged} <-
+           Contacts.merge_cluster(scope, survivor.id, [loser.id], %{
+             fields: resolution.fields,
+             drop: %{}
+           }) do
       json(conn, %{data: ContactJSON.data(merged)})
     else
       false -> {:error, :forbidden}

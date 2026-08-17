@@ -25,4 +25,12 @@ defmodule Kith.Accounts.Scope do
   end
 
   def for_user(nil), do: nil
+
+  @doc """
+  Builds a scope for background and adapter callers that have an account id but
+  no user. `user` is nil, so callers needing an audit actor must supply one.
+  """
+  def for_account_id(account_id) do
+    %__MODULE__{user: nil, account: Kith.Repo.get!(Kith.Accounts.Account, account_id)}
+  end
 end

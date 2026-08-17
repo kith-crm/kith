@@ -22,6 +22,8 @@ defmodule Kith.Contacts do
     ImmichCandidate,
     LifeEventType,
     Merge,
+    MergeFields,
+    MergeResolution,
     Note,
     PhoneFormatter,
     Photo,
@@ -1705,194 +1707,59 @@ defmodule Kith.Contacts do
   end
 
   @doc """
-  Merges two contacts. The survivor keeps chosen field values and receives
-  all sub-entities from the non-survivor. The non-survivor is soft-deleted.
+  Merges `non_survivor_id` into `survivor_id`.
 
-  `field_choices` is a map of `%{"field_name" => "survivor" | "non_survivor"}`
-  indicating which contact's value to keep for each identity field.
-
-  Both contacts must belong to the same account.
-
-  Returns `{:ok, %{survivor: contact}}` or `{:error, step, changeset, changes}`.
+  Retained for the existing wizard and REST API. `field_choices` uses the old
+  `%{"field" => "survivor" | "non_survivor"}` shape; everything not named is
+  resolved by `Kith.Contacts.MergeResolution`, then any field where the
+  survivor already holds a value is reset back to that value — a survivor's
+  existing value is never overridden by the resolver's pick, only gap-filled
+  when the survivor has none — before `field_choices` overrides are applied
+  on top.
   """
   def merge_contacts(survivor_id, non_survivor_id, field_choices \\ %{}) do
-    alias Kith.Activities.{Call, LifeEvent}
-
     with {:ok, survivor} <- fetch_active_contact(survivor_id),
          {:ok, non_survivor} <- fetch_active_contact(non_survivor_id),
          :ok <- validate_merge(survivor, non_survivor) do
-      account_id = survivor.account_id
+      scope = Kith.Accounts.Scope.for_account_id(survivor.account_id)
+      resolution = MergeResolution.resolve([survivor, non_survivor], survivor.id)
 
-      Ecto.Multi.new()
-      # (a) Update survivor identity fields
-      |> Ecto.Multi.run(:update_survivor_fields, fn _repo, _changes ->
-        update_survivor_fields(survivor, non_survivor, field_choices)
-      end)
-      # (b) Remap notes
-      |> Ecto.Multi.update_all(
-        :remap_notes,
-        fn _changes ->
-          from(n in Note, where: n.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # Remap activity_contacts
-      |> Ecto.Multi.run(:remap_activity_contacts, fn repo, _changes ->
-        # Delete activity_contacts that would create duplicates
-        repo.query(
-          "DELETE FROM activity_contacts WHERE contact_id = $1 AND activity_id IN (SELECT activity_id FROM activity_contacts WHERE contact_id = $2)",
-          [non_survivor.id, survivor.id]
-        )
+      fields =
+        resolution.fields
+        |> keep_survivor_values(survivor)
+        |> apply_legacy_choices(survivor, non_survivor, field_choices)
 
-        repo.update_all(
-          from(ac in "activity_contacts", where: ac.contact_id == ^non_survivor.id),
-          set: [contact_id: survivor.id]
-        )
-
-        {:ok, :done}
-      end)
-      # Remap calls
-      |> Ecto.Multi.update_all(
-        :remap_calls,
-        fn _changes ->
-          from(c in Call, where: c.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # Remap life_events
-      |> Ecto.Multi.update_all(
-        :remap_life_events,
-        fn _changes ->
-          from(le in LifeEvent, where: le.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # Remap documents
-      |> Ecto.Multi.update_all(
-        :remap_documents,
-        fn _changes ->
-          from(d in Document, where: d.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # Remap photos (delete duplicates by content_hash first, then move remaining)
-      |> Ecto.Multi.run(:remap_photos, fn repo, _changes ->
-        # Delete photos from non-survivor that already exist on survivor (same content_hash)
-        repo.query(
-          """
-          DELETE FROM photos
-          WHERE contact_id = $1
-            AND content_hash IS NOT NULL
-            AND content_hash IN (
-              SELECT content_hash FROM photos WHERE contact_id = $2 AND content_hash IS NOT NULL
-            )
-          """,
-          [non_survivor.id, survivor.id]
-        )
-
-        # Move remaining photos
-        {count, _} =
-          from(p in Photo, where: p.contact_id == ^non_survivor.id)
-          |> repo.update_all(set: [contact_id: survivor.id])
-
-        {:ok, count}
-      end)
-      # Remap addresses
-      |> Ecto.Multi.update_all(
-        :remap_addresses,
-        fn _changes ->
-          from(a in Address, where: a.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # Remap contact_fields (then deduplicate)
-      |> Ecto.Multi.run(:remap_contact_fields, fn repo, _changes ->
-        # Move all contact fields
-        repo.update_all(
-          from(cf in ContactField, where: cf.contact_id == ^non_survivor.id),
-          set: [contact_id: survivor.id]
-        )
-
-        # Deduplicate: remove exact dupes (same type + same value)
-        repo.query(
-          """
-          DELETE FROM contact_fields
-          WHERE id IN (
-            SELECT cf.id FROM contact_fields cf
-            WHERE cf.contact_id = $1
-            AND EXISTS (
-              SELECT 1 FROM contact_fields cf2
-              WHERE cf2.contact_id = $1
-              AND cf2.contact_field_type_id = cf.contact_field_type_id
-              AND cf2.value = cf.value
-              AND cf2.id < cf.id
-            )
-          )
-          """,
-          [survivor.id]
-        )
-
-        {:ok, :done}
-      end)
-      # Remap contact_tags (handle duplicates)
-      |> Ecto.Multi.run(:remap_contact_tags, fn repo, _changes ->
-        # Delete tags that already exist on survivor
-        repo.query(
-          "DELETE FROM contact_tags WHERE contact_id = $1 AND tag_id IN (SELECT tag_id FROM contact_tags WHERE contact_id = $2)",
-          [non_survivor.id, survivor.id]
-        )
-
-        # Move remaining tags
-        repo.update_all(
-          from(ct in "contact_tags", where: ct.contact_id == ^non_survivor.id),
-          set: [contact_id: survivor.id]
-        )
-
-        {:ok, :done}
-      end)
-      # Remap reminders
-      |> Ecto.Multi.update_all(
-        :remap_reminders,
-        fn _changes ->
-          from(r in Kith.Reminders.Reminder, where: r.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # (c) Remap relationships
-      |> Ecto.Multi.run(:remap_relationships, fn repo, _changes ->
-        remap_relationships(repo, survivor, non_survivor)
-      end)
-      # (d) Cancel Oban jobs for non-survivor reminders
-      |> Ecto.Multi.run(:cancel_oban_jobs, fn _repo, _changes ->
-        Kith.Reminders.cancel_all_for_contact(non_survivor.id, account_id)
-      end)
-      # (f) Update survivor's last_talked_to
-      |> Ecto.Multi.run(:update_last_talked_to, fn repo, _changes ->
-        merge_last_talked_to(repo, survivor, non_survivor)
-      end)
-      # (e) Soft-delete non-survivor
-      |> Ecto.Multi.run(:soft_delete_non_survivor, fn repo, _changes ->
-        non_survivor
-        |> Ecto.Changeset.change(%{deleted_at: DateTime.utc_now(:second)})
-        |> repo.update()
-      end)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{update_survivor_fields: survivor}} -> {:ok, survivor}
-        {:error, step, reason, _changes} -> {:error, {step, reason}}
-      end
+      merge_cluster(scope, survivor.id, [non_survivor.id], %{fields: fields, drop: %{}})
     end
   end
 
-  defp merge_last_talked_to(repo, survivor, non_survivor) do
-    more_recent = most_recent_date(survivor.last_talked_to, non_survivor.last_talked_to)
+  defp keep_survivor_values(fields, survivor) do
+    Enum.reduce(MergeFields.choice_fields(), fields, fn field, acc ->
+      case Map.fetch!(survivor, field) do
+        nil -> acc
+        value -> Map.put(acc, field, value)
+      end
+    end)
+  end
 
-    if more_recent != survivor.last_talked_to do
-      survivor
-      |> Ecto.Changeset.change(%{last_talked_to: more_recent})
-      |> repo.update()
+  defp apply_legacy_choices(fields, survivor, non_survivor, choices) do
+    Enum.reduce(choices, fields, fn {field_string, source}, acc ->
+      apply_legacy_choice(
+        acc,
+        survivor,
+        non_survivor,
+        String.to_existing_atom(field_string),
+        source
+      )
+    end)
+  end
+
+  defp apply_legacy_choice(acc, survivor, non_survivor, field, source) do
+    if field in MergeFields.choice_fields() do
+      contact = if source == "non_survivor", do: non_survivor, else: survivor
+      Map.put(acc, field, Map.fetch!(contact, field) || :clear)
     else
-      {:ok, survivor}
+      acc
     end
   end
 
@@ -1912,91 +1779,6 @@ defmodule Kith.Contacts do
       survivor.account_id != non_survivor.account_id -> {:error, :different_accounts}
       true -> :ok
     end
-  end
-
-  defp update_survivor_fields(survivor, non_survivor, field_choices) do
-    mergeable_fields = ~w(first_name last_name nickname birthdate description
-                          occupation company avatar)a
-
-    changes =
-      Enum.reduce(mergeable_fields, %{}, fn field, acc ->
-        field_str = Atom.to_string(field)
-
-        case Map.get(field_choices, field_str, "survivor") do
-          "non_survivor" ->
-            Map.put(acc, field, Map.get(non_survivor, field))
-
-          _ ->
-            acc
-        end
-      end)
-
-    if map_size(changes) > 0 do
-      survivor
-      |> Ecto.Changeset.change(changes)
-      |> Repo.update()
-    else
-      {:ok, survivor}
-    end
-  end
-
-  defp remap_relationships(repo, survivor, non_survivor) do
-    # Remap forward relationships (contact_id = non_survivor)
-    # First delete any that would create duplicates or self-references
-    repo.query(
-      """
-      DELETE FROM relationships WHERE contact_id = $1
-      AND (
-        related_contact_id = $2
-        OR (related_contact_id, relationship_type_id) IN (
-          SELECT related_contact_id, relationship_type_id
-          FROM relationships WHERE contact_id = $2
-        )
-      )
-      """,
-      [non_survivor.id, survivor.id]
-    )
-
-    repo.update_all(
-      from(r in Relationship, where: r.contact_id == ^non_survivor.id),
-      set: [contact_id: survivor.id]
-    )
-
-    # Remap reverse relationships (related_contact_id = non_survivor)
-    repo.query(
-      """
-      DELETE FROM relationships WHERE related_contact_id = $1
-      AND (
-        contact_id = $2
-        OR (contact_id, relationship_type_id) IN (
-          SELECT contact_id, relationship_type_id
-          FROM relationships WHERE related_contact_id = $2
-        )
-      )
-      """,
-      [non_survivor.id, survivor.id]
-    )
-
-    repo.update_all(
-      from(r in Relationship, where: r.related_contact_id == ^non_survivor.id),
-      set: [related_contact_id: survivor.id]
-    )
-
-    # Clean up any self-referential relationships
-    repo.delete_all(
-      from(r in Relationship,
-        where: r.contact_id == ^survivor.id and r.related_contact_id == ^survivor.id
-      )
-    )
-
-    {:ok, :done}
-  end
-
-  defp most_recent_date(nil, date), do: date
-  defp most_recent_date(date, nil), do: date
-
-  defp most_recent_date(date1, date2) do
-    if DateTime.compare(date1, date2) == :gt, do: date1, else: date2
   end
 
   @doc """

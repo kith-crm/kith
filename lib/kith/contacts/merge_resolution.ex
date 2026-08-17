@@ -109,11 +109,18 @@ defmodule Kith.Contacts.MergeResolution do
     fields =
       Enum.reduce(MergeFields.immich_fields(), acc.fields, fn field, fields ->
         value = if source, do: Map.fetch!(source, field), else: nil
-        Map.put(fields, field, value || :clear)
+        Map.put(fields, field, resolve_immich_field(field, value))
       end)
 
     %{acc | fields: fields}
   end
+
+  # `immich_status` is a `null: false` column with a check constraint
+  # (`unlinked | needs_review | linked`) — unlike the other three Immich
+  # columns, it has no unset state to clear to, so an absent source resolves
+  # to its neutral value rather than `:clear`.
+  defp resolve_immich_field(:immich_status, nil), do: "unlinked"
+  defp resolve_immich_field(_field, value), do: value || :clear
 
   defp sync_key(%{immich_last_synced_at: nil}), do: 0
   defp sync_key(%{immich_last_synced_at: at}), do: DateTime.to_unix(at)

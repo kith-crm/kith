@@ -243,6 +243,37 @@ defmodule Kith.Contacts.MergeTest do
     end
   end
 
+  describe "merge_contacts/3 shim" do
+    test "still honours non_survivor field choices", ctx do
+      {:ok, survivor} =
+        Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id, %{
+          "company" => "non_survivor"
+        })
+
+      assert survivor.company == "New Corp"
+    end
+
+    test "fills a gap on the survivor from the loser", ctx do
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [middle_name: nil]
+      )
+
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [middle_name: "Jo"]
+      )
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert survivor.middle_name == "Jo"
+    end
+
+    test "never overrides an existing survivor value by default", ctx do
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert survivor.company == "Old Corp"
+    end
+  end
+
   describe "merge_preview/2" do
     test "returns counts of sub-entities to be merged", ctx do
       ContactsFixtures.note_fixture(ctx.contact_b, ctx.user.id)

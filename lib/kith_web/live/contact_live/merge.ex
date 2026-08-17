@@ -170,10 +170,6 @@ defmodule KithWeb.ContactLive.Merge do
           DuplicateDetection.mark_merged(candidate)
         end
 
-        # Dismiss any other pending candidates involving either contact
-        DuplicateDetection.dismiss_candidates_for_contact(account_id, contact_a.id)
-        DuplicateDetection.dismiss_candidates_for_contact(account_id, contact_b.id)
-
         # Log the merge
         Kith.AuditLogs.log_event(account_id, scope.user, :contact_merged,
           contact_id: contact_a.id,
