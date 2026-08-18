@@ -272,6 +272,56 @@ defmodule Kith.Contacts.MergeTest do
 
       assert survivor.company == "Old Corp"
     end
+
+    test "keeps the survivor's value even when the loser was updated later", ctx do
+      # The resolver's conflict default is most-held, then most-recently-updated.
+      # Make the loser unambiguously newer so only the survivor-value protection
+      # can keep "Old Corp".
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [updated_at: DateTime.add(DateTime.utc_now(:second), 3600, :second)]
+      )
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert survivor.company == "Old Corp"
+    end
+
+    test "ignores an unrecognised field key instead of crashing", ctx do
+      {:ok, survivor} =
+        Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id, %{
+          "definitely_not_a_field" => "non_survivor",
+          "company" => "non_survivor"
+        })
+
+      assert survivor.company == "New Corp"
+    end
+
+    test "an explicit survivor choice still empties a field the survivor lacks", ctx do
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [middle_name: nil]
+      )
+
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [middle_name: "Jo"]
+      )
+
+      {:ok, survivor} =
+        Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id, %{
+          "middle_name" => "survivor"
+        })
+
+      assert survivor.middle_name == nil
+    end
+
+    test "clears first_met_through rather than pointing at the trashed loser", ctx do
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [first_met_through_id: ctx.contact_b.id]
+      )
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert survivor.first_met_through_id == nil
+    end
   end
 
   describe "merge_preview/2" do

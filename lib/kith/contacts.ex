@@ -1711,10 +1711,8 @@ defmodule Kith.Contacts do
 
   Retained for the existing wizard and REST API. `field_choices` uses the old
   `%{"field" => "survivor" | "non_survivor"}` shape; everything not named is
-  resolved by `Kith.Contacts.MergeResolution`, then any field where the
-  survivor already holds a value is reset back to that value — a survivor's
-  existing value is never overridden by the resolver's pick, only gap-filled
-  when the survivor has none — before `field_choices` overrides are applied
+  resolved by `legacy_resolution_fields/2` — see there for how a survivor's
+  existing value is protected — before `field_choices` overrides are applied
   on top.
   """
   def merge_contacts(survivor_id, non_survivor_id, field_choices \\ %{}) do
@@ -1722,45 +1720,78 @@ defmodule Kith.Contacts do
          {:ok, non_survivor} <- fetch_active_contact(non_survivor_id),
          :ok <- validate_merge(survivor, non_survivor) do
       scope = Kith.Accounts.Scope.for_account_id(survivor.account_id)
-      resolution = MergeResolution.resolve([survivor, non_survivor], survivor.id)
 
       fields =
-        resolution.fields
-        |> keep_survivor_values(survivor)
+        survivor
+        |> legacy_resolution_fields(non_survivor)
         |> apply_legacy_choices(survivor, non_survivor, field_choices)
 
       merge_cluster(scope, survivor.id, [non_survivor.id], %{fields: fields, drop: %{}})
     end
   end
 
-  defp keep_survivor_values(fields, survivor) do
+  @doc """
+  Resolves a two-contact legacy merge via `Kith.Contacts.MergeResolution`,
+  then protects the survivor's own values: for every
+  `MergeFields.choice_fields/0` entry the survivor already holds a non-nil
+  value for, that value wins over whatever the resolver's conflict-default
+  picked — a survivor's existing value is never silently overridden, only
+  gap-filled when the survivor has none (design spec §6).
+
+  The one exception is a field the resolver cleared because it pointed back
+  at a member being merged away (e.g. `first_met_through_id` referencing
+  `loser`) — restoring the survivor's raw value there would leave the field
+  pointing at a contact about to be soft-deleted, so the resolver's `:clear`
+  is left standing instead (design spec scenario D4).
+
+  Shared by the legacy wizard shim (`merge_contacts/3`) and the REST API
+  merge endpoint so the two two-contact callers cannot drift apart.
+  """
+  def legacy_resolution_fields(survivor, loser) do
+    fields =
+      [survivor, loser]
+      |> MergeResolution.resolve(survivor.id)
+      |> Map.fetch!(:fields)
+
+    member_ids = [survivor.id, loser.id]
+
     Enum.reduce(MergeFields.choice_fields(), fields, fn field, acc ->
-      case Map.fetch!(survivor, field) do
-        nil -> acc
-        value -> Map.put(acc, field, value)
+      keep_survivor_value(acc, field, Map.fetch!(survivor, field), member_ids)
+    end)
+  end
+
+  # The survivor holds nothing here, so whatever the resolver produced stands
+  # (that is the gap fill). A value the resolver cleared because it points at a
+  # member being merged away also stands cleared — restoring it would leave the
+  # field referencing a contact about to be soft-deleted.
+  defp keep_survivor_value(fields, _field, nil, _member_ids), do: fields
+
+  defp keep_survivor_value(fields, field, value, member_ids) do
+    if Map.get(fields, field) == :clear and value in member_ids do
+      fields
+    else
+      Map.put(fields, field, value)
+    end
+  end
+
+  # Iterates the known field registry rather than the caller-supplied
+  # `choices` map, and never converts a client-controlled key to an atom —
+  # the wizard's "choose-field" LiveView event puts the raw client string
+  # into `field_choices` with no allowlist, so a crafted/unknown field name
+  # must be silently dropped rather than crashing the merge (and the
+  # LiveView process) on `String.to_existing_atom/1`.
+  #
+  # An explicit choice pins that contact's value even when it is nil (the
+  # user asked for the field to be empty); a field with no choice keeps
+  # whatever the resolver produced, which is what gap-fills the survivor.
+  defp apply_legacy_choices(fields, survivor, non_survivor, choices) do
+    Enum.reduce(MergeFields.choice_fields(), fields, fn field, acc ->
+      case Map.get(choices, Atom.to_string(field)) do
+        "non_survivor" -> Map.put(acc, field, Map.fetch!(non_survivor, field) || :clear)
+        "survivor" -> Map.put(acc, field, Map.fetch!(survivor, field) || :clear)
+        _ -> acc
       end
     end)
-  end
-
-  defp apply_legacy_choices(fields, survivor, non_survivor, choices) do
-    Enum.reduce(choices, fields, fn {field_string, source}, acc ->
-      apply_legacy_choice(
-        acc,
-        survivor,
-        non_survivor,
-        String.to_existing_atom(field_string),
-        source
-      )
-    end)
-  end
-
-  defp apply_legacy_choice(acc, survivor, non_survivor, field, source) do
-    if field in MergeFields.choice_fields() do
-      contact = if source == "non_survivor", do: non_survivor, else: survivor
-      Map.put(acc, field, Map.fetch!(contact, field) || :clear)
-    else
-      acc
-    end
   end
 
   defp fetch_active_contact(id) do
