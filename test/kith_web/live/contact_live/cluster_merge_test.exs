@@ -439,6 +439,37 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       refute "sarah@example.com" in values
     end
 
+    # Aliases are a whole-array field carried in `fields`, never in `drop`, so
+    # this is the only path that proves the subtraction reaches the database.
+    # "007" is deliberately numeric-looking: it also pins
+    # `cast_entry_id("Aliases", id)` end to end, which a render-only test can't.
+    test "unchecking an alias keeps it off the merged contact", ctx do
+      c =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Sarah",
+          last_name: "Kim",
+          aliases: ["007", "Bond"]
+        })
+
+      candidate!(ctx.account_id, ctx.a, c)
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      live
+      |> element("input[phx-click='toggle-value'][phx-value-type='Aliases'][phx-value-id='007']")
+      |> render_click()
+
+      assert {:error, {:redirect, %{to: path}}} =
+               live |> element("button[phx-click='merge']") |> render_click()
+
+      assert path == "/contacts/#{ctx.a.id}"
+
+      # Asserted against the persisted array, not the payload: the subtraction
+      # reads `:aliases` off the already-override-merged map, so it is only
+      # correct because it runs after that merge.
+      assert Kith.Repo.get!(Kith.Contacts.Contact, ctx.a.id).aliases == ["Bond"]
+    end
+
     test "not duplicates dismisses the cluster and returns to the list", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
@@ -467,6 +498,16 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
 
     test "changing the resolution clears a stale merge error", ctx do
+      email_type =
+        Kith.Repo.one!(
+          from(t in Kith.Contacts.ContactFieldType, where: like(t.protocol, "mailto%"), limit: 1)
+        )
+
+      field =
+        ContactsFixtures.contact_field_fixture(ctx.a, email_type.id, %{
+          "value" => "sarah@example.com"
+        })
+
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
       Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.b.id),
@@ -476,12 +517,18 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert live |> element("button[phx-click='merge']") |> render_click() =~
                "changed since you opened"
 
-      html =
-        live
-        |> element("button[phx-value-field='company'][phx-value-index='0']")
-        |> render_click()
+      refute live
+             |> element("button[phx-value-field='company'][phx-value-index='0']")
+             |> render_click() =~ "changed since you opened"
 
-      refute html =~ "changed since you opened"
+      assert live |> element("button[phx-click='merge']") |> render_click() =~
+               "changed since you opened"
+
+      refute live
+             |> element(
+               "input[phx-click='toggle-value'][phx-value-type='Fields'][phx-value-id='#{field.id}']"
+             )
+             |> render_click() =~ "changed since you opened"
     end
 
     test "a viewer cannot open the screen", ctx do

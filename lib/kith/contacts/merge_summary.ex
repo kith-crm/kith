@@ -90,20 +90,26 @@ defmodule Kith.Contacts.MergeSummary do
   # an address with neither line1 nor postal_code isn't a duplicate of
   # another address in the same shape (they may differ by city/region/
   # country, e.g. "Paris" vs "Tokyo"), so give each a key that can't collide.
+  #
+  # The engine compares these columns through `coalesce(col, '')`, so a NULL
+  # and an empty string are the same value to it. Collapsing both to `""` here
+  # keeps this key in step: a caller expanding a dropped entry to everything
+  # sharing its key (see `build/1`) would otherwise miss the other side of a
+  # nil/"" pair the engine is about to dedupe, and the dropped value would come
+  # back on the survivor.
   defp address_key(address) do
-    line1 = normalize(address.line1)
-    postal_code = normalize(address.postal_code)
+    line1 = blank_to_empty(normalize(address.line1))
+    postal_code = blank_to_empty(normalize(address.postal_code))
 
-    if blank?(line1) and blank?(postal_code) do
+    if line1 == "" and postal_code == "" do
       {:no_key, address.id}
     else
       {line1, postal_code}
     end
   end
 
-  defp blank?(nil), do: true
-  defp blank?(""), do: true
-  defp blank?(_), do: false
+  defp blank_to_empty(nil), do: ""
+  defp blank_to_empty(value), do: value
 
   defp tags(ids) do
     from(ct in "contact_tags",

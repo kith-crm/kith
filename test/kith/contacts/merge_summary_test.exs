@@ -84,6 +84,27 @@ defmodule Kith.Contacts.MergeSummaryTest do
     assert Enum.count(summary.addresses, & &1.duplicate?) == 0
   end
 
+  # Kith.Contacts.Merge compares these columns through `coalesce(col, '')`, so
+  # a NULL line1 and an empty-string line1 are the same value to `:dedupe_owned`.
+  # The summary key has to agree, or a caller expanding a dropped entry by key
+  # would miss the other side of the pair and the dropped value would survive.
+  # The empty string is written directly: `Address`'s changeset casts `""` to
+  # nil, so a blank line1 only reaches the column through a bulk insert.
+  test "an address with a nil line1 keys the same as one with an empty line1", ctx do
+    ContactsFixtures.address_fixture(ctx.a, %{"line1" => nil, "postal_code" => "94110"})
+    blank = ContactsFixtures.address_fixture(ctx.b, %{"line1" => nil, "postal_code" => "94110"})
+
+    Repo.update_all(from(a in Kith.Contacts.Address, where: a.id == ^blank.id),
+      set: [line1: ""]
+    )
+
+    summary = MergeSummary.build([ctx.a, ctx.b])
+
+    assert [first, second] = summary.addresses
+    assert first.key == second.key
+    assert Enum.count(summary.addresses, & &1.duplicate?) == 1
+  end
+
   test "aliases are unioned across members", ctx do
     Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.a.id),
       set: [aliases: ["Sarah K."]]
