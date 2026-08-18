@@ -345,5 +345,18 @@ defmodule Kith.Contacts.MergeResolutionTest do
       assert [%{value: "Stripe", count: 2}, %{value: "Figma", count: 1}] =
                MergeResolution.candidates_for([a, b, c], :company)
     end
+
+    test "a tie on count breaks toward the lowest member id, not value ordering", ctx do
+      # a is created (and so gets the lower id) first but holds the
+      # alphabetically-later value — this makes term/map iteration order
+      # disagree with id order, so the assertion only passes if the sort
+      # genuinely breaks ties on member id rather than falling out of
+      # candidates/1's incidental ordering.
+      a = contact(ctx.account_id, %{first_name: "Sarah", company: "Zeta"})
+      b = contact(ctx.account_id, %{first_name: "Sarah", company: "Alpha"})
+
+      assert [%{value: "Zeta", count: 1}, %{value: "Alpha", count: 1}] =
+               MergeResolution.candidates_for([a, b], :company)
+    end
   end
 end

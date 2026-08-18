@@ -140,7 +140,9 @@ defmodule Kith.Contacts.MergeResolution do
   end
 
   @doc """
-  Every distinct value `members` hold for `field`, most-held first.
+  Every distinct value `members` hold for `field`, most-held first, ties broken
+  by the lowest member id holding that value. Callers may rely on this order
+  being stable across renders.
 
   Unlike `conflicts`, this is populated even when the members agree — the screen
   uses it to open an already-resolved row as a choice.
@@ -150,7 +152,7 @@ defmodule Kith.Contacts.MergeResolution do
     |> Enum.map(fn member -> {member.id, normalize(Map.fetch!(member, field))} end)
     |> Enum.reject(fn {_id, value} -> is_nil(value) end)
     |> candidates()
-    |> Enum.sort_by(& &1.count, :desc)
+    |> Enum.sort_by(&{-&1.count, Enum.min(&1.member_ids)})
   end
 
   # Returns {resolved_value, attribution, conflict_candidates}
