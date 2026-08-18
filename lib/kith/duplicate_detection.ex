@@ -216,32 +216,92 @@ defmodule Kith.DuplicateDetection do
     |> Enum.take(limit)
   end
 
-  @doc "How many clusters are pending review."
-  def cluster_count(account_id), do: account_id |> build_clusters() |> length()
+  @doc """
+  Lists a page of derived clusters together with the total cluster count, from
+  a single cluster derivation.
+
+  Prefer this over separate `list_clusters/2` + `cluster_count/1` calls when
+  both are needed for the same request (e.g. rendering a page and its total),
+  since each derivation re-runs the candidate query and the union-find pass.
+
+  Options: `:limit` (default #{@default_page_size}), `:offset` (default 0).
+  """
+  def list_clusters_page(account_id, opts \\ []) do
+    limit = Keyword.get(opts, :limit, @default_page_size)
+    offset = Keyword.get(opts, :offset, 0)
+
+    clusters = build_clusters(account_id)
+
+    %{clusters: clusters |> Enum.drop(offset) |> Enum.take(limit), total: length(clusters)}
+  end
+
+  @doc """
+  How many clusters are pending review.
+
+  Counts groups directly from the union-find derivation rather than building
+  full `%Cluster{}` structs, so it never queries contacts.
+  """
+  def cluster_count(account_id) do
+    {acc, _pending} = derive_groups(account_id)
+    Enum.count(acc.groups, fn {_id, members} -> MapSet.size(members) >= 2 end)
+  end
 
   defp build_clusters(account_id) do
+    {acc, pending} = derive_groups(account_id)
+    to_clusters(acc, account_id, pending)
+  end
+
+  defp derive_groups(account_id) do
     candidates =
       DuplicateCandidate
       |> scope_to_account(account_id)
       |> where([d], d.status in ["pending", "dismissed"])
-      |> join(:inner, [d], one in Contact, on: one.id == d.contact_id)
-      |> join(:inner, [d, _one], two in Contact, on: two.id == d.duplicate_contact_id)
+      |> join(:inner, [d], one in Contact,
+        on: one.id == d.contact_id and one.account_id == ^account_id
+      )
+      |> join(:inner, [d, one], two in Contact,
+        on: two.id == d.duplicate_contact_id and two.account_id == ^account_id
+      )
       |> where([d, one, two], is_nil(one.deleted_at) and is_nil(two.deleted_at))
       |> select([d], d)
       |> Repo.all()
 
     {pending, dismissed} = Enum.split_with(candidates, &(&1.status == "pending"))
 
-    negatives =
-      MapSet.new(dismissed, fn d -> {d.contact_id, d.duplicate_contact_id} end)
+    negatives = index_negatives(dismissed)
 
-    pending
-    # Fully deterministic: scores come from a small fixed set, so ties are the
-    # common case. Without the id tiebreak, which edge wins would depend on
-    # arbitrary row order and clustering would vary between identical runs.
-    |> Enum.sort_by(&{-&1.score, &1.contact_id, &1.duplicate_contact_id})
-    |> Enum.reduce(%{groups: %{}, of: %{}, next: 0}, &union_pair(&2, &1, negatives))
-    |> to_clusters(account_id, pending)
+    acc =
+      pending
+      # Fully deterministic: scores come from a small fixed set, so ties are
+      # the common case. Without the id tiebreak, which edge wins would
+      # depend on arbitrary row order and clustering would vary between
+      # identical runs.
+      |> Enum.sort_by(&{-&1.score, &1.contact_id, &1.duplicate_contact_id})
+      |> Enum.reduce(%{groups: %{}, of: %{}, next: 0}, &union_pair(&2, &1, negatives))
+
+    {acc, pending}
+  end
+
+  # Dismissed pairs indexed as contact_id => the set of contact ids it was
+  # dismissed against, so `blocked?/4` can look up membership instead of
+  # scanning every dismissed row. Dismissed rows are permanent negative edges
+  # (never deleted), so that set grows for the life of the account while the
+  # pending set stays small — without this index `blocked?/4` was the
+  # dominant cost of every cluster derivation.
+  defp index_negatives(dismissed) do
+    Enum.reduce(dismissed, %{}, fn d, acc ->
+      acc
+      |> Map.update(
+        d.contact_id,
+        MapSet.new([d.duplicate_contact_id]),
+        &MapSet.put(&1, d.duplicate_contact_id)
+      )
+      |> Map.update(
+        d.duplicate_contact_id,
+        MapSet.new([d.contact_id]),
+        &MapSet.put(&1, d.contact_id)
+      )
+    end)
   end
 
   defp union_pair(acc, pair, negatives) do
@@ -276,14 +336,25 @@ defmodule Kith.DuplicateDetection do
 
   # A dismissed pair is a negative edge: the user already reviewed those two
   # contacts and rejected the match, so no third contact may reunite them by
-  # transitivity.
+  # transitivity. Walks the smaller of the two member sets, doing a map
+  # lookup + set-disjoint check per member against the larger set — O(min(|a|,
+  # |b|)) instead of scanning every dismissed pair in the account.
   defp blocked?(acc, group_a, group_b, negatives) do
     members_a = Map.fetch!(acc.groups, group_a)
     members_b = Map.fetch!(acc.groups, group_b)
 
-    Enum.any?(negatives, fn {one, two} ->
-      (MapSet.member?(members_a, one) and MapSet.member?(members_b, two)) or
-        (MapSet.member?(members_a, two) and MapSet.member?(members_b, one))
+    {small, large} =
+      if MapSet.size(members_a) <= MapSet.size(members_b) do
+        {members_a, members_b}
+      else
+        {members_b, members_a}
+      end
+
+    Enum.any?(small, fn id ->
+      case Map.fetch(negatives, id) do
+        {:ok, partners} -> not MapSet.disjoint?(partners, large)
+        :error -> false
+      end
     end)
   end
 

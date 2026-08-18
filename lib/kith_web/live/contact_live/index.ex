@@ -61,14 +61,15 @@ defmodule KithWeb.ContactLive.Index do
 
   defp apply_action(socket, :duplicates, _params) do
     account_id = socket.assigns.account_id
-    clusters = DuplicateDetection.list_clusters(account_id, limit: @duplicates_page_size)
-    total = DuplicateDetection.cluster_count(account_id)
+
+    %{clusters: clusters, total: total} =
+      DuplicateDetection.list_clusters_page(account_id, limit: @duplicates_page_size)
 
     socket
     |> assign(:page_title, "Duplicate Contacts")
     |> assign(:clusters, clusters)
     |> assign(:clusters_total, total)
-    |> assign(:clusters_has_more, length(clusters) >= @duplicates_page_size)
+    |> assign(:clusters_has_more, total > length(clusters))
   end
 
   defp apply_action(socket, :trash, _params) do
@@ -256,10 +257,12 @@ defmodule KithWeb.ContactLive.Index do
         offset: length(socket.assigns.clusters)
       )
 
+    clusters = socket.assigns.clusters ++ more
+
     {:noreply,
      socket
-     |> assign(:clusters, socket.assigns.clusters ++ more)
-     |> assign(:clusters_has_more, length(more) >= @duplicates_page_size)}
+     |> assign(:clusters, clusters)
+     |> assign(:clusters_has_more, socket.assigns.clusters_total > length(clusters))}
   end
 
   def handle_event("scan", _params, socket) do
