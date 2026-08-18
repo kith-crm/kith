@@ -106,11 +106,15 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       # `MergeResolution.resolve/2` requires a non-empty member list, and there
       # is no meaningful "merge nothing" state to render — refuse to uncheck
       # the last remaining member instead of leaving a selection that would
-      # crash the next recompute.
-      {:noreply, socket}
+      # crash the next recompute. Re-assigning an equal `selected_ids` would
+      # not itself produce a diff (`assign/3` skips equal values), which would
+      # leave the browser's checkbox showing unchecked while the server still
+      # holds that member selected — flash a notice so a patch is always sent.
+      {:noreply, put_flash(socket, :info, "At least one contact must stay selected")}
     else
       {:noreply,
        socket
+       |> clear_flash(:info)
        |> assign(:selected_ids, selected)
        # Selection changed, so every derived value is stale — including choices
        # the user made, which may no longer be held by any selected member.
@@ -151,7 +155,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   def handle_event("toggle-value", %{"type" => type, "id" => id}, socket) do
-    key = {type, cast_entry_id(id)}
+    key = {type, cast_entry_id(type, id)}
 
     dropped =
       if MapSet.member?(socket.assigns.dropped, key) do
@@ -163,7 +167,15 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     {:noreply, assign(socket, :dropped, dropped)}
   end
 
-  defp cast_entry_id(id) do
+  # `MergeSummary.build/1` gives "Fields"/"Addresses"/"Tags" entries an
+  # integer row id, but "Aliases" entries are keyed by the alias string
+  # itself (there is no per-row id to drop). Casting by the value's shape
+  # rather than by category would corrupt a numeric-looking alias like
+  # "007" — `Integer.parse/1` would turn it into `7`, which can never match
+  # the `{"Aliases", "007"}` key the render side looks up.
+  defp cast_entry_id("Aliases", id), do: id
+
+  defp cast_entry_id(_type, id) do
     case Integer.parse(id) do
       {int, ""} -> int
       _ -> id

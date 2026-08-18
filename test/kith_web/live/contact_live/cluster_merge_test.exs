@@ -162,12 +162,23 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     test "choosing a conflicting value marks it selected", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
-      html =
-        live
-        |> element("button[phx-value-field='company'][phx-value-index='1']")
-        |> render_click()
+      # candidates_for/2, sorted, ties broken by lowest member id: index 0 is
+      # a's "Figma", index 1 is b's "Stripe" — so clicking index 1 must move
+      # the accent styling onto the Stripe button specifically, not merely
+      # cause "Figma" to still appear (it's a candidate label either way).
+      live
+      |> element("button[phx-value-field='company'][phx-value-index='1']")
+      |> render_click()
 
-      assert html =~ "Figma"
+      assert has_element?(
+               live,
+               "button[phx-value-field='company'][phx-value-index='1'][class*='bg-[var(--color-accent)]']"
+             )
+
+      refute has_element?(
+               live,
+               "button[phx-value-field='company'][phx-value-index='0'][class*='bg-[var(--color-accent)]']"
+             )
     end
 
     test "changing the selection discards an explicit choice", ctx do
@@ -175,24 +186,31 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
         ContactsFixtures.contact_fixture(ctx.account_id, %{
           first_name: "Sarah",
           last_name: "Kim",
-          company: "Stripe"
+          company: "Notion"
         })
 
       candidate!(ctx.account_id, ctx.b, c)
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
+      # Three members, one value each (Figma/Stripe/Notion): candidates_for/2
+      # sorts by lowest member id on a count tie, so index 2 is c's "Notion" —
+      # an explicit choice that is nobody's computed default, so it can only
+      # still be selected after the toggle below if the override survived.
       live
-      |> element("button[phx-value-field='company'][phx-value-index='1']")
+      |> element("button[phx-value-field='company'][phx-value-index='2']")
       |> render_click()
 
-      html =
-        live
-        |> element("input[phx-click='toggle-member'][phx-value-id='#{c.id}']")
-        |> render_click()
+      live
+      |> element("input[phx-click='toggle-member'][phx-value-id='#{c.id}']")
+      |> render_click()
 
-      # Back to the computed default rather than the override.
-      assert html =~ "Stripe"
+      # Back to the computed default (a's "Figma", the surviving lowest-id
+      # member) rather than the discarded override.
+      assert has_element?(
+               live,
+               "button[phx-value-field='company'][phx-value-index='0'][class*='bg-[var(--color-accent)]']"
+             )
     end
 
     test "unchecking a value removes it from the merge", ctx do
@@ -206,23 +224,68 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
-      html =
-        live
-        |> element("input[phx-click='toggle-value'][phx-value-id='#{field.id}']")
-        |> render_click()
+      assert has_element?(
+               live,
+               "input[phx-click='toggle-value'][phx-value-id='#{field.id}'][checked]"
+             )
 
-      assert html =~ "x@y.com"
+      live
+      |> element("input[phx-click='toggle-value'][phx-value-id='#{field.id}']")
+      |> render_click()
+
+      refute has_element?(
+               live,
+               "input[phx-click='toggle-value'][phx-value-id='#{field.id}'][checked]"
+             )
     end
 
     test "making another member primary moves the badge", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
+      assert has_element?(live, "button[phx-click='set-primary'][phx-value-id='#{ctx.b.id}']")
+      refute has_element?(live, "button[phx-click='set-primary'][phx-value-id='#{ctx.a.id}']")
+
+      live
+      |> element("button[phx-click='set-primary'][phx-value-id='#{ctx.b.id}']")
+      |> render_click()
+
+      # The badge (and its "make primary" button) moved to a, off of b.
+      refute has_element?(live, "button[phx-click='set-primary'][phx-value-id='#{ctx.b.id}']")
+      assert has_element?(live, "button[phx-click='set-primary'][phx-value-id='#{ctx.a.id}']")
+    end
+
+    test "unchecking the last selected member is refused, not stranded unchecked", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      live
+      |> element("input[phx-click='toggle-member'][phx-value-id='#{ctx.b.id}']")
+      |> render_click()
+
       html =
         live
-        |> element("button[phx-click='set-primary'][phx-value-id='#{ctx.b.id}']")
+        |> element("input[phx-click='toggle-member'][phx-value-id='#{ctx.a.id}']")
         |> render_click()
 
-      assert html =~ "primary"
+      assert html =~ "At least one contact must stay selected"
+
+      assert has_element?(
+               live,
+               "input[phx-click='toggle-member'][phx-value-id='#{ctx.a.id}'][checked]"
+             )
+    end
+
+    test "a numeric-looking alias can still be dropped", ctx do
+      {:ok, member} = Kith.Contacts.update_contact(ctx.a, %{"aliases" => ["007"]})
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(member, ctx.b))
+
+      assert has_element?(live, "input[phx-click='toggle-value'][phx-value-id='007'][checked]")
+
+      live
+      |> element("input[phx-click='toggle-value'][phx-value-id='007']")
+      |> render_click()
+
+      refute has_element?(live, "input[phx-click='toggle-value'][phx-value-id='007'][checked]")
     end
 
     test "choosing Leave empty on a clearable contested field records a :clear override", ctx do
