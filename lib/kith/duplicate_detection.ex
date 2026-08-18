@@ -1,7 +1,9 @@
 defmodule Kith.DuplicateDetection do
   import Ecto.Query, warn: false
   import Kith.Scope
+  alias Kith.Contacts.Contact
   alias Kith.Contacts.DuplicateCandidate
+  alias Kith.DuplicateDetection.Cluster
   alias Kith.Repo
 
   @default_page_size 20
@@ -197,5 +199,131 @@ defmodule Kith.DuplicateDetection do
       |> DuplicateCandidate.changeset(attrs)
       |> Repo.insert!()
     end
+  end
+
+  @doc """
+  Lists derived duplicate clusters, highest confidence first.
+
+  Options: `:limit` (default #{@default_page_size}), `:offset` (default 0).
+  """
+  def list_clusters(account_id, opts \\ []) do
+    limit = Keyword.get(opts, :limit, @default_page_size)
+    offset = Keyword.get(opts, :offset, 0)
+
+    account_id
+    |> build_clusters()
+    |> Enum.drop(offset)
+    |> Enum.take(limit)
+  end
+
+  @doc "How many clusters are pending review."
+  def cluster_count(account_id), do: account_id |> build_clusters() |> length()
+
+  defp build_clusters(account_id) do
+    candidates =
+      DuplicateCandidate
+      |> scope_to_account(account_id)
+      |> where([d], d.status in ["pending", "dismissed"])
+      |> Repo.all()
+
+    {pending, dismissed} = Enum.split_with(candidates, &(&1.status == "pending"))
+
+    negatives =
+      MapSet.new(dismissed, fn d -> {d.contact_id, d.duplicate_contact_id} end)
+
+    pending
+    # Fully deterministic: scores come from a small fixed set, so ties are the
+    # common case. Without the id tiebreak, which edge wins would depend on
+    # arbitrary row order and clustering would vary between identical runs.
+    |> Enum.sort_by(&{-&1.score, &1.contact_id, &1.duplicate_contact_id})
+    |> Enum.reduce(%{groups: %{}, of: %{}, next: 0}, &union_pair(&2, &1, negatives))
+    |> to_clusters(pending)
+  end
+
+  defp union_pair(acc, pair, negatives) do
+    {acc, group_a} = ensure_group(acc, pair.contact_id)
+    {acc, group_b} = ensure_group(acc, pair.duplicate_contact_id)
+
+    cond do
+      group_a == group_b -> acc
+      blocked?(acc, group_a, group_b, negatives) -> acc
+      true -> merge_groups(acc, group_a, group_b)
+    end
+  end
+
+  defp ensure_group(acc, contact_id) do
+    case Map.fetch(acc.of, contact_id) do
+      {:ok, group_id} ->
+        {acc, group_id}
+
+      :error ->
+        group_id = acc.next
+
+        acc = %{
+          acc
+          | groups: Map.put(acc.groups, group_id, MapSet.new([contact_id])),
+            of: Map.put(acc.of, contact_id, group_id),
+            next: group_id + 1
+        }
+
+        {acc, group_id}
+    end
+  end
+
+  # A dismissed pair is a negative edge: the user already reviewed those two
+  # contacts and rejected the match, so no third contact may reunite them by
+  # transitivity.
+  defp blocked?(acc, group_a, group_b, negatives) do
+    members_a = Map.fetch!(acc.groups, group_a)
+    members_b = Map.fetch!(acc.groups, group_b)
+
+    Enum.any?(negatives, fn {one, two} ->
+      (MapSet.member?(members_a, one) and MapSet.member?(members_b, two)) or
+        (MapSet.member?(members_a, two) and MapSet.member?(members_b, one))
+    end)
+  end
+
+  defp merge_groups(acc, group_a, group_b) do
+    members_b = Map.fetch!(acc.groups, group_b)
+    members = MapSet.union(Map.fetch!(acc.groups, group_a), members_b)
+
+    of = Enum.reduce(members_b, acc.of, &Map.put(&2, &1, group_a))
+
+    %{acc | groups: acc.groups |> Map.put(group_a, members) |> Map.delete(group_b), of: of}
+  end
+
+  defp to_clusters(acc, pending) do
+    contacts =
+      acc.of
+      |> Map.keys()
+      |> then(fn ids -> from(c in Contact, where: c.id in ^ids) |> Repo.all() end)
+      |> Map.new(&{&1.id, &1})
+
+    acc.groups
+    |> Enum.filter(fn {_id, members} -> MapSet.size(members) >= 2 end)
+    |> Enum.map(fn {_id, members} -> build_cluster(members, pending, contacts) end)
+    |> Enum.sort_by(&{-&1.max_score, &1.key})
+  end
+
+  defp build_cluster(members, pending, contacts) do
+    pairs =
+      Enum.filter(pending, fn p ->
+        MapSet.member?(members, p.contact_id) and
+          MapSet.member?(members, p.duplicate_contact_id)
+      end)
+
+    member_contacts =
+      members
+      |> Enum.map(&Map.get(contacts, &1))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.sort_by(& &1.id)
+
+    %Cluster{
+      key: members |> Enum.min(),
+      contacts: member_contacts,
+      pairs: pairs,
+      max_score: pairs |> Enum.map(& &1.score) |> Enum.max(fn -> 0.0 end),
+      reasons: pairs |> Enum.flat_map(& &1.reasons) |> Enum.uniq()
+    }
   end
 end

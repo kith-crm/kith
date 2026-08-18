@@ -441,4 +441,131 @@ defmodule Kith.DuplicateDetectionTest do
       assert Enum.all?(merged_rows, fn {one, two} -> one != nil or two != nil end)
     end
   end
+
+  describe "list_clusters/2" do
+    setup do
+      Kith.ContactsFixtures.seed_reference_data!()
+      user = Kith.AccountsFixtures.user_fixture()
+      account_id = user.account_id
+
+      contacts =
+        Map.new([a: "Ann", b: "Bea", c: "Cal", d: "Dee", e: "Eve"], fn {key, name} ->
+          {key, Kith.ContactsFixtures.contact_fixture(account_id, %{first_name: name})}
+        end)
+
+      %{user: user, account_id: account_id, contacts: contacts}
+    end
+
+    defp candidate!(account_id, one, two, opts \\ []) do
+      {low, high} = if one.id < two.id, do: {one, two}, else: {two, one}
+
+      Repo.insert!(%Kith.Contacts.DuplicateCandidate{
+        account_id: account_id,
+        contact_id: low.id,
+        duplicate_contact_id: high.id,
+        score: Keyword.get(opts, :score, 0.9),
+        reasons: Keyword.get(opts, :reasons, ["email_match"]),
+        status: Keyword.get(opts, :status, "pending"),
+        detected_at: DateTime.utc_now(:second)
+      })
+    end
+
+    defp member_ids(cluster), do: cluster.contacts |> Enum.map(& &1.id) |> Enum.sort()
+
+    test "transitive pairs collapse into one cluster", ctx do
+      %{a: a, b: b, c: c} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+      candidate!(ctx.account_id, b, c)
+
+      assert [cluster] = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+      assert member_ids(cluster) == Enum.sort([a.id, b.id, c.id])
+    end
+
+    test "disjoint pairs stay separate", ctx do
+      %{a: a, b: b, d: d, e: e} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+      candidate!(ctx.account_id, d, e)
+
+      clusters = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+
+      assert length(clusters) == 2
+    end
+
+    test "clusters are ordered by their highest score", ctx do
+      %{a: a, b: b, d: d, e: e} = ctx.contacts
+      candidate!(ctx.account_id, a, b, score: 0.6)
+      candidate!(ctx.account_id, d, e, score: 0.95)
+
+      [first, second] = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+
+      assert first.max_score == 0.95
+      assert second.max_score == 0.6
+    end
+
+    test "a cluster carries the union of its pair reasons", ctx do
+      %{a: a, b: b, c: c} = ctx.contacts
+      candidate!(ctx.account_id, a, b, reasons: ["email_match"])
+      candidate!(ctx.account_id, b, c, reasons: ["phone_match", "email_match"])
+
+      assert [cluster] = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+      assert Enum.sort(cluster.reasons) == ["email_match", "phone_match"]
+    end
+
+    test "the key is the lowest member id", ctx do
+      %{a: a, b: b} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+
+      assert [cluster] = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+      assert cluster.key == Enum.min([a.id, b.id])
+    end
+
+    test "a dismissed pair blocks a transitive union", ctx do
+      %{a: a, b: b, c: c} = ctx.contacts
+      # A and C were reviewed and rejected; B links to both.
+      candidate!(ctx.account_id, a, c, status: "dismissed")
+      candidate!(ctx.account_id, a, b, score: 0.9)
+      candidate!(ctx.account_id, b, c, score: 0.6)
+
+      clusters = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+
+      assert [cluster] = clusters
+      assert member_ids(cluster) == Enum.sort([a.id, b.id])
+      refute c.id in member_ids(cluster)
+    end
+
+    test "the stronger edge wins when a dismissal blocks the weaker", ctx do
+      %{a: a, b: b, c: c} = ctx.contacts
+      candidate!(ctx.account_id, a, c, status: "dismissed")
+      candidate!(ctx.account_id, a, b, score: 0.6)
+      candidate!(ctx.account_id, b, c, score: 0.9)
+
+      assert [cluster] = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+      assert member_ids(cluster) == Enum.sort([b.id, c.id])
+    end
+
+    test "tied scores cluster deterministically", ctx do
+      %{a: a, b: b, c: c} = ctx.contacts
+      candidate!(ctx.account_id, a, b, score: 0.85)
+      candidate!(ctx.account_id, b, c, score: 0.85)
+
+      first = Kith.DuplicateDetection.list_clusters(ctx.account_id) |> Enum.map(&member_ids/1)
+
+      for _ <- 1..5 do
+        assert Enum.map(Kith.DuplicateDetection.list_clusters(ctx.account_id), &member_ids/1) ==
+                 first
+      end
+    end
+
+    test "paginates over clusters, not pairs", ctx do
+      %{a: a, b: b, d: d, e: e} = ctx.contacts
+      candidate!(ctx.account_id, a, b, score: 0.95)
+      candidate!(ctx.account_id, d, e, score: 0.6)
+
+      assert [one] = Kith.DuplicateDetection.list_clusters(ctx.account_id, limit: 1)
+      assert one.max_score == 0.95
+
+      assert [two] = Kith.DuplicateDetection.list_clusters(ctx.account_id, limit: 1, offset: 1)
+      assert two.max_score == 0.6
+    end
+  end
 end
