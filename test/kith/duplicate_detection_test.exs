@@ -545,8 +545,17 @@ defmodule Kith.DuplicateDetectionTest do
 
     test "tied scores cluster deterministically", ctx do
       %{a: a, b: b, c: c} = ctx.contacts
-      candidate!(ctx.account_id, a, b, score: 0.85)
+      # A and C were dismissed, so (a,b) and (b,c) compete for B: only one can
+      # win. With equal scores, the id-based tiebreak in the sort key decides
+      # which one — (a,b) sorts first because a.id < b.id. Inserted in
+      # reverse (b,c) then (a,b) order so DB/insertion order alone cannot
+      # produce that result — only the explicit id tiebreak can.
+      candidate!(ctx.account_id, a, c, status: "dismissed")
       candidate!(ctx.account_id, b, c, score: 0.85)
+      candidate!(ctx.account_id, a, b, score: 0.85)
+
+      assert [cluster] = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+      assert member_ids(cluster) == Enum.sort([a.id, b.id])
 
       first = Kith.DuplicateDetection.list_clusters(ctx.account_id) |> Enum.map(&member_ids/1)
 
@@ -566,6 +575,44 @@ defmodule Kith.DuplicateDetectionTest do
 
       assert [two] = Kith.DuplicateDetection.list_clusters(ctx.account_id, limit: 1, offset: 1)
       assert two.max_score == 0.6
+    end
+
+    test "clusters never cross accounts", ctx do
+      %{a: a, b: b} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+
+      other_user = Kith.AccountsFixtures.user_fixture()
+      other_account_id = other_user.account_id
+
+      other_x = Kith.ContactsFixtures.contact_fixture(other_account_id, %{first_name: "Xan"})
+      other_y = Kith.ContactsFixtures.contact_fixture(other_account_id, %{first_name: "Yan"})
+      candidate!(other_account_id, other_x, other_y)
+
+      clusters = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+
+      assert [cluster] = clusters
+      assert member_ids(cluster) == Enum.sort([a.id, b.id])
+      refute other_x.id in member_ids(cluster)
+      refute other_y.id in member_ids(cluster)
+    end
+
+    test "cluster_count/1 counts derived clusters", ctx do
+      %{a: a, b: b, d: d, e: e} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+      candidate!(ctx.account_id, d, e)
+
+      assert Kith.DuplicateDetection.cluster_count(ctx.account_id) == 2
+    end
+
+    test "equal max_score breaks the tie by ascending key", ctx do
+      %{a: a, b: b, d: d, e: e} = ctx.contacts
+      candidate!(ctx.account_id, a, b, score: 0.8)
+      candidate!(ctx.account_id, d, e, score: 0.8)
+
+      [first, second] = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+
+      assert first.max_score == second.max_score
+      assert first.key < second.key
     end
   end
 end

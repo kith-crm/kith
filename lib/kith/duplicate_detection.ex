@@ -237,7 +237,7 @@ defmodule Kith.DuplicateDetection do
     # arbitrary row order and clustering would vary between identical runs.
     |> Enum.sort_by(&{-&1.score, &1.contact_id, &1.duplicate_contact_id})
     |> Enum.reduce(%{groups: %{}, of: %{}, next: 0}, &union_pair(&2, &1, negatives))
-    |> to_clusters(pending)
+    |> to_clusters(account_id, pending)
   end
 
   defp union_pair(acc, pair, negatives) do
@@ -292,16 +292,18 @@ defmodule Kith.DuplicateDetection do
     %{acc | groups: acc.groups |> Map.put(group_a, members) |> Map.delete(group_b), of: of}
   end
 
-  defp to_clusters(acc, pending) do
+  defp to_clusters(acc, account_id, pending) do
     contacts =
       acc.of
       |> Map.keys()
-      |> then(fn ids -> from(c in Contact, where: c.id in ^ids) |> Repo.all() end)
+      |> then(fn ids ->
+        Contact |> scope_to_account(account_id) |> where([c], c.id in ^ids) |> Repo.all()
+      end)
       |> Map.new(&{&1.id, &1})
 
     acc.groups
-    |> Enum.filter(fn {_id, members} -> MapSet.size(members) >= 2 end)
     |> Enum.map(fn {_id, members} -> build_cluster(members, pending, contacts) end)
+    |> Enum.filter(fn cluster -> length(cluster.contacts) >= 2 end)
     |> Enum.sort_by(&{-&1.max_score, &1.key})
   end
 
