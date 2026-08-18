@@ -22,6 +22,28 @@
 - Authorization uses `Kith.Policy.can?(user, :update, :contact)`. A `viewer` must be refused.
 - One deviation from the spec, deliberate and better: §1 states the negative-edge check costs O(|C₁|×|C₂|) per edge. The implementation below checks each dismissed pair against the two groups instead, which is O(|negatives|) per edge.
 
+### Carried over from slice 1 — read before building the drop list
+
+Slice 1's engine landed with a caller contract that only documentation enforces, and this slice is
+the first caller that can violate it. Both items were found in slice 1's reviews and deliberately
+left for here.
+
+- **A drop list must name EVERY row backing a dropped value.** The engine's `:dedupe_owned` step
+  runs before `:apply_drop`. If the survivor and a loser both hold the same contact-field value and
+  the user unchecks it, dedupe keeps whichever row has the lower id: if that is the survivor's, the
+  drop deletes it and the value is gone (correct); if it is the loser's, the drop's id matches
+  nothing and **the excluded value silently comes back**, roughly half the time, depending on row
+  ids. See the `## Contract` section of `Kith.Contacts.Merge`'s moduledoc. Reordering the Multi
+  steps makes it worse, not better. Two ways out — decide before Task 8: (a) the LiveView expands
+  each unchecked value to every member row backing it, or (b) the engine grows value-based dropping
+  for the dedupe keys, which is the sturdier fix since it cannot be forgotten by a future caller.
+  Option (b) is a slice-1 file change and needs its own test.
+
+- **`Kith.Accounts.Scope.for_account_id/1` is not an authorization scope.** It fabricates a
+  full-privilege scope with `user: nil` for the legacy two-contact shim. Do not use it in this
+  slice: the cluster screen has a real `current_scope`, and passing a userless scope would also
+  silently skip the engine's audit entry.
+
 ## File Structure
 
 | File | Responsibility |
