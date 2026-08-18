@@ -10,6 +10,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   use KithWeb, :live_view
 
+  alias Kith.Contacts
   alias Kith.Contacts.{MergeFields, MergeResolution, MergeSummary}
   alias Kith.DuplicateDetection
   alias Kith.Policy
@@ -74,6 +75,9 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     |> assign(:primary_id, primary_id)
     |> assign(:resolution, MergeResolution.resolve(selected, primary_id))
     |> assign(:summary, MergeSummary.build(selected))
+    # A merge error describes the resolution that was submitted. Anything that
+    # changes the resolution makes it stale, so it never outlives one.
+    |> assign(:error, nil)
   end
 
   defp selected_members(socket) do
@@ -133,7 +137,11 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   # `String.to_integer/1`, which would raise on this value.
   def handle_event("choose-field", %{"field" => field, "index" => "clear"}, socket) do
     field = String.to_existing_atom(field)
-    {:noreply, assign(socket, :overrides, Map.put(socket.assigns.overrides, field, :clear))}
+
+    {:noreply,
+     socket
+     |> assign(:overrides, Map.put(socket.assigns.overrides, field, :clear))
+     |> assign(:error, nil)}
   end
 
   def handle_event("choose-field", %{"field" => field, "index" => index}, socket) do
@@ -150,7 +158,9 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
       candidate ->
         {:noreply,
-         assign(socket, :overrides, Map.put(socket.assigns.overrides, field, candidate.value))}
+         socket
+         |> assign(:overrides, Map.put(socket.assigns.overrides, field, candidate.value))
+         |> assign(:error, nil)}
     end
   end
 
@@ -164,8 +174,130 @@ defmodule KithWeb.ContactLive.ClusterMerge do
         MapSet.put(socket.assigns.dropped, key)
       end
 
-    {:noreply, assign(socket, :dropped, dropped)}
+    {:noreply, socket |> assign(:dropped, dropped) |> assign(:error, nil)}
   end
+
+  def handle_event("merge", _params, socket) do
+    survivor_id = socket.assigns.primary_id
+
+    loser_ids =
+      socket |> selected_members() |> Enum.map(& &1.id) |> Enum.reject(&(&1 == survivor_id))
+
+    resolution = %{
+      fields: Map.merge(socket.assigns.resolution.fields, socket.assigns.overrides),
+      drop: build_drop(socket),
+      # Every member the screen showed but the user excluded, so the engine can
+      # dismiss exactly the pairs the user reviewed and rejected. Leaving these
+      # out would leave those pairs `pending` and they would be suggested again.
+      unchecked_ids: unchecked_ids(socket)
+    }
+
+    resolution = drop_aliases(resolution, socket.assigns.dropped)
+
+    case Contacts.merge_cluster(socket.assigns.current_scope, survivor_id, loser_ids, resolution) do
+      {:ok, survivor} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Merged #{length(loser_ids) + 1} contacts")
+         |> redirect(to: ~p"/contacts/#{survivor.id}")}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :error, error_message(reason))}
+    end
+  end
+
+  def handle_event("not-duplicates", _params, socket) do
+    DuplicateDetection.dismiss_selection(
+      socket.assigns.current_scope.account.id,
+      MapSet.to_list(socket.assigns.selected_ids),
+      unchecked_ids(socket)
+    )
+
+    {:noreply,
+     socket
+     |> put_flash(:info, "Marked as not duplicates")
+     |> redirect(to: ~p"/contacts/duplicates")}
+  end
+
+  defp unchecked_ids(socket) do
+    socket.assigns.members
+    |> Enum.map(& &1.id)
+    |> Enum.reject(&MapSet.member?(socket.assigns.selected_ids, &1))
+  end
+
+  # The screen groups dropped values by its own section labels; the engine wants
+  # them keyed by entity type. Aliases are deliberately absent: they are a
+  # whole-array field carried in `fields`, with no row to drop.
+  defp build_drop(socket) do
+    socket.assigns.dropped
+    |> Enum.reduce(%{}, fn {label, id}, acc ->
+      case drop_key(label) do
+        nil ->
+          acc
+
+        key ->
+          ids = equivalent_ids(socket, key, id)
+          Map.update(acc, key, ids, &(ids ++ &1))
+      end
+    end)
+    |> Map.new(fn {key, ids} -> {key, Enum.uniq(ids)} end)
+  end
+
+  # `Kith.Contacts.Merge`'s contract: its `:dedupe_owned` step collapses equal
+  # rows *before* `:apply_drop` runs, keeping whichever row has the lower id.
+  # Naming only the row the user clicked would therefore leave its equivalent
+  # standing on the survivor and the excluded value would come back. Each
+  # `MergeSummary` entry carries the dedupe-equivalence `key` for exactly this:
+  # expand a dropped entry to every entry sharing its key.
+  defp equivalent_ids(socket, section, id) do
+    entries = Map.fetch!(socket.assigns.summary, section)
+
+    case Enum.find(entries, &(&1.id == id)) do
+      nil -> [id]
+      entry -> for other <- entries, other.key == entry.key, do: other.id
+    end
+  end
+
+  defp drop_key("Fields"), do: :contact_fields
+  defp drop_key("Addresses"), do: :addresses
+  defp drop_key("Tags"), do: :tags
+  defp drop_key(_label), do: nil
+
+  # An alias has no backing row — the alias id *is* the string — so unchecking
+  # one is a subtraction from the resolved array rather than a `drop` entry
+  # (design spec §3).
+  defp drop_aliases(resolution, dropped) do
+    dropped_aliases = for {"Aliases", value} <- dropped, do: value
+
+    case resolution.fields do
+      %{aliases: list} when is_list(list) and dropped_aliases != [] ->
+        put_in(resolution.fields[:aliases], list -- dropped_aliases)
+
+      _fields ->
+        resolution
+    end
+  end
+
+  defp error_message(reason) when reason in [:not_found, :trashed],
+    do: "One of these contacts changed since you opened this page."
+
+  defp error_message({:unknown_value, field}),
+    do: "The #{humanize(field)} you picked changed since you opened this page."
+
+  defp error_message({:not_clearable, field}),
+    do: "#{String.capitalize(humanize(field))} can't be left empty."
+
+  defp error_message({:unknown_drop, _key}),
+    do: "One of the values you unchecked changed since you opened this page."
+
+  defp error_message({:invalid_fields, _changeset}),
+    do: "The values you picked can't be saved to one contact."
+
+  # `:different_accounts`, `:survivor_in_losers`, `:no_losers` and anything the
+  # engine grows later. None is reachable from this screen's own UI, and a raw
+  # reason tuple on the page reads as a crash — say something true instead.
+  defp error_message(_reason),
+    do: "This merge couldn't be completed. Reload the page and try again."
 
   # `MergeSummary.build/1` gives "Fields"/"Addresses"/"Tags" entries an
   # integer row id, but "Aliases" entries are keyed by the alias string

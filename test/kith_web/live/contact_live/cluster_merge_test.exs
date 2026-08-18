@@ -340,4 +340,155 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       refute has_element?(live, "button[phx-value-field='first_name'][phx-value-index='clear']")
     end
   end
+
+  describe "submitting" do
+    test "merging redirects to the survivor and trashes the rest", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert {:error, {:redirect, %{to: path}}} =
+               live |> element("button[phx-click='merge']") |> render_click()
+
+      survivor_id = path |> String.split("/") |> List.last() |> String.to_integer()
+      loser_id = if survivor_id == ctx.a.id, do: ctx.b.id, else: ctx.a.id
+
+      assert Kith.Repo.get!(Kith.Contacts.Contact, loser_id).deleted_at != nil
+      assert Kith.Repo.get!(Kith.Contacts.Contact, survivor_id).deleted_at == nil
+    end
+
+    test "merging with a member unchecked dismisses that pair", ctx do
+      c =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Sarah", last_name: "Kim"})
+
+      candidate!(ctx.account_id, ctx.b, c)
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      live
+      |> element("input[phx-click='toggle-member'][phx-value-id='#{c.id}']")
+      |> render_click()
+
+      assert {:error, {:redirect, _}} =
+               live |> element("button[phx-click='merge']") |> render_click()
+
+      # The pair the user rejected is dismissed. Its `b` endpoint is a loser, so
+      # `resolve_after_merge/4` also repoints the row onto the survivor — assert
+      # on every surviving pair that touches `c` rather than on `(b, c)`, which
+      # no longer exists by that key.
+      statuses =
+        Kith.Repo.all(
+          from(d in Kith.Contacts.DuplicateCandidate,
+            where: d.contact_id == ^c.id or d.duplicate_contact_id == ^c.id,
+            select: d.status
+          )
+        )
+
+      assert statuses == ["dismissed"]
+
+      # An unchecked member is not a loser — it must still be an active contact.
+      assert Kith.Repo.get!(Kith.Contacts.Contact, c.id).deleted_at == nil
+    end
+
+    # Ruling S5: the engine dedupes the survivor's own rows *before* it applies
+    # `drop`, so naming only the row the user clicked is not enough. Here the
+    # loser's row is the lower id (the one the screen renders as checkable) and
+    # the survivor holds the equivalent higher-id row: dropping only the clicked
+    # id would leave the survivor's row untouched and the excluded value would
+    # come back on the merged contact.
+    test "unchecking a value shared by two members drops every row backing it", ctx do
+      email_type =
+        Kith.Repo.one!(
+          from(t in Kith.Contacts.ContactFieldType, where: like(t.protocol, "mailto%"), limit: 1)
+        )
+
+      # Inserted on the loser first, so its row id is below the survivor's.
+      loser_field =
+        ContactsFixtures.contact_field_fixture(ctx.b, email_type.id, %{
+          "value" => "sarah@example.com"
+        })
+
+      survivor_field =
+        ContactsFixtures.contact_field_fixture(ctx.a, email_type.id, %{
+          "value" => "sarah@example.com"
+        })
+
+      assert loser_field.id < survivor_field.id
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # Only the first row of an equal-value group is checkable; the later one
+      # renders disabled as "duplicate · dropped".
+      live
+      |> element(
+        "input[phx-click='toggle-value'][phx-value-type='Fields'][phx-value-id='#{loser_field.id}']"
+      )
+      |> render_click()
+
+      assert {:error, {:redirect, %{to: path}}} =
+               live |> element("button[phx-click='merge']") |> render_click()
+
+      assert path == "/contacts/#{ctx.a.id}"
+
+      values =
+        Kith.Repo.all(
+          from(f in Kith.Contacts.ContactField,
+            where: f.contact_id == ^ctx.a.id,
+            select: f.value
+          )
+        )
+
+      refute "sarah@example.com" in values
+    end
+
+    test "not duplicates dismisses the cluster and returns to the list", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert {:error, {:redirect, %{to: "/contacts/duplicates"}}} =
+               live |> element("button[phx-click='not-duplicates']") |> render_click()
+
+      assert Kith.DuplicateDetection.list_clusters(ctx.account_id) == []
+      assert Kith.Repo.get!(Kith.Contacts.Contact, ctx.b.id).deleted_at == nil
+    end
+
+    test "a member merged elsewhere produces an inline error, not a partial merge", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # Another session trashes a member behind our back.
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.b.id),
+        set: [deleted_at: DateTime.utc_now(:second)]
+      )
+
+      html = live |> element("button[phx-click='merge']") |> render_click()
+
+      assert html =~ "changed since you opened"
+      assert Kith.Repo.get!(Kith.Contacts.Contact, ctx.a.id).deleted_at == nil
+
+      # The screen stays usable after a failed merge.
+      assert has_element?(live, "button[phx-click='merge']")
+    end
+
+    test "changing the resolution clears a stale merge error", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.b.id),
+        set: [deleted_at: DateTime.utc_now(:second)]
+      )
+
+      assert live |> element("button[phx-click='merge']") |> render_click() =~
+               "changed since you opened"
+
+      html =
+        live
+        |> element("button[phx-value-field='company'][phx-value-index='0']")
+        |> render_click()
+
+      refute html =~ "changed since you opened"
+    end
+
+    test "a viewer cannot open the screen", ctx do
+      viewer = AccountsFixtures.user_fixture(%{role: "viewer"})
+
+      assert {:error, {:live_redirect, %{to: "/contacts"}}} =
+               live(log_in_user(build_conn(), viewer), cluster_path(ctx.a, ctx.b))
+    end
+  end
 end
