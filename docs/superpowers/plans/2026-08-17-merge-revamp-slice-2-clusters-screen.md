@@ -39,6 +39,15 @@ left for here.
   for the dedupe keys, which is the sturdier fix since it cannot be forgotten by a future caller.
   Option (b) is a slice-1 file change and needs its own test.
 
+- **Never let the user pick a raw Immich field value.** Slice 1 exempted the four Immich columns
+  from the engine's held-by-member validation, because the group is resolved as a unit and can
+  legitimately synthesise `immich_status: "unlinked"` when no member is linked. That means the
+  engine no longer rejects an Immich value no member holds: a bogus `immich_status` would sail past
+  validation and hit the bare DB CHECK `contacts_immich_status_values`, raising a `Postgrex.Error`
+  that escapes the error contract entirely (there is no `validate_inclusion` for it on
+  `Contact.update_changeset/2`). The §4 Immich row must therefore submit a chosen MEMBER, with the
+  LiveView copying that member's whole four-field group — never free-form field values.
+
 - **Do not offer a member's id as a `first_met_through_id` value.** The engine now enforces spec D4
   by silently coercing a `first_met_through_id` that names any merged member to `:clear`. If the
   Identity section's segmented control lists the loser as a candidate value, the user can click it,
