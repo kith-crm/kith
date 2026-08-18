@@ -89,6 +89,12 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     refute has_element?(live, "button[phx-value-field='first_name'][phx-value-index='clear']")
   end
 
+  test "clearable contested fields do offer a Leave empty option", ctx do
+    {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+    assert has_element?(live, "button[phx-value-field='company'][phx-value-index='clear']")
+  end
+
   test "an unknown contact id renders not found", ctx do
     assert {:error, {:live_redirect, %{to: "/contacts"}}} =
              live(ctx.conn, "/contacts/duplicates/cluster/0")
@@ -97,5 +103,37 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   test "a non-numeric contact id redirects instead of raising", ctx do
     assert {:error, {:live_redirect, %{to: "/contacts"}}} =
              live(ctx.conn, "/contacts/duplicates/cluster/abc")
+  end
+
+  test "a resolved section says so instead of just staying folded", ctx do
+    c =
+      ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Priya", last_name: "Nair"})
+
+    d =
+      ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Priya", last_name: "Nair"})
+
+    candidate!(ctx.account_id, c, d)
+
+    {:ok, _live, html} = live(ctx.conn, cluster_path(c, d))
+
+    assert html =~ "all resolved"
+  end
+
+  test "a viewer hitting the cluster route is redirected to /contacts", ctx do
+    viewer = AccountsFixtures.user_fixture(%{role: "viewer"})
+    viewer_conn = log_in_user(build_conn(), viewer)
+
+    assert {:error, {:live_redirect, %{to: "/contacts"}}} =
+             live(viewer_conn, cluster_path(ctx.a, ctx.b))
+  end
+
+  test "a member id from another account does not resolve", ctx do
+    other_user = AccountsFixtures.user_fixture()
+
+    other_contact =
+      ContactsFixtures.contact_fixture(other_user.account_id, %{first_name: "Other"})
+
+    assert {:error, {:live_redirect, %{to: "/contacts"}}} =
+             live(ctx.conn, "/contacts/duplicates/cluster/#{other_contact.id}")
   end
 end

@@ -147,6 +147,14 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   defp display(list) when is_list(list), do: Enum.join(list, ", ")
   defp display(value), do: to_string(value)
 
+  defp trash_summary(assigns) do
+    case MapSet.size(assigns.selected_ids) - 1 do
+      n when n <= 0 -> "Nothing moves to trash."
+      1 -> "1 contact moves to trash and stays recoverable for 30 days."
+      n -> "#{n} contacts move to trash and stay recoverable for 30 days."
+    end
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -233,6 +241,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
               >
                 {conflict_count(assigns)} need{if conflict_count(assigns) == 1, do: "s"} a decision
               </span>
+              <span
+                :if={conflict_count(assigns) == 0}
+                class="rounded-full bg-[var(--color-success-subtle)] text-[var(--color-success)] px-2 py-0.5 text-xs font-medium"
+              >
+                all resolved
+              </span>
             </span>
           </summary>
 
@@ -265,6 +279,23 @@ defmodule KithWeb.ContactLive.ClusterMerge do
               >
                 {display(candidate.value)}
                 <span class="block text-[10px] opacity-70">{candidate.count} record(s)</span>
+              </button>
+              <button
+                :if={not MergeFields.non_clearable?(field)}
+                type="button"
+                phx-click="choose-field"
+                phx-value-field={field}
+                phx-value-index="clear"
+                class={[
+                  "rounded-[var(--radius-md)] border px-3 py-1.5 text-sm text-start italic",
+                  if(effective(assigns, field) == :clear,
+                    do:
+                      "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-foreground)]",
+                    else: "border-[var(--color-border)] text-[var(--color-text-tertiary)]"
+                  )
+                ]}
+              >
+                Leave empty
               </button>
             </div>
 
@@ -360,7 +391,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
         <UI.card>
           <div class="flex flex-wrap items-center justify-between gap-4">
             <p class="text-sm text-[var(--color-text-tertiary)] max-w-md">
-              {MapSet.size(@selected_ids) - 1} contact(s) move to trash and stay recoverable for 30 days.
+              {trash_summary(assigns)}
               <span :if={MapSet.size(@selected_ids) < length(@members)}>
                 Unchecked contacts will be marked as not duplicates and won't be suggested again.
               </span>
