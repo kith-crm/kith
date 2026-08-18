@@ -615,4 +615,172 @@ defmodule Kith.DuplicateDetectionTest do
       assert first.key < second.key
     end
   end
+
+  describe "get_cluster/2 and trashed members" do
+    setup do
+      Kith.ContactsFixtures.seed_reference_data!()
+      user = Kith.AccountsFixtures.user_fixture()
+
+      contacts =
+        Map.new([a: "Ann", b: "Bea", c: "Cal"], fn {key, name} ->
+          {key, Kith.ContactsFixtures.contact_fixture(user.account_id, %{first_name: name})}
+        end)
+
+      %{user: user, account_id: user.account_id, contacts: contacts}
+    end
+
+    test "any member id resolves to the cluster", ctx do
+      %{a: a, b: b, c: c} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+      candidate!(ctx.account_id, b, c)
+
+      for member <- [a, b, c] do
+        cluster = Kith.DuplicateDetection.get_cluster(ctx.account_id, member.id)
+        assert cluster
+        assert member.id in Enum.map(cluster.contacts, & &1.id)
+      end
+    end
+
+    test "a contact in no cluster returns nil", ctx do
+      assert Kith.DuplicateDetection.get_cluster(ctx.account_id, ctx.contacts.a.id) == nil
+    end
+
+    test "a trashed member is excluded and a one-member cluster disappears", ctx do
+      %{a: a, b: b} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^b.id),
+        set: [deleted_at: DateTime.utc_now(:second)]
+      )
+
+      assert Kith.DuplicateDetection.list_clusters(ctx.account_id) == []
+      assert Kith.DuplicateDetection.get_cluster(ctx.account_id, a.id) == nil
+    end
+
+    test "a trashed member is dropped but a three-member cluster survives", ctx do
+      %{a: a, b: b, c: c} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+      candidate!(ctx.account_id, b, c)
+
+      Repo.update_all(from(x in Kith.Contacts.Contact, where: x.id == ^c.id),
+        set: [deleted_at: DateTime.utc_now(:second)]
+      )
+
+      assert [cluster] = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+      assert Enum.map(cluster.contacts, & &1.id) |> Enum.sort() == Enum.sort([a.id, b.id])
+    end
+  end
+
+  describe "default_primary/1" do
+    setup do
+      Kith.ContactsFixtures.seed_reference_data!()
+      user = Kith.AccountsFixtures.user_fixture()
+      %{user: user, account_id: user.account_id}
+    end
+
+    test "picks the member with the most attached records", ctx do
+      thin = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Thin"})
+      rich = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Rich"})
+
+      Kith.ContactsFixtures.note_fixture(rich, ctx.user.id)
+      Kith.ContactsFixtures.note_fixture(rich, ctx.user.id)
+      Kith.ContactsFixtures.address_fixture(rich)
+      Kith.ContactsFixtures.note_fixture(thin, ctx.user.id)
+
+      assert Kith.DuplicateDetection.default_primary([thin, rich]).id == rich.id
+    end
+
+    test "breaks ties toward the earliest created", ctx do
+      older = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Older"})
+      newer = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Newer"})
+
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^older.id),
+        set: [inserted_at: ~U[2020-01-01 00:00:00Z]]
+      )
+
+      older = Repo.get!(Kith.Contacts.Contact, older.id)
+
+      assert Kith.DuplicateDetection.default_primary([newer, older]).id == older.id
+    end
+  end
+
+  describe "dismiss_selection/3" do
+    setup do
+      Kith.ContactsFixtures.seed_reference_data!()
+      user = Kith.AccountsFixtures.user_fixture()
+
+      contacts =
+        Map.new([a: "Ann", b: "Bea", c: "Cal", d: "Dee", e: "Eve"], fn {key, name} ->
+          {key, Kith.ContactsFixtures.contact_fixture(user.account_id, %{first_name: name})}
+        end)
+
+      %{account_id: user.account_id, contacts: contacts}
+    end
+
+    test "writes the full clique over the selected members", ctx do
+      %{a: a, b: b, c: c} = ctx.contacts
+      # A chain: only two pairs exist, but all three combinations must end up
+      # dismissed or a later contact could reunite A and C by transitivity.
+      candidate!(ctx.account_id, a, b)
+      candidate!(ctx.account_id, b, c)
+
+      :ok = Kith.DuplicateDetection.dismiss_selection(ctx.account_id, [a.id, b.id, c.id], [])
+
+      assert status_of(ctx.account_id, a, b) == "dismissed"
+      assert status_of(ctx.account_id, b, c) == "dismissed"
+      assert status_of(ctx.account_id, a, c) == "dismissed"
+    end
+
+    test "dismisses selected-to-unchecked but never unchecked-to-unchecked", ctx do
+      %{a: a, b: b, d: d, e: e} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+      candidate!(ctx.account_id, a, d)
+      candidate!(ctx.account_id, d, e)
+
+      :ok =
+        Kith.DuplicateDetection.dismiss_selection(ctx.account_id, [a.id, b.id], [d.id, e.id])
+
+      assert status_of(ctx.account_id, a, d) == "dismissed"
+      assert status_of(ctx.account_id, d, e) == "pending"
+    end
+
+    test "rejects a selected id belonging to another account and writes nothing for it", ctx do
+      %{a: a, b: b} = ctx.contacts
+      other_user = Kith.AccountsFixtures.user_fixture()
+      foreign = Kith.ContactsFixtures.contact_fixture(other_user.account_id, %{first_name: "Fox"})
+
+      candidate!(ctx.account_id, a, b)
+
+      :ok =
+        Kith.DuplicateDetection.dismiss_selection(ctx.account_id, [a.id, b.id, foreign.id], [])
+
+      count =
+        Repo.aggregate(
+          from(d in Kith.Contacts.DuplicateCandidate,
+            where: d.contact_id == ^foreign.id or d.duplicate_contact_id == ^foreign.id
+          ),
+          :count
+        )
+
+      assert count == 0
+    end
+
+    test "rejects an unchecked id belonging to another account and writes nothing for it", ctx do
+      %{a: a, b: b} = ctx.contacts
+      other_user = Kith.AccountsFixtures.user_fixture()
+      foreign = Kith.ContactsFixtures.contact_fixture(other_user.account_id, %{first_name: "Fox"})
+
+      :ok = Kith.DuplicateDetection.dismiss_selection(ctx.account_id, [a.id, b.id], [foreign.id])
+
+      count =
+        Repo.aggregate(
+          from(d in Kith.Contacts.DuplicateCandidate,
+            where: d.contact_id == ^foreign.id or d.duplicate_contact_id == ^foreign.id
+          ),
+          :count
+        )
+
+      assert count == 0
+    end
+  end
 end

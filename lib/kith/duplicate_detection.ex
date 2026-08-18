@@ -224,6 +224,10 @@ defmodule Kith.DuplicateDetection do
       DuplicateCandidate
       |> scope_to_account(account_id)
       |> where([d], d.status in ["pending", "dismissed"])
+      |> join(:inner, [d], one in Contact, on: one.id == d.contact_id)
+      |> join(:inner, [d, _one], two in Contact, on: two.id == d.duplicate_contact_id)
+      |> where([d, one, two], is_nil(one.deleted_at) and is_nil(two.deleted_at))
+      |> select([d], d)
       |> Repo.all()
 
     {pending, dismissed} = Enum.split_with(candidates, &(&1.status == "pending"))
@@ -327,5 +331,145 @@ defmodule Kith.DuplicateDetection do
       max_score: pairs |> Enum.map(& &1.score) |> Enum.max(fn -> 0.0 end),
       reasons: pairs |> Enum.flat_map(& &1.reasons) |> Enum.uniq()
     }
+  end
+
+  @doc """
+  Finds the cluster containing `contact_id`, or `nil`.
+
+  Takes any member id rather than only the cluster key, so a bookmark survives
+  the key shifting when a lower-id member joins.
+  """
+  def get_cluster(account_id, contact_id) do
+    account_id
+    |> build_clusters()
+    |> Enum.find(fn cluster ->
+      Enum.any?(cluster.contacts, &(&1.id == contact_id))
+    end)
+  end
+
+  @count_schemas [
+    Kith.Contacts.Note,
+    Kith.Contacts.Address,
+    Kith.Contacts.ContactField,
+    Kith.Contacts.Document,
+    Kith.Contacts.Photo,
+    Kith.Activities.Call,
+    Kith.Activities.LifeEvent
+  ]
+
+  @doc """
+  The member that should survive by default: the one holding the most attached
+  records, tie-broken by earliest creation.
+
+  Moving the fewest rows is the cheap part; the real reason is that the richest,
+  oldest record is the id external clients (CardDAV, Immich) are already pinned
+  to.
+  """
+  def default_primary(contacts) do
+    ids = Enum.map(contacts, & &1.id)
+    counts = attached_counts(ids)
+
+    Enum.max_by(contacts, fn contact ->
+      {Map.get(counts, contact.id, 0), -DateTime.to_unix(contact.inserted_at)}
+    end)
+  end
+
+  defp attached_counts(ids) do
+    schema_counts =
+      Enum.reduce(@count_schemas, %{}, fn schema, acc ->
+        from(r in schema,
+          where: r.contact_id in ^ids,
+          group_by: r.contact_id,
+          select: {r.contact_id, count(r.id)}
+        )
+        |> Repo.all()
+        |> Enum.reduce(acc, fn {id, n}, acc -> Map.update(acc, id, n, &(&1 + n)) end)
+      end)
+
+    from(ac in "activity_contacts",
+      where: ac.contact_id in ^ids,
+      group_by: ac.contact_id,
+      select: {ac.contact_id, count()}
+    )
+    |> Repo.all()
+    |> Enum.reduce(schema_counts, fn {id, n}, acc -> Map.update(acc, id, n, &(&1 + n)) end)
+  end
+
+  @doc """
+  Records that the selected members are not duplicates of each other.
+
+  Writes the full clique over `selected_ids` rather than only the pairs
+  detection happened to produce: a cluster is often a chain (A–B, B–C), and
+  dismissing only those leaves no negative edge between A and C. Pairs between
+  two unchecked members are never touched — the user excluded them, and
+  excluding is not a statement about them.
+
+  `selected_ids` and `unchecked_ids` are caller-supplied, so every id is
+  verified to belong to `account_id` before anything is written — the
+  candidate row's foreign key only proves the contact exists, not that it's
+  this account's, and a bad caller could otherwise write a dismissal row
+  referencing another account's contact. Ids that don't resolve to this
+  account are silently dropped from their list rather than raising, since
+  this is a bulk action driven by UI selection state, not a single-resource
+  lookup.
+  """
+  def dismiss_selection(account_id, selected_ids, unchecked_ids) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    selected_ids = owned_ids(account_id, selected_ids)
+    unchecked_ids = owned_ids(account_id, unchecked_ids)
+
+    cliques =
+      for one <- selected_ids, two <- selected_ids, one < two, do: {one, two}
+
+    crosses =
+      for one <- selected_ids, two <- unchecked_ids, one != two do
+        if one < two, do: {one, two}, else: {two, one}
+      end
+
+    (cliques ++ crosses)
+    |> Enum.uniq()
+    |> Enum.each(fn {low, high} -> upsert_dismissed(account_id, low, high, now) end)
+
+    :ok
+  end
+
+  defp owned_ids(_account_id, []), do: []
+
+  defp owned_ids(account_id, ids) do
+    Contact
+    |> scope_to_account(account_id)
+    |> where([c], c.id in ^ids)
+    |> select([c], c.id)
+    |> Repo.all()
+  end
+
+  defp upsert_dismissed(account_id, low, high, now) do
+    case Repo.one(
+           from(d in DuplicateCandidate,
+             where:
+               d.account_id == ^account_id and d.contact_id == ^low and
+                 d.duplicate_contact_id == ^high
+           )
+         ) do
+      nil ->
+        %DuplicateCandidate{account_id: account_id}
+        |> DuplicateCandidate.changeset(%{
+          contact_id: low,
+          duplicate_contact_id: high,
+          score: 0.0,
+          reasons: ["user_rejected"],
+          status: "dismissed",
+          detected_at: now,
+          resolved_at: now
+        })
+        |> Repo.insert!()
+
+      %DuplicateCandidate{status: "merged"} = existing ->
+        existing
+
+      existing ->
+        existing |> DuplicateCandidate.dismiss_changeset() |> Repo.update!()
+    end
   end
 end
