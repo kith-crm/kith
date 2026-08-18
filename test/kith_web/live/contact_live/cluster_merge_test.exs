@@ -1,6 +1,7 @@
 defmodule KithWeb.ContactLive.ClusterMergeTest do
   use KithWeb.ConnCase
 
+  import Ecto.Query
   import Phoenix.LiveViewTest
 
   alias Kith.{AccountsFixtures, ContactsFixtures}
@@ -135,5 +136,145 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
     assert {:error, {:live_redirect, %{to: "/contacts"}}} =
              live(ctx.conn, "/contacts/duplicates/cluster/#{other_contact.id}")
+  end
+
+  describe "interactions" do
+    test "unchecking a member recomputes the result", ctx do
+      {:ok, live, html0} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # "Jiyoung" (b's middle name) appears both in b's own member chip and in
+      # the resolved middle_name row's value + attribution — the chip stays
+      # (unchecked members are dimmed, not removed) but the resolved row must
+      # drop it once b is no longer part of the selection.
+      occurrences_before = html0 |> String.split("Jiyoung") |> length()
+
+      html =
+        live
+        |> element("input[phx-click='toggle-member'][phx-value-id='#{ctx.b.id}']")
+        |> render_click()
+
+      occurrences_after = html |> String.split("Jiyoung") |> length()
+
+      assert html =~ "Merge 1 contacts" or html =~ "1 selected"
+      assert occurrences_after < occurrences_before
+    end
+
+    test "choosing a conflicting value marks it selected", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      html =
+        live
+        |> element("button[phx-value-field='company'][phx-value-index='1']")
+        |> render_click()
+
+      assert html =~ "Figma"
+    end
+
+    test "changing the selection discards an explicit choice", ctx do
+      c =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Sarah",
+          last_name: "Kim",
+          company: "Stripe"
+        })
+
+      candidate!(ctx.account_id, ctx.b, c)
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      live
+      |> element("button[phx-value-field='company'][phx-value-index='1']")
+      |> render_click()
+
+      html =
+        live
+        |> element("input[phx-click='toggle-member'][phx-value-id='#{c.id}']")
+        |> render_click()
+
+      # Back to the computed default rather than the override.
+      assert html =~ "Stripe"
+    end
+
+    test "unchecking a value removes it from the merge", ctx do
+      email_type =
+        Kith.Repo.one!(
+          from(t in Kith.Contacts.ContactFieldType, where: like(t.protocol, "mailto%"), limit: 1)
+        )
+
+      field =
+        ContactsFixtures.contact_field_fixture(ctx.b, email_type.id, %{"value" => "x@y.com"})
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      html =
+        live
+        |> element("input[phx-click='toggle-value'][phx-value-id='#{field.id}']")
+        |> render_click()
+
+      assert html =~ "x@y.com"
+    end
+
+    test "making another member primary moves the badge", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      html =
+        live
+        |> element("button[phx-click='set-primary'][phx-value-id='#{ctx.b.id}']")
+        |> render_click()
+
+      assert html =~ "primary"
+    end
+
+    test "choosing Leave empty on a clearable contested field records a :clear override", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      html =
+        live
+        |> element("button[phx-value-field='company'][phx-value-index='clear']")
+        |> render_click()
+
+      # The clear button itself now reads as the selected choice for the row.
+      assert html =~ ~s(phx-value-field="company")
+
+      assert has_element?(
+               live,
+               "button[phx-value-field='company'][phx-value-index='clear'][class*='bg-[var(--color-accent)]']"
+             )
+
+      refute has_element?(
+               live,
+               "button[phx-value-field='company'][phx-value-index='0'][class*='bg-[var(--color-accent)]']"
+             )
+
+      refute has_element?(
+               live,
+               "button[phx-value-field='company'][phx-value-index='1'][class*='bg-[var(--color-accent)]']"
+             )
+    end
+
+    test "a genuinely contested required field offers candidates but no Leave empty option",
+         ctx do
+      c =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "David",
+          last_name: "Kim"
+        })
+
+      d =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Priya",
+          last_name: "Kim"
+        })
+
+      candidate!(ctx.account_id, c, d)
+
+      {:ok, live, html} = live(ctx.conn, cluster_path(c, d))
+
+      assert html =~ "David"
+      assert html =~ "Priya"
+      assert has_element?(live, "button[phx-value-field='first_name'][phx-value-index='0']")
+      assert has_element?(live, "button[phx-value-field='first_name'][phx-value-index='1']")
+      refute has_element?(live, "button[phx-value-field='first_name'][phx-value-index='clear']")
+    end
   end
 end

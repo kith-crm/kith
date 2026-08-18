@@ -91,10 +91,84 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     end
   end
 
-  # Temporary — Task 7 adds the real event handlers (toggle-member, set-primary,
-  # choose-field, toggle-value, not-duplicates, merge). Remove this clause then.
   @impl true
-  def handle_event(_event, _params, socket), do: {:noreply, socket}
+  def handle_event("toggle-member", %{"id" => id}, socket) do
+    id = String.to_integer(id)
+
+    selected =
+      if MapSet.member?(socket.assigns.selected_ids, id) do
+        MapSet.delete(socket.assigns.selected_ids, id)
+      else
+        MapSet.put(socket.assigns.selected_ids, id)
+      end
+
+    if MapSet.size(selected) == 0 do
+      # `MergeResolution.resolve/2` requires a non-empty member list, and there
+      # is no meaningful "merge nothing" state to render — refuse to uncheck
+      # the last remaining member instead of leaving a selection that would
+      # crash the next recompute.
+      {:noreply, socket}
+    else
+      {:noreply,
+       socket
+       |> assign(:selected_ids, selected)
+       # Selection changed, so every derived value is stale — including choices
+       # the user made, which may no longer be held by any selected member.
+       |> assign(:overrides, %{})
+       |> assign(:dropped, MapSet.new())
+       |> recompute()}
+    end
+  end
+
+  def handle_event("set-primary", %{"id" => id}, socket) do
+    {:noreply, socket |> assign(:primary_id, String.to_integer(id)) |> recompute()}
+  end
+
+  # "Leave empty" posts the literal index "clear" (spec B7) rather than a
+  # candidate position — route it to the override directly instead of
+  # `String.to_integer/1`, which would raise on this value.
+  def handle_event("choose-field", %{"field" => field, "index" => "clear"}, socket) do
+    field = String.to_existing_atom(field)
+    {:noreply, assign(socket, :overrides, Map.put(socket.assigns.overrides, field, :clear))}
+  end
+
+  def handle_event("choose-field", %{"field" => field, "index" => index}, socket) do
+    field = String.to_existing_atom(field)
+    index = String.to_integer(index)
+
+    # Must resolve the clicked index the same way it was rendered — against
+    # `candidates_for/2` over the current selection, never against
+    # `@resolution.conflicts[field]`, which is built by a different, unsorted
+    # helper and could pick a different value than the button the user clicked.
+    case Enum.at(MergeResolution.candidates_for(selected_members(socket), field), index) do
+      nil ->
+        {:noreply, socket}
+
+      candidate ->
+        {:noreply,
+         assign(socket, :overrides, Map.put(socket.assigns.overrides, field, candidate.value))}
+    end
+  end
+
+  def handle_event("toggle-value", %{"type" => type, "id" => id}, socket) do
+    key = {type, cast_entry_id(id)}
+
+    dropped =
+      if MapSet.member?(socket.assigns.dropped, key) do
+        MapSet.delete(socket.assigns.dropped, key)
+      else
+        MapSet.put(socket.assigns.dropped, key)
+      end
+
+    {:noreply, assign(socket, :dropped, dropped)}
+  end
+
+  defp cast_entry_id(id) do
+    case Integer.parse(id) do
+      {int, ""} -> int
+      _ -> id
+    end
+  end
 
   # ── Rendering helpers ──────────────────────────────────────────────────
 
