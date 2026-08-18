@@ -184,7 +184,9 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       socket |> selected_members() |> Enum.map(& &1.id) |> Enum.reject(&(&1 == survivor_id))
 
     resolution = %{
-      fields: Map.merge(socket.assigns.resolution.fields, socket.assigns.overrides),
+      fields:
+        socket.assigns.resolution.fields
+        |> Map.merge(Map.delete(socket.assigns.overrides, :__immich__)),
       drop: build_drop(socket),
       # Every member the screen showed but the user excluded, so the engine can
       # dismiss exactly the pairs the user reviewed and rejected. Leaving these
@@ -203,6 +205,44 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
       {:error, reason} ->
         {:noreply, assign(socket, :error, error_message(reason))}
+    end
+  end
+
+  # Ruling S7: `immich_status` is `null: false` with a check constraint
+  # restricting it to "unlinked"/"needs_review"/"linked", so unlike the other
+  # three (nullable) Immich fields it cannot be set to `:clear` — that maps
+  # to `nil` in the engine and would raise a `Postgrex.Error`. This mirrors
+  # `MergeResolution.resolve_immich/3`'s own handling of "no member linked".
+  def handle_event("choose-immich", %{"id" => "none"}, socket) do
+    overrides =
+      MergeFields.immich_fields()
+      |> Enum.reduce(socket.assigns.overrides, fn
+        :immich_status, acc -> Map.put(acc, :immich_status, "unlinked")
+        field, acc -> Map.put(acc, field, :clear)
+      end)
+      |> Map.put(:__immich__, :none)
+
+    {:noreply, assign(socket, :overrides, overrides)}
+  end
+
+  def handle_event("choose-immich", %{"id" => id}, socket) do
+    id = String.to_integer(id)
+
+    case Enum.find(socket.assigns.members, &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      member ->
+        # All four columns move together or the survivor ends up with one
+        # record's person id and another's sync timestamp.
+        overrides =
+          MergeFields.immich_fields()
+          |> Enum.reduce(socket.assigns.overrides, fn field, acc ->
+            Map.put(acc, field, Map.fetch!(member, field) || :clear)
+          end)
+          |> Map.put(:__immich__, id)
+
+        {:noreply, assign(socket, :overrides, overrides)}
     end
   end
 
@@ -364,6 +404,32 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   defp display(false), do: "No"
   defp display(list) when is_list(list), do: Enum.join(list, ", ")
   defp display(value), do: to_string(value)
+
+  defp linked_members(assigns) do
+    assigns
+    |> selected_from_assigns()
+    |> Enum.filter(&(not is_nil(&1.immich_person_id)))
+  end
+
+  # Which member's Immich group is currently winning, so the row can highlight
+  # it without exposing the opaque person id.
+  defp immich_source_id(assigns) do
+    case Map.get(assigns.overrides, :__immich__, :default) do
+      :default ->
+        chosen = Map.get(assigns.resolution.fields, :immich_person_id)
+
+        case Enum.find(linked_members(assigns), &(&1.immich_person_id == chosen)) do
+          nil -> :none
+          member -> member.id
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp immich_sync_label(nil), do: "never synced"
+  defp immich_sync_label(at), do: "synced #{Calendar.strftime(at, "%d %b %Y")}"
 
   defp trash_summary(assigns) do
     case MapSet.size(assigns.selected_ids) - 1 do
@@ -530,6 +596,49 @@ defmodule KithWeb.ContactLive.ClusterMerge do
               <span class="text-xs text-[var(--color-text-tertiary)]">
                 {attribution_text(assigns, field)}
               </span>
+            </div>
+          </div>
+
+          <div
+            :if={linked_members(assigns) != []}
+            class="grid grid-cols-[10rem_1fr] gap-4 items-center px-4 py-2.5 border-t border-[var(--color-border-subtle)]"
+          >
+            <div class="text-sm text-[var(--color-text-secondary)]">Photo library</div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button
+                :for={member <- linked_members(assigns)}
+                type="button"
+                phx-click="choose-immich"
+                phx-value-id={member.id}
+                class={[
+                  "rounded-[var(--radius-md)] border px-3 py-1.5 text-sm text-start",
+                  if(immich_source_id(assigns) == member.id,
+                    do:
+                      "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-foreground)]",
+                    else: "border-[var(--color-border)]"
+                  )
+                ]}
+              >
+                {member.display_name}
+                <span class="block text-[10px] opacity-70">
+                  {immich_sync_label(member.immich_last_synced_at)}
+                </span>
+              </button>
+              <button
+                type="button"
+                phx-click="choose-immich"
+                phx-value-id="none"
+                class={[
+                  "rounded-[var(--radius-md)] border px-3 py-1.5 text-sm",
+                  if(immich_source_id(assigns) == :none,
+                    do:
+                      "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-foreground)]",
+                    else: "border-[var(--color-border)]"
+                  )
+                ]}
+              >
+                Not linked
+              </button>
             </div>
           </div>
         </details>
