@@ -359,18 +359,24 @@ defmodule Kith.DuplicateDetection do
 
   @doc """
   The member that should survive by default: the one holding the most attached
-  records, tie-broken by earliest creation.
+  records, tie-broken by earliest creation, then by lowest id.
 
   Moving the fewest rows is the cheap part; the real reason is that the richest,
   oldest record is the id external clients (CardDAV, Immich) are already pinned
-  to.
+  to. The id tiebreak makes the choice deterministic on its own — without it,
+  a tie on both count and `inserted_at` (easy with second-precision timestamps
+  and a bulk import) would resolve by whatever order `contacts` happened to be
+  passed in, an accident of the caller rather than a rule.
+
+  `contacts` must be non-empty; callers only ever pass cluster members, and a
+  cluster always has at least two.
   """
   def default_primary(contacts) do
     ids = Enum.map(contacts, & &1.id)
     counts = attached_counts(ids)
 
     Enum.max_by(contacts, fn contact ->
-      {Map.get(counts, contact.id, 0), -DateTime.to_unix(contact.inserted_at)}
+      {Map.get(counts, contact.id, 0), -DateTime.to_unix(contact.inserted_at), -contact.id}
     end)
   end
 
@@ -412,6 +418,12 @@ defmodule Kith.DuplicateDetection do
   account are silently dropped from their list rather than raising, since
   this is a bulk action driven by UI selection state, not a single-resource
   lookup.
+
+  The whole batch of pairs is written inside one transaction. Without it, a
+  mid-loop failure (e.g. a unique-constraint race against a concurrent
+  dismissal) would leave the clique half-written — some rejected matches
+  recorded, others not — which for negative edges reopens exactly the
+  transitivity hole the clique exists to close.
   """
   def dismiss_selection(account_id, selected_ids, unchecked_ids) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
@@ -427,9 +439,11 @@ defmodule Kith.DuplicateDetection do
         if one < two, do: {one, two}, else: {two, one}
       end
 
-    (cliques ++ crosses)
-    |> Enum.uniq()
-    |> Enum.each(fn {low, high} -> upsert_dismissed(account_id, low, high, now) end)
+    Repo.transaction(fn ->
+      (cliques ++ crosses)
+      |> Enum.uniq()
+      |> Enum.each(fn {low, high} -> upsert_dismissed(account_id, low, high, now) end)
+    end)
 
     :ok
   end

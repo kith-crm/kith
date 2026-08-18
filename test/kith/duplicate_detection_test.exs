@@ -741,7 +741,17 @@ defmodule Kith.DuplicateDetectionTest do
         Kith.DuplicateDetection.dismiss_selection(ctx.account_id, [a.id, b.id], [d.id, e.id])
 
       assert status_of(ctx.account_id, a, d) == "dismissed"
+      assert status_of(ctx.account_id, b, d) == "dismissed"
       assert status_of(ctx.account_id, d, e) == "pending"
+    end
+
+    test "leaves a merged pair alone rather than downgrading it to dismissed", ctx do
+      %{a: a, b: b} = ctx.contacts
+      candidate!(ctx.account_id, a, b, status: "merged")
+
+      :ok = Kith.DuplicateDetection.dismiss_selection(ctx.account_id, [a.id, b.id], [])
+
+      assert status_of(ctx.account_id, a, b) == "merged"
     end
 
     test "rejects a selected id belonging to another account and writes nothing for it", ctx do
