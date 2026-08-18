@@ -36,12 +36,19 @@ defmodule Kith.Contacts.Merge do
   alias Kith.Contacts.{Address, Contact, ContactField, MergeFields, Tag}
   alias Kith.Repo
 
-  # Policy and array fields are computed rather than picked from a member, so
-  # `held_by_member?/3` accepts any value for them without a match. Mirrors
-  # `MergeFields.policy_fields/0 ++ MergeFields.array_fields/0` at compile
-  # time (guards cannot call remote functions) — keep this in sync with that
-  # registry.
-  @computed_fields MergeFields.policy_fields() ++ MergeFields.array_fields()
+  # Policy, array and Immich fields are computed rather than picked from a
+  # member, so `held_by_member?/3` accepts any value for them without a match.
+  # The Immich group is resolved as a unit (an id from one member paired with
+  # another's sync timestamp is corrupt state), which means the resolver can
+  # legitimately synthesise a value no member stores: with every member at
+  # `needs_review` and no `immich_person_id`, `immich_status` resolves to
+  # `"unlinked"` because the column is `null: false` with a CHECK constraint
+  # and has no unset state to clear to. Mirrors
+  # `MergeFields.policy_fields/0 ++ MergeFields.array_fields/0 ++
+  # MergeFields.immich_fields/0` at compile time (guards cannot call remote
+  # functions) — keep this in sync with that registry.
+  @computed_fields MergeFields.policy_fields() ++
+                     MergeFields.array_fields() ++ MergeFields.immich_fields()
 
   # Every schema owning a contact_id that must follow the survivor. The six
   # after `Reminder` are the ones the previous two-contact engine silently
@@ -98,7 +105,7 @@ defmodule Kith.Contacts.Merge do
     Repo.transaction(fn ->
       with {:ok, members} <- lock_and_load(scope, survivor_id, loser_ids),
            survivor = Enum.find(members, &(&1.id == survivor_id)),
-           :ok <- validate_fields(members, resolution),
+           {:ok, resolution} <- validate_fields(members, resolution),
            :ok <- validate_drop(members, resolution) do
         run_merge(scope, members, survivor, resolution)
       else
@@ -151,6 +158,8 @@ defmodule Kith.Contacts.Merge do
   defp build_multi(scope, members, survivor, losers, resolution, dropped_records, dropped_ids) do
     loser_ids = Enum.map(losers, & &1.id)
 
+    account_id = scope.account.id
+
     Multi.new()
     |> Multi.run(:survivor, fn _repo, _changes -> apply_fields(survivor, resolution) end)
     |> Multi.run(:remap_photos, fn repo, _changes ->
@@ -158,14 +167,22 @@ defmodule Kith.Contacts.Merge do
       # move would raise whenever any two members share a hash — including
       # two losers colliding with each other, not just a loser vs. the
       # survivor. Dedupe across the whole cluster before moving.
-      dedupe_and_move(repo, "photos", "content_hash", loser_ids, survivor.id)
+      dedupe_and_move(repo, "photos", "content_hash", loser_ids, survivor.id, account_id)
       {:ok, :done}
     end)
     |> Multi.run(:remap_immich_candidates, fn repo, _changes ->
       # unique_index(:immich_candidates, [:contact_id, :immich_photo_id]) —
       # duplicate contacts routinely have the same Immich photo suggested
       # for both, so this collides in practice more than most.
-      dedupe_and_move(repo, "immich_candidates", "immich_photo_id", loser_ids, survivor.id)
+      dedupe_and_move(
+        repo,
+        "immich_candidates",
+        "immich_photo_id",
+        loser_ids,
+        survivor.id,
+        account_id
+      )
+
       {:ok, :done}
     end)
     |> Multi.run(:remap_birthday_reminders, fn repo, _changes ->
@@ -188,31 +205,29 @@ defmodule Kith.Contacts.Merge do
     |> Multi.run(:remap_activity_contacts, fn repo, _changes ->
       # unique_index(:activity_contacts, [:activity_id, :contact_id]) —
       # two losers can be tagged on the same activity the survivor isn't.
-      dedupe_and_move(repo, "activity_contacts", "activity_id", loser_ids, survivor.id)
+      dedupe_and_move(
+        repo,
+        "activity_contacts",
+        "activity_id",
+        loser_ids,
+        survivor.id,
+        account_id
+      )
+
       {:ok, :done}
     end)
     |> Multi.run(:remap_inbound_first_met, fn repo, _changes ->
-      remap_inbound_first_met_step(repo, loser_ids, survivor.id)
+      remap_inbound_first_met_step(repo, loser_ids, survivor.id, account_id)
     end)
     |> Multi.run(:dedupe_owned, fn repo, _changes -> dedupe_owned_step(repo, survivor.id) end)
     |> Multi.run(:remap_relationships, fn repo, _changes ->
-      remap_relationships(repo, survivor.id, loser_ids)
+      remap_relationships(repo, survivor.id, loser_ids, account_id)
     end)
     |> Multi.run(:apply_drop, fn repo, _changes ->
       apply_drop_step(repo, resolution, survivor.id)
     end)
     |> Multi.run(:last_talked_to, fn repo, %{survivor: survivor} ->
       last_talked_to_step(repo, members, survivor)
-    end)
-    |> Multi.run(:cancel_jobs, fn _repo, _changes ->
-      # Runs after the remap steps, not before: cancel_all_for_contact/2
-      # only cancels the Oban jobs of reminders currently owned by the
-      # given contact. By this point every loser's reminders have already
-      # moved to the survivor, so this step finds nothing on the losers —
-      # that's the correct outcome. Running it earlier would cancel jobs
-      # for reminders about to legitimately become the survivor's,
-      # silently killing live reminders.
-      cancel_jobs_step(losers, scope.account.id)
     end)
     |> Multi.run(:soft_delete_losers, fn repo, _changes ->
       soft_delete_losers_step(repo, loser_ids)
@@ -251,10 +266,25 @@ defmodule Kith.Contacts.Merge do
     delete_ids = for [id, _contact_id] <- rows, id != keep_id, do: id
 
     if delete_ids != [] do
+      cancel_reminder_jobs(repo, delete_ids)
       repo.query!("DELETE FROM reminders WHERE id = ANY($1)", [delete_ids])
     end
 
     {:ok, :done}
+  end
+
+  # Design spec §2 step 7, and the whole of it: these duplicate birthday
+  # reminders are the *only* reminders a merge destroys. Every other reminder a
+  # loser owns moves to the survivor at `:remap_owned` and must keep its
+  # scheduled job, so there is nothing to cancel per-contact — cancelling here,
+  # where the doomed ids are still known, is the correct scope.
+  # `ReminderNotificationWorker.perform/1` also discards a job whose reminder is
+  # gone, so this trims the queue rather than being the only guard.
+  defp cancel_reminder_jobs(repo, reminder_ids) do
+    %{rows: rows} =
+      repo.query!("SELECT enqueued_oban_job_ids FROM reminders WHERE id = ANY($1)", [reminder_ids])
+
+    rows |> List.flatten() |> Kith.Reminders.cancel_jobs()
   end
 
   defp birthday_reminder_keep_id(rows, survivor_id) do
@@ -286,10 +316,13 @@ defmodule Kith.Contacts.Merge do
     {:ok, :done}
   end
 
-  defp remap_inbound_first_met_step(repo, loser_ids, survivor_id) do
+  defp remap_inbound_first_met_step(repo, loser_ids, survivor_id, account_id) do
     {count, _} =
       repo.update_all(
-        from(c in Contact, where: c.first_met_through_id in ^loser_ids),
+        from(c in Contact,
+          where: c.account_id == ^account_id,
+          where: c.first_met_through_id in ^loser_ids
+        ),
         set: [first_met_through_id: survivor_id]
       )
 
@@ -301,7 +334,7 @@ defmodule Kith.Contacts.Merge do
   # constraint guard. Both keys are normalized (lower + trimmed) so
   # case/whitespace-only differences still collapse. Tags and photos
   # are deduped by their own remap steps above already, via
-  # `dedupe_and_move/5`; nothing to repeat here.
+  # `dedupe_and_move/6`; nothing to repeat here.
   defp dedupe_owned_step(repo, survivor_id) do
     repo.query!(
       """
@@ -400,11 +433,6 @@ defmodule Kith.Contacts.Merge do
     end
   end
 
-  defp cancel_jobs_step(losers, account_id) do
-    Enum.each(losers, &Kith.Reminders.cancel_all_for_contact(&1.id, account_id))
-    {:ok, :done}
-  end
-
   defp soft_delete_losers_step(repo, loser_ids) do
     now = DateTime.utc_now(:second)
 
@@ -477,26 +505,59 @@ defmodule Kith.Contacts.Merge do
     end
   end
 
-  defp validate_fields(members, %{fields: fields}) do
-    Enum.reduce_while(fields, :ok, fn {field, value}, :ok ->
-      cond do
-        value == :clear and MergeFields.non_clearable?(field) ->
-          {:halt, {:error, {:not_clearable, field}}}
+  # Returns the resolution to apply, which is not always the one handed in:
+  # `first_met_through_id` is coerced (see `clear_member_self_reference/2`).
+  defp validate_fields(members, resolution) do
+    member_ids = Enum.map(members, & &1.id)
+    fields = clear_member_self_reference(resolution.fields, member_ids)
 
-        value == :clear ->
-          {:cont, :ok}
+    result =
+      Enum.reduce_while(fields, :ok, fn {field, value}, :ok ->
+        cond do
+          value == :clear and MergeFields.non_clearable?(field) ->
+            {:halt, {:error, {:not_clearable, field}}}
 
-        held_by_member?(members, field, value) ->
-          {:cont, :ok}
+          value == :clear ->
+            {:cont, :ok}
 
-        true ->
-          {:halt, {:error, {:unknown_value, field}}}
-      end
-    end)
+          held_by_member?(members, field, value) ->
+            {:cont, :ok}
+
+          true ->
+            {:halt, {:error, {:unknown_value, field}}}
+        end
+      end)
+
+    case result do
+      :ok -> {:ok, Map.put(resolution, :fields, fields)}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
-  # Array and policy fields are computed rather than picked, so they are not
-  # required to match a single member's stored value.
+  # Design spec §3 / scenario D4: "when the resolved `first_met_through_id` is
+  # any merged member, it is set to `nil`". A contact cannot be met through a
+  # record it just absorbed, and pointing at a loser is worse than useless —
+  # `:remap_inbound_first_met` would rewrite it to the survivor anyway,
+  # producing a self-reference. Enforced here, at the engine, so every caller
+  # gets it: `MergeResolution.clear_self_reference/2` covers the resolver-driven
+  # paths, but a legacy `%{"first_met_through_id" => "survivor"}` choice and a
+  # cluster screen offering a loser's id as a value both route around it.
+  # Coercing rather than rejecting matches §3's wording and is a no-op for the
+  # resolver-driven callers, which already pass `:clear`.
+  defp clear_member_self_reference(fields, member_ids) do
+    case Map.fetch(fields, :first_met_through_id) do
+      {:ok, value} when value != :clear ->
+        if value in member_ids,
+          do: Map.put(fields, :first_met_through_id, :clear),
+          else: fields
+
+      _ ->
+        fields
+    end
+  end
+
+  # Array, policy and Immich fields are computed rather than picked, so they
+  # are not required to match a single member's stored value.
   defp held_by_member?(_members, field, _value)
        when field in @computed_fields,
        do: true
@@ -518,11 +579,13 @@ defmodule Kith.Contacts.Merge do
   # colliding loser rows deterministically without needing an `id` column, so
   # this works for bare join tables (`contact_tags`) as well as tables with a
   # primary key (`photos`, `activity_contacts`, `immich_candidates`).
-  defp dedupe_and_move(repo, table, key_column, loser_ids, survivor_id) do
+  defp dedupe_and_move(repo, table, key_column, loser_ids, survivor_id, account_id) do
+    {scope_delete, scope_update, scope_param} = account_scope(table, account_id)
+
     repo.query!(
       """
       DELETE FROM #{table} t
-      WHERE t.contact_id = ANY($1)
+      WHERE t.contact_id = ANY($1)#{scope_delete}
         AND t.#{key_column} IS NOT NULL
         AND EXISTS (
           SELECT 1 FROM #{table} o
@@ -531,15 +594,31 @@ defmodule Kith.Contacts.Merge do
                  OR (o.contact_id = ANY($1) AND o.ctid < t.ctid))
         )
       """,
-      [loser_ids, survivor_id]
+      [loser_ids, survivor_id] ++ scope_param
     )
 
     repo.query!(
-      "UPDATE #{table} SET contact_id = $1 WHERE contact_id = ANY($2)",
-      [survivor_id, loser_ids]
+      "UPDATE #{table} SET contact_id = $1 WHERE contact_id = ANY($2)#{scope_update}",
+      [survivor_id, loser_ids] ++ scope_param
     )
 
     :ok
+  end
+
+  # Tables `dedupe_and_move/6` drives that carry their own account_id column.
+  # `activity_contacts` (and `contact_tags`, in `dedupe_and_move_tags/4`) are
+  # bare join tables with no account column, so they are scoped transitively
+  # by the account-validated contact ids `lock_and_load/3` produced. The
+  # scoping is defence in depth either way — those ids are already checked —
+  # but every other query in this codebase carries its scope.
+  @account_column_tables ~w(photos immich_candidates)
+
+  defp account_scope(table, account_id) do
+    if table in @account_column_tables do
+      {"\n  AND t.account_id = $3", " AND account_id = $3", [account_id]}
+    else
+      {"", "", []}
+    end
   end
 
   # Relationships are directional and carry a 4-column unique index
@@ -559,18 +638,24 @@ defmodule Kith.Contacts.Merge do
   # loser) — each pass drops a loser's row when either another loser's row
   # (ctid tie-break) or the survivor's own row already covers the same
   # (other endpoint, type) pair, then moves what's left onto the survivor.
-  defp remap_relationships(repo, survivor_id, loser_ids) do
+  defp remap_relationships(repo, survivor_id, loser_ids, account_id) do
     cluster_ids = [survivor_id | loser_ids]
 
     repo.query!(
-      "DELETE FROM relationships WHERE contact_id = ANY($1) AND related_contact_id = ANY($1)",
-      [cluster_ids]
+      """
+      DELETE FROM relationships
+      WHERE account_id = $2
+        AND contact_id = ANY($1)
+        AND related_contact_id = ANY($1)
+      """,
+      [cluster_ids, account_id]
     )
 
     repo.query!(
       """
       DELETE FROM relationships r
-      WHERE r.contact_id = ANY($1)
+      WHERE r.account_id = $3
+        AND r.contact_id = ANY($1)
         AND EXISTS (
           SELECT 1 FROM relationships o
           WHERE o.related_contact_id = r.related_contact_id
@@ -581,18 +666,19 @@ defmodule Kith.Contacts.Merge do
             )
         )
       """,
-      [loser_ids, survivor_id]
+      [loser_ids, survivor_id, account_id]
     )
 
     repo.query!(
-      "UPDATE relationships SET contact_id = $1 WHERE contact_id = ANY($2)",
-      [survivor_id, loser_ids]
+      "UPDATE relationships SET contact_id = $1 WHERE contact_id = ANY($2) AND account_id = $3",
+      [survivor_id, loser_ids, account_id]
     )
 
     repo.query!(
       """
       DELETE FROM relationships r
-      WHERE r.related_contact_id = ANY($1)
+      WHERE r.account_id = $3
+        AND r.related_contact_id = ANY($1)
         AND EXISTS (
           SELECT 1 FROM relationships o
           WHERE o.contact_id = r.contact_id
@@ -603,12 +689,15 @@ defmodule Kith.Contacts.Merge do
             )
         )
       """,
-      [loser_ids, survivor_id]
+      [loser_ids, survivor_id, account_id]
     )
 
     repo.query!(
-      "UPDATE relationships SET related_contact_id = $1 WHERE related_contact_id = ANY($2)",
-      [survivor_id, loser_ids]
+      """
+      UPDATE relationships SET related_contact_id = $1
+      WHERE related_contact_id = ANY($2) AND account_id = $3
+      """,
+      [survivor_id, loser_ids, account_id]
     )
 
     {:ok, :done}
@@ -735,7 +824,7 @@ defmodule Kith.Contacts.Merge do
     :ok
   end
 
-  # Same collision handling as `dedupe_and_move/5`, specialised to
+  # Same collision handling as `dedupe_and_move/6`, specialised to
   # `contact_tags` with one addition: a loser's link to a tag_id in
   # `excluded_tag_ids` is neither deduped away nor moved — it is left in
   # place so it rides to trash with that loser. An empty `excluded_tag_ids`

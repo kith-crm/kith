@@ -30,6 +30,33 @@ defmodule Kith.Contacts.MergeTest do
     %{user: user, account_id: account_id, contact_a: contact_a, contact_b: contact_b}
   end
 
+  # Enqueues a real notification job for `reminder` and records it the way
+  # Reminders.enqueue_jobs_for_reminder/2 would.
+  defp notification_job!(reminder) do
+    {:ok, job} =
+      Oban.insert(
+        Kith.Workers.ReminderNotificationWorker.new(%{
+          reminder_id: reminder.id,
+          type: "on_day",
+          days_before: 0
+        })
+      )
+
+    Repo.update_all(
+      from(r in Kith.Reminders.Reminder, where: r.id == ^reminder.id),
+      set: [enqueued_oban_job_ids: [job.id]]
+    )
+
+    job
+  end
+
+  # A contact in a different account, used to force a changeset failure on the
+  # survivor that D4's coercion does not pre-empt.
+  defp foreign_contact do
+    other_account_id = AccountsFixtures.user_fixture().account_id
+    ContactsFixtures.contact_fixture(other_account_id, %{first_name: "Stranger"})
+  end
+
   describe "merge_contacts/3" do
     test "merges contacts with default field choices (keep survivor)", ctx do
       {:ok, _result} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
@@ -322,6 +349,24 @@ defmodule Kith.Contacts.MergeTest do
 
       assert survivor.first_met_through_id == nil
     end
+
+    test "an explicit \"survivor\" choice cannot keep a pointer at the loser", ctx do
+      # apply_legacy_choices/4 overrides the resolver's :clear with the
+      # survivor's raw value, which here is the loser's id — routing around
+      # MergeResolution.clear_self_reference/2 entirely. Only the engine's own
+      # D4 enforcement catches this.
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [first_met_through_id: ctx.contact_b.id]
+      )
+
+      {:ok, survivor} =
+        Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id, %{
+          "first_met_through_id" => "survivor"
+        })
+
+      assert survivor.first_met_through_id == nil
+      assert Repo.get!(Kith.Contacts.Contact, ctx.contact_a.id).first_met_through_id == nil
+    end
   end
 
   describe "merge_preview/2" do
@@ -472,24 +517,78 @@ defmodule Kith.Contacts.MergeTest do
     end
 
     test "wraps a changeset failure as {:invalid_fields, changeset}", ctx do
-      # contact_b already references the survivor as first_met_through; resolving
-      # to that value passes held_by_member?/3, but applying it to the survivor
-      # is a self-reference, which Contact.update_changeset/2 rejects.
-      {:ok, _} =
-        ctx.contact_b
-        |> Ecto.Changeset.change(%{first_met_through_id: ctx.contact_a.id})
-        |> Repo.update()
+      # contact_b references a contact in a *different* account as
+      # first_met_through (written straight to the column, which is the only way
+      # such a pointer could exist). Resolving to that value passes
+      # held_by_member?/3 — a member holds it — but applying it to the survivor
+      # is rejected by Contact.update_changeset/2. A pointer at a merged member
+      # can no longer serve as the injection here: the engine coerces that to
+      # nil before validation (design spec D4).
+      stranger = foreign_contact()
+
+      Repo.update_all(
+        from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [first_met_through_id: stranger.id]
+      )
 
       assert {:error, {:invalid_fields, %Ecto.Changeset{} = changeset}} =
                Contacts.merge_cluster(
                  ctx.scope,
                  ctx.contact_a.id,
                  [ctx.contact_b.id],
-                 resolution(%{first_met_through_id: ctx.contact_a.id})
+                 resolution(%{first_met_through_id: stranger.id})
                )
 
-      assert %{first_met_through_id: ["cannot reference the contact itself"]} =
+      assert %{first_met_through_id: ["must be a contact in the same account"]} =
                errors_on(changeset)
+    end
+
+    test "clears a first_met_through_id pointing at a merged member (D4)", ctx do
+      # The survivor genuinely holds this value, so validate_fields/2 accepts it
+      # and apply_fields/2 writes it — and then :remap_inbound_first_met rewrites
+      # every pointer at a loser to the survivor, turning it into a
+      # self-reference. The engine coerces the value to nil instead.
+      Repo.update_all(
+        from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [first_met_through_id: ctx.contact_b.id]
+      )
+
+      assert {:ok, survivor} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [ctx.contact_b.id],
+                 resolution(%{first_met_through_id: ctx.contact_b.id})
+               )
+
+      assert survivor.first_met_through_id == nil
+      assert Repo.get!(Kith.Contacts.Contact, ctx.contact_a.id).first_met_through_id == nil
+    end
+
+    test "merges a cluster whose every member is at immich needs_review", ctx do
+      # ImmichSyncWorker sets needs_review without an immich_person_id and scans
+      # both duplicates, so this is the ordinary post-sync state of a duplicate
+      # pair. The resolver then synthesises immich_status: "unlinked", which no
+      # member stores — the merge must accept it rather than halting with
+      # {:unknown_value, :immich_status}.
+      Repo.update_all(
+        from(c in Kith.Contacts.Contact,
+          where: c.id in ^[ctx.contact_a.id, ctx.contact_b.id]
+        ),
+        set: [immich_status: "needs_review", immich_person_id: nil]
+      )
+
+      a = Repo.get!(Kith.Contacts.Contact, ctx.contact_a.id)
+      b = Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id)
+      fields = Kith.Contacts.MergeResolution.resolve([a, b], a.id).fields
+
+      assert fields.immich_status == "unlinked"
+
+      assert {:ok, survivor} =
+               Contacts.merge_cluster(ctx.scope, a.id, [b.id], %{fields: fields, drop: %{}})
+
+      assert survivor.immich_status == "unlinked"
+      assert Repo.get!(Kith.Contacts.Contact, b.id).deleted_at != nil
     end
 
     test "a rejected merge leaves the database unchanged", ctx do
@@ -877,6 +976,37 @@ defmodule Kith.Contacts.MergeTest do
                ),
                :count
              ) == 0
+    end
+
+    test "cancels the Oban jobs of the birthday reminders it deletes", ctx do
+      birthday_a =
+        Kith.RemindersFixtures.birthday_reminder_fixture(
+          ctx.account_id,
+          ctx.contact_a.id,
+          ctx.user.id
+        )
+
+      birthday_b =
+        Kith.RemindersFixtures.birthday_reminder_fixture(
+          ctx.account_id,
+          ctx.contact_b.id,
+          ctx.user.id
+        )
+
+      kept_job = notification_job!(birthday_a)
+      doomed_job = notification_job!(birthday_b)
+
+      {:ok, _survivor} =
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{},
+          drop: %{}
+        })
+
+      # birthday_b is the reminder the merge destroys, so its scheduled
+      # notification must go with it (design spec §2 step 7). Every other
+      # reminder just changes owner and keeps its job.
+      assert Repo.get!(Oban.Job, doomed_job.id).state == "cancelled"
+      assert Repo.get!(Oban.Job, kept_job.id).state == "available"
     end
 
     test "when only losers have birthday reminders, keeps the lowest-id one", ctx do
@@ -1570,6 +1700,9 @@ defmodule Kith.Contacts.MergeTest do
       refute_enqueued(worker: Kith.Workers.DisplayNameRecomputeWorker)
     end
 
+    # This one fails at the FIRST Multi step, so it pins the error contract and
+    # the "nothing at all happened" outcome. It cannot prove the later steps roll
+    # back — nothing had run yet. See the late-failure test below for that.
     test "a merge that fails inside the transaction rolls back every mutation", ctx do
       note = Kith.ContactsFixtures.note_fixture(ctx.contact_b, ctx.user.id)
 
@@ -1578,25 +1711,71 @@ defmodule Kith.Contacts.MergeTest do
           "value" => "drop@example.com"
         })
 
-      # contact_b already references the survivor as first_met_through, so
-      # resolving to that value passes validate_fields/2 (a member holds it),
-      # but applying it to the survivor is a self-reference — Multi step
-      # :survivor fails via Contact.update_changeset/2, after `with` has
-      # already accepted the resolution and entered the Multi/transaction.
-      {:ok, _} =
-        ctx.contact_b
-        |> Ecto.Changeset.change(%{first_met_through_id: ctx.contact_a.id})
-        |> Repo.update()
+      # contact_b references a contact in another account, so resolving to that
+      # value passes validate_fields/2 (a member holds it, and it names no member
+      # so D4's coercion leaves it alone), but applying it to the survivor fails
+      # Contact.update_changeset/2 — inside the Multi, after `with` has already
+      # accepted the resolution.
+      stranger = foreign_contact()
+
+      Repo.update_all(
+        from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [first_met_through_id: stranger.id]
+      )
 
       assert {:error, {:invalid_fields, %Ecto.Changeset{}}} =
                Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
-                 fields: %{first_met_through_id: ctx.contact_a.id},
+                 fields: %{first_met_through_id: stranger.id},
                  drop: %{contact_fields: [drop.id]}
                })
 
       assert Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id).deleted_at == nil
       assert Repo.get!(Kith.Contacts.Note, note.id).contact_id == ctx.contact_b.id
       assert Repo.get!(Kith.Contacts.ContactField, drop.id)
+
+      assert Repo.aggregate(
+               from(l in Kith.AuditLogs.AuditLog, where: l.event == "contact_merged"),
+               :count
+             ) == 0
+    end
+
+    test "a failure late in the Multi rolls back the remaps that already ran", ctx do
+      note = Kith.ContactsFixtures.note_fixture(ctx.contact_b, ctx.user.id)
+
+      outsider =
+        Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Outsider"})
+
+      Repo.update_all(
+        from(c in Kith.Contacts.Contact, where: c.id == ^outsider.id),
+        set: [first_met_through_id: ctx.contact_b.id]
+      )
+
+      # No real data can make :soft_delete_losers fail, so the failure is
+      # injected as a constraint that makes the soft delete itself illegal. By
+      # then :survivor and every remap step above it have written — the point of
+      # the test is that all of them come back (design spec D7).
+      Repo.query!(
+        "ALTER TABLE contacts ADD CONSTRAINT contacts_never_deleted CHECK (deleted_at IS NULL)"
+      )
+
+      assert_raise Postgrex.Error, fn ->
+        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+          fields: %{last_name: "S."},
+          drop: %{}
+        })
+      end
+
+      Repo.query!("ALTER TABLE contacts DROP CONSTRAINT contacts_never_deleted")
+
+      # :survivor (the first step)
+      assert Repo.get!(Kith.Contacts.Contact, ctx.contact_a.id).last_name == "Smith"
+      # :remap_owned
+      assert Repo.get!(Kith.Contacts.Note, note.id).contact_id == ctx.contact_b.id
+      # :remap_inbound_first_met
+      assert Repo.get!(Kith.Contacts.Contact, outsider.id).first_met_through_id ==
+               ctx.contact_b.id
+
+      assert Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id).deleted_at == nil
 
       assert Repo.aggregate(
                from(l in Kith.AuditLogs.AuditLog, where: l.event == "contact_merged"),

@@ -1719,7 +1719,7 @@ defmodule Kith.Contacts do
     with {:ok, survivor} <- fetch_active_contact(survivor_id),
          {:ok, non_survivor} <- fetch_active_contact(non_survivor_id),
          :ok <- validate_merge(survivor, non_survivor) do
-      scope = Kith.Accounts.Scope.for_account_id(survivor.account_id)
+      scope = Kith.Accounts.Scope.system_for_account_id(survivor.account_id)
 
       fields =
         survivor

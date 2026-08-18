@@ -301,5 +301,23 @@ defmodule Kith.Contacts.MergeResolutionTest do
 
       assert res.fields.immich_person_id == :clear
     end
+
+    # ImmichSyncWorker sets immich_status: "needs_review" *without* an
+    # immich_person_id, and it scans both duplicates — so this is the ordinary
+    # state of a duplicate pair after a sync, not an edge case. No member counts
+    # as linked, and immich_status is a null: false column with a CHECK
+    # constraint, so the resolver synthesises "unlinked": a value no member
+    # stores. `Kith.Contacts.Merge` must therefore treat the Immich group as
+    # computed rather than picked (see @computed_fields there).
+    test "every member at needs_review with no person id resolves to unlinked", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah", immich_status: "needs_review"})
+      b = contact(ctx.account_id, %{first_name: "Sarah", immich_status: "needs_review"})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
+      assert res.fields.immich_person_id == :clear
+      assert res.fields.immich_status == "unlinked"
+      refute Enum.any?([a, b], &(&1.immich_status == "unlinked"))
+    end
   end
 end

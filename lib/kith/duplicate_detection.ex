@@ -54,15 +54,6 @@ defmodule Kith.DuplicateDetection do
     |> Repo.all()
   end
 
-  def dismiss_candidates_for_contact(account_id, contact_id) do
-    from(dc in DuplicateCandidate,
-      where: dc.account_id == ^account_id,
-      where: dc.status == "pending",
-      where: dc.contact_id == ^contact_id or dc.duplicate_contact_id == ^contact_id
-    )
-    |> Repo.update_all(set: [status: "dismissed", resolved_at: DateTime.utc_now()])
-  end
-
   @status_rank %{"pending" => 0, "dismissed" => 1, "merged" => 2}
 
   @doc """
@@ -177,22 +168,26 @@ defmodule Kith.DuplicateDetection do
         )
       )
 
+    # The winner is a whole row, not just a status: a row's score, reasons and
+    # timestamps describe the match that produced *that* status, so pairing the
+    # existing row's status with the repointed row's evidence would misreport
+    # both.
     winner =
       if existing &&
            Map.fetch!(@status_rank, existing.status) >= Map.fetch!(@status_rank, candidate.status) do
-        existing.status
+        existing
       else
-        candidate.status
+        candidate
       end
 
     attrs = %{
       contact_id: low,
       duplicate_contact_id: high,
-      score: candidate.score,
-      reasons: candidate.reasons,
-      status: winner,
-      detected_at: candidate.detected_at,
-      resolved_at: candidate.resolved_at
+      score: winner.score,
+      reasons: winner.reasons,
+      status: winner.status,
+      detected_at: winner.detected_at,
+      resolved_at: winner.resolved_at
     }
 
     if existing do

@@ -321,15 +321,58 @@ defmodule Kith.DuplicateDetectionTest do
       assert status_of(ctx.account_id, b, d) == nil
     end
 
+    # `d` is deliberately NOT unchecked: set_status/5 then leaves both a-d and
+    # b-d alone, so the two rows still hold *different* statuses by the time
+    # repoint/3 collapses b-d onto a-d and @status_rank has to choose. Passing
+    # `d` as unchecked would flatten both to "dismissed" first and the ranking
+    # would never be exercised.
     test "repointing keeps the strongest status on collision", ctx do
       %{a: a, b: b, d: d} = ctx.contacts
       pair!(ctx.account_id, a, b)
-      pair!(ctx.account_id, a, d, "dismissed")
-      pair!(ctx.account_id, b, d)
+      pair!(ctx.account_id, a, d, "merged")
+      pair!(ctx.account_id, b, d, "pending")
 
-      :ok = Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [d.id])
+      :ok = Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [])
 
-      assert status_of(ctx.account_id, a, d) == "dismissed"
+      assert status_of(ctx.account_id, a, d) == "merged"
+    end
+
+    test "the winning row keeps its own score, reasons and detected_at", ctx do
+      %{a: a, b: b, d: d} = ctx.contacts
+      pair!(ctx.account_id, a, b)
+
+      existing = pair!(ctx.account_id, a, d, "merged")
+      losing = pair!(ctx.account_id, b, d, "pending")
+
+      detected = ~U[2025-06-01 00:00:00Z]
+
+      Repo.update_all(
+        from(x in Kith.Contacts.DuplicateCandidate, where: x.id == ^existing.id),
+        set: [score: 0.42, reasons: ["existing"], detected_at: detected]
+      )
+
+      Repo.update_all(
+        from(x in Kith.Contacts.DuplicateCandidate, where: x.id == ^losing.id),
+        set: [score: 0.11, reasons: ["repointed"], detected_at: ~U[2026-06-01 00:00:00Z]]
+      )
+
+      :ok = Kith.DuplicateDetection.resolve_after_merge(ctx.account_id, a.id, [b.id], [])
+
+      {low, high} = if a.id < d.id, do: {a.id, d.id}, else: {d.id, a.id}
+
+      row =
+        Repo.one!(
+          from(x in Kith.Contacts.DuplicateCandidate,
+            where:
+              x.account_id == ^ctx.account_id and x.contact_id == ^low and
+                x.duplicate_contact_id == ^high
+          )
+        )
+
+      assert row.status == "merged"
+      assert row.score == 0.42
+      assert row.reasons == ["existing"]
+      assert DateTime.compare(row.detected_at, detected) == :eq
     end
 
     test "pairs in an unrelated cluster are untouched", ctx do
