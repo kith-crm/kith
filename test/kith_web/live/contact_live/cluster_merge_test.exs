@@ -617,10 +617,13 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
 
     # `:__immich__` is UI bookkeeping and must never reach `merge_cluster/4`
-    # as a field — `Contact.update_changeset/2` uses `cast/3` with an
-    # explicit allowlist, which silently drops unknown keys rather than
-    # raising, so an unstripped key would not fail loudly; only a successful
-    # merge after choosing an Immich source proves it was stripped cleanly.
+    # as a field. `Merge.validate_fields/2` reduces over every entry in
+    # `fields` and dispatches non-`:clear`, non-computed values to
+    # `held_by_member?/3`, whose first act is `Map.fetch!(member, field)` on
+    # a `Contact` struct — `:__immich__` holds an integer id or `:none`, so
+    # leaving it in would raise an unhandled `KeyError`, not silently drop.
+    # Only a successful merge after choosing an Immich source proves it was
+    # stripped cleanly.
     test "choosing an immich source still allows the merge to submit", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
@@ -630,6 +633,118 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
       assert {:error, {:redirect, %{to: _path}}} =
                live |> element("button[phx-click='merge']") |> render_click()
+    end
+
+    # Adopting all four columns together, checked on every field including
+    # `immich_person_url` (never set by the fixtures above) and
+    # `immich_last_synced_at` (never read back above) — asserting only
+    # `immich_person_id`/`immich_status` would leave half the unit-move
+    # guarantee unverified.
+    test "choosing a member adopts all four immich columns, not just two", ctx do
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.b.id),
+        set: [immich_person_url: "https://immich.example/person/person-b"]
+      )
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      live
+      |> element("button[phx-click='choose-immich'][phx-value-id='#{ctx.b.id}']")
+      |> render_click()
+
+      assert {:error, {:redirect, %{to: path}}} =
+               live |> element("button[phx-click='merge']") |> render_click()
+
+      survivor_id = path |> String.split("/") |> List.last() |> String.to_integer()
+      survivor = Kith.Repo.get!(Kith.Contacts.Contact, survivor_id)
+
+      assert survivor.immich_person_id == "person-b"
+      assert survivor.immich_person_url == "https://immich.example/person/person-b"
+      assert survivor.immich_status == "linked"
+      assert survivor.immich_last_synced_at == ~U[2026-02-01 00:00:00Z]
+    end
+
+    # Unreachable through the rendered UI (the row only offers buttons for
+    # selected linked members) but not unreachable through a crafted
+    # `phx-click` payload — and if it were adopted, it would sail through
+    # `validate_fields/2` unchallenged, since slice 1 exempts the Immich
+    # group from `held_by_member?/3`. The handler must re-check membership
+    # against the selection, not `socket.assigns.members`. A three-member
+    # cluster is needed here: deselecting down to one member disables the
+    # merge button, and re-selecting a member resets `overrides` wholesale
+    # (see `handle_event("toggle-member", ...)`), erasing the evidence — so
+    # the deselected member must stay deselected while two others remain
+    # selected and mergeable.
+    test "choosing a deselected member's id does not adopt their immich group", ctx do
+      c =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Sarah",
+          last_name: "Kim",
+          company: "Deselected Co"
+        })
+
+      candidate!(ctx.account_id, ctx.a, c)
+
+      Kith.Repo.update_all(from(ct in Kith.Contacts.Contact, where: ct.id == ^c.id),
+        set: [
+          immich_person_id: "person-c",
+          immich_status: "linked",
+          immich_last_synced_at: ~U[2026-03-01 00:00:00Z]
+        ]
+      )
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      live
+      |> element("input[phx-click='toggle-member'][phx-value-id='#{c.id}']")
+      |> render_click()
+
+      render_click(live, "choose-immich", %{"id" => to_string(c.id)})
+
+      assert {:error, {:redirect, %{to: path}}} =
+               live |> element("button[phx-click='merge']") |> render_click()
+
+      survivor_id = path |> String.split("/") |> List.last() |> String.to_integer()
+      survivor = Kith.Repo.get!(Kith.Contacts.Contact, survivor_id)
+
+      assert survivor.immich_person_id != "person-c"
+    end
+
+    test "the row is hidden when no member is linked", ctx do
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.a.id),
+        set: [immich_person_id: nil, immich_status: "unlinked", immich_last_synced_at: nil]
+      )
+
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.b.id),
+        set: [immich_person_id: nil, immich_status: "unlinked", immich_last_synced_at: nil]
+      )
+
+      {:ok, _live, html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      refute html =~ "Photo library"
+    end
+
+    test "not linked shows selected after being clicked, and can switch back to a member", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      live
+      |> element("button[phx-click='choose-immich'][phx-value-id='none']")
+      |> render_click()
+
+      assert live
+             |> element("button[phx-click='choose-immich'][phx-value-id='none']")
+             |> render() =~ "border-[var(--color-accent)]"
+
+      live
+      |> element("button[phx-click='choose-immich'][phx-value-id='#{ctx.a.id}']")
+      |> render_click()
+
+      refute live
+             |> element("button[phx-click='choose-immich'][phx-value-id='none']")
+             |> render() =~ "border-[var(--color-accent)]"
+
+      assert live
+             |> element("button[phx-click='choose-immich'][phx-value-id='#{ctx.a.id}']")
+             |> render() =~ "border-[var(--color-accent)]"
     end
   end
 end

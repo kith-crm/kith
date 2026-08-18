@@ -184,6 +184,14 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       socket |> selected_members() |> Enum.map(& &1.id) |> Enum.reject(&(&1 == survivor_id))
 
     resolution = %{
+      # `:__immich__` is UI bookkeeping, not a contact field, and MUST be
+      # stripped here. `Merge.validate_fields/2` reduces over every entry in
+      # `fields` and dispatches non-computed, non-`:clear` values to
+      # `held_by_member?/3`, whose first act is `Map.fetch!(member, field)`
+      # on a `Contact` struct — `:__immich__` is neither `:clear` nor a known
+      # computed field, so leaving it in raises an unhandled `KeyError`
+      # outside the engine's documented error contract, not a silently
+      # dropped key.
       fields:
         socket.assigns.resolution.fields
         |> Map.merge(Map.delete(socket.assigns.overrides, :__immich__)),
@@ -228,7 +236,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   def handle_event("choose-immich", %{"id" => id}, socket) do
     id = String.to_integer(id)
 
-    case Enum.find(socket.assigns.members, &(&1.id == id)) do
+    # Must resolve against the *selected* members, not `socket.assigns.members`
+    # — the row only renders buttons for selected linked members, but a
+    # crafted event carrying a deselected member's id would otherwise adopt
+    # that member's Immich group unchallenged, since slice 1 exempts the
+    # Immich group from `held_by_member?/3`.
+    case Enum.find(selected_members(socket), &(&1.id == id)) do
       nil ->
         {:noreply, socket}
 
