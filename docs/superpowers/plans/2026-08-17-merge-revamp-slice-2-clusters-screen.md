@@ -39,7 +39,14 @@ left for here.
   for the dedupe keys, which is the sturdier fix since it cannot be forgotten by a future caller.
   Option (b) is a slice-1 file change and needs its own test.
 
-- **`Kith.Accounts.Scope.for_account_id/1` is not an authorization scope.** It fabricates a
+- **Do not offer a member's id as a `first_met_through_id` value.** The engine now enforces spec D4
+  by silently coercing a `first_met_through_id` that names any merged member to `:clear`. If the
+  Identity section's segmented control lists the loser as a candidate value, the user can click it,
+  the merge will succeed, and the field will come back empty with no explanation. Filter member ids
+  out of that row's options (and out of its attribution), or render the row as "cleared — a contact
+  cannot be met through a record it just absorbed".
+
+- **`Kith.Accounts.Scope.system_for_account_id/1` is not an authorization scope.** It fabricates a
   full-privilege scope with `user: nil` for the legacy two-contact shim. Do not use it in this
   slice: the cluster screen has a real `current_scope`, and passing a userless scope would also
   silently skip the engine's audit entry.
