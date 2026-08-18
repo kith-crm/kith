@@ -66,6 +66,24 @@ defmodule Kith.Contacts.MergeSummaryTest do
     assert Enum.count(summary.addresses, & &1.duplicate?) == 1
   end
 
+  test "addresses with no line1 or postal code are never collapsed into each other", ctx do
+    ContactsFixtures.address_fixture(ctx.a, %{
+      "line1" => nil,
+      "postal_code" => nil,
+      "city" => "Paris"
+    })
+
+    ContactsFixtures.address_fixture(ctx.b, %{
+      "line1" => nil,
+      "postal_code" => nil,
+      "city" => "Tokyo"
+    })
+
+    summary = MergeSummary.build([ctx.a, ctx.b])
+
+    assert Enum.count(summary.addresses, & &1.duplicate?) == 0
+  end
+
   test "aliases are unioned across members", ctx do
     Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.a.id),
       set: [aliases: ["Sarah K."]]

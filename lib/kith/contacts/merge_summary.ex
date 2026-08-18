@@ -80,11 +80,30 @@ defmodule Kith.Contacts.MergeSummary do
         label: address.label || "Address",
         value: Enum.join(Enum.reject([address.line1, address.city], &is_nil/1), ", "),
         owner_id: address.contact_id,
-        key: {normalize(address.line1), normalize(address.postal_code)}
+        key: address_key(address)
       }
     end)
     |> mark_duplicates()
   end
+
+  # Mirrors the blank-key guard in Kith.Contacts.Merge's dedupe_owned_step/2:
+  # an address with neither line1 nor postal_code isn't a duplicate of
+  # another address in the same shape (they may differ by city/region/
+  # country, e.g. "Paris" vs "Tokyo"), so give each a key that can't collide.
+  defp address_key(address) do
+    line1 = normalize(address.line1)
+    postal_code = normalize(address.postal_code)
+
+    if blank?(line1) and blank?(postal_code) do
+      {:no_key, address.id}
+    else
+      {line1, postal_code}
+    end
+  end
+
+  defp blank?(nil), do: true
+  defp blank?(""), do: true
+  defp blank?(_), do: false
 
   defp tags(ids) do
     from(ct in "contact_tags",
