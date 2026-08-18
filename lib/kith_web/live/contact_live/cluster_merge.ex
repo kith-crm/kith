@@ -15,6 +15,33 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   alias Kith.DuplicateDetection
   alias Kith.Policy
 
+  # The value sections, keyed on the identifier the drop payload and the
+  # summary both use. The display label is a rendering detail hanging off that
+  # key, never the key itself: `drop_key/1` used to match on the label, so a
+  # copy edit or an i18n pass would have made it return `nil` for everything
+  # and every unchecked value would have silently come back on the survivor.
+  @sections [
+    {:contact_fields, "Fields"},
+    {:addresses, "Addresses"},
+    {:tags, "Tags"},
+    {:aliases, "Aliases"}
+  ]
+
+  # Rendered instead of an attribution when every `first_met_through_id`
+  # candidate was a member of this merge. `Merge.clear_member_self_reference/2`
+  # coerces such a value to `:clear`, so offering it would be offering a value
+  # the engine silently discards.
+  @self_reference_note "a contact cannot be met through a record it just absorbed"
+
+  # Read-only rows (design spec §3: resolved by policy, not by choice) and the
+  # rule that produced each one.
+  @policy_notes %{
+    favorite: "favorite if any of these contacts is",
+    is_archived: "archived only if every contact is archived",
+    deceased: "deceased if any of these contacts is",
+    deceased_at: "the earliest date among the deceased contacts"
+  }
+
   @impl true
   def mount(_params, _session, socket), do: {:ok, assign(socket, :error, nil)}
 
@@ -63,6 +90,13 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     |> assign(:overrides, %{})
     |> assign(:dropped, MapSet.new())
     |> assign(:error, nil)
+    # `<details>` carrying an id but no `open` attribute loses a user-set
+    # `open` on every morphdom patch, and contact details is the only place
+    # value pruning happens — unchecking N values would cost 2N clicks.
+    # Tracked in assigns rather than fenced off with `phx-update="ignore"`,
+    # which would also freeze the checkbox state inside these sections.
+    |> assign(:open_sections, MapSet.new())
+    |> assign(:labels, Contacts.merge_association_labels(members))
     |> recompute()
   end
 
@@ -149,10 +183,10 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     index = String.to_integer(index)
 
     # Must resolve the clicked index the same way it was rendered — against
-    # `candidates_for/2` over the current selection, never against
+    # `visible_candidates/2` over the current selection, never against
     # `@resolution.conflicts[field]`, which is built by a different, unsorted
     # helper and could pick a different value than the button the user clicked.
-    case Enum.at(MergeResolution.candidates_for(selected_members(socket), field), index) do
+    case Enum.at(visible_candidates(selected_members(socket), field), index) do
       nil ->
         {:noreply, socket}
 
@@ -162,6 +196,21 @@ defmodule KithWeb.ContactLive.ClusterMerge do
          |> assign(:overrides, Map.put(socket.assigns.overrides, field, candidate.value))
          |> assign(:error, nil)}
     end
+  end
+
+  # `<details open>` is server-state here (see `load_cluster/2`): the summary
+  # reports the toggle so the assign and the browser's own toggle agree.
+  def handle_event("toggle-section", %{"section" => section}, socket) do
+    section = String.to_existing_atom(section)
+
+    open =
+      if MapSet.member?(socket.assigns.open_sections, section) do
+        MapSet.delete(socket.assigns.open_sections, section)
+      else
+        MapSet.put(socket.assigns.open_sections, section)
+      end
+
+    {:noreply, assign(socket, :open_sections, open)}
   end
 
   def handle_event("toggle-value", %{"type" => type, "id" => id}, socket) do
@@ -178,42 +227,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   def handle_event("merge", _params, socket) do
-    survivor_id = socket.assigns.primary_id
-
-    loser_ids =
-      socket |> selected_members() |> Enum.map(& &1.id) |> Enum.reject(&(&1 == survivor_id))
-
-    resolution = %{
-      # `:__immich__` is UI bookkeeping, not a contact field, and MUST be
-      # stripped here. `Merge.validate_fields/2` reduces over every entry in
-      # `fields` and dispatches non-computed, non-`:clear` values to
-      # `held_by_member?/3`, whose first act is `Map.fetch!(member, field)`
-      # on a `Contact` struct — `:__immich__` is neither `:clear` nor a known
-      # computed field, so leaving it in raises an unhandled `KeyError`
-      # outside the engine's documented error contract, not a silently
-      # dropped key.
-      fields:
-        socket.assigns.resolution.fields
-        |> Map.merge(Map.delete(socket.assigns.overrides, :__immich__)),
-      drop: build_drop(socket),
-      # Every member the screen showed but the user excluded, so the engine can
-      # dismiss exactly the pairs the user reviewed and rejected. Leaving these
-      # out would leave those pairs `pending` and they would be suggested again.
-      unchecked_ids: unchecked_ids(socket)
-    }
-
-    resolution = drop_aliases(resolution, socket.assigns.dropped)
-
-    case Contacts.merge_cluster(socket.assigns.current_scope, survivor_id, loser_ids, resolution) do
-      {:ok, survivor} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Merged #{length(loser_ids) + 1} contacts")
-         |> redirect(to: ~p"/contacts/#{survivor.id}")}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, :error, error_message(reason))}
-    end
+    if authorized?(socket), do: run_merge(socket), else: {:noreply, refuse(socket)}
   end
 
   # Ruling S7: `immich_status` is `null: false` with a check constraint
@@ -260,6 +274,14 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   def handle_event("not-duplicates", _params, socket) do
+    if authorized?(socket) do
+      dismiss_selection(socket)
+    else
+      {:noreply, refuse(socket)}
+    end
+  end
+
+  defp dismiss_selection(socket) do
     DuplicateDetection.dismiss_selection(
       socket.assigns.current_scope.account.id,
       MapSet.to_list(socket.assigns.selected_ids),
@@ -270,6 +292,57 @@ defmodule KithWeb.ContactLive.ClusterMerge do
      socket
      |> put_flash(:info, "Marked as not duplicates")
      |> redirect(to: ~p"/contacts/duplicates")}
+  end
+
+  # Spec G2 is "open **or** submit": `handle_params/3` only covers the open.
+  # A role downgrade while this page is open, or a reused socket, leaves a
+  # mounted screen whose submit would otherwise never be re-checked.
+  defp authorized?(socket),
+    do: Policy.can?(socket.assigns.current_scope.user, :update, :contact)
+
+  defp refuse(socket) do
+    socket
+    |> put_flash(:error, "You don't have permission to merge contacts")
+    |> push_navigate(to: ~p"/contacts")
+  end
+
+  defp run_merge(socket) do
+    survivor_id = socket.assigns.primary_id
+
+    loser_ids =
+      socket |> selected_members() |> Enum.map(& &1.id) |> Enum.reject(&(&1 == survivor_id))
+
+    resolution = %{
+      # `:__immich__` is UI bookkeeping, not a contact field, and MUST be
+      # stripped here. `Merge.validate_fields/2` reduces over every entry in
+      # `fields` and dispatches non-computed, non-`:clear` values to
+      # `held_by_member?/3`, whose first act is `Map.fetch!(member, field)`
+      # on a `Contact` struct — `:__immich__` is neither `:clear` nor a known
+      # computed field, so leaving it in raises an unhandled `KeyError`
+      # outside the engine's documented error contract, not a silently
+      # dropped key.
+      fields:
+        socket.assigns.resolution.fields
+        |> Map.merge(Map.delete(socket.assigns.overrides, :__immich__)),
+      drop: build_drop(socket),
+      # Every member the screen showed but the user excluded, so the engine can
+      # dismiss exactly the pairs the user reviewed and rejected. Leaving these
+      # out would leave those pairs `pending` and they would be suggested again.
+      unchecked_ids: unchecked_ids(socket)
+    }
+
+    resolution = drop_aliases(resolution, socket.assigns.dropped)
+
+    case Contacts.merge_cluster(socket.assigns.current_scope, survivor_id, loser_ids, resolution) do
+      {:ok, survivor} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Merged #{length(loser_ids) + 1} contacts")
+         |> redirect(to: ~p"/contacts/#{survivor.id}")}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :error, error_message(reason))}
+    end
   end
 
   defp unchecked_ids(socket) do
@@ -311,16 +384,19 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     end
   end
 
-  defp drop_key("Fields"), do: :contact_fields
-  defp drop_key("Addresses"), do: :addresses
-  defp drop_key("Tags"), do: :tags
-  defp drop_key(_label), do: nil
+  # Keyed on the section identifier the template renders as `phx-value-type`,
+  # never on its display label — see `@sections`. Aliases deliberately fall
+  # through: they are a whole-array field carried in `fields`, not a `drop`.
+  defp drop_key("contact_fields"), do: :contact_fields
+  defp drop_key("addresses"), do: :addresses
+  defp drop_key("tags"), do: :tags
+  defp drop_key(_type), do: nil
 
   # An alias has no backing row — the alias id *is* the string — so unchecking
   # one is a subtraction from the resolved array rather than a `drop` entry
   # (design spec §3).
   defp drop_aliases(resolution, dropped) do
-    dropped_aliases = for {"Aliases", value} <- dropped, do: value
+    dropped_aliases = for {"aliases", value} <- dropped, do: value
 
     case resolution.fields do
       %{aliases: list} when is_list(list) and dropped_aliases != [] ->
@@ -352,13 +428,13 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   defp error_message(_reason),
     do: "This merge couldn't be completed. Reload the page and try again."
 
-  # `MergeSummary.build/1` gives "Fields"/"Addresses"/"Tags" entries an
-  # integer row id, but "Aliases" entries are keyed by the alias string
+  # `MergeSummary.build/1` gives contact_fields/addresses/tags entries an
+  # integer row id, but alias entries are keyed by the alias string
   # itself (there is no per-row id to drop). Casting by the value's shape
   # rather than by category would corrupt a numeric-looking alias like
   # "007" — `Integer.parse/1` would turn it into `7`, which can never match
-  # the `{"Aliases", "007"}` key the render side looks up.
-  defp cast_entry_id("Aliases", id), do: id
+  # the `{"aliases", "007"}` key the render side looks up.
+  defp cast_entry_id("aliases", id), do: id
 
   defp cast_entry_id(_type, id) do
     case Integer.parse(id) do
@@ -380,14 +456,48 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   defp candidates(assigns, field) do
-    MergeResolution.candidates_for(selected_from_assigns(assigns), field)
+    visible_candidates(selected_from_assigns(assigns), field)
   end
+
+  # Design spec §3 and the constraint slice 2 carried over from slice 1: never
+  # offer a member's own id as a `first_met_through_id` value.
+  # `Merge.clear_member_self_reference/2` coerces such a choice to `:clear`, so
+  # the merge would succeed and the survivor's first-met-through would come
+  # back empty with no error and nothing on screen having said why.
+  defp visible_candidates(selected, :first_met_through_id) do
+    member_ids = MapSet.new(selected, & &1.id)
+
+    selected
+    |> MergeResolution.candidates_for(:first_met_through_id)
+    |> Enum.reject(&MapSet.member?(member_ids, &1.value))
+  end
+
+  defp visible_candidates(selected, field),
+    do: MergeResolution.candidates_for(selected, field)
 
   defp selected_from_assigns(assigns) do
     Enum.filter(assigns.members, &MapSet.member?(assigns.selected_ids, &1.id))
   end
 
-  defp attribution_text(assigns, field) do
+  # True when the only first-met-through values on offer were members of this
+  # merge, so the row renders as cleared with the reason rather than as an
+  # attribution for a value nobody can pick.
+  defp self_reference_only?(assigns) do
+    selected = selected_from_assigns(assigns)
+
+    MergeResolution.candidates_for(selected, :first_met_through_id) != [] and
+      visible_candidates(selected, :first_met_through_id) == []
+  end
+
+  defp attribution_text(assigns, :first_met_through_id = field) do
+    if self_reference_only?(assigns),
+      do: @self_reference_note,
+      else: resolved_attribution(assigns, field)
+  end
+
+  defp attribution_text(assigns, field), do: resolved_attribution(assigns, field)
+
+  defp resolved_attribution(assigns, field) do
     total = MapSet.size(assigns.selected_ids)
 
     case Map.get(assigns.resolution.attributions, field) do
@@ -397,6 +507,10 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       _ -> nil
     end
   end
+
+  defp policy_note(field), do: Map.fetch!(@policy_notes, field)
+
+  defp sections, do: @sections
 
   defp member_name(assigns, id) do
     case Enum.find(assigns.members, &(&1.id == id)) do
@@ -408,6 +522,16 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   defp humanize(field) do
     field |> Atom.to_string() |> String.replace("_id", "") |> String.replace("_", " ")
   end
+
+  # Design spec §3, "Association ids": the UI renders the associated record's
+  # name. Without this a contested gender renders as a button reading "3".
+  # An id with no row behind it (deleted between load and render) falls back
+  # to the plain value rather than blanking the row.
+  defp display(assigns, field, value)
+       when field in [:gender_id, :currency_id, :first_met_through_id],
+       do: assigns.labels |> Map.fetch!(field) |> Map.get(value) || display(value)
+
+  defp display(_assigns, _field, value), do: display(value)
 
   defp display(nil), do: nil
   defp display(:clear), do: nil
@@ -549,6 +673,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
           <div
             :for={field <- MergeFields.choice_fields()}
+            data-field={field}
             class={[
               "grid grid-cols-[10rem_1fr] gap-4 items-center px-4 py-2.5 border-t border-[var(--color-border-subtle)]",
               conflict?(assigns, field) && "bg-[var(--color-danger-subtle)]"
@@ -557,8 +682,15 @@ defmodule KithWeb.ContactLive.ClusterMerge do
             <div class="text-sm text-[var(--color-text-secondary)] capitalize">
               {humanize(field)}
             </div>
-
-            <div :if={conflict?(assigns, field)} class="flex flex-wrap items-center gap-2">
+            <!--
+              Spec B6: a resolved row is click-to-change too, opening in place as
+              the same segmented control a contested row gets. The only rows
+              without one are those no member holds a usable value for.
+            -->
+            <div
+              :if={candidates(assigns, field) != []}
+              class="flex flex-wrap items-center gap-2"
+            >
               <button
                 :for={{candidate, index} <- Enum.with_index(candidates(assigns, field))}
                 type="button"
@@ -574,7 +706,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                   )
                 ]}
               >
-                {display(candidate.value)}
+                {display(assigns, field, candidate.value)}
                 <span class="block text-[10px] opacity-70">{candidate.count} record(s)</span>
               </button>
               <button
@@ -594,9 +726,37 @@ defmodule KithWeb.ContactLive.ClusterMerge do
               >
                 Leave empty
               </button>
+              <span class="text-xs text-[var(--color-text-tertiary)]">
+                {attribution_text(assigns, field)}
+              </span>
             </div>
 
-            <div :if={not conflict?(assigns, field)} class="flex items-center gap-3 text-sm">
+            <div
+              :if={candidates(assigns, field) == []}
+              class="flex items-center gap-3 text-sm"
+            >
+              <span class="italic text-[var(--color-text-disabled)]">
+                Not set on any contact
+              </span>
+              <span class="text-xs text-[var(--color-text-tertiary)]">
+                {attribution_text(assigns, field)}
+              </span>
+            </div>
+          </div>
+          <!--
+            Spec B1 requires every mergeable scalar on screen, the flags
+            included. §3 resolves these by policy rather than by choice, so
+            they state the outcome and the rule instead of offering a control.
+          -->
+          <div
+            :for={field <- MergeFields.policy_fields()}
+            data-field={field}
+            class="grid grid-cols-[10rem_1fr] gap-4 items-center px-4 py-2.5 border-t border-[var(--color-border-subtle)]"
+          >
+            <div class="text-sm text-[var(--color-text-secondary)] capitalize">
+              {humanize(field)}
+            </div>
+            <div class="flex items-center gap-3 text-sm">
               <span :if={display(effective(assigns, field))}>
                 {display(effective(assigns, field))}
               </span>
@@ -604,10 +764,10 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                 :if={is_nil(display(effective(assigns, field)))}
                 class="italic text-[var(--color-text-disabled)]"
               >
-                Not set on any contact
+                Not set
               </span>
               <span class="text-xs text-[var(--color-text-tertiary)]">
-                {attribution_text(assigns, field)}
+                {policy_note(field)}
               </span>
             </div>
           </div>
@@ -658,9 +818,14 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
         <details
           id="section-contact-details"
+          open={MapSet.member?(@open_sections, :contact_details)}
           class="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)]"
         >
-          <summary class="flex items-center justify-between p-4 cursor-pointer">
+          <summary
+            phx-click="toggle-section"
+            phx-value-section="contact_details"
+            class="flex items-center justify-between p-4 cursor-pointer"
+          >
             <span class="flex items-baseline gap-3">
               <strong class="text-sm">Contact details</strong>
               <span class="text-xs text-[var(--color-text-tertiary)]">
@@ -672,24 +837,24 @@ defmodule KithWeb.ContactLive.ClusterMerge do
           </summary>
 
           <div
-            :for={
-              {label, entries} <- [
-                {"Fields", @summary.contact_fields},
-                {"Addresses", @summary.addresses},
-                {"Tags", @summary.tags},
-                {"Aliases", @summary.aliases}
-              ]
-            }
+            :for={{key, label} <- sections()}
+            data-field={key}
             class="px-4 py-3 border-t border-[var(--color-border-subtle)]"
           >
             <p class="text-sm text-[var(--color-text-secondary)] mb-2">{label}</p>
-            <label :for={entry <- entries} class="flex items-center gap-2 text-sm py-0.5">
+            <label
+              :for={entry <- Map.fetch!(@summary, key)}
+              class="flex items-center gap-2 text-sm py-0.5"
+            >
               <input
                 type="checkbox"
                 disabled={entry.duplicate?}
-                checked={not entry.duplicate? and not MapSet.member?(@dropped, {label, entry.id})}
+                checked={
+                  not entry.duplicate? and
+                    not MapSet.member?(@dropped, {to_string(key), entry.id})
+                }
                 phx-click="toggle-value"
-                phx-value-type={label}
+                phx-value-type={key}
                 phx-value-id={entry.id}
               />
               <span class={entry.duplicate? && "line-through text-[var(--color-text-disabled)]"}>
@@ -701,15 +866,25 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                   else: member_name(assigns, entry.owner_id)}
               </span>
             </label>
-            <p :if={entries == []} class="text-sm text-[var(--color-text-disabled)] italic">None</p>
+            <p
+              :if={Map.fetch!(@summary, key) == []}
+              class="text-sm text-[var(--color-text-disabled)] italic"
+            >
+              None
+            </p>
           </div>
         </details>
 
         <details
           id="section-history"
+          open={MapSet.member?(@open_sections, :history)}
           class="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)]"
         >
-          <summary class="flex items-center justify-between p-4 cursor-pointer">
+          <summary
+            phx-click="toggle-section"
+            phx-value-section="history"
+            class="flex items-center justify-between p-4 cursor-pointer"
+          >
             <span class="flex items-baseline gap-3">
               <strong class="text-sm">Carried over as-is</strong>
               <span class="text-xs text-[var(--color-text-tertiary)]">

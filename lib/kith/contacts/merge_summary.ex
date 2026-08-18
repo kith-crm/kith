@@ -167,6 +167,18 @@ defmodule Kith.Contacts.MergeSummary do
     marked
   end
 
+  # Pinned to the SQL in `Kith.Contacts.Merge`'s `dedupe_owned_step/2`, which
+  # keys on `lower(btrim(col))`. One-argument `btrim` strips SPACES ONLY, while
+  # `String.trim/1` strips every Unicode whitespace character — so a value with
+  # a leading tab would read as "duplicate · dropped" on screen while the engine
+  # kept both rows, and a caller expanding a dropped entry over everything
+  # sharing its key (see `build/1`) would then drop a value the user never
+  # excluded. `String.trim/2` with `" "` is byte-for-byte what `btrim` does.
+  #
+  # `lower()` vs `String.downcase/1` still differ for locale-specific casing
+  # (Postgres folds per the database collation; Elixir folds per Unicode
+  # default). Both are identical over ASCII, which is what these keys are in
+  # practice; the whitespace half is the one that had a reachable divergence.
   defp normalize(nil), do: nil
-  defp normalize(value) when is_binary(value), do: value |> String.trim() |> String.downcase()
+  defp normalize(value) when is_binary(value), do: value |> String.trim(" ") |> String.downcase()
 end

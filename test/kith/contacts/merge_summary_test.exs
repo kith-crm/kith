@@ -133,4 +133,35 @@ defmodule Kith.Contacts.MergeSummaryTest do
     assert summary.history.documents == 1
     assert summary.history.calls == 0
   end
+
+  # `Kith.Contacts.Merge`'s dedupe runs `lower(btrim(value))`, and one-argument
+  # `btrim` strips SPACES ONLY. `String.trim/1` strips every Unicode whitespace
+  # character, so a tab-prefixed value used to read as "duplicate · dropped" on
+  # screen while the engine kept both rows — and a caller expanding a dropped
+  # entry over everything sharing its key would then drop a value the user
+  # never excluded.
+  test "a tab-prefixed value is not a duplicate, matching the engine's btrim", ctx do
+    ContactsFixtures.contact_field_fixture(ctx.a, ctx.email_type.id, %{"value" => "s@example.com"})
+
+    ContactsFixtures.contact_field_fixture(ctx.b, ctx.email_type.id, %{
+      "value" => "\ts@example.com"
+    })
+
+    summary = MergeSummary.build([ctx.a, ctx.b])
+
+    assert Enum.count(summary.contact_fields, & &1.duplicate?) == 0
+    assert summary.contact_fields |> Enum.map(& &1.key) |> Enum.uniq() |> length() == 2
+  end
+
+  test "a space-padded value is still a duplicate, matching the engine's btrim", ctx do
+    ContactsFixtures.contact_field_fixture(ctx.a, ctx.email_type.id, %{"value" => "s@example.com"})
+
+    ContactsFixtures.contact_field_fixture(ctx.b, ctx.email_type.id, %{
+      "value" => "  s@example.com  "
+    })
+
+    summary = MergeSummary.build([ctx.a, ctx.b])
+
+    assert Enum.count(summary.contact_fields, & &1.duplicate?) == 1
+  end
 end

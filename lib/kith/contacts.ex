@@ -1707,6 +1707,47 @@ defmodule Kith.Contacts do
   end
 
   @doc """
+  Names for the association ids `members` hold, as `%{field => %{id => name}}`.
+
+  Design spec §3, "Association ids": a merge screen renders the associated
+  record's name, never the raw id. Covers only the three association columns
+  in `Kith.Contacts.MergeFields.choice_fields/0`; ids with no surviving row
+  are simply absent, and the caller falls back to the id.
+
+  `first_met_through_id` may point at any contact in the account, not only a
+  cluster member, so it is looked up rather than read off `members`.
+  """
+  def merge_association_labels([]), do: empty_association_labels()
+
+  def merge_association_labels([%Contact{} | _] = members) do
+    account_id = hd(members).account_id
+
+    %{
+      gender_id: label_map(Gender, ids_held(members, :gender_id), :name),
+      currency_id: label_map(Currency, ids_held(members, :currency_id), :name),
+      first_met_through_id:
+        Contact
+        |> where([c], c.account_id == ^account_id)
+        |> label_map(ids_held(members, :first_met_through_id), :display_name)
+    }
+  end
+
+  defp empty_association_labels,
+    do: %{gender_id: %{}, currency_id: %{}, first_met_through_id: %{}}
+
+  defp ids_held(members, field) do
+    members |> Enum.map(&Map.fetch!(&1, field)) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+  end
+
+  defp label_map(_queryable, [], _name_field), do: %{}
+
+  defp label_map(queryable, ids, name_field) do
+    from(r in queryable, where: r.id in ^ids, select: {r.id, field(r, ^name_field)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
   Merges `non_survivor_id` into `survivor_id`.
 
   Retained for the existing wizard and REST API. `field_choices` uses the old

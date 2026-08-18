@@ -419,7 +419,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       # renders disabled as "duplicate · dropped".
       live
       |> element(
-        "input[phx-click='toggle-value'][phx-value-type='Fields'][phx-value-id='#{loser_field.id}']"
+        "input[phx-click='toggle-value'][phx-value-type='contact_fields'][phx-value-id='#{loser_field.id}']"
       )
       |> render_click()
 
@@ -456,7 +456,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
       live
-      |> element("input[phx-click='toggle-value'][phx-value-type='Aliases'][phx-value-id='007']")
+      |> element("input[phx-click='toggle-value'][phx-value-type='aliases'][phx-value-id='007']")
       |> render_click()
 
       assert {:error, {:redirect, %{to: path}}} =
@@ -526,7 +526,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
       refute live
              |> element(
-               "input[phx-click='toggle-value'][phx-value-type='Fields'][phx-value-id='#{field.id}']"
+               "input[phx-click='toggle-value'][phx-value-type='contact_fields'][phx-value-id='#{field.id}']"
              )
              |> render_click() =~ "changed since you opened"
     end
@@ -745,6 +745,263 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert live
              |> element("button[phx-click='choose-immich'][phx-value-id='#{ctx.a.id}']")
              |> render() =~ "border-[var(--color-accent)]"
+    end
+  end
+
+  # Spec B6: "Resolved rows show the value plus attribution and are
+  # click-to-change, opening in place as a segmented control including 'Leave
+  # empty'." Before this, the non-conflict branch rendered two inert spans
+  # while the section header claimed every value was clickable.
+  describe "resolved rows are editable (B6/B7)" do
+    test "a resolved row exposes its candidates as a segmented control", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # middle_name is held by b alone, so it resolves without a conflict.
+      assert has_element?(live, "button[phx-value-field='middle_name'][phx-value-index='0']")
+
+      assert live
+             |> element("button[phx-value-field='middle_name'][phx-value-index='0']")
+             |> render() =~ "Jiyoung"
+    end
+
+    test "a resolved clearable row offers Leave empty and clears through to the merge", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert has_element?(
+               live,
+               "button[phx-value-field='middle_name'][phx-value-index='clear']"
+             )
+
+      live
+      |> element("button[phx-value-field='middle_name'][phx-value-index='clear']")
+      |> render_click()
+
+      assert {:error, {:redirect, %{to: path}}} =
+               live |> element("button[phx-click='merge']") |> render_click()
+
+      survivor_id = path |> String.split("/") |> List.last() |> String.to_integer()
+      assert Kith.Repo.get!(Kith.Contacts.Contact, survivor_id).middle_name == nil
+    end
+
+    # B7's actual scenario: first_name is normally *resolved*, so this is the
+    # rule the existing contested-first_name test only covers as a carve-out.
+    test "the resolved first_name row offers candidates but no Leave empty", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert has_element?(live, "button[phx-value-field='first_name'][phx-value-index='0']")
+      refute has_element?(live, "button[phx-value-field='first_name'][phx-value-index='clear']")
+    end
+  end
+
+  # Spec B1: every mergeable scalar is on screen, "including … and the flags".
+  describe "field coverage (B1)" do
+    test "every mergeable field outside the Immich group has a row", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      shown = Kith.Contacts.MergeFields.all() -- Kith.Contacts.MergeFields.immich_fields()
+
+      for field <- shown do
+        assert has_element?(live, "[data-field='#{field}']"),
+               "no row rendered for mergeable field #{field}"
+      end
+    end
+
+    test "the policy flags state the resolved value, not a control", ctx do
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.b.id),
+        set: [is_archived: true, favorite: true]
+      )
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # "the most engaged interpretation wins": favorite if any, archived only
+      # if every member is archived.
+      assert live |> element("[data-field='favorite']") |> render() =~ "Yes"
+      assert live |> element("[data-field='is_archived']") |> render() =~ "No"
+
+      refute has_element?(live, "[data-field='favorite'] button")
+      refute has_element?(live, "[data-field='is_archived'] button")
+    end
+  end
+
+  describe "association rows (§3)" do
+    setup ctx do
+      woman =
+        Kith.Repo.insert!(%Kith.Contacts.Gender{name: "Woman", account_id: ctx.account_id})
+
+      man = Kith.Repo.insert!(%Kith.Contacts.Gender{name: "Man", account_id: ctx.account_id})
+
+      Map.merge(ctx, %{woman: woman, man: man})
+    end
+
+    test "a contested gender renders the gender's name, not its id", ctx do
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.a.id),
+        set: [gender_id: ctx.woman.id]
+      )
+
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.b.id),
+        set: [gender_id: ctx.man.id]
+      )
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      rendered =
+        live |> element("button[phx-value-field='gender_id'][phx-value-index='0']") |> render()
+
+      assert rendered =~ "Woman" or rendered =~ "Man"
+      refute rendered =~ to_string(ctx.woman.id)
+      refute rendered =~ to_string(ctx.man.id)
+    end
+
+    # The engine's `clear_member_self_reference/2` coerces a member id to
+    # `:clear`, so offering one is offering a value that silently disappears.
+    test "a member id is never offered as a first-met-through candidate", ctx do
+      outsider =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Mutual",
+          last_name: "Friend"
+        })
+
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.a.id),
+        set: [first_met_through_id: ctx.b.id]
+      )
+
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.b.id),
+        set: [first_met_through_id: outsider.id]
+      )
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # Exactly one candidate survives the filter — the non-member — and it
+      # renders as that contact's name.
+      assert live
+             |> element("button[phx-value-field='first_met_through_id'][phx-value-index='0']")
+             |> render() =~ "Mutual Friend"
+
+      refute has_element?(
+               live,
+               "button[phx-value-field='first_met_through_id'][phx-value-index='1']"
+             )
+    end
+
+    test "a row whose only candidate was a member renders cleared with the reason", ctx do
+      Kith.Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.a.id),
+        set: [first_met_through_id: ctx.b.id]
+      )
+
+      {:ok, live, html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      refute has_element?(
+               live,
+               "button[phx-value-field='first_met_through_id'][phx-value-index='0']"
+             )
+
+      assert html =~ "a contact cannot be met through a record it just absorbed"
+    end
+  end
+
+  describe "section state" do
+    # Contact details starts folded and is the only place value pruning
+    # happens; a `<details>` with an id and no `open` attribute loses a
+    # user-set `open` on every LiveView patch, so pruning N values would cost
+    # 2N clicks.
+    test "an opened section stays open across an unrelated re-render", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      refute has_element?(live, "details#section-contact-details[open]")
+
+      live
+      |> element("summary[phx-value-section='contact_details']")
+      |> render_click()
+
+      assert has_element?(live, "details#section-contact-details[open]")
+
+      live
+      |> element("button[phx-click='set-primary'][phx-value-id='#{ctx.b.id}']")
+      |> render_click()
+
+      assert has_element?(live, "details#section-contact-details[open]")
+    end
+  end
+
+  describe "drop payload keys" do
+    # `drop_key/1` used to match the literal display labels the template
+    # supplied ("Fields"/"Addresses"/"Tags"). A copy edit or an i18n pass would
+    # have made it return nil for everything, `build_drop/1` return `%{}`, and
+    # every unchecked value silently come back on the survivor.
+    test "value rows are keyed on section identifiers, not display copy", ctx do
+      email_type =
+        Kith.Repo.one!(
+          from(t in Kith.Contacts.ContactFieldType, where: like(t.protocol, "mailto%"), limit: 1)
+        )
+
+      ContactsFixtures.contact_field_fixture(ctx.a, email_type.id, %{"value" => "x@y.com"})
+      {:ok, _} = Kith.Contacts.update_contact(ctx.b, %{"aliases" => ["Sass"]})
+
+      {:ok, _live, html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # The rows that exist are keyed on the section identifier…
+      assert html =~ ~s(phx-value-type="contact_fields")
+      assert html =~ ~s(phx-value-type="aliases")
+
+      # …and every section, populated or not, is identified the same way.
+      for {key, label} <- [
+            {"contact_fields", "Fields"},
+            {"addresses", "Addresses"},
+            {"tags", "Tags"},
+            {"aliases", "Aliases"}
+          ] do
+        assert html =~ ~s(data-field="#{key}")
+        refute html =~ ~s(phx-value-type="#{label}")
+        # The label is still displayed — it is just not the key.
+        assert html =~ ">#{label}</p>"
+      end
+    end
+  end
+
+  # Spec G2 is "open **or** submit". A viewer cannot mount, so reaching the
+  # submit needs a role downgrade against an already-open screen (or a reused
+  # socket) — driven here by handing the handler that exact socket.
+  describe "permissions on submit (G2)" do
+    setup ctx do
+      viewer_scope = Kith.Accounts.Scope.for_user(%{ctx.user | role: "viewer"})
+      members = [ctx.a, ctx.b]
+
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{
+          __changed__: %{},
+          flash: %{},
+          current_scope: viewer_scope,
+          members: members,
+          selected_ids: MapSet.new([ctx.a.id, ctx.b.id]),
+          primary_id: ctx.a.id,
+          overrides: %{},
+          dropped: MapSet.new(),
+          resolution: Kith.Contacts.MergeResolution.resolve(members, ctx.a.id),
+          error: nil
+        }
+      }
+
+      Map.put(ctx, :socket, socket)
+    end
+
+    test "a viewer submitting a merge is refused, not merged", ctx do
+      assert {:noreply, socket} =
+               KithWeb.ContactLive.ClusterMerge.handle_event("merge", %{}, ctx.socket)
+
+      assert {:live, :redirect, %{to: "/contacts"}} = socket.redirected
+      assert Kith.Repo.get!(Kith.Contacts.Contact, ctx.b.id).deleted_at == nil
+      assert Kith.Repo.get!(Kith.Contacts.Contact, ctx.a.id).deleted_at == nil
+    end
+
+    test "a viewer submitting not duplicates is refused, not dismissed", ctx do
+      assert {:noreply, socket} =
+               KithWeb.ContactLive.ClusterMerge.handle_event("not-duplicates", %{}, ctx.socket)
+
+      assert {:live, :redirect, %{to: "/contacts"}} = socket.redirected
+
+      assert Kith.Repo.all(from(d in Kith.Contacts.DuplicateCandidate, select: d.status)) == [
+               "pending"
+             ]
     end
   end
 end

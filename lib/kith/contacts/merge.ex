@@ -335,6 +335,10 @@ defmodule Kith.Contacts.Merge do
   # case/whitespace-only differences still collapse. Tags and photos
   # are deduped by their own remap steps above already, via
   # `dedupe_and_move/6`; nothing to repeat here.
+  #
+  # `Kith.Contacts.MergeSummary.normalize/1` mirrors this key so the screen
+  # marks exactly the rows this step collapses. `btrim/1` strips spaces only —
+  # keep the two in step if either side changes.
   defp dedupe_owned_step(repo, survivor_id) do
     repo.query!(
       """
