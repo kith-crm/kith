@@ -139,6 +139,20 @@ defmodule Kith.Contacts.MergeResolution do
     end
   end
 
+  @doc """
+  Every distinct value `members` hold for `field`, most-held first.
+
+  Unlike `conflicts`, this is populated even when the members agree — the screen
+  uses it to open an already-resolved row as a choice.
+  """
+  def candidates_for(members, field) do
+    members
+    |> Enum.map(fn member -> {member.id, normalize(Map.fetch!(member, field))} end)
+    |> Enum.reject(fn {_id, value} -> is_nil(value) end)
+    |> candidates()
+    |> Enum.sort_by(& &1.count, :desc)
+  end
+
   # Returns {resolved_value, attribution, conflict_candidates}
   defp resolve_scalar(members, field) do
     held =

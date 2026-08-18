@@ -320,4 +320,30 @@ defmodule Kith.Contacts.MergeResolutionTest do
       refute Enum.any?([a, b], &(&1.immich_status == "unlinked"))
     end
   end
+
+  describe "candidates_for/2" do
+    test "a resolved field still offers its single value", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah"})
+      b = contact(ctx.account_id, %{first_name: "Sarah"})
+
+      assert [%{value: "Sarah", count: 2}] =
+               MergeResolution.candidates_for([a, b], :first_name)
+    end
+
+    test "an empty field offers nothing", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah", occupation: nil})
+      b = contact(ctx.account_id, %{first_name: "Sarah", occupation: nil})
+
+      assert MergeResolution.candidates_for([a, b], :occupation) == []
+    end
+
+    test "a contested field offers every value, most-held first", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah", company: "Figma"})
+      b = contact(ctx.account_id, %{first_name: "Sarah", company: "Stripe"})
+      c = contact(ctx.account_id, %{first_name: "Sarah", company: "Stripe"})
+
+      assert [%{value: "Stripe", count: 2}, %{value: "Figma", count: 1}] =
+               MergeResolution.candidates_for([a, b, c], :company)
+    end
+  end
 end
