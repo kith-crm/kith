@@ -51,7 +51,8 @@ config :kith, Oban,
     purge: 1
   ],
   plugins: [
-    Oban.Plugins.Pruner,
+    {Oban.Plugins.Pruner,
+     max_age: String.to_integer(System.get_env("OBAN_PRUNER_MAX_AGE_DAYS", "7")) * 24 * 60 * 60},
     {Oban.Plugins.Cron,
      crontab: [
        {"0 2 * * *", Kith.Workers.ReminderSchedulerWorker},

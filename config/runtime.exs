@@ -1,14 +1,7 @@
 import Config
 
-# Helper: read from env var or Docker secret file (VAR_FILE takes precedence)
-defmodule Kith.ConfigHelpers do
-  def read_secret(env_var) do
-    case System.get_env("#{env_var}_FILE") do
-      nil -> System.get_env(env_var)
-      file_path -> file_path |> String.trim() |> File.read!() |> String.trim()
-    end
-  end
-end
+# Kith.ConfigHelpers (lib/kith/config_helpers.ex) — read from env var or
+# Docker secret file (VAR_FILE takes precedence).
 
 # ## Shared (all environments)
 
@@ -218,14 +211,28 @@ if config_env() == :prod do
   # Oban — only the worker container processes jobs in production.
   # The web container can call `Oban.insert/1` to enqueue jobs, but
   # runs no queues or plugins (no cron, no pruner) — so it never claims
-  # rows from `oban_jobs`. The worker container keeps the full config
-  # from `config.exs`.
+  # rows from `oban_jobs`.
+  #
+  # The worker container re-declares `plugins` here (rather than keeping
+  # `config.exs`'s value) so `OBAN_PRUNER_MAX_AGE_DAYS` is read at container
+  # boot instead of being baked in at release build time — same rationale
+  # as `DATABASE_URL`/`SECRET_KEY_BASE` above.
   #
   # Dev (`config_env() == :dev`) is unaffected: this block only runs in
   # `:prod`. Test env is pinned to `testing: :manual` in `config/test.exs`.
   case System.get_env("KITH_MODE", "web") do
     "worker" ->
-      :ok
+      config :kith, Oban,
+        plugins: [
+          {Oban.Plugins.Pruner, max_age: Kith.ConfigHelpers.oban_pruner_max_age_seconds()},
+          {Oban.Plugins.Cron,
+           crontab: [
+             {"0 2 * * *", Kith.Workers.ReminderSchedulerWorker},
+             {"0 3 * * *", Kith.Workers.ContactPurgeWorker},
+             {"0 4 * * 0", Kith.Workers.DuplicateDetectionWorker},
+             {"0 5 * * 0", Kith.Workers.ImportFileCleanupWorker}
+           ]}
+        ]
 
     _web ->
       config :kith, Oban, queues: false, plugins: false
