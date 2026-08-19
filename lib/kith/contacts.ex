@@ -64,7 +64,15 @@ defmodule Kith.Contacts do
     |> Repo.all()
   end
 
-  def search_contacts(account_id, query) do
+  @doc """
+  Searches contacts by name, nickname, company, alias or contact-field value.
+
+  ## Options
+
+    * `:limit` - cap the rows the database returns (default: no cap)
+    * `:preload_tags` - preload `:tags` on each result (default: `true`)
+  """
+  def search_contacts(account_id, query, opts \\ []) do
     search = "%#{String.replace(query, ~r/[%_\\]/, "\\\\\\0")}%"
 
     Contact
@@ -86,9 +94,16 @@ defmodule Kith.Contacts do
     )
     |> distinct([c], c.id)
     |> order_by([c], asc: c.display_name)
-    |> preload([:tags])
+    |> maybe_limit(Keyword.get(opts, :limit))
+    |> maybe_preload_tags(Keyword.get(opts, :preload_tags, true))
     |> Repo.all()
   end
+
+  defp maybe_limit(query, nil), do: query
+  defp maybe_limit(query, n) when is_integer(n), do: limit(query, ^n)
+
+  defp maybe_preload_tags(query, false), do: query
+  defp maybe_preload_tags(query, true), do: preload(query, [:tags])
 
   @doc """
   Lists contacts with cursor-based pagination.

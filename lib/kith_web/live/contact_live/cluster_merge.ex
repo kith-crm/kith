@@ -116,6 +116,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       socket
       |> assign(:members, members)
       |> assign(:selected_ids, MapSet.new(members, & &1.id))
+      # The URL id leads only because `merge_selected_path/1` sorts the
+      # selection — the user expressed no preference — so the survivor has to
+      # be re-derived over every member, not just the one `load_cluster/3`
+      # saw. Safe only here: this runs immediately after `load_cluster/3`, so
+      # there is no "make primary" choice to clobber.
+      |> assign(:primary_id, DuplicateDetection.default_primary(members).id)
       |> recompute()
     end
   end
@@ -194,7 +200,15 @@ defmodule KithWeb.ContactLive.ClusterMerge do
         current = MapSet.new(socket.assigns.members, & &1.id)
 
         socket.assigns.current_scope.account.id
-        |> Contacts.search_contacts(query)
+        # Capped in the database — this runs on every debounced keystroke and
+        # the unbounded query scans five columns plus a `contact_fields` join.
+        # The headroom is the current members, all of which are rejected
+        # below, so a full page of results can never come back short. Tags are
+        # not rendered here and `add-member` re-fetches by id, so skip them.
+        |> Contacts.search_contacts(query,
+          limit: 8 + MapSet.size(current),
+          preload_tags: false
+        )
         |> Enum.reject(&MapSet.member?(current, &1.id))
         |> Enum.take(8)
       else
@@ -205,26 +219,31 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   def handle_event("add-member", %{"id" => id}, socket) do
-    id = String.to_integer(id)
+    existing = MapSet.new(socket.assigns.members, & &1.id)
 
-    case Contacts.get_contact(socket.assigns.current_scope.account.id, id) do
-      nil ->
-        {:noreply, socket}
-
-      contact ->
-        # An added member is indistinguishable from a detected one from here
-        # on; the engine does not care how it got into the strip. Discarding
-        # overrides/dropped mirrors "toggle-member": the selection changed, so
-        # every derived value is stale.
-        {:noreply,
-         socket
-         |> assign(:members, socket.assigns.members ++ [contact])
-         |> assign(:selected_ids, MapSet.put(socket.assigns.selected_ids, contact.id))
-         |> assign(:overrides, %{})
-         |> assign(:dropped, MapSet.new())
-         |> assign(:search_query, "")
-         |> assign(:search_results, [])
-         |> recompute()}
+    # The id is client-supplied, so it is parsed rather than cast, and an id
+    # already in the strip is ignored: `selected_members/1` filters `:members`,
+    # so a repeat would reach the resolution and the summary twice and make the
+    # chip strip, the button count and the trash line disagree.
+    with {id, ""} <- Integer.parse(id),
+         false <- MapSet.member?(existing, id),
+         contact when not is_nil(contact) <-
+           Contacts.get_contact(socket.assigns.current_scope.account.id, id) do
+      # An added member is indistinguishable from a detected one from here
+      # on; the engine does not care how it got into the strip. Discarding
+      # overrides/dropped mirrors "toggle-member": the selection changed, so
+      # every derived value is stale.
+      {:noreply,
+       socket
+       |> assign(:members, socket.assigns.members ++ [contact])
+       |> assign(:selected_ids, MapSet.put(socket.assigns.selected_ids, contact.id))
+       |> assign(:overrides, %{})
+       |> assign(:dropped, MapSet.new())
+       |> assign(:search_query, "")
+       |> assign(:search_results, [])
+       |> recompute()}
+    else
+      _ -> {:noreply, socket}
     end
   end
 
@@ -290,7 +309,19 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   def handle_event("merge", _params, socket) do
-    if authorized?(socket), do: run_merge(socket), else: {:noreply, refuse(socket)}
+    cond do
+      not authorized?(socket) ->
+        {:noreply, refuse(socket)}
+
+      # The button carries `disabled` below two selected, but the event is
+      # client-controlled and one member is now this screen's default landing
+      # state — don't rely on the engine's `:no_losers` to catch it.
+      MapSet.size(socket.assigns.selected_ids) < 2 ->
+        {:noreply, assign(socket, :error, "Pick at least two contacts to merge.")}
+
+      true ->
+        run_merge(socket)
+    end
   end
 
   # Ruling S7: `immich_status` is `null: false` with a check constraint
@@ -744,6 +775,33 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   defp immich_sync_label(nil), do: "never synced"
   defp immich_sync_label(at), do: "synced #{Calendar.strftime(at, "%d %b %Y")}"
 
+  # A hand-picked set was never "matched" on anything, and a detected cluster
+  # loaded before this slice can still carry no reasons — either way the
+  # "Matched on ." sentence would name nothing.
+  defp matched_on?(assigns), do: not assigns.synthetic? and assigns.cluster.reasons != []
+
+  # Nothing detection proposed is a "possible duplicate", and the manual path
+  # routinely lands on a single member.
+  defp member_count_label(assigns) do
+    count = length(assigns.members)
+    noun = if assigns.synthetic?, do: "contact", else: "possible duplicate"
+
+    "#{count} #{noun}#{if count == 1, do: "", else: "s"}"
+  end
+
+  # `@cluster` never learns about members added by search or by `?with=`, so a
+  # link built from its key would drop them all on the one error this link
+  # exists for. Built from current state instead.
+  defp reload_path(assigns) do
+    others = assigns.members |> Enum.map(& &1.id) |> Enum.reject(&(&1 == assigns.primary_id))
+
+    if others == [] do
+      ~p"/contacts/duplicates/cluster/#{assigns.primary_id}"
+    else
+      ~p"/contacts/duplicates/cluster/#{assigns.primary_id}?#{[with: Enum.join(others, ",")]}"
+    end
+  end
+
   defp trash_summary(assigns) do
     case MapSet.size(assigns.selected_ids) - 1 do
       n when n <= 0 -> "Nothing moves to trash."
@@ -767,7 +825,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
           class="rounded-[var(--radius-md)] border-s-4 border-[var(--color-danger)] bg-[var(--color-danger-subtle)] p-3 text-sm"
         >
           {@error}
-          <.link navigate={~p"/contacts/duplicates/cluster/#{@cluster.key}"} class="underline ms-2">
+          <.link navigate={reload_path(assigns)} class="underline ms-2">
             Reload
           </.link>
         </div>
@@ -776,10 +834,13 @@ defmodule KithWeb.ContactLive.ClusterMerge do
           <div class="flex flex-wrap items-center justify-between gap-4">
             <div>
               <p class="font-semibold text-[var(--color-text-primary)]">
-                {length(@members)} possible duplicates · {MapSet.size(@selected_ids)} selected
+                {member_count_label(assigns)} · {MapSet.size(@selected_ids)} selected
               </p>
-              <p class="text-sm text-[var(--color-text-tertiary)]">
+              <p :if={matched_on?(assigns)} class="text-sm text-[var(--color-text-tertiary)]">
                 Matched on {Enum.join(@cluster.reasons, ", ")}. Uncheck anyone who isn't this person.
+              </p>
+              <p :if={not matched_on?(assigns)} class="text-sm text-[var(--color-text-tertiary)]">
+                Pick the contacts to merge into one.
               </p>
             </div>
           </div>

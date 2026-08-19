@@ -91,6 +91,57 @@ defmodule KithWeb.ContactLive.MergeSelectedTest do
            |> length() == 1
   end
 
+  test "the primary is re-derived over every member of the with param", ctx do
+    # `merge_selected_path/1` leads with the lowest id, which carries no user
+    # intent — the richest record has to win regardless of URL position.
+    ContactsFixtures.note_fixture(ctx.b, ctx.user.id)
+    ContactsFixtures.note_fixture(ctx.b, ctx.user.id)
+
+    {:ok, live, _html} =
+      live(ctx.conn, "/contacts/duplicates/cluster/#{ctx.a.id}?with=#{ctx.b.id}")
+
+    # "make primary" is offered for every selected member except the primary.
+    assert has_element?(live, "button[phx-click='set-primary'][phx-value-id='#{ctx.a.id}']")
+    refute has_element?(live, "button[phx-click='set-primary'][phx-value-id='#{ctx.b.id}']")
+  end
+
+  test "a crafted merge with one member selected is refused", ctx do
+    {:ok, live, _html} =
+      live(ctx.conn, "/contacts/duplicates/cluster/#{ctx.a.id}?with=#{ctx.b.id}")
+
+    live
+    |> element("input[phx-click='toggle-member'][phx-value-id='#{ctx.b.id}']")
+    |> render_click()
+
+    html = render_click(live, "merge", %{})
+
+    assert html =~ "Pick at least two contacts to merge."
+    assert Kith.Contacts.get_contact(ctx.account_id, ctx.b.id)
+  end
+
+  test "the reload link after a failed merge keeps every added member", ctx do
+    {:ok, live, _html} =
+      live(ctx.conn, "/contacts/duplicates/cluster/#{ctx.a.id}?with=#{ctx.b.id},#{ctx.c.id}")
+
+    # Trash a member behind the screen's back so the merge fails the way the
+    # Reload link exists for.
+    {:ok, _} = Kith.Contacts.soft_delete_contact(ctx.c)
+
+    html = live |> element("button", "Merge 3 contacts") |> render_click()
+
+    assert html =~ "changed since you opened this page"
+
+    assert [[_, reload]] = Regex.scan(~r|href="(/contacts/duplicates/cluster/[^"]*)"|, html)
+
+    reload = reload |> String.replace("&amp;", "&") |> URI.decode()
+
+    assert reload =~ "with="
+
+    for id <- [ctx.a.id, ctx.b.id, ctx.c.id] do
+      assert reload =~ to_string(id)
+    end
+  end
+
   test "merging past a dismissal resolves the dismissed candidate to merged", ctx do
     candidate!(ctx.account_id, ctx.a, ctx.b, "dismissed")
 

@@ -1071,9 +1071,39 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     test "merge is disabled until a second member is added", ctx do
       loner = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
 
+      mate = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dara"})
+
       {:ok, live, _html} = live(ctx.conn, "/contacts/duplicates/cluster/#{loner.id}")
 
       assert has_element?(live, "button[phx-click='merge'][disabled]")
+
+      live |> form("form[phx-change='search']", %{query: "Dara"}) |> render_change()
+
+      live
+      |> element("button[phx-click='add-member'][phx-value-id='#{mate.id}']")
+      |> render_click()
+
+      assert has_element?(live, "button[phx-click='merge']")
+      refute has_element?(live, "button[phx-click='merge'][disabled]")
+    end
+
+    test "the manual screen says nothing about matches or duplicates", ctx do
+      loner = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+
+      {:ok, _live, html} = live(ctx.conn, "/contacts/duplicates/cluster/#{loner.id}")
+
+      refute html =~ "Matched on"
+      refute html =~ "possible duplicate"
+      assert html =~ "1 contact ·"
+      assert html =~ "Pick the contacts to merge into one."
+    end
+
+    test "a detected cluster still says what it matched on", ctx do
+      {:ok, _live, html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert html =~ "2 possible duplicates ·"
+      assert html =~ "Matched on"
+      refute html =~ "Pick the contacts to merge into one."
     end
 
     test "a contact id from another account is refused", ctx do
@@ -1200,7 +1230,12 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert has_element?(live, "input[phx-click='toggle-member'][phx-value-id='#{dana.id}']")
     end
 
-    test "an added member contributes to conflicts", ctx do
+    test "an added member creates a conflict the section flags", ctx do
+      # `ctx.a` and `ctx.b` already contest `company`, so the screen opens on
+      # one conflict; the added member contests `occupation` with `ctx.a` and
+      # must push that count to two.
+      Kith.Repo.update!(Ecto.Changeset.change(ctx.a, occupation: "Engineer"))
+
       third =
         ContactsFixtures.contact_fixture(ctx.account_id, %{
           first_name: "Sarah",
@@ -1208,7 +1243,9 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
           occupation: "Designer"
         })
 
-      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+      {:ok, live, html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert html =~ "1 needs a decision"
 
       live |> form("form[phx-change='search']", %{query: "Sarah"}) |> render_change()
 
@@ -1217,32 +1254,76 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
         |> element("button[phx-click='add-member'][phx-value-id='#{third.id}']")
         |> render_click()
 
+      assert html =~ "2 need a decision"
       assert html =~ "Designer"
+      assert html =~ "Engineer"
     end
 
-    test "a short query returns nothing", ctx do
+    test "a query shorter than the threshold returns nothing", ctx do
+      dana = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
+      # "D" would match Dana on any of the searched columns — only the
+      # two-character threshold keeps it out.
       html = live |> form("form[phx-change='search']", %{query: "D"}) |> render_change()
 
-      refute html =~ "add-member"
+      refute html =~ ~s(phx-click="add-member" phx-value-id="#{dana.id}")
+
+      html = live |> form("form[phx-change='search']", %{query: "Da"}) |> render_change()
+
+      assert html =~ ~s(phx-click="add-member" phx-value-id="#{dana.id}")
     end
 
     test "search never surfaces a contact from another account", ctx do
       other_user = AccountsFixtures.user_fixture()
 
-      ContactsFixtures.contact_fixture(other_user.account_id, %{
-        first_name: "Sarah",
-        last_name: "Kim"
-      })
+      stranger =
+        ContactsFixtures.contact_fixture(other_user.account_id, %{
+          first_name: "Sarah",
+          last_name: "Kim"
+        })
+
+      # A same-account match the search must offer, so the refute below is
+      # about account scoping and not about there being nothing to find.
+      mine =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Sarah", last_name: "Park"})
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
       html = live |> form("form[phx-change='search']", %{query: "Sarah"}) |> render_change()
 
-      # Only the two seeded members exist for this account, both excluded as
-      # current members — so no result rows should be offered at all.
-      refute html =~ "add-member"
+      assert html =~ ~s(phx-click="add-member" phx-value-id="#{mine.id}")
+      refute html =~ ~s(phx-click="add-member" phx-value-id="#{stranger.id}")
+    end
+
+    test "adding the same contact twice leaves one member entry", ctx do
+      dana = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      live |> form("form[phx-change='search']", %{query: "Dana"}) |> render_change()
+
+      live
+      |> element("button[phx-click='add-member'][phx-value-id='#{dana.id}']")
+      |> render_click()
+
+      # The result list is cleared on add, so a repeat can only arrive as a
+      # crafted event — which is exactly the case the guard is for.
+      html = render_click(live, "add-member", %{"id" => to_string(dana.id)})
+
+      assert html =~ "Merge 3 contacts"
+
+      assert Regex.scan(~r/phx-click="toggle-member"\s+phx-value-id="#{dana.id}"/, html)
+             |> length() == 1
+    end
+
+    test "a non-numeric add-member id is ignored", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      html = render_click(live, "add-member", %{"id" => "x"})
+
+      assert html =~ "Merge 2 contacts"
     end
   end
 
