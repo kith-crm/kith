@@ -78,6 +78,19 @@ defmodule KithWeb.ContactLive.MergeSelectedTest do
     assert html =~ "Ann"
   end
 
+  test "repeated ids in the with param yield exactly one member entry", ctx do
+    {:ok, _live, html} =
+      live(ctx.conn, "/contacts/duplicates/cluster/#{ctx.a.id}?with=#{ctx.b.id},#{ctx.b.id}")
+
+    assert html =~ "Merge 2 contacts"
+
+    assert Regex.scan(
+             ~r/phx-click="toggle-member"\s+phx-value-id="#{ctx.b.id}"/,
+             html
+           )
+           |> length() == 1
+  end
+
   test "merging past a dismissal resolves the dismissed candidate to merged", ctx do
     candidate!(ctx.account_id, ctx.a, ctx.b, "dismissed")
 

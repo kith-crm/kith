@@ -103,6 +103,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
           _ -> []
         end
       end)
+      |> Enum.uniq()
       |> Enum.reject(&MapSet.member?(existing, &1))
       |> Enum.map(&Contacts.get_contact(account_id, &1))
       |> Enum.reject(&is_nil/1)
