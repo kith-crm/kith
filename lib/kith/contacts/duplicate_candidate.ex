@@ -4,6 +4,8 @@ defmodule Kith.Contacts.DuplicateCandidate do
 
   @statuses ~w(pending merged dismissed)
 
+  @type t :: %__MODULE__{}
+
   schema "duplicate_candidates" do
     field :score, :float
     field :reasons, {:array, :string}, default: []

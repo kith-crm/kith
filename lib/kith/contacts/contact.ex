@@ -9,6 +9,8 @@ defmodule Kith.Contacts.Contact do
            default_limit: 20,
            max_limit: 100}
 
+  @type t :: %__MODULE__{}
+
   schema "contacts" do
     field :first_name, :string
     field :last_name, :string
