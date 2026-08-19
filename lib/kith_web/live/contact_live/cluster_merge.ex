@@ -152,6 +152,46 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   @impl true
+  def handle_event("search", %{"query" => query}, socket) do
+    results =
+      if String.length(query) >= 2 do
+        current = MapSet.new(socket.assigns.members, & &1.id)
+
+        socket.assigns.current_scope.account.id
+        |> Contacts.search_contacts(query)
+        |> Enum.reject(&MapSet.member?(current, &1.id))
+        |> Enum.take(8)
+      else
+        []
+      end
+
+    {:noreply, socket |> assign(:search_query, query) |> assign(:search_results, results)}
+  end
+
+  def handle_event("add-member", %{"id" => id}, socket) do
+    id = String.to_integer(id)
+
+    case Contacts.get_contact(socket.assigns.current_scope.account.id, id) do
+      nil ->
+        {:noreply, socket}
+
+      contact ->
+        # An added member is indistinguishable from a detected one from here
+        # on; the engine does not care how it got into the strip. Discarding
+        # overrides/dropped mirrors "toggle-member": the selection changed, so
+        # every derived value is stale.
+        {:noreply,
+         socket
+         |> assign(:members, socket.assigns.members ++ [contact])
+         |> assign(:selected_ids, MapSet.put(socket.assigns.selected_ids, contact.id))
+         |> assign(:overrides, %{})
+         |> assign(:dropped, MapSet.new())
+         |> assign(:search_query, "")
+         |> assign(:search_results, [])
+         |> recompute()}
+    end
+  end
+
   def handle_event("toggle-member", %{"id" => id}, socket) do
     case cast_member_id(id) do
       {:ok, id} -> toggle_member(socket, id)

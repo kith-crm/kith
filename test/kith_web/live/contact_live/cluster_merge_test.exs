@@ -1169,4 +1169,80 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert has_element?(live, "[data-field='first_name']")
     end
   end
+
+  describe "add contact search" do
+    test "searching excludes current members, offers a new match", ctx do
+      third =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Sarah", last_name: "Kim"})
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      html = live |> form("form[phx-change='search']", %{query: "Sarah"}) |> render_change()
+
+      assert html =~ ~s(phx-click="add-member" phx-value-id="#{third.id}")
+      refute html =~ ~s(phx-click="add-member" phx-value-id="#{ctx.a.id}")
+      refute html =~ ~s(phx-click="add-member" phx-value-id="#{ctx.b.id}")
+    end
+
+    test "adding a contact puts it in the strip, checked", ctx do
+      dana = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      live |> form("form[phx-change='search']", %{query: "Dana"}) |> render_change()
+
+      html =
+        live
+        |> element("button[phx-click='add-member'][phx-value-id='#{dana.id}']")
+        |> render_click()
+
+      assert html =~ "Merge 3 contacts"
+      assert has_element?(live, "input[phx-click='toggle-member'][phx-value-id='#{dana.id}']")
+    end
+
+    test "an added member contributes to conflicts", ctx do
+      third =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Sarah",
+          last_name: "Kim",
+          occupation: "Designer"
+        })
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      live |> form("form[phx-change='search']", %{query: "Sarah"}) |> render_change()
+
+      html =
+        live
+        |> element("button[phx-click='add-member'][phx-value-id='#{third.id}']")
+        |> render_click()
+
+      assert html =~ "Designer"
+    end
+
+    test "a short query returns nothing", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      html = live |> form("form[phx-change='search']", %{query: "D"}) |> render_change()
+
+      refute html =~ "add-member"
+    end
+
+    test "search never surfaces a contact from another account", ctx do
+      other_user = AccountsFixtures.user_fixture()
+
+      ContactsFixtures.contact_fixture(other_user.account_id, %{
+        first_name: "Sarah",
+        last_name: "Kim"
+      })
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      html = live |> form("form[phx-change='search']", %{query: "Sarah"}) |> render_change()
+
+      # Only the two seeded members exist for this account, both excluded as
+      # current members — so no result rows should be offered at all.
+      refute html =~ "add-member"
+    end
+  end
 end
