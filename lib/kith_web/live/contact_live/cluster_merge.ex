@@ -52,7 +52,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   def mount(_params, _session, socket), do: {:ok, assign(socket, :error, nil)}
 
   @impl true
-  def handle_params(%{"id" => id}, _uri, socket) do
+  def handle_params(%{"id" => id} = params, _uri, socket) do
     scope = socket.assigns.current_scope
 
     # `id` comes straight from the URL and is not guaranteed numeric — a bad
@@ -72,11 +72,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
          |> push_navigate(to: ~p"/contacts")}
 
       cluster = contact_id && DuplicateDetection.get_cluster(scope.account.id, contact_id) ->
-        {:noreply, load_cluster(socket, cluster, false)}
+        {:noreply, socket |> load_cluster(cluster, false) |> append_from_params(params)}
 
       contact = contact_id && Contacts.get_contact(scope.account.id, contact_id) ->
         # Not a detected duplicate — the user came here to merge by hand.
-        {:noreply, load_cluster(socket, synthetic_cluster(contact), true)}
+        {:noreply,
+         socket |> load_cluster(synthetic_cluster(contact), true) |> append_from_params(params)}
 
       true ->
         {:noreply,
@@ -85,6 +86,40 @@ defmodule KithWeb.ContactLive.ClusterMerge do
          |> push_navigate(to: ~p"/contacts")}
     end
   end
+
+  # Extra members passed from the contacts list "Merge selected" action. Every
+  # id is re-fetched through the account scope, so a hand-edited URL cannot
+  # pull in another account's contact.
+  defp append_from_params(socket, %{"with" => with_param}) when is_binary(with_param) do
+    account_id = socket.assigns.current_scope.account.id
+    existing = MapSet.new(socket.assigns.members, & &1.id)
+
+    extra =
+      with_param
+      |> String.split(",", trim: true)
+      |> Enum.flat_map(fn raw ->
+        case Integer.parse(raw) do
+          {id, ""} -> [id]
+          _ -> []
+        end
+      end)
+      |> Enum.reject(&MapSet.member?(existing, &1))
+      |> Enum.map(&Contacts.get_contact(account_id, &1))
+      |> Enum.reject(&is_nil/1)
+
+    if extra == [] do
+      socket
+    else
+      members = socket.assigns.members ++ extra
+
+      socket
+      |> assign(:members, members)
+      |> assign(:selected_ids, MapSet.new(members, & &1.id))
+      |> recompute()
+    end
+  end
+
+  defp append_from_params(socket, _params), do: socket
 
   defp synthetic_cluster(contact) do
     %Kith.DuplicateDetection.Cluster{

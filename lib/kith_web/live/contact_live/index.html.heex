@@ -180,6 +180,17 @@
               <.icon name="hero-trash" class="size-3.5" /> Delete
             </button>
 
+            <%= if MapSet.size(@selected_ids) > 1 do %>
+              <div class="w-px h-5 bg-[var(--color-border)]" />
+              <.link
+                data-role="merge-selected"
+                navigate={merge_selected_path(@selected_ids)}
+                class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-sunken)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
+              >
+                <.icon name="hero-arrows-right-left" class="size-3.5" /> Merge selected
+              </.link>
+            <% end %>
+
             <%!-- Bulk tag dropdowns --%>
             <%= if @tags != [] do %>
               <div class="w-px h-5 bg-[var(--color-border)]" />

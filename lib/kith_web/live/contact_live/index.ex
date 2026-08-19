@@ -425,6 +425,11 @@ defmodule KithWeb.ContactLive.Index do
     DateTime.diff(DateTime.utc_now(), deleted_at, :day) |> then(&(30 - &1))
   end
 
+  defp merge_selected_path(selected_ids) do
+    [first | rest] = Enum.sort(selected_ids)
+    ~p"/contacts/duplicates/cluster/#{first}?#{[with: Enum.join(rest, ",")]}"
+  end
+
   defp days_remaining_label(deleted_at) do
     remaining = days_until_deletion(deleted_at)
 
