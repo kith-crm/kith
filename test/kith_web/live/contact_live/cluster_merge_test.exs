@@ -1057,6 +1057,34 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
   end
 
+  describe "manual entry" do
+    test "a contact in no cluster renders alone", ctx do
+      loner = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+
+      {:ok, _live, html} = live(ctx.conn, "/contacts/duplicates/cluster/#{loner.id}")
+
+      assert html =~ "Dana"
+      assert html =~ "Add contact"
+      refute html =~ "Sarah"
+    end
+
+    test "merge is disabled until a second member is added", ctx do
+      loner = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+
+      {:ok, live, _html} = live(ctx.conn, "/contacts/duplicates/cluster/#{loner.id}")
+
+      assert has_element?(live, "button[phx-click='merge'][disabled]")
+    end
+
+    test "a contact id from another account is refused", ctx do
+      other = AccountsFixtures.user_fixture()
+      stranger = ContactsFixtures.contact_fixture(other.account_id, %{first_name: "Zed"})
+
+      assert {:error, {:live_redirect, %{to: "/contacts"}}} =
+               live(ctx.conn, "/contacts/duplicates/cluster/#{stranger.id}")
+    end
+  end
+
   describe "identity section state" do
     # Identity opens itself while a conflict is outstanding, so this only bites
     # on a fully-resolved cluster — which is exactly where B6's click-to-change

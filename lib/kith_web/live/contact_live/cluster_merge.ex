@@ -55,6 +55,15 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   def handle_params(%{"id" => id}, _uri, socket) do
     scope = socket.assigns.current_scope
 
+    # `id` comes straight from the URL and is not guaranteed numeric — a bad
+    # value (e.g. "/contacts/duplicates/cluster/abc") must land on the same
+    # "not found" redirect as an unknown id rather than raising.
+    contact_id =
+      case Integer.parse(id) do
+        {contact_id, ""} -> contact_id
+        _ -> nil
+      end
+
     cond do
       not Policy.can?(scope.user, :update, :contact) ->
         {:noreply,
@@ -62,8 +71,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
          |> put_flash(:error, "You don't have permission to merge contacts")
          |> push_navigate(to: ~p"/contacts")}
 
-      cluster = find_cluster(scope.account.id, id) ->
-        {:noreply, load_cluster(socket, cluster)}
+      cluster = contact_id && DuplicateDetection.get_cluster(scope.account.id, contact_id) ->
+        {:noreply, load_cluster(socket, cluster, false)}
+
+      contact = contact_id && Contacts.get_contact(scope.account.id, contact_id) ->
+        # Not a detected duplicate — the user came here to merge by hand.
+        {:noreply, load_cluster(socket, synthetic_cluster(contact), true)}
 
       true ->
         {:noreply,
@@ -73,17 +86,17 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     end
   end
 
-  # `id` comes straight from the URL and is not guaranteed numeric — a bad
-  # value (e.g. "/contacts/duplicates/cluster/abc") must land on the same
-  # "no cluster found" redirect as an unknown id rather than raising.
-  defp find_cluster(account_id, id) do
-    case Integer.parse(id) do
-      {contact_id, ""} -> DuplicateDetection.get_cluster(account_id, contact_id)
-      _ -> nil
-    end
+  defp synthetic_cluster(contact) do
+    %Kith.DuplicateDetection.Cluster{
+      key: contact.id,
+      contacts: [contact],
+      pairs: [],
+      max_score: 0.0,
+      reasons: []
+    }
   end
 
-  defp load_cluster(socket, cluster) do
+  defp load_cluster(socket, cluster, synthetic?) do
     members = cluster.contacts
     primary = DuplicateDetection.default_primary(members)
 
@@ -102,7 +115,9 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     # Tracked in assigns rather than fenced off with `phx-update="ignore"`,
     # which would also freeze the checkbox state inside these sections.
     |> assign(:open_sections, MapSet.new())
-    |> assign(:labels, Contacts.merge_association_labels(members))
+    |> assign(:synthetic?, synthetic?)
+    |> assign(:search_query, "")
+    |> assign(:search_results, [])
     |> recompute()
   end
 
@@ -115,6 +130,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     |> assign(:primary_id, primary_id)
     |> assign(:resolution, MergeResolution.resolve(selected, primary_id))
     |> assign(:summary, MergeSummary.build(selected))
+    |> assign(:labels, Contacts.merge_association_labels(socket.assigns.members))
     # A merge error describes the resolution that was submitted. Anything that
     # changes the resolution makes it stale, so it never outlives one.
     |> assign(:error, nil)
@@ -724,6 +740,37 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                 class="text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-accent)]"
               >
                 make primary
+              </button>
+            </div>
+          </div>
+
+          <div class="mt-4 border-t border-[var(--color-border-subtle)] pt-4">
+            <form phx-change="search" phx-submit="search">
+              <label class="block text-xs text-[var(--color-text-tertiary)] mb-1.5">
+                Add contact
+              </label>
+              <input
+                type="text"
+                name="query"
+                value={@search_query}
+                placeholder="Search by name, email or phone…"
+                phx-debounce="300"
+                class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm"
+              />
+            </form>
+
+            <div
+              :if={@search_results != []}
+              class="mt-2 rounded-[var(--radius-md)] border border-[var(--color-border)] divide-y divide-[var(--color-border-subtle)]"
+            >
+              <button
+                :for={result <- @search_results}
+                type="button"
+                phx-click="add-member"
+                phx-value-id={result.id}
+                class="w-full text-start px-3 py-2 text-sm hover:bg-[var(--color-surface-sunken)]"
+              >
+                {result.display_name}
               </button>
             </div>
           </div>
