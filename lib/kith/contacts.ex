@@ -1741,7 +1741,10 @@ defmodule Kith.Contacts do
   @doc """
   Merges `non_survivor_id` into `survivor_id`.
 
-  Retained for the existing wizard and REST API. `field_choices` uses the old
+  Retained for the Monica CRM importer (`Kith.Imports.Sources.MonicaAPI`) —
+  the merge wizard this once served and the REST API's `/api/contacts/merge`
+  endpoint have both moved onto `MergeResolution.resolve/1` and
+  `merge_cluster/4` directly. `field_choices` uses the old
   `%{"field" => "survivor" | "non_survivor"}` shape; everything not named is
   resolved by `legacy_resolution_fields/2` — see there for how a survivor's
   existing value is protected — before `field_choices` overrides are applied
@@ -1781,8 +1784,10 @@ defmodule Kith.Contacts do
   `birthdate_year_unknown`, so a gap-filled placeholder year is never marked
   as a known one.
 
-  Shared by the legacy wizard shim (`merge_contacts/3`) and the REST API
-  merge endpoint so the two two-contact callers cannot drift apart.
+  Shared by the legacy `merge_contacts/3` shim (now only used by the Monica
+  CRM importer) and the REST API merge endpoint, so the two two-contact
+  callers stay consistent with the cluster merge engine's conflict
+  resolution.
   """
   def legacy_resolution_fields(survivor, loser) do
     fields =
