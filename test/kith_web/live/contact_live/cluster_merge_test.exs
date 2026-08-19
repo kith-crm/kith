@@ -1245,4 +1245,23 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       refute html =~ "add-member"
     end
   end
+
+  describe "old routes" do
+    test "the merge wizard route no longer exists", ctx do
+      # This app's endpoint renders a 404 page for unmatched routes rather
+      # than letting Phoenix.Router.NoRouteError propagate to the caller
+      # (see config :kith, KithWeb.Endpoint, render_errors: ... in
+      # config/config.exs), so we assert on the rendered 404 response.
+      conn = get(ctx.conn, "/contacts/#{ctx.a.id}/merge")
+
+      assert conn.status == 404
+    end
+
+    test "the contact page links to the cluster screen", ctx do
+      {:ok, _live, html} = live(ctx.conn, ~p"/contacts/#{ctx.a.id}")
+
+      assert html =~ "/contacts/duplicates/cluster/#{ctx.a.id}"
+      refute html =~ "/contacts/#{ctx.a.id}/merge"
+    end
+  end
 end

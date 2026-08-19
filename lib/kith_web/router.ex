@@ -354,7 +354,6 @@ defmodule KithWeb.Router do
       live "/contacts/new", ContactLive.New, :new
       live "/contacts/:id", ContactLive.Show, :show
       live "/contacts/:id/edit", ContactLive.Edit, :edit
-      live "/contacts/:id/merge", ContactLive.Merge, :index
 
       # Settings
       live "/settings/tags", SettingsLive.Tags, :index
