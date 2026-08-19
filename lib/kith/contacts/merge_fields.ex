@@ -47,13 +47,66 @@ defmodule Kith.Contacts.MergeFields do
   def all, do: @choice_fields ++ @policy_fields ++ @array_fields ++ @immich_fields
 
   @doc """
-  Fields that cannot be set to `:clear`, derived from the contact update
-  changeset's `validate_required/2` list rather than maintained by hand.
+  Fields that cannot be set to `:clear`.
+
+  Two sources, neither maintained by hand:
+
+    * the contact update changeset's `validate_required/2` list, and
+    * every `contacts` column declared `NOT NULL`.
+
+  The second half is not optional. `:clear` becomes `nil` at the database, so a
+  `NOT NULL` column raises a `Postgrex.Error` (SQLSTATE 23502) outside the
+  merge engine's documented `{:error, reason}` contract — and the changeset's
+  required list does not cover them: `birthdate_year_unknown` and
+  `first_met_year_unknown` are `null: false` booleans that no
+  `validate_required/2` names, so they were offered as clearable and two clicks
+  on the cluster merge screen crashed the LiveView.
+
+  Read from `information_schema` rather than restated here so a column added
+  with `null: false` later is covered on its own.
   """
   def non_clearable do
-    %Contact{}
-    |> Contact.update_changeset(%{})
-    |> Map.fetch!(:required)
+    changeset_required =
+      %Contact{}
+      |> Contact.update_changeset(%{})
+      |> Map.fetch!(:required)
+
+    Enum.uniq(changeset_required ++ not_null_fields())
+  end
+
+  @doc """
+  Mergeable fields backed by a `NOT NULL` column on `contacts`.
+
+  Cached in `:persistent_term` — the answer is a property of the deployed
+  schema, and `non_clearable?/1` is called once per field per render and again
+  for every field inside the merge transaction.
+  """
+  def not_null_fields do
+    key = {__MODULE__, :not_null_fields}
+
+    case :persistent_term.get(key, nil) do
+      nil ->
+        fields = query_not_null_fields()
+        :persistent_term.put(key, fields)
+        fields
+
+      fields ->
+        fields
+    end
+  end
+
+  # Compared as strings and filtered against the registry, so no atom is
+  # created from a database identifier.
+  defp query_not_null_fields do
+    %{rows: rows} =
+      Kith.Repo.query!("""
+      SELECT column_name FROM information_schema.columns
+      WHERE table_name = 'contacts' AND is_nullable = 'NO'
+      """)
+
+    names = rows |> List.flatten() |> MapSet.new()
+
+    Enum.filter(all(), &MapSet.member?(names, Atom.to_string(&1)))
   end
 
   @doc "Whether `field` may be cleared."

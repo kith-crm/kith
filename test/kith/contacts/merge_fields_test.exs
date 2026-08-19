@@ -57,13 +57,25 @@ defmodule Kith.Contacts.MergeFieldsTest do
   end
 
   describe "non_clearable" do
-    test "matches the contact update changeset's required fields" do
+    # Two sources, and neither alone is enough: the changeset's required list
+    # misses `NOT NULL` columns nothing validates (which reach the database as
+    # `nil` and raise 23502), and the not-null set misses fields that are
+    # nullable but still required by the changeset.
+    test "covers the contact update changeset's required fields" do
       required =
         %Kith.Contacts.Contact{}
         |> Kith.Contacts.Contact.update_changeset(%{})
         |> Map.fetch!(:required)
 
-      assert Enum.sort(MergeFields.non_clearable()) == Enum.sort(required)
+      assert Enum.all?(required, &(&1 in MergeFields.non_clearable()))
+    end
+
+    test "covers every mergeable field backed by a not-null column" do
+      assert Enum.all?(MergeFields.not_null_fields(), &MergeFields.non_clearable?/1)
+
+      assert MergeFields.non_clearable?(:birthdate_year_unknown)
+      assert MergeFields.non_clearable?(:first_met_year_unknown)
+      assert MergeFields.non_clearable?(:immich_status)
     end
 
     test "first_name cannot be cleared" do

@@ -647,10 +647,14 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
         <details
           id="section-identity"
-          open={conflict_count(assigns) > 0}
+          open={conflict_count(assigns) > 0 or MapSet.member?(@open_sections, :identity)}
           class="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)]"
         >
-          <summary class="flex items-center justify-between p-4 cursor-pointer">
+          <summary
+            phx-click="toggle-section"
+            phx-value-section="identity"
+            class="flex items-center justify-between p-4 cursor-pointer"
+          >
             <span class="flex items-baseline gap-3">
               <strong class="text-sm">Identity</strong>
               <span class="text-xs text-[var(--color-text-tertiary)]">

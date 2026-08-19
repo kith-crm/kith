@@ -1004,4 +1004,57 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
              ]
     end
   end
+
+  describe "not-null columns are never offered as clearable" do
+    # `birthdate_year_unknown` is `null: false` but named by no
+    # `validate_required/2`. Every member holds `false` for it, so once resolved
+    # rows became segmented controls the clear button rendered on essentially
+    # every merge screen — and clicking it drove the engine into a 23502.
+    test "a not-null boolean row renders no Leave empty button", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert has_element?(live, "[data-field='birthdate_year_unknown']")
+
+      refute has_element?(
+               live,
+               "button[phx-value-field='birthdate_year_unknown'][phx-value-index='clear']"
+             )
+
+      refute has_element?(
+               live,
+               "button[phx-value-field='first_met_year_unknown'][phx-value-index='clear']"
+             )
+    end
+  end
+
+  describe "identity section state" do
+    # Identity opens itself while a conflict is outstanding, so this only bites
+    # on a fully-resolved cluster — which is exactly where B6's click-to-change
+    # rows are the reason to open it at all.
+    test "identity stays open across an edit on a fully resolved cluster", ctx do
+      c =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Priya", last_name: "Nair"})
+
+      d =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Priya", last_name: "Nair"})
+
+      candidate!(ctx.account_id, c, d)
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(c, d))
+
+      refute has_element?(live, "details#section-identity[open]")
+
+      live
+      |> element("summary[phx-value-section='identity']")
+      |> render_click()
+
+      assert has_element?(live, "details#section-identity[open]")
+
+      live
+      |> element("button[phx-value-field='first_name'][phx-value-index='0']")
+      |> render_click()
+
+      assert has_element?(live, "details#section-identity[open]")
+    end
+  end
 end

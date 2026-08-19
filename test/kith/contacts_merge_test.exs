@@ -451,6 +451,60 @@ defmodule Kith.Contacts.MergeTest do
                )
     end
 
+    # `:clear` becomes `nil` at the database, so a `NOT NULL` column raises
+    # SQLSTATE 23502 — outside this engine's `{:error, reason}` contract.
+    # `birthdate_year_unknown` is `null: false` but named by no
+    # `validate_required/2`, so only the schema itself can rule it out. The
+    # screen is one caller; the contract is what slice 3 and the API lean on.
+    test "rejects clearing a not-null column that no changeset marks required", ctx do
+      assert {:error, {:not_clearable, :birthdate_year_unknown}} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [ctx.contact_b.id],
+                 resolution(%{birthdate_year_unknown: :clear})
+               )
+
+      assert {:error, {:not_clearable, :first_met_year_unknown}} =
+               Contacts.merge_cluster(
+                 ctx.scope,
+                 ctx.contact_a.id,
+                 [ctx.contact_b.id],
+                 resolution(%{first_met_year_unknown: :clear})
+               )
+
+      # Rejected before anything is written.
+      assert Kith.Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id).deleted_at == nil
+    end
+
+    # Guards the derivation itself: every mergeable field backed by a NOT NULL
+    # column must be non-clearable, so a column added with `null: false` later
+    # cannot quietly become clearable.
+    test "every not-null contacts column is reported non-clearable" do
+      %{rows: rows} =
+        Kith.Repo.query!("""
+        SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'contacts' AND is_nullable = 'NO'
+        """)
+
+      names = rows |> List.flatten() |> MapSet.new()
+
+      not_null_mergeable =
+        Enum.filter(Kith.Contacts.MergeFields.all(), &MapSet.member?(names, Atom.to_string(&1)))
+
+      assert :birthdate_year_unknown in not_null_mergeable
+      assert :first_met_year_unknown in not_null_mergeable
+
+      for field <- not_null_mergeable do
+        assert Kith.Contacts.MergeFields.non_clearable?(field),
+               "#{field} is NOT NULL in the database but is offered as clearable"
+      end
+
+      # Nullable fields are still clearable — this is not a blanket refusal.
+      refute Kith.Contacts.MergeFields.non_clearable?(:occupation)
+      refute Kith.Contacts.MergeFields.non_clearable?(:deceased_at)
+    end
+
     test "rejects a value no member holds", ctx do
       assert {:error, {:unknown_value, :company}} =
                Contacts.merge_cluster(
