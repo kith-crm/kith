@@ -92,8 +92,13 @@ defmodule Kith.Contacts do
           ^search
         )
     )
+    # Results come back in id order. `distinct([c], c.id)` forces `c.id` to the
+    # front of the generated ORDER BY, so an `asc: c.display_name` here would
+    # only ever break ties between rows sharing an id — i.e. never. It read as
+    # an alphabetical sort and delivered nothing, so it is gone rather than
+    # left to mislead; sorting by name needs a DISTINCT ON subquery with an
+    # outer ORDER BY.
     |> distinct([c], c.id)
-    |> order_by([c], asc: c.display_name)
     |> maybe_limit(Keyword.get(opts, :limit))
     |> maybe_preload_tags(Keyword.get(opts, :preload_tags, true))
     |> Repo.all()
@@ -102,8 +107,8 @@ defmodule Kith.Contacts do
   defp maybe_limit(query, nil), do: query
   defp maybe_limit(query, n) when is_integer(n), do: limit(query, ^n)
 
-  defp maybe_preload_tags(query, false), do: query
   defp maybe_preload_tags(query, true), do: preload(query, [:tags])
+  defp maybe_preload_tags(query, _falsy), do: query
 
   @doc """
   Lists contacts with cursor-based pagination.

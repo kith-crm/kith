@@ -8,46 +8,12 @@ defmodule Kith.DuplicateDetection do
 
   @default_page_size 20
 
-  def list_candidates(account_id, opts \\ []) do
-    status = Keyword.get(opts, :status, "pending")
-    limit = Keyword.get(opts, :limit, @default_page_size)
-    offset = Keyword.get(opts, :offset, 0)
-
-    DuplicateCandidate
-    |> scope_to_account(account_id)
-    |> where([d], d.status == ^status)
-    |> order_by([d], desc: d.score)
-    |> limit(^limit)
-    |> offset(^offset)
-    |> Repo.all()
-    |> Repo.preload([:contact, :duplicate_contact])
-  end
-
-  def get_candidate!(account_id, id) do
-    DuplicateCandidate
-    |> scope_to_account(account_id)
-    |> Repo.get!(id)
-    |> Repo.preload([:contact, :duplicate_contact])
-  end
-
   def dismiss_candidate(%DuplicateCandidate{} = candidate) do
     invalidate_cluster_count(candidate.account_id)
     candidate |> DuplicateCandidate.dismiss_changeset() |> Repo.update()
   end
 
-  def mark_merged(%DuplicateCandidate{} = candidate) do
-    invalidate_cluster_count(candidate.account_id)
-    candidate |> DuplicateCandidate.merge_changeset() |> Repo.update()
-  end
-
   @cluster_count_ttl :timer.minutes(5)
-
-  def pending_count(account_id) do
-    DuplicateCandidate
-    |> scope_to_account(account_id)
-    |> where([d], d.status == "pending")
-    |> Repo.aggregate(:count)
-  end
 
   def pending_candidates_for_contact(account_id, contact_id) do
     from(dc in DuplicateCandidate,

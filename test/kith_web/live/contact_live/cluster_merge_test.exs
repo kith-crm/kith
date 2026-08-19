@@ -1345,4 +1345,63 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       refute html =~ "/contacts/#{ctx.a.id}/merge"
     end
   end
+
+  describe "untrusted event payloads" do
+    test "add-member ignores an id that is not among the offered results", ctx do
+      outsider = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Zoe"})
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # Never searched for, so it was never rendered as an add-member button.
+      html = render_click(live, "add-member", %{"id" => to_string(outsider.id)})
+
+      assert html =~ "Merge 2 contacts"
+      refute html =~ "Zoe"
+    end
+
+    test "toggle-member ignores an id wider than the column", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      html = render_click(live, "toggle-member", %{"id" => "99999999999999999999"})
+
+      assert html =~ "Merge 2 contacts"
+    end
+
+    test "set-primary survives a non-numeric id instead of crashing", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # `ctx.a` is the default primary, so only `ctx.b` is offered the button.
+      html = render_click(live, "set-primary", %{"id" => "abc"})
+
+      assert html =~ ~s(phx-click="set-primary" phx-value-id="#{ctx.b.id}")
+      refute html =~ ~s(phx-click="set-primary" phx-value-id="#{ctx.a.id}")
+    end
+
+    test "choose-field refuses a negative index instead of counting from the end", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # `Enum.at/2` reads -1 as the *last* candidate, so an unguarded handler
+      # would select a value the user never clicked.
+      render_click(live, "choose-field", %{"field" => "company", "index" => "-1"})
+
+      last =
+        live
+        |> element(
+          ~s(button[phx-click="choose-field"][phx-value-field="company"][phx-value-index="1"])
+        )
+        |> render()
+
+      refute last =~ "border-[var(--color-accent)] bg-[var(--color-accent)]"
+    end
+
+    test "an oversized id in the with param is dropped, not sent to the database", ctx do
+      loner = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Zoe"})
+
+      {:ok, _live, html} =
+        live(ctx.conn, "/contacts/duplicates/cluster/#{loner.id}?with=99999999999999999999")
+
+      assert html =~ "1 contact ·"
+      assert html =~ "Zoe"
+    end
+  end
 end

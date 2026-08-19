@@ -48,9 +48,4 @@ defmodule Kith.Contacts.DuplicateCandidate do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     change(candidate, status: "dismissed", resolved_at: now)
   end
-
-  def merge_changeset(candidate) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
-    change(candidate, status: "merged", resolved_at: now)
-  end
 end
