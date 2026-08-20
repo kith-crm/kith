@@ -1,9 +1,9 @@
 # Kith Production Dockerfile
 # Multi-stage build: compile in builder, run in minimal alpine
 
-ARG ELIXIR_VERSION=1.18.4
-ARG OTP_VERSION=27.3.4.9
-ARG ALPINE_VERSION=3.21.6
+ARG ELIXIR_VERSION=1.19.5
+ARG OTP_VERSION=28.5.0.5
+ARG ALPINE_VERSION=3.23.5
 
 # =============================================================================
 # Stage 1: Builder
