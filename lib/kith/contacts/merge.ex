@@ -194,8 +194,8 @@ defmodule Kith.Contacts.Merge do
 
       {:ok, :done}
     end)
-    |> Multi.run(:remap_birthday_reminders, fn repo, _changes ->
-      remap_birthday_reminders_step(repo, survivor.id, loser_ids)
+    |> Multi.run(:remap_birthday_reminders, fn repo, %{survivor: survivor} ->
+      remap_birthday_reminders_step(repo, survivor, loser_ids, account_id)
     end)
     |> Multi.run(:remap_owned, fn repo, _changes ->
       remap_owned_step(repo, loser_ids, survivor.id, dropped_ids)
@@ -255,8 +255,15 @@ defmodule Kith.Contacts.Merge do
   # collision. Keep the survivor's own birthday reminder if it has one;
   # otherwise keep the lowest-id one among the losers. Delete the rest;
   # reminder_instances cascades (on_delete: :delete_all).
-  defp remap_birthday_reminders_step(repo, survivor_id, loser_ids) do
-    all_ids = [survivor_id | loser_ids]
+  #
+  # The kept reminder is then re-dated from the *merged* birthdate. `:survivor`
+  # runs before this step and may have just replaced the survivor's birthdate
+  # with a loser's — nothing else in the app re-syncs a birthday reminder from
+  # `contacts.birthdate`, so without this the survivor keeps a reminder firing
+  # on a date it no longer has, permanently, while the reminder that matched
+  # the surviving birthdate has just been deleted.
+  defp remap_birthday_reminders_step(repo, survivor, loser_ids, account_id) do
+    all_ids = [survivor.id | loser_ids]
 
     %{rows: rows} =
       repo.query!(
@@ -265,9 +272,49 @@ defmodule Kith.Contacts.Merge do
       )
 
     case rows do
-      [] -> {:ok, :done}
-      _ -> delete_extra_birthday_reminders(repo, rows, survivor_id)
+      [] ->
+        {:ok, :done}
+
+      _ ->
+        {:ok, :done} = delete_extra_birthday_reminders(repo, rows, survivor.id)
+        resync_birthday_reminder(repo, rows, survivor, account_id)
     end
+  end
+
+  # No merged birthdate means there is no date to re-derive from, so the kept
+  # reminder is left exactly as it was. Deleting it here would be a different
+  # change than this one: a merge that clears a birthdate is not the same event
+  # as a user removing one (which routes through
+  # `Reminders.delete_birthday_reminder/2`), and the engine's contract is that
+  # a merge destroys birthday reminders only to resolve the unique-index
+  # collision.
+  defp resync_birthday_reminder(_repo, _rows, %Contact{birthdate: nil}, _account_id) do
+    {:ok, :done}
+  end
+
+  defp resync_birthday_reminder(repo, rows, survivor, account_id) do
+    keep_id = birthday_reminder_keep_id(rows, survivor.id)
+    next_date = Kith.TimeHelper.next_birthday_date(survivor.birthdate)
+    reminder = repo.get!(Kith.Reminders.Reminder, keep_id)
+
+    if reminder.next_reminder_date != next_date do
+      cancel_reminder_jobs(repo, [keep_id])
+
+      reminder =
+        reminder
+        |> Ecto.Changeset.change(%{next_reminder_date: next_date, enqueued_oban_job_ids: []})
+        |> repo.update!()
+
+      account = repo.get!(Kith.Accounts.Account, account_id)
+      {:ok, job_ids} = Kith.Reminders.enqueue_jobs_for_reminder(reminder, account)
+
+      repo.update_all(
+        from(r in Kith.Reminders.Reminder, where: r.id == ^keep_id),
+        set: [enqueued_oban_job_ids: job_ids]
+      )
+    end
+
+    {:ok, :done}
   end
 
   defp delete_extra_birthday_reminders(repo, rows, survivor_id) do

@@ -1921,6 +1921,67 @@ defmodule Kith.Contacts.MergeTest do
       assert Enum.sort(hd(logs).metadata["loser_ids"]) == Enum.sort([ctx.contact_b.id, c.id])
     end
 
+    test "the surviving birthday reminder matches the merged birthdate", ctx do
+      survivor =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-01-05]
+        })
+
+      loser =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-07-22]
+        })
+
+      {:ok, survivor_reminder} = Kith.Reminders.create_birthday_reminder(survivor, ctx.user.id)
+      {:ok, _loser_reminder} = Kith.Reminders.create_birthday_reminder(loser, ctx.user.id)
+
+      # Force the loser's birthdate to win.
+      assert {:ok, merged} =
+               Contacts.merge_cluster(ctx.scope, survivor.id, [loser.id], %{
+                 fields: %{birthdate: ~D[1985-07-22], birthdate_year_unknown: false},
+                 drop: %{}
+               })
+
+      assert merged.birthdate == ~D[1985-07-22]
+
+      reminder = Kith.Reminders.get_birthday_reminder(merged.id, ctx.account_id)
+
+      assert reminder
+      assert reminder.id == survivor_reminder.id
+      assert reminder.next_reminder_date == Kith.TimeHelper.next_birthday_date(~D[1985-07-22])
+    end
+
+    test "clearing the birthdate leaves the surviving birthday reminder alone", ctx do
+      # A merge that clears a birthdate is not the same event as a user
+      # removing one, so the kept reminder survives untouched — the engine
+      # destroys birthday reminders only to resolve the unique-index collision.
+      survivor =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-01-05]
+        })
+
+      loser = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Alice"})
+
+      {:ok, reminder} = Kith.Reminders.create_birthday_reminder(survivor, ctx.user.id)
+
+      assert {:ok, merged} =
+               Contacts.merge_cluster(ctx.scope, survivor.id, [loser.id], %{
+                 fields: %{birthdate: :clear, birthdate_year_unknown: false},
+                 drop: %{}
+               })
+
+      assert is_nil(merged.birthdate)
+
+      kept = Kith.Reminders.get_birthday_reminder(merged.id, ctx.account_id)
+
+      assert kept
+      assert kept.id == reminder.id
+      assert kept.next_reminder_date == reminder.next_reminder_date
+    end
+
     test "merging two needs_review contacts keeps the survivor reviewable", ctx do
       survivor =
         ContactsFixtures.contact_fixture(ctx.account_id, %{
