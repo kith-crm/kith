@@ -119,6 +119,14 @@ defmodule Kith.Contacts.MergeResolution do
     %{acc | fields: fields}
   end
 
+  # `immich_status` is a `null: false` column with a check constraint
+  # (`unlinked | needs_review | linked`), ordered here by how much state it
+  # stands for. A merge must never move a contact *down* this ladder: dropping
+  # a `needs_review` survivor to `unlinked` hides it from
+  # `Contacts.list_needs_review/1` just as `:remap_immich_candidates` finishes
+  # moving every member's pending suggestion onto it.
+  @immich_status_rank %{"unlinked" => 0, "needs_review" => 1, "linked" => 2}
+
   # The four Immich columns move together: an id from one record paired with
   # another record's sync timestamp is corrupt state.
   defp resolve_immich(acc, members, survivor_id) do
@@ -134,19 +142,23 @@ defmodule Kith.Contacts.MergeResolution do
 
     fields =
       Enum.reduce(MergeFields.immich_fields(), acc.fields, fn field, fields ->
-        value = if source, do: Map.fetch!(source, field), else: nil
-        Map.put(fields, field, resolve_immich_field(field, value))
+        Map.put(fields, field, resolve_immich_field(field, source, members))
       end)
 
     %{acc | fields: fields}
   end
 
-  # `immich_status` is a `null: false` column with a check constraint
-  # (`unlinked | needs_review | linked`) — unlike the other three Immich
-  # columns, it has no unset state to clear to, so an absent source resolves
-  # to its neutral value rather than `:clear`.
-  defp resolve_immich_field(:immich_status, nil), do: "unlinked"
-  defp resolve_immich_field(_field, value), do: value || :clear
+  # With no linked source the three nullable columns have nothing to carry, but
+  # the status still does — it is the strongest status any member held.
+  defp resolve_immich_field(:immich_status, nil, members), do: strongest_immich_status(members)
+  defp resolve_immich_field(_field, nil, _members), do: :clear
+  defp resolve_immich_field(field, source, _members), do: Map.fetch!(source, field) || :clear
+
+  defp strongest_immich_status(members) do
+    members
+    |> Enum.max_by(&Map.get(@immich_status_rank, &1.immich_status, 0))
+    |> Map.fetch!(:immich_status)
+  end
 
   defp sync_key(%{immich_last_synced_at: nil}), do: 0
   defp sync_key(%{immich_last_synced_at: at}), do: DateTime.to_unix(at)

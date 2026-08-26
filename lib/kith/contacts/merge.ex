@@ -43,9 +43,10 @@ defmodule Kith.Contacts.Merge do
   #
   #   * the Immich group — an id from one record paired with another's sync
   #     timestamp is corrupt state. With every member at `needs_review` and
-  #     no `immich_person_id`, `immich_status` resolves to `"unlinked"`,
-  #     because the column is `null: false` with a CHECK constraint and has
-  #     no unset state to clear to.
+  #     no `immich_person_id`, the three nullable columns clear while
+  #     `immich_status` keeps the strongest status any member held, because
+  #     the column is `null: false` with a CHECK constraint and has no unset
+  #     state to clear to.
   #   * the date/flag pairs — with no member holding a date, the flag
   #     resolves to `false` for that same reason, even when every member
   #     stores `true`.

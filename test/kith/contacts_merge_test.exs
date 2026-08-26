@@ -642,9 +642,12 @@ defmodule Kith.Contacts.MergeTest do
     test "merges a cluster whose every member is at immich needs_review", ctx do
       # ImmichSyncWorker sets needs_review without an immich_person_id and scans
       # both duplicates, so this is the ordinary post-sync state of a duplicate
-      # pair. The resolver then synthesises immich_status: "unlinked", which no
-      # member stores — the merge must accept it rather than halting with
-      # {:unknown_value, :immich_status}.
+      # pair. The resolver clears the three nullable Immich columns — `:clear`
+      # is a value no member stores — so the merge must accept the group as
+      # computed rather than halting with {:unknown_value, :immich_person_id}.
+      # The status itself must survive at needs_review: the survivor has just
+      # absorbed both members' pending candidate rows and has to stay visible
+      # to `Contacts.list_needs_review/1`.
       Repo.update_all(
         from(c in Kith.Contacts.Contact,
           where: c.id in ^[ctx.contact_a.id, ctx.contact_b.id]
@@ -656,12 +659,14 @@ defmodule Kith.Contacts.MergeTest do
       b = Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id)
       fields = Kith.Contacts.MergeResolution.resolve([a, b], a.id).fields
 
-      assert fields.immich_status == "unlinked"
+      assert fields.immich_person_id == :clear
+      assert fields.immich_status == "needs_review"
 
       assert {:ok, survivor} =
                Contacts.merge_cluster(ctx.scope, a.id, [b.id], %{fields: fields, drop: %{}})
 
-      assert survivor.immich_status == "unlinked"
+      assert survivor.immich_status == "needs_review"
+      assert is_nil(survivor.immich_person_id)
       assert Repo.get!(Kith.Contacts.Contact, b.id).deleted_at != nil
     end
 
@@ -1895,6 +1900,35 @@ defmodule Kith.Contacts.MergeTest do
 
       assert length(logs) == 1
       assert Enum.sort(hd(logs).metadata["loser_ids"]) == Enum.sort([ctx.contact_b.id, c.id])
+    end
+
+    test "merging two needs_review contacts keeps the survivor reviewable", ctx do
+      survivor =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          immich_status: "needs_review"
+        })
+
+      loser =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          immich_status: "needs_review"
+        })
+
+      fields =
+        [survivor, loser]
+        |> Kith.Contacts.MergeResolution.resolve(survivor.id)
+        |> Map.fetch!(:fields)
+
+      assert {:ok, merged} =
+               Contacts.merge_cluster(ctx.scope, survivor.id, [loser.id], %{
+                 fields: fields,
+                 drop: %{}
+               })
+
+      assert merged.immich_status == "needs_review"
+
+      assert merged.id in Enum.map(Contacts.list_needs_review(ctx.account_id), & &1.id)
     end
   end
 end

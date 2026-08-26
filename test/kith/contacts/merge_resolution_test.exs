@@ -407,19 +407,43 @@ defmodule Kith.Contacts.MergeResolutionTest do
     # ImmichSyncWorker sets immich_status: "needs_review" *without* an
     # immich_person_id, and it scans both duplicates — so this is the ordinary
     # state of a duplicate pair after a sync, not an edge case. No member counts
-    # as linked, and immich_status is a null: false column with a CHECK
-    # constraint, so the resolver synthesises "unlinked": a value no member
-    # stores. `Kith.Contacts.Merge` must therefore treat the Immich group as
-    # computed rather than picked (see @computed_fields there).
-    test "every member at needs_review with no person id resolves to unlinked", ctx do
+    # as linked, so the three nullable columns clear; the status must not clear
+    # with them. Dropping the survivor to "unlinked" here would hide it from
+    # `Contacts.list_needs_review/1` at the very moment
+    # `:remap_immich_candidates` moved both members' pending suggestions onto
+    # it, stranding those suggestions where no screen can reach them.
+    #
+    # `Kith.Contacts.Merge` still treats the Immich group as computed rather
+    # than picked (see @computed_fields there): `:clear` is not a value any
+    # member stores either.
+    test "every member at needs_review with no person id stays needs_review", ctx do
       a = contact(ctx.account_id, %{first_name: "Sarah", immich_status: "needs_review"})
       b = contact(ctx.account_id, %{first_name: "Sarah", immich_status: "needs_review"})
 
       res = MergeResolution.resolve([a, b], a.id)
 
       assert res.fields.immich_person_id == :clear
+      assert res.fields.immich_person_url == :clear
+      assert res.fields.immich_last_synced_at == :clear
+      assert res.fields.immich_status == "needs_review"
+    end
+
+    test "needs_review beats unlinked when no member is linked", ctx do
+      unlinked = contact(ctx.account_id, %{first_name: "Sarah", immich_status: "unlinked"})
+      pending = contact(ctx.account_id, %{first_name: "Sarah", immich_status: "needs_review"})
+
+      res = MergeResolution.resolve([unlinked, pending], unlinked.id)
+
+      assert res.fields.immich_status == "needs_review"
+    end
+
+    test "all members unlinked stays unlinked", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah"})
+      b = contact(ctx.account_id, %{first_name: "Sarah"})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
       assert res.fields.immich_status == "unlinked"
-      refute Enum.any?([a, b], &(&1.immich_status == "unlinked"))
     end
   end
 end
