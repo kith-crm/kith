@@ -698,6 +698,25 @@ defmodule Kith.Contacts.MergeTest do
       %{scope: scope}
     end
 
+    test "a partial resolution cannot leave the survivor met through itself", ctx do
+      # A field map that omits :first_met_through_id entirely — the shape the
+      # cluster screen can produce. clear_member_self_reference/2 is a no-op
+      # here, so the guard has to live in the remap step itself.
+      Repo.update_all(
+        from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [first_met_through_id: ctx.contact_b.id]
+      )
+
+      assert {:ok, merged} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{first_name: "Alice"},
+                 drop: %{}
+               })
+
+      refute merged.first_met_through_id == merged.id
+      assert merged.first_met_through_id == ctx.contact_b.id
+    end
+
     test "moves the six record types the old engine orphaned", ctx do
       account_id = ctx.account_id
       loser_id = ctx.contact_b.id

@@ -325,11 +325,19 @@ defmodule Kith.Contacts.Merge do
     {:ok, :done}
   end
 
+  # Contacts met *through* a loser now point at the survivor. The survivor's
+  # own row is excluded: `clear_member_self_reference/2` only coerces when the
+  # caller's field map names `:first_met_through_id`, so a partial resolution
+  # can reach here with the survivor pointing at a loser — and rewriting that
+  # to `survivor_id` produces the self-reference
+  # `Contact.validate_first_met_through_account/1` exists to reject, through an
+  # `update_all` that runs no changeset.
   defp remap_inbound_first_met_step(repo, loser_ids, survivor_id, account_id) do
     {count, _} =
       repo.update_all(
         from(c in Contact,
           where: c.account_id == ^account_id,
+          where: c.id != ^survivor_id,
           where: c.first_met_through_id in ^loser_ids
         ),
         set: [first_met_through_id: survivor_id]
