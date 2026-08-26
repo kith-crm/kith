@@ -917,7 +917,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
     end
   end
 
-  defp try_merge_candidate(survivor, candidate, account_id, import_job, {c, e, s}) do
+  defp try_merge_candidate(survivor, candidate, _account_id, _import_job, {c, e, s}) do
     cond do
       MapSet.member?(s, candidate.id) ->
         {c, e, s}
@@ -928,7 +928,9 @@ defmodule Kith.Imports.Sources.MonicaApi do
       true ->
         case Contacts.merge_contacts(survivor.id, candidate.id) do
           {:ok, _} ->
-            update_import_records_after_merge(account_id, import_job, candidate.id, survivor.id)
+            # `Kith.Contacts.Merge` repoints import_records onto the survivor
+            # itself now (`:remap_import_records`), for every merge path
+            # rather than just this one.
             {c + 1, e, MapSet.put(s, candidate.id)}
 
           {:error, reason} ->
@@ -1032,24 +1034,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   defp normalize_name_part(v) when is_binary(v) do
     v |> String.trim() |> String.downcase() |> String.replace(~r/\s+/, " ")
-  end
-
-  defp update_import_records_after_merge(account_id, import_job, old_contact_id, new_contact_id) do
-    from(ir in Imports.ImportRecord,
-      where:
-        ir.import_id == ^import_job.id and
-          ir.source_entity_type == "contact" and
-          ir.local_entity_id == ^old_contact_id
-    )
-    |> Repo.update_all(set: [local_entity_id: new_contact_id])
-
-    # Also update any non-contact records that reference the old contact
-    # (This is handled by merge_contacts which remaps sub-entities,
-    # but import_records still need updating for Phase 2 cross-refs)
-    Logger.info(
-      "[MonicaApi] Remapped import records from contact #{old_contact_id} to #{new_contact_id} " <>
-        "(account #{account_id})"
-    )
   end
 
   # ── Phase 2: Cross-reference resolution ──────────────────────────────

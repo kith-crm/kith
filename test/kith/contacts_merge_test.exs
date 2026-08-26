@@ -698,6 +698,31 @@ defmodule Kith.Contacts.MergeTest do
       %{scope: scope}
     end
 
+    test "import records follow the survivor", ctx do
+      import_job = Kith.ImportsFixtures.import_fixture(ctx.account_id, ctx.user.id)
+
+      {:ok, record} =
+        %Kith.Imports.ImportRecord{}
+        |> Kith.Imports.ImportRecord.changeset(%{
+          source: "monica_api",
+          source_entity_type: "contact",
+          source_entity_id: "42",
+          local_entity_type: "contact",
+          local_entity_id: ctx.contact_b.id,
+          account_id: ctx.account_id,
+          import_id: import_job.id
+        })
+        |> Repo.insert()
+
+      assert {:ok, _merged} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{},
+                 drop: %{}
+               })
+
+      assert Repo.reload!(record).local_entity_id == ctx.contact_a.id
+    end
+
     test "a partial resolution cannot leave the survivor met through itself", ctx do
       # A field map that omits :first_met_through_id entirely — the shape the
       # cluster screen can produce. clear_member_self_reference/2 is a no-op

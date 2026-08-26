@@ -61,7 +61,10 @@ defmodule Kith.Contacts.Merge do
 
   # Every schema owning a contact_id that must follow the survivor. The six
   # after `Reminder` are the ones the previous two-contact engine silently
-  # orphaned (Bug 1 in the design spec).
+  # orphaned (Bug 1 in the design spec). `import_records` is deliberately
+  # absent: it references a contact through an untyped `local_entity_id`
+  # bigint with no FK, so it gets its own step (`remap_import_records_step/4`)
+  # rather than the blanket `contact_id` move.
   @owned_schemas [
     Kith.Contacts.Note,
     Kith.Contacts.Address,
@@ -228,6 +231,9 @@ defmodule Kith.Contacts.Merge do
     |> Multi.run(:remap_inbound_first_met, fn repo, _changes ->
       remap_inbound_first_met_step(repo, loser_ids, survivor.id, account_id)
     end)
+    |> Multi.run(:remap_import_records, fn repo, _changes ->
+      remap_import_records_step(repo, loser_ids, survivor.id, account_id)
+    end)
     |> Multi.run(:dedupe_owned, fn repo, _changes -> dedupe_owned_step(repo, survivor.id) end)
     |> Multi.run(:remap_relationships, fn repo, _changes ->
       remap_relationships(repo, survivor.id, loser_ids, account_id)
@@ -388,6 +394,26 @@ defmodule Kith.Contacts.Merge do
           where: c.first_met_through_id in ^loser_ids
         ),
         set: [first_met_through_id: survivor_id]
+      )
+
+    {:ok, count}
+  end
+
+  # `import_records.local_entity_id` is an untyped bigint with no foreign key,
+  # so nothing repoints it on its own and `ContactPurgeWorker` will hard-delete
+  # the loser it names 30 days from now. The unique index on
+  # (account_id, source, source_entity_type, source_entity_id) means a
+  # re-import would then map that source contact to a row that no longer
+  # exists instead of to the survivor.
+  defp remap_import_records_step(repo, loser_ids, survivor_id, account_id) do
+    {count, _} =
+      repo.update_all(
+        from(ir in Kith.Imports.ImportRecord,
+          where: ir.account_id == ^account_id,
+          where: ir.local_entity_type == "contact",
+          where: ir.local_entity_id in ^loser_ids
+        ),
+        set: [local_entity_id: survivor_id]
       )
 
     {:ok, count}
