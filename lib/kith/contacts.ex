@@ -1744,6 +1744,11 @@ defmodule Kith.Contacts do
   pointing at a contact about to be soft-deleted, so the resolver's `:clear`
   is left standing instead (design spec scenario D4).
 
+  A date's year-unknown flag follows whichever date survives this protection:
+  restoring the survivor's `birthdate` also restores the survivor's
+  `birthdate_year_unknown`, so a gap-filled placeholder year is never marked
+  as a known one.
+
   Shared by the legacy wizard shim (`merge_contacts/3`) and the REST API
   merge endpoint so the two two-contact callers cannot drift apart.
   """
@@ -1755,8 +1760,25 @@ defmodule Kith.Contacts do
 
     member_ids = [survivor.id, loser.id]
 
-    Enum.reduce(MergeFields.choice_fields(), fields, fn field, acc ->
+    MergeFields.choice_fields()
+    |> Enum.reduce(fields, fn field, acc ->
       keep_survivor_value(acc, field, Map.fetch!(survivor, field), member_ids)
+    end)
+    |> keep_survivor_coupled_flags(survivor)
+  end
+
+  # `keep_survivor_value/4` may have just restored the survivor's date over the
+  # resolver's pick, in which case the flag the resolver attached describes the
+  # *other* date. Re-derive each flag from whichever date actually survived.
+  defp keep_survivor_coupled_flags(fields, survivor) do
+    Enum.reduce(MergeFields.coupled_fields(), fields, fn {date_field, flag_field}, acc ->
+      survivor_date = Map.fetch!(survivor, date_field)
+
+      if not is_nil(survivor_date) and Map.get(acc, date_field) == survivor_date do
+        Map.put(acc, flag_field, Map.fetch!(survivor, flag_field))
+      else
+        acc
+      end
     end)
   end
 
@@ -1779,20 +1801,38 @@ defmodule Kith.Contacts do
   # the wizard's "choose-field" LiveView event puts the raw client string
   # into `field_choices` with no allowlist, so a crafted/unknown field name
   # must be silently dropped rather than crashing the merge (and the
-  # LiveView process) on `String.to_existing_atom/1`.
+  # LiveView process) on `String.to_existing_atom/1`. Coupled flags are not
+  # choice fields, so a choice naming one is dropped here too — writing
+  # `:clear` to a `null: false` boolean raises inside the transaction.
   #
   # An explicit choice pins that contact's value even when it is nil (the
   # user asked for the field to be empty); a field with no choice keeps
   # whatever the resolver produced, which is what gap-fills the survivor.
+  # Choosing a date also pins that same contact's year-unknown flag: to the
+  # user the two are one value.
   defp apply_legacy_choices(fields, survivor, non_survivor, choices) do
     Enum.reduce(MergeFields.choice_fields(), fields, fn field, acc ->
       case Map.get(choices, Atom.to_string(field)) do
-        "non_survivor" -> Map.put(acc, field, Map.fetch!(non_survivor, field) || :clear)
-        "survivor" -> Map.put(acc, field, Map.fetch!(survivor, field) || :clear)
+        "non_survivor" -> pin_choice(acc, field, non_survivor)
+        "survivor" -> pin_choice(acc, field, survivor)
         _ -> acc
       end
     end)
   end
+
+  defp pin_choice(fields, field, contact) do
+    fields = Map.put(fields, field, clearable_value(Map.fetch!(contact, field)))
+
+    case List.keyfind(MergeFields.coupled_fields(), field, 0) do
+      {^field, flag_field} -> Map.put(fields, flag_field, Map.fetch!(contact, flag_field))
+      nil -> fields
+    end
+  end
+
+  # Only `nil` means "unset". A `false` is a value, and coercing it to
+  # `:clear` writes NULL to a `null: false` column.
+  defp clearable_value(nil), do: :clear
+  defp clearable_value(value), do: value
 
   defp fetch_active_contact(id) do
     contact = Repo.get(Contact, id)

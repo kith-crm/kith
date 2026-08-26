@@ -367,6 +367,80 @@ defmodule Kith.Contacts.MergeTest do
       assert survivor.first_met_through_id == nil
       assert Repo.get!(Kith.Contacts.Contact, ctx.contact_a.id).first_met_through_id == nil
     end
+
+    test "restoring the survivor's birthdate restores its flag too", %{account_id: account_id} do
+      survivor =
+        ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-04-12],
+          birthdate_year_unknown: false
+        })
+
+      loser =
+        ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1900-04-12],
+          birthdate_year_unknown: true
+        })
+
+      fields = Contacts.legacy_resolution_fields(survivor, loser)
+
+      assert fields.birthdate == ~D[1985-04-12]
+      assert fields.birthdate_year_unknown == false
+    end
+
+    test "gap-filling the survivor's empty birthdate keeps the loser's flag",
+         %{account_id: account_id} do
+      survivor = ContactsFixtures.contact_fixture(account_id, %{first_name: "Alice"})
+
+      loser =
+        ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1900-06-15],
+          birthdate_year_unknown: true
+        })
+
+      fields = Contacts.legacy_resolution_fields(survivor, loser)
+
+      assert fields.birthdate == ~D[1900-06-15]
+      assert fields.birthdate_year_unknown == true
+    end
+
+    test "an explicit birthdate choice carries that contact's flag",
+         %{account_id: account_id} do
+      survivor =
+        ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-04-12],
+          birthdate_year_unknown: false
+        })
+
+      loser =
+        ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1900-04-12],
+          birthdate_year_unknown: true
+        })
+
+      assert {:ok, merged} =
+               Contacts.merge_contacts(survivor.id, loser.id, %{"birthdate" => "non_survivor"})
+
+      assert merged.birthdate == ~D[1900-04-12]
+      assert merged.birthdate_year_unknown == true
+    end
+
+    test "a choice naming a boolean flag directly is ignored, not a crash",
+         %{contact_a: contact_a, contact_b: contact_b} do
+      # `birthdate_year_unknown` is `null: false`; the wizard's "choose-field"
+      # event passes the raw client string with no allowlist, so this must not
+      # reach the merge as a NULL write.
+      assert {:ok, merged} =
+               Contacts.merge_contacts(contact_a.id, contact_b.id, %{
+                 "birthdate_year_unknown" => "non_survivor"
+               })
+
+      assert merged.birthdate_year_unknown == false
+    end
   end
 
   describe "merge_preview/2" do
