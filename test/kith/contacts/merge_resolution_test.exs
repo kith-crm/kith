@@ -230,6 +230,108 @@ defmodule Kith.Contacts.MergeResolutionTest do
     end
   end
 
+  describe "coupled date/flag resolution" do
+    setup do
+      Kith.ContactsFixtures.seed_reference_data!()
+      user = Kith.AccountsFixtures.user_fixture()
+      %{account_id: user.account_id}
+    end
+
+    test "the flag travels with the date that won", %{account_id: account_id} do
+      known =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1985-04-12],
+          birthdate_year_unknown: false
+        })
+
+      placeholder =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1900-04-12],
+          birthdate_year_unknown: true
+        })
+
+      fields = MergeResolution.resolve([known, placeholder], known.id).fields
+
+      # Whichever date the tie-break picked, its own flag must come with it.
+      case fields.birthdate do
+        ~D[1985-04-12] -> assert fields.birthdate_year_unknown == false
+        ~D[1900-04-12] -> assert fields.birthdate_year_unknown == true
+      end
+    end
+
+    test "gap-filling a date brings its flag along", %{account_id: account_id} do
+      empty = Kith.ContactsFixtures.contact_fixture(account_id, %{first_name: "A"})
+
+      holder =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1900-06-15],
+          birthdate_year_unknown: true
+        })
+
+      fields = MergeResolution.resolve([empty, holder], empty.id).fields
+
+      assert fields.birthdate == ~D[1900-06-15]
+      assert fields.birthdate_year_unknown == true
+    end
+
+    test "no member holds the date, so the flag is false rather than :clear",
+         %{account_id: account_id} do
+      a = Kith.ContactsFixtures.contact_fixture(account_id, %{first_name: "A"})
+      b = Kith.ContactsFixtures.contact_fixture(account_id, %{first_name: "A"})
+
+      fields = MergeResolution.resolve([a, b], a.id).fields
+
+      assert fields.birthdate == :clear
+      assert fields.birthdate_year_unknown == false
+      assert fields.first_met_at == :clear
+      assert fields.first_met_year_unknown == false
+    end
+
+    test "members agreeing on the date but disagreeing on the flag keep the year unknown",
+         %{account_id: account_id} do
+      a =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1900-04-12],
+          birthdate_year_unknown: true
+        })
+
+      b =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1900-04-12],
+          birthdate_year_unknown: false
+        })
+
+      fields = MergeResolution.resolve([a, b], a.id).fields
+
+      assert fields.birthdate == ~D[1900-04-12]
+      assert fields.birthdate_year_unknown == true
+    end
+
+    test "the date still reports conflicts for the UI", %{account_id: account_id} do
+      a =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1985-04-12]
+        })
+
+      b =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1990-01-01]
+        })
+
+      resolution = MergeResolution.resolve([a, b], a.id)
+
+      assert Map.has_key?(resolution.conflicts, :birthdate)
+      assert length(resolution.conflicts.birthdate) == 2
+    end
+  end
+
   describe "immich fields" do
     test "the survivor's link wins when it has one", ctx do
       a =

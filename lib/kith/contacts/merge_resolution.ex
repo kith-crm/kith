@@ -36,6 +36,7 @@ defmodule Kith.Contacts.MergeResolution do
     |> Enum.reduce(%__MODULE__{}, fn field, acc ->
       put_resolution(acc, field, resolve_scalar(members, field))
     end)
+    |> resolve_coupled(members)
     |> clear_self_reference(member_ids)
     |> resolve_arrays(members)
     |> resolve_policy_fields(members)
@@ -66,6 +67,31 @@ defmodule Kith.Contacts.MergeResolution do
 
       %{acc | fields: Map.put(acc.fields, field, union)}
     end)
+  end
+
+  # A date and its year-unknown flag move together. The date is resolved by the
+  # ordinary scalar rules in the reduce above (so it keeps its conflicts and
+  # attribution for the cluster screen); the flag is then read off the members
+  # holding the winning date rather than resolved on its own. Taking the flag
+  # from a different member than the date is how a 1900 placeholder ends up
+  # marked as a real birth year.
+  defp resolve_coupled(acc, members) do
+    Enum.reduce(MergeFields.coupled_fields(), acc, fn {date_field, flag_field}, acc ->
+      flag = coupled_flag(members, date_field, Map.fetch!(acc.fields, date_field), flag_field)
+      %{acc | fields: Map.put(acc.fields, flag_field, flag)}
+    end)
+  end
+
+  # Both flags are `null: false` with `default: false`, so an absent date
+  # resolves the flag to `false`, never `:clear`.
+  defp coupled_flag(_members, _date_field, :clear, _flag_field), do: false
+
+  defp coupled_flag(members, date_field, value, flag_field) do
+    # When members agree on the date but disagree on the flag, "year unknown"
+    # wins: asserting a placeholder year is real is the worse of the two errors.
+    members
+    |> Enum.filter(&(Map.fetch!(&1, date_field) == value))
+    |> Enum.any?(&Map.fetch!(&1, flag_field))
   end
 
   defp resolve_policy_fields(acc, members) do

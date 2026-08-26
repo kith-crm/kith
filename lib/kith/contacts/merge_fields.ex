@@ -10,6 +10,7 @@ defmodule Kith.Contacts.MergeFields do
       rather than by choice (see `Kith.Contacts.MergeResolution`).
     * `array_fields` — array columns resolved as a deduplicated union.
     * `immich_fields` — integration state that moves as one unit.
+    * `coupled_fields` — a date and its year-unknown flag, resolved together.
 
   `display_name` is deliberately absent: it is computed by
   `Contact.compute_display_name/1` and recomputed asynchronously by
@@ -20,16 +21,26 @@ defmodule Kith.Contacts.MergeFields do
 
   @choice_fields ~w(
     first_name middle_name last_name nickname
-    birthdate birthdate_year_unknown
+    birthdate
     description avatar occupation company
     gender_id currency_id
-    first_met_at first_met_year_unknown first_met_where
+    first_met_at first_met_where
     first_met_through_id first_met_additional_info
   )a
 
   @policy_fields ~w(favorite is_archived deceased deceased_at)a
   @array_fields ~w(aliases)a
   @immich_fields ~w(immich_person_id immich_person_url immich_status immich_last_synced_at)a
+
+  # A date and the flag saying whether its year is real. Resolved as one unit:
+  # taking the date from one member and the flag from another produces a
+  # contact that claims a placeholder year (1900) is a known birth year. Both
+  # flags are `null: false` with `default: false`, so they must never resolve
+  # to `:clear`.
+  @coupled_fields [
+    {:birthdate, :birthdate_year_unknown},
+    {:first_met_at, :first_met_year_unknown}
+  ]
 
   @doc "Scalars the user picks between."
   def choice_fields, do: @choice_fields
@@ -43,8 +54,16 @@ defmodule Kith.Contacts.MergeFields do
   @doc "Immich integration state, moved as a single unit."
   def immich_fields, do: @immich_fields
 
+  @doc "Date columns paired with the flag describing their year."
+  def coupled_fields, do: @coupled_fields
+
+  @doc "The flag half of every coupled pair."
+  def coupled_flags, do: Enum.map(@coupled_fields, &elem(&1, 1))
+
   @doc "Every mergeable field."
-  def all, do: @choice_fields ++ @policy_fields ++ @array_fields ++ @immich_fields
+  def all do
+    @choice_fields ++ @policy_fields ++ @array_fields ++ @immich_fields ++ coupled_flags()
+  end
 
   @doc """
   Fields that cannot be set to `:clear`, derived from the contact update

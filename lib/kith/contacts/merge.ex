@@ -36,19 +36,27 @@ defmodule Kith.Contacts.Merge do
   alias Kith.Contacts.{Address, Contact, ContactField, MergeFields, Tag}
   alias Kith.Repo
 
-  # Policy, array and Immich fields are computed rather than picked from a
-  # member, so `held_by_member?/3` accepts any value for them without a match.
-  # The Immich group is resolved as a unit (an id from one member paired with
-  # another's sync timestamp is corrupt state), which means the resolver can
-  # legitimately synthesise a value no member stores: with every member at
-  # `needs_review` and no `immich_person_id`, `immich_status` resolves to
-  # `"unlinked"` because the column is `null: false` with a CHECK constraint
-  # and has no unset state to clear to. Mirrors
-  # `MergeFields.policy_fields/0 ++ MergeFields.array_fields/0 ++
-  # MergeFields.immich_fields/0` at compile time (guards cannot call remote
-  # functions) — keep this in sync with that registry.
+  # Policy, array, Immich and coupled-flag fields are computed rather than
+  # picked from a member, so `held_by_member?/3` accepts any value for them
+  # without a match. Two of those groups are resolved as a unit and can
+  # therefore synthesise a value no member stores:
+  #
+  #   * the Immich group — an id from one record paired with another's sync
+  #     timestamp is corrupt state. With every member at `needs_review` and
+  #     no `immich_person_id`, `immich_status` resolves to `"unlinked"`,
+  #     because the column is `null: false` with a CHECK constraint and has
+  #     no unset state to clear to.
+  #   * the date/flag pairs — with no member holding a date, the flag
+  #     resolves to `false` for that same reason, even when every member
+  #     stores `true`.
+  #
+  # Mirrors `MergeFields.policy_fields/0 ++ MergeFields.array_fields/0 ++
+  # MergeFields.immich_fields/0 ++ MergeFields.coupled_flags/0` at compile
+  # time (guards cannot call remote functions) — keep this in sync with that
+  # registry.
   @computed_fields MergeFields.policy_fields() ++
-                     MergeFields.array_fields() ++ MergeFields.immich_fields()
+                     MergeFields.array_fields() ++
+                     MergeFields.immich_fields() ++ MergeFields.coupled_flags()
 
   # Every schema owning a contact_id that must follow the survivor. The six
   # after `Reminder` are the ones the previous two-contact engine silently
