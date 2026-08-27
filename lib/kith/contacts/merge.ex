@@ -61,10 +61,10 @@ defmodule Kith.Contacts.Merge do
 
   # Every schema owning a contact_id that must follow the survivor. A schema
   # missing from this list is silently orphaned by a merge, so it must stay
-  # exhaustive — `Kith.Contacts.MergeInvariantsTest` asserts it covers every
-  # table carrying a contact_id. `import_records` is deliberately absent: it references a contact through an untyped `local_entity_id`
-  # bigint with no FK, so it gets its own step (`remap_import_records_step/4`)
-  # rather than the blanket `contact_id` move.
+  # exhaustive. `import_records` is deliberately absent: it references a
+  # contact through an untyped `local_entity_id` bigint with no FK, so it gets
+  # its own step (`remap_import_records_step/4`) rather than the blanket
+  # `contact_id` move.
   @owned_schemas [
     Kith.Contacts.Note,
     Kith.Contacts.Address,

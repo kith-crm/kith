@@ -53,10 +53,10 @@ defmodule Kith.Contacts.MergeTest do
   end
 
   # The 3-arity call the wizard actually makes — `field_choices` starts empty
-  # and gains one entry per click (see Task 1). apply_legacy_choices/4
-  # resolves each field independently (a per-field reduce over `choices`), so
-  # it cannot reproduce the Task 1 bug itself: that bug lived in the
-  # LiveView's own `default_field_choices/0` / `effective_choice/4` and is
+  # and gains one entry per click. apply_legacy_choices/4 resolves each field
+  # independently (a per-field reduce over `choices`), so it cannot reproduce
+  # the wizard's lost-gap-fill bug itself: that one lives in the LiveView's own
+  # `default_field_choices/0` / `effective_choice/4` and is
   # covered by test/kith_web/live/contact_live/merge_test.exs. The tests
   # below instead pin a narrower invariant: an unrelated explicit choice must
   # never disturb the resolution of a field the user didn't touch.
@@ -358,8 +358,8 @@ defmodule Kith.Contacts.MergeTest do
     test "keeps the survivor's value even when the loser was updated later, through the wizard path",
          ctx do
       # Same conflict-default scenario as above, run with an unrelated field
-      # clicked. Pins wizard_merge/3's narrow invariant, not a closure of the
-      # Task 1 arity gap — apply_legacy_choices/4 resolves each field
+      # clicked. Pins wizard_merge/3's narrow invariant, not the wizard's
+      # lost-gap-fill bug — apply_legacy_choices/4 resolves each field
       # independently, so that gap cannot occur here.
       Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
         set: [updated_at: DateTime.add(DateTime.utc_now(:second), 3600, :second)]
@@ -411,8 +411,8 @@ defmodule Kith.Contacts.MergeTest do
     test "clears first_met_through rather than pointing at the trashed loser, through the wizard path",
          ctx do
       # Same D4 self-reference clearing as above, run with an unrelated field
-      # clicked. Pins wizard_merge/3's narrow invariant, not a closure of the
-      # Task 1 arity gap.
+      # clicked. Pins wizard_merge/3's narrow invariant, not the wizard's
+      # lost-gap-fill bug.
       Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
         set: [first_met_through_id: ctx.contact_b.id]
       )

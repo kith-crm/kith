@@ -84,19 +84,16 @@ defmodule Kith.Contacts.MergeInvariantsTest do
 
     # Each entry is {table, column} the engine knowingly handles.
     known = [
-      # remap_me_contact_step/4 — Task 3
+      # remap_me_contact_step/4
       ["users", "me_contact_id"],
       # remap_inbound_first_met_step/4
       ["contacts", "first_met_through_id"],
-      # remap_relationships/4 (raw SQL) — the table is `relationships`, not
-      # `contact_relationships` as originally assumed; verified against
-      # lib/kith/contacts/relationship.ex's `schema "relationships"`.
+      # remap_relationships/4 (raw SQL). The table is `relationships` —
+      # see lib/kith/contacts/relationship.ex's `schema "relationships"`.
       ["relationships", "related_contact_id"],
-      # resolve_after_merge/4 in DuplicateDetection — the schema's second FK
-      # to contacts is `duplicate_contact_id`, not `contact_a_id`/
-      # `contact_b_id` as originally assumed; the first FK is `contact_id`,
-      # already excluded above. Verified both loser ids are repointed to the
-      # survivor in DuplicateDetection.resolve_after_merge/4.
+      # resolve_after_merge/4 in DuplicateDetection, which repoints both
+      # loser ids onto the survivor. `duplicate_contact_id` is the schema's
+      # second FK to contacts; the first is `contact_id`, excluded above.
       ["duplicate_candidates", "duplicate_contact_id"]
     ]
 

@@ -43,15 +43,13 @@ defmodule Kith.MixProject do
   # `Multi.run/3`.
   #
   # No code shape fixes it. Routing `Multi.new/0` through a `@spec _ ::
-  # Multi.t()` boundary was tried and only relocates the warning to
-  # `contract_with_opaque`, because `Multi.new/0`'s success typing cannot itself
-  # satisfy `Multi.t()`. Ecto is already current (3.13.5), so a version bump is
-  # not the remedy either.
+  # Multi.t()` boundary only relocates the warning to `contract_with_opaque`,
+  # because `Multi.new/0`'s success typing cannot itself satisfy `Multi.t()`.
+  # Ecto is already current (3.13.5), so a version bump is not the remedy
+  # either.
   #
-  # This replaced 23 per-function escapes across seven modules. The cost: a
-  # genuine opaque-type misuse anywhere in the project now goes unreported.
-  # Every one of those 23 sites was verified to be this false positive and
-  # nothing else, so nothing real is being hidden today.
+  # The cost of the project-wide flag over per-function escapes: a genuine
+  # opaque-type misuse anywhere in the project goes unreported.
   defp dialyzer do
     [
       plt_file: {:no_warn, "priv/plts/dialyzer.plt"},

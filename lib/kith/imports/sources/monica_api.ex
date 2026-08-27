@@ -928,9 +928,9 @@ defmodule Kith.Imports.Sources.MonicaApi do
       true ->
         case Contacts.merge_contacts(survivor.id, candidate.id) do
           {:ok, _} ->
-            # `Kith.Contacts.Merge` repoints import_records onto the survivor
-            # itself now (`:remap_import_records`), for every merge path
-            # rather than just this one.
+            # No import_record fixup here: `Kith.Contacts.Merge` repoints
+            # them onto the survivor as part of the merge itself, at
+            # `:remap_import_records`.
             {c + 1, e, MapSet.put(s, candidate.id)}
 
           {:error, reason} ->

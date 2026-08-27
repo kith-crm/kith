@@ -434,10 +434,9 @@ defmodule KithWeb.ContactLive.Merge do
   # Seeds no choices at all. A field the user never clicks must stay absent
   # from this map: `Contacts.apply_legacy_choices/4` treats any present key as
   # a deliberate pin and writes `:clear` when the chosen contact's value is
-  # nil, which silently discarded the resolver's gap fill for every wizard
-  # merge. Absent means "let the resolver decide", which is the whole point of
-  # the gap fill. `effective_choice/4` supplies the radio's display state so
-  # the UI still shows which value survives.
+  # nil, which would discard the resolver's gap fill. Absent means "let the
+  # resolver decide". `effective_choice/4` supplies the radio's display state
+  # so the UI still shows which value survives.
   defp default_field_choices, do: %{}
 
   # Which column the radio should show as selected. An explicit click wins.
