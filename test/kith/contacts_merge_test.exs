@@ -6,6 +6,8 @@ defmodule Kith.Contacts.MergeTest do
   alias Kith.ContactsFixtures
   alias Kith.AccountsFixtures
 
+  import Kith.RemindersFixtures
+
   setup do
     ContactsFixtures.seed_reference_data!()
     user = AccountsFixtures.user_fixture()
@@ -48,6 +50,18 @@ defmodule Kith.Contacts.MergeTest do
     )
 
     job
+  end
+
+  # The 3-arity call the wizard actually makes — `field_choices` starts empty
+  # and gains one entry per click. apply_legacy_choices/4 resolves each field
+  # independently (a per-field reduce over `choices`), so it cannot reproduce
+  # the wizard's lost-gap-fill bug itself: that one lives in the LiveView's own
+  # `default_field_choices/0` / `effective_choice/4` and is
+  # covered by test/kith_web/live/contact_live/merge_test.exs. The tests
+  # below instead pin a narrower invariant: an unrelated explicit choice must
+  # never disturb the resolution of a field the user didn't touch.
+  defp wizard_merge(survivor_id, loser_id, clicked) do
+    Contacts.merge_contacts(survivor_id, loser_id, clicked)
   end
 
   # A contact in a different account, used to force a changeset failure on the
@@ -294,8 +308,36 @@ defmodule Kith.Contacts.MergeTest do
       assert survivor.middle_name == "Jo"
     end
 
+    test "fills a gap on the survivor from the loser through the wizard path", ctx do
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [middle_name: nil]
+      )
+
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [middle_name: "Jo"]
+      )
+
+      # Pins wizard_merge/3's narrow invariant: the user clicked one unrelated
+      # field, so middle_name must still gap-fill even though `choices` isn't
+      # empty.
+      {:ok, survivor} =
+        wizard_merge(ctx.contact_a.id, ctx.contact_b.id, %{"company" => "non_survivor"})
+
+      assert survivor.middle_name == "Jo"
+      assert survivor.company == "New Corp"
+    end
+
     test "never overrides an existing survivor value by default", ctx do
       {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert survivor.company == "Old Corp"
+    end
+
+    test "never overrides an existing survivor value through the wizard path", ctx do
+      # Pins wizard_merge/3's narrow invariant: company was never touched, so
+      # the survivor-value protection must still hold for it.
+      {:ok, survivor} =
+        wizard_merge(ctx.contact_a.id, ctx.contact_b.id, %{"occupation" => "survivor"})
 
       assert survivor.company == "Old Corp"
     end
@@ -309,6 +351,22 @@ defmodule Kith.Contacts.MergeTest do
       )
 
       {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert survivor.company == "Old Corp"
+    end
+
+    test "keeps the survivor's value even when the loser was updated later, through the wizard path",
+         ctx do
+      # Same conflict-default scenario as above, run with an unrelated field
+      # clicked. Pins wizard_merge/3's narrow invariant, not the wizard's
+      # lost-gap-fill bug — apply_legacy_choices/4 resolves each field
+      # independently, so that gap cannot occur here.
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [updated_at: DateTime.add(DateTime.utc_now(:second), 3600, :second)]
+      )
+
+      {:ok, survivor} =
+        wizard_merge(ctx.contact_a.id, ctx.contact_b.id, %{"occupation" => "survivor"})
 
       assert survivor.company == "Old Corp"
     end
@@ -350,6 +408,21 @@ defmodule Kith.Contacts.MergeTest do
       assert survivor.first_met_through_id == nil
     end
 
+    test "clears first_met_through rather than pointing at the trashed loser, through the wizard path",
+         ctx do
+      # Same D4 self-reference clearing as above, run with an unrelated field
+      # clicked. Pins wizard_merge/3's narrow invariant, not the wizard's
+      # lost-gap-fill bug.
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [first_met_through_id: ctx.contact_b.id]
+      )
+
+      {:ok, survivor} =
+        wizard_merge(ctx.contact_a.id, ctx.contact_b.id, %{"occupation" => "survivor"})
+
+      assert survivor.first_met_through_id == nil
+    end
+
     test "an explicit \"survivor\" choice cannot keep a pointer at the loser", ctx do
       # apply_legacy_choices/4 overrides the resolver's :clear with the
       # survivor's raw value, which here is the loser's id — routing around
@@ -366,6 +439,80 @@ defmodule Kith.Contacts.MergeTest do
 
       assert survivor.first_met_through_id == nil
       assert Repo.get!(Kith.Contacts.Contact, ctx.contact_a.id).first_met_through_id == nil
+    end
+
+    test "restoring the survivor's birthdate restores its flag too", %{account_id: account_id} do
+      survivor =
+        ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-04-12],
+          birthdate_year_unknown: false
+        })
+
+      loser =
+        ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1900-04-12],
+          birthdate_year_unknown: true
+        })
+
+      fields = Contacts.legacy_resolution_fields(survivor, loser)
+
+      assert fields.birthdate == ~D[1985-04-12]
+      assert fields.birthdate_year_unknown == false
+    end
+
+    test "gap-filling the survivor's empty birthdate keeps the loser's flag",
+         %{account_id: account_id} do
+      survivor = ContactsFixtures.contact_fixture(account_id, %{first_name: "Alice"})
+
+      loser =
+        ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1900-06-15],
+          birthdate_year_unknown: true
+        })
+
+      fields = Contacts.legacy_resolution_fields(survivor, loser)
+
+      assert fields.birthdate == ~D[1900-06-15]
+      assert fields.birthdate_year_unknown == true
+    end
+
+    test "an explicit birthdate choice carries that contact's flag",
+         %{account_id: account_id} do
+      survivor =
+        ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-04-12],
+          birthdate_year_unknown: false
+        })
+
+      loser =
+        ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1900-04-12],
+          birthdate_year_unknown: true
+        })
+
+      assert {:ok, merged} =
+               Contacts.merge_contacts(survivor.id, loser.id, %{"birthdate" => "non_survivor"})
+
+      assert merged.birthdate == ~D[1900-04-12]
+      assert merged.birthdate_year_unknown == true
+    end
+
+    test "a choice naming a boolean flag directly is ignored, not a crash",
+         %{contact_a: contact_a, contact_b: contact_b} do
+      # `birthdate_year_unknown` is `null: false`; the wizard's "choose-field"
+      # event passes the raw client string with no allowlist, so this must not
+      # reach the merge as a NULL write.
+      assert {:ok, merged} =
+               Contacts.merge_contacts(contact_a.id, contact_b.id, %{
+                 "birthdate_year_unknown" => "non_survivor"
+               })
+
+      assert merged.birthdate_year_unknown == false
     end
   end
 
@@ -576,8 +723,8 @@ defmodule Kith.Contacts.MergeTest do
       # such a pointer could exist). Resolving to that value passes
       # held_by_member?/3 — a member holds it — but applying it to the survivor
       # is rejected by Contact.update_changeset/2. A pointer at a merged member
-      # can no longer serve as the injection here: the engine coerces that to
-      # nil before validation (design spec D4).
+      # cannot serve as the injection here: the engine coerces that to nil
+      # before validation (design spec D4).
       stranger = foreign_contact()
 
       Repo.update_all(
@@ -622,9 +769,12 @@ defmodule Kith.Contacts.MergeTest do
     test "merges a cluster whose every member is at immich needs_review", ctx do
       # ImmichSyncWorker sets needs_review without an immich_person_id and scans
       # both duplicates, so this is the ordinary post-sync state of a duplicate
-      # pair. The resolver then synthesises immich_status: "unlinked", which no
-      # member stores — the merge must accept it rather than halting with
-      # {:unknown_value, :immich_status}.
+      # pair. The resolver clears the three nullable Immich columns — `:clear`
+      # is a value no member stores — so the merge must accept the group as
+      # computed rather than halting with {:unknown_value, :immich_person_id}.
+      # The status itself must survive at needs_review: the survivor has just
+      # absorbed both members' pending candidate rows and has to stay visible
+      # to `Contacts.list_needs_review/1`.
       Repo.update_all(
         from(c in Kith.Contacts.Contact,
           where: c.id in ^[ctx.contact_a.id, ctx.contact_b.id]
@@ -636,12 +786,14 @@ defmodule Kith.Contacts.MergeTest do
       b = Repo.get!(Kith.Contacts.Contact, ctx.contact_b.id)
       fields = Kith.Contacts.MergeResolution.resolve([a, b], a.id).fields
 
-      assert fields.immich_status == "unlinked"
+      assert fields.immich_person_id == :clear
+      assert fields.immich_status == "needs_review"
 
       assert {:ok, survivor} =
                Contacts.merge_cluster(ctx.scope, a.id, [b.id], %{fields: fields, drop: %{}})
 
-      assert survivor.immich_status == "unlinked"
+      assert survivor.immich_status == "needs_review"
+      assert is_nil(survivor.immich_person_id)
       assert Repo.get!(Kith.Contacts.Contact, b.id).deleted_at != nil
     end
 
@@ -665,12 +817,77 @@ defmodule Kith.Contacts.MergeTest do
       assert after_a.deleted_at == nil
       assert after_b.deleted_at == nil
     end
+
+    test "returns an error for a field key that is not a contact field", ctx do
+      assert {:error, {:unknown_field, :not_a_real_field}} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{not_a_real_field: "whatever"},
+                 drop: %{},
+                 unchecked_ids: []
+               })
+    end
+
+    test "rejects an unknown field even when its value is :clear", ctx do
+      # :clear alone is not proof the field is known — an unrecognised field
+      # carrying :clear must not slip through the `value == :clear` branch
+      # before the known?/1 guard has a chance to reject it.
+      assert {:error, {:unknown_field, :not_a_real_field}} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{not_a_real_field: :clear},
+                 drop: %{},
+                 unchecked_ids: []
+               })
+    end
   end
 
   describe "merge_cluster/4 remapping" do
     setup ctx do
       scope = Kith.Accounts.Scope.for_user(ctx.user)
       %{scope: scope}
+    end
+
+    test "import records follow the survivor", ctx do
+      import_job = Kith.ImportsFixtures.import_fixture(ctx.account_id, ctx.user.id)
+
+      {:ok, record} =
+        %Kith.Imports.ImportRecord{}
+        |> Kith.Imports.ImportRecord.changeset(%{
+          source: "monica_api",
+          source_entity_type: "contact",
+          source_entity_id: "42",
+          local_entity_type: "contact",
+          local_entity_id: ctx.contact_b.id,
+          account_id: ctx.account_id,
+          import_id: import_job.id
+        })
+        |> Repo.insert()
+
+      assert {:ok, _merged} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{},
+                 drop: %{}
+               })
+
+      assert Repo.reload!(record).local_entity_id == ctx.contact_a.id
+    end
+
+    test "a partial resolution cannot leave the survivor met through itself", ctx do
+      # A field map that omits :first_met_through_id entirely — the shape the
+      # cluster screen can produce. clear_member_self_reference/2 is a no-op
+      # here, so the guard has to live in the remap step itself.
+      Repo.update_all(
+        from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [first_met_through_id: ctx.contact_b.id]
+      )
+
+      assert {:ok, merged} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{first_name: "Alice"},
+                 drop: %{}
+               })
+
+      refute merged.first_met_through_id == merged.id
+      assert merged.first_met_through_id == ctx.contact_b.id
     end
 
     test "moves the six record types the old engine orphaned", ctx do
@@ -1875,6 +2092,236 @@ defmodule Kith.Contacts.MergeTest do
 
       assert length(logs) == 1
       assert Enum.sort(hd(logs).metadata["loser_ids"]) == Enum.sort([ctx.contact_b.id, c.id])
+    end
+
+    test "the surviving birthday reminder matches the merged birthdate", ctx do
+      survivor =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-01-05]
+        })
+
+      loser =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-07-22]
+        })
+
+      {:ok, survivor_reminder} = Kith.Reminders.create_birthday_reminder(survivor, ctx.user.id)
+      {:ok, _loser_reminder} = Kith.Reminders.create_birthday_reminder(loser, ctx.user.id)
+
+      # Force the loser's birthdate to win.
+      assert {:ok, merged} =
+               Contacts.merge_cluster(ctx.scope, survivor.id, [loser.id], %{
+                 fields: %{birthdate: ~D[1985-07-22], birthdate_year_unknown: false},
+                 drop: %{}
+               })
+
+      assert merged.birthdate == ~D[1985-07-22]
+
+      reminder = Kith.Reminders.get_birthday_reminder(merged.id, ctx.account_id)
+
+      assert reminder
+      assert reminder.id == survivor_reminder.id
+      assert reminder.next_reminder_date == Kith.TimeHelper.next_birthday_date(~D[1985-07-22])
+    end
+
+    test "clearing the birthdate leaves the surviving birthday reminder alone", ctx do
+      # A merge that clears a birthdate is not the same event as a user
+      # removing one, so the kept reminder survives untouched — the engine
+      # destroys birthday reminders only to resolve the unique-index collision.
+      survivor =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-01-05]
+        })
+
+      loser = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Alice"})
+
+      {:ok, reminder} = Kith.Reminders.create_birthday_reminder(survivor, ctx.user.id)
+
+      assert {:ok, merged} =
+               Contacts.merge_cluster(ctx.scope, survivor.id, [loser.id], %{
+                 fields: %{birthdate: :clear, birthdate_year_unknown: false},
+                 drop: %{}
+               })
+
+      assert is_nil(merged.birthdate)
+
+      kept = Kith.Reminders.get_birthday_reminder(merged.id, ctx.account_id)
+
+      assert kept
+      assert kept.id == reminder.id
+      assert kept.next_reminder_date == reminder.next_reminder_date
+    end
+
+    test "merging two needs_review contacts keeps the survivor reviewable", ctx do
+      survivor =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          immich_status: "needs_review"
+        })
+
+      loser =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          immich_status: "needs_review"
+        })
+
+      fields =
+        [survivor, loser]
+        |> Kith.Contacts.MergeResolution.resolve(survivor.id)
+        |> Map.fetch!(:fields)
+
+      assert {:ok, merged} =
+               Contacts.merge_cluster(ctx.scope, survivor.id, [loser.id], %{
+                 fields: fields,
+                 drop: %{}
+               })
+
+      assert merged.immich_status == "needs_review"
+
+      assert merged.id in Enum.map(Contacts.list_needs_review(ctx.account_id), & &1.id)
+    end
+  end
+
+  describe "stay-in-touch reminders" do
+    setup ctx do
+      survivor_reminder =
+        stay_in_touch_reminder_fixture(ctx.account_id, ctx.contact_a.id, ctx.user.id, "monthly")
+
+      loser_reminder =
+        stay_in_touch_reminder_fixture(ctx.account_id, ctx.contact_b.id, ctx.user.id, "weekly")
+
+      Map.merge(ctx, %{
+        survivor_reminder: survivor_reminder,
+        loser_reminder: loser_reminder
+      })
+    end
+
+    test "leaves the survivor with exactly one active stay-in-touch reminder", ctx do
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      count =
+        Repo.aggregate(
+          from(r in Kith.Reminders.Reminder,
+            where: r.contact_id == ^survivor.id and r.type == "stay_in_touch" and r.active == true
+          ),
+          :count
+        )
+
+      assert count == 1
+    end
+
+    test "keeps the survivor's own reminder, not the loser's", ctx do
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      kept =
+        Repo.one!(
+          from(r in Kith.Reminders.Reminder,
+            where: r.contact_id == ^survivor.id and r.type == "stay_in_touch" and r.active == true
+          )
+        )
+
+      assert kept.id == ctx.survivor_reminder.id
+      assert kept.frequency == "monthly"
+    end
+
+    test "cancels the Oban jobs of the reminder it discards", ctx do
+      job = notification_job!(ctx.loser_reminder)
+
+      {:ok, _survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert Repo.get(Oban.Job, job.id).state in ["cancelled", "discarded"]
+    end
+
+    # The regression this whole task exists for: a second active reminder makes
+    # Reminders.resolve_stay_in_touch_instance/1 raise Ecto.MultipleResultsError.
+    test "logging an interaction after the merge does not raise", ctx do
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert {:ok, _} = Kith.Reminders.resolve_stay_in_touch_instance(survivor.id)
+    end
+  end
+
+  describe "me_contact_id" do
+    test "repoints a user whose me-contact is merged away", ctx do
+      {:ok, _user} = Kith.Accounts.link_me_contact(ctx.user, ctx.contact_b.id)
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert Repo.get!(Kith.Accounts.User, ctx.user.id).me_contact_id == survivor.id
+    end
+
+    test "leaves a user whose me-contact is the survivor untouched", ctx do
+      {:ok, _user} = Kith.Accounts.link_me_contact(ctx.user, ctx.contact_a.id)
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert Repo.get!(Kith.Accounts.User, ctx.user.id).me_contact_id == survivor.id
+    end
+
+    test "does not touch a user in another account", ctx do
+      other = Kith.AccountsFixtures.user_fixture()
+      other_contact = ContactsFixtures.contact_fixture(other.account_id)
+      {:ok, _} = Kith.Accounts.link_me_contact(other, other_contact.id)
+
+      {:ok, _survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert Repo.get!(Kith.Accounts.User, other.id).me_contact_id == other_contact.id
+    end
+
+    # The slow-burn failure this guards: the pointer survives the merge, then
+    # the purge worker hard-deletes the loser and the FK nilifies it away.
+    test "survives the 30-day purge of the merged-away contact", ctx do
+      {:ok, _user} = Kith.Accounts.link_me_contact(ctx.user, ctx.contact_b.id)
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      Repo.query!("DELETE FROM contacts WHERE id = $1", [ctx.contact_b.id])
+
+      assert Repo.get!(Kith.Accounts.User, ctx.user.id).me_contact_id == survivor.id
+    end
+  end
+
+  describe "inactive birthday reminders" do
+    setup ctx do
+      import Kith.RemindersFixtures
+
+      reminder =
+        birthday_reminder_fixture(ctx.account_id, ctx.contact_a.id, ctx.user.id)
+
+      Repo.update_all(
+        from(r in Kith.Reminders.Reminder, where: r.id == ^reminder.id),
+        set: [active: false, enqueued_oban_job_ids: []]
+      )
+
+      # A birthdate on the loser that the merge will gap-fill onto the
+      # survivor, forcing next_reminder_date to change.
+      Repo.update_all(
+        from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [birthdate: ~D[1990-06-15]]
+      )
+
+      Map.put(ctx, :reminder, reminder)
+    end
+
+    test "does not enqueue jobs for a deactivated reminder", ctx do
+      {:ok, _survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      kept = Repo.get!(Kith.Reminders.Reminder, ctx.reminder.id)
+
+      assert kept.active == false
+      assert kept.enqueued_oban_job_ids == []
+    end
+
+    test "still tracks the merged birthdate on the date field", ctx do
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      kept = Repo.get!(Kith.Reminders.Reminder, ctx.reminder.id)
+
+      assert survivor.birthdate == ~D[1990-06-15]
+      assert kept.next_reminder_date == Kith.TimeHelper.next_birthday_date(~D[1990-06-15])
     end
   end
 end

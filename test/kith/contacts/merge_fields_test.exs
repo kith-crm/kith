@@ -46,13 +46,38 @@ defmodule Kith.Contacts.MergeFieldsTest do
       refute :immich_person_id in MergeFields.choice_fields()
     end
 
-    test "all/0 is the union of the four groups" do
+    test "all/0 is the union of the five groups" do
       expected =
         MergeFields.choice_fields() ++
           MergeFields.policy_fields() ++
-          MergeFields.array_fields() ++ MergeFields.immich_fields()
+          MergeFields.array_fields() ++
+          MergeFields.immich_fields() ++ MergeFields.coupled_flags()
 
       assert Enum.sort(MergeFields.all()) == Enum.sort(expected)
+    end
+  end
+
+  describe "coupled_fields/0" do
+    test "pairs each date with the flag describing it" do
+      assert MergeFields.coupled_fields() == [
+               {:birthdate, :birthdate_year_unknown},
+               {:first_met_at, :first_met_year_unknown}
+             ]
+    end
+
+    test "flags are not choice fields — they are never picked independently" do
+      refute :birthdate_year_unknown in MergeFields.choice_fields()
+      refute :first_met_year_unknown in MergeFields.choice_fields()
+    end
+
+    test "dates remain choice fields so the UI still shows their conflicts" do
+      assert :birthdate in MergeFields.choice_fields()
+      assert :first_met_at in MergeFields.choice_fields()
+    end
+
+    test "all/0 still covers every mergeable column" do
+      assert :birthdate_year_unknown in MergeFields.all()
+      assert :first_met_year_unknown in MergeFields.all()
     end
   end
 

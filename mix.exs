@@ -32,11 +32,29 @@ defmodule Kith.MixProject do
     ]
   end
 
+  # `:no_opaque` is project-wide on purpose. Every `Ecto.Multi` pipeline we
+  # build trips `call_without_opaque`, and the cause is entirely upstream:
+  # `Ecto.Multi`'s `names` field is typed `MapSet.t()`
+  # (deps/ecto/lib/ecto/multi.ex:150), `MapSet.t/0` is opaque, and Dialyzer
+  # constant-folds `Multi.new/0` to the literal `%Ecto.Multi{names: %MapSet{map:
+  # %{}}}` — a structurally built MapSet where an opaque one is expected. Note
+  # `Ecto.Multi`'s own `t/0` is NOT opaque, so this is not the "don't reach into
+  # Multi's internals" case; we only ever go through `Multi.new/0` and
+  # `Multi.run/3`.
+  #
+  # No code shape fixes it. Routing `Multi.new/0` through a `@spec _ ::
+  # Multi.t()` boundary only relocates the warning to `contract_with_opaque`,
+  # because `Multi.new/0`'s success typing cannot itself satisfy `Multi.t()`.
+  # Ecto is already current (3.13.5), so a version bump is not the remedy
+  # either.
+  #
+  # The cost of the project-wide flag over per-function escapes: a genuine
+  # opaque-type misuse anywhere in the project goes unreported.
   defp dialyzer do
     [
       plt_file: {:no_warn, "priv/plts/dialyzer.plt"},
       plt_add_apps: [:mix, :ex_unit],
-      flags: [:error_handling, :underspecs, :unknown],
+      flags: [:error_handling, :underspecs, :unknown, :no_opaque],
       ignore_warnings: ".dialyzer_ignore.exs"
     ]
   end

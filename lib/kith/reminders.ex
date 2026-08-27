@@ -25,17 +25,6 @@ defmodule Kith.Reminders do
     ReminderRule
   }
 
-  # Suppress Ecto.Multi opaque type warnings (Dialyzer false positives)
-  @dialyzer [
-    {:nowarn_function, create_reminder: 3},
-    {:nowarn_function, update_reminder: 2},
-    {:nowarn_function, delete_reminder: 1},
-    {:nowarn_function, resolve_stay_in_touch_instance: 1},
-    {:nowarn_function, resolve_instance: 1},
-    {:nowarn_function, dismiss_instance: 1},
-    {:nowarn_function, cancel_enqueued_jobs_step: 2}
-  ]
-
   # ── Reminders CRUD ──────────────────────────────────────────────────────
 
   @doc """
@@ -199,9 +188,17 @@ defmodule Kith.Reminders do
     end
   end
 
+  # `limit: 1` rather than a bare `Repo.one/1`: nothing in the schema enforces
+  # one active stay-in-touch reminder per contact (the only partial unique
+  # index on `reminders` covers birthdays), so any path that creates a second
+  # one — a merge, the API, a restored contact — would otherwise turn this
+  # into an `Ecto.MultipleResultsError` at the caller. `Kith.Contacts.Merge`
+  # dedupes on merge; this keeps the read total regardless.
   defp get_stay_in_touch_reminder(contact_id) do
     from(r in Reminder,
-      where: r.contact_id == ^contact_id and r.type == "stay_in_touch" and r.active == true
+      where: r.contact_id == ^contact_id and r.type == "stay_in_touch" and r.active == true,
+      order_by: [asc: r.id],
+      limit: 1
     )
     |> Repo.one()
   end

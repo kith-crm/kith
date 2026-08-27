@@ -5,8 +5,6 @@ defmodule Kith.Debts do
   alias Kith.Contacts.{Debt, DebtPayment}
   alias Kith.Repo
 
-  @dialyzer {:nowarn_function, add_payment: 2}
-
   def list_debts(account_id, contact_id) do
     Debt
     |> scope_to_account(account_id)

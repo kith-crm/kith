@@ -230,6 +230,108 @@ defmodule Kith.Contacts.MergeResolutionTest do
     end
   end
 
+  describe "coupled date/flag resolution" do
+    setup do
+      Kith.ContactsFixtures.seed_reference_data!()
+      user = Kith.AccountsFixtures.user_fixture()
+      %{account_id: user.account_id}
+    end
+
+    test "the flag travels with the date that won", %{account_id: account_id} do
+      known =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1985-04-12],
+          birthdate_year_unknown: false
+        })
+
+      placeholder =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1900-04-12],
+          birthdate_year_unknown: true
+        })
+
+      fields = MergeResolution.resolve([known, placeholder], known.id).fields
+
+      # Whichever date the tie-break picked, its own flag must come with it.
+      case fields.birthdate do
+        ~D[1985-04-12] -> assert fields.birthdate_year_unknown == false
+        ~D[1900-04-12] -> assert fields.birthdate_year_unknown == true
+      end
+    end
+
+    test "gap-filling a date brings its flag along", %{account_id: account_id} do
+      empty = Kith.ContactsFixtures.contact_fixture(account_id, %{first_name: "A"})
+
+      holder =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1900-06-15],
+          birthdate_year_unknown: true
+        })
+
+      fields = MergeResolution.resolve([empty, holder], empty.id).fields
+
+      assert fields.birthdate == ~D[1900-06-15]
+      assert fields.birthdate_year_unknown == true
+    end
+
+    test "no member holds the date, so the flag is false rather than :clear",
+         %{account_id: account_id} do
+      a = Kith.ContactsFixtures.contact_fixture(account_id, %{first_name: "A"})
+      b = Kith.ContactsFixtures.contact_fixture(account_id, %{first_name: "A"})
+
+      fields = MergeResolution.resolve([a, b], a.id).fields
+
+      assert fields.birthdate == :clear
+      assert fields.birthdate_year_unknown == false
+      assert fields.first_met_at == :clear
+      assert fields.first_met_year_unknown == false
+    end
+
+    test "members agreeing on the date but disagreeing on the flag keep the year unknown",
+         %{account_id: account_id} do
+      a =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1900-04-12],
+          birthdate_year_unknown: true
+        })
+
+      b =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1900-04-12],
+          birthdate_year_unknown: false
+        })
+
+      fields = MergeResolution.resolve([a, b], a.id).fields
+
+      assert fields.birthdate == ~D[1900-04-12]
+      assert fields.birthdate_year_unknown == true
+    end
+
+    test "the date still reports conflicts for the UI", %{account_id: account_id} do
+      a =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1985-04-12]
+        })
+
+      b =
+        Kith.ContactsFixtures.contact_fixture(account_id, %{
+          first_name: "A",
+          birthdate: ~D[1990-01-01]
+        })
+
+      resolution = MergeResolution.resolve([a, b], a.id)
+
+      assert Map.has_key?(resolution.conflicts, :birthdate)
+      assert length(resolution.conflicts.birthdate) == 2
+    end
+  end
+
   describe "immich fields" do
     test "the survivor's link wins when it has one", ctx do
       a =
@@ -305,19 +407,43 @@ defmodule Kith.Contacts.MergeResolutionTest do
     # ImmichSyncWorker sets immich_status: "needs_review" *without* an
     # immich_person_id, and it scans both duplicates — so this is the ordinary
     # state of a duplicate pair after a sync, not an edge case. No member counts
-    # as linked, and immich_status is a null: false column with a CHECK
-    # constraint, so the resolver synthesises "unlinked": a value no member
-    # stores. `Kith.Contacts.Merge` must therefore treat the Immich group as
-    # computed rather than picked (see @computed_fields there).
-    test "every member at needs_review with no person id resolves to unlinked", ctx do
+    # as linked, so the three nullable columns clear; the status must not clear
+    # with them. Dropping the survivor to "unlinked" here would hide it from
+    # `Contacts.list_needs_review/1` at the very moment
+    # `:remap_immich_candidates` moved both members' pending suggestions onto
+    # it, stranding those suggestions where no screen can reach them.
+    #
+    # `Kith.Contacts.Merge` still treats the Immich group as computed rather
+    # than picked (see @computed_fields there): `:clear` is not a value any
+    # member stores either.
+    test "every member at needs_review with no person id stays needs_review", ctx do
       a = contact(ctx.account_id, %{first_name: "Sarah", immich_status: "needs_review"})
       b = contact(ctx.account_id, %{first_name: "Sarah", immich_status: "needs_review"})
 
       res = MergeResolution.resolve([a, b], a.id)
 
       assert res.fields.immich_person_id == :clear
+      assert res.fields.immich_person_url == :clear
+      assert res.fields.immich_last_synced_at == :clear
+      assert res.fields.immich_status == "needs_review"
+    end
+
+    test "needs_review beats unlinked when no member is linked", ctx do
+      unlinked = contact(ctx.account_id, %{first_name: "Sarah", immich_status: "unlinked"})
+      pending = contact(ctx.account_id, %{first_name: "Sarah", immich_status: "needs_review"})
+
+      res = MergeResolution.resolve([unlinked, pending], unlinked.id)
+
+      assert res.fields.immich_status == "needs_review"
+    end
+
+    test "all members unlinked stays unlinked", ctx do
+      a = contact(ctx.account_id, %{first_name: "Sarah"})
+      b = contact(ctx.account_id, %{first_name: "Sarah"})
+
+      res = MergeResolution.resolve([a, b], a.id)
+
       assert res.fields.immich_status == "unlinked"
-      refute Enum.any?([a, b], &(&1.immich_status == "unlinked"))
     end
   end
 

@@ -36,23 +36,35 @@ defmodule Kith.Contacts.Merge do
   alias Kith.Contacts.{Address, Contact, ContactField, MergeFields, Tag}
   alias Kith.Repo
 
-  # Policy, array and Immich fields are computed rather than picked from a
-  # member, so `held_by_member?/3` accepts any value for them without a match.
-  # The Immich group is resolved as a unit (an id from one member paired with
-  # another's sync timestamp is corrupt state), which means the resolver can
-  # legitimately synthesise a value no member stores: with every member at
-  # `needs_review` and no `immich_person_id`, `immich_status` resolves to
-  # `"unlinked"` because the column is `null: false` with a CHECK constraint
-  # and has no unset state to clear to. Mirrors
-  # `MergeFields.policy_fields/0 ++ MergeFields.array_fields/0 ++
-  # MergeFields.immich_fields/0` at compile time (guards cannot call remote
-  # functions) — keep this in sync with that registry.
+  # Policy, array, Immich and coupled-flag fields are computed rather than
+  # picked from a member, so `held_by_member?/3` accepts any value for them
+  # without a match. Two of those groups are resolved as a unit and can
+  # therefore synthesise a value no member stores:
+  #
+  #   * the Immich group — an id from one record paired with another's sync
+  #     timestamp is corrupt state. With every member at `needs_review` and
+  #     no `immich_person_id`, the three nullable columns clear while
+  #     `immich_status` keeps the strongest status any member held, because
+  #     the column is `null: false` with a CHECK constraint and has no unset
+  #     state to clear to.
+  #   * the date/flag pairs — with no member holding a date, the flag
+  #     resolves to `false` for that same reason, even when every member
+  #     stores `true`.
+  #
+  # Mirrors `MergeFields.policy_fields/0 ++ MergeFields.array_fields/0 ++
+  # MergeFields.immich_fields/0 ++ MergeFields.coupled_flags/0` at compile
+  # time (guards cannot call remote functions) — keep this in sync with that
+  # registry.
   @computed_fields MergeFields.policy_fields() ++
-                     MergeFields.array_fields() ++ MergeFields.immich_fields()
+                     MergeFields.array_fields() ++
+                     MergeFields.immich_fields() ++ MergeFields.coupled_flags()
 
-  # Every schema owning a contact_id that must follow the survivor. The six
-  # after `Reminder` are the ones the previous two-contact engine silently
-  # orphaned (Bug 1 in the design spec).
+  # Every schema owning a contact_id that must follow the survivor. A schema
+  # missing from this list is silently orphaned by a merge, so it must stay
+  # exhaustive. `import_records` is deliberately absent: it references a
+  # contact through an untyped `local_entity_id` bigint with no FK, so it gets
+  # its own step (`remap_import_records_step/4`) rather than the blanket
+  # `contact_id` move.
   @owned_schemas [
     Kith.Contacts.Note,
     Kith.Contacts.Address,
@@ -70,6 +82,11 @@ defmodule Kith.Contacts.Merge do
     Kith.Conversations.Conversation,
     Kith.Contacts.ImmichCandidate
   ]
+
+  @doc false
+  # Exposed for `Kith.Contacts.MergeInvariantsTest`, which asserts this
+  # registry still covers every table carrying a contact_id.
+  def __owned_schemas__, do: @owned_schemas
 
   # Which schema backs each key of `resolution.drop`. Tags are the exception:
   # `contact_tags` is a bare join table, so its ids are tag ids.
@@ -97,7 +114,7 @@ defmodule Kith.Contacts.Merge do
 
   Returns `{:ok, contact}` or `{:error, reason}`, where `reason` is one of
   `:not_found`, `:trashed`, `:different_accounts`, `:survivor_in_losers`,
-  `:no_losers`, `{:unknown_value, field}`, `{:not_clearable, field}`,
+  `:no_losers`, `{:unknown_value, field}`, `{:unknown_field, field}`, `{:not_clearable, field}`,
   `{:unknown_drop, key}`, or `{:invalid_fields, changeset}` if the resolved
   values fail changeset validation on the survivor.
   """
@@ -185,18 +202,20 @@ defmodule Kith.Contacts.Merge do
 
       {:ok, :done}
     end)
-    |> Multi.run(:remap_birthday_reminders, fn repo, _changes ->
-      remap_birthday_reminders_step(repo, survivor.id, loser_ids)
+    |> Multi.run(:remap_birthday_reminders, fn repo, %{survivor: survivor} ->
+      remap_birthday_reminders_step(repo, survivor, loser_ids, account_id)
+    end)
+    |> Multi.run(:remap_stay_in_touch_reminders, fn repo, _changes ->
+      remap_stay_in_touch_reminders_step(repo, loser_ids, survivor.id)
     end)
     |> Multi.run(:remap_owned, fn repo, _changes ->
       remap_owned_step(repo, loser_ids, survivor.id, dropped_ids)
     end)
     |> Multi.run(:remap_contact_tags, fn repo, _changes ->
       # contact_tags is a bare join table with no Ecto schema, so it is
-      # invisible to @owned_schemas but must still follow the survivor —
-      # mirrors the old engine's `:remap_contact_tags` step. unique_index
-      # on (contact_id, tag_id); two losers can share a tag the survivor
-      # doesn't have, so this dedupes across the whole cluster too.
+      # invisible to @owned_schemas but must still follow the survivor.
+      # unique_index on (contact_id, tag_id); two losers can share a tag the
+      # survivor doesn't have, so this dedupes across the whole cluster too.
       # Dropped tag ids are excluded from the move: a loser's link to a
       # dropped tag stays on the loser and rides to trash with it.
       dedupe_and_move_tags(repo, loser_ids, survivor.id, dropped_ids.tags)
@@ -218,6 +237,12 @@ defmodule Kith.Contacts.Merge do
     end)
     |> Multi.run(:remap_inbound_first_met, fn repo, _changes ->
       remap_inbound_first_met_step(repo, loser_ids, survivor.id, account_id)
+    end)
+    |> Multi.run(:remap_import_records, fn repo, _changes ->
+      remap_import_records_step(repo, loser_ids, survivor.id, account_id)
+    end)
+    |> Multi.run(:remap_me_contact, fn repo, _changes ->
+      remap_me_contact_step(repo, loser_ids, survivor.id, account_id)
     end)
     |> Multi.run(:dedupe_owned, fn repo, _changes -> dedupe_owned_step(repo, survivor.id) end)
     |> Multi.run(:remap_relationships, fn repo, _changes ->
@@ -246,8 +271,15 @@ defmodule Kith.Contacts.Merge do
   # collision. Keep the survivor's own birthday reminder if it has one;
   # otherwise keep the lowest-id one among the losers. Delete the rest;
   # reminder_instances cascades (on_delete: :delete_all).
-  defp remap_birthday_reminders_step(repo, survivor_id, loser_ids) do
-    all_ids = [survivor_id | loser_ids]
+  #
+  # The kept reminder is then re-dated from the *merged* birthdate. `:survivor`
+  # runs before this step and may have just replaced the survivor's birthdate
+  # with a loser's — nothing else in the app re-syncs a birthday reminder from
+  # `contacts.birthdate`, so without this the survivor keeps a reminder firing
+  # on a date it no longer has, permanently, while the reminder that matched
+  # the surviving birthdate has just been deleted.
+  defp remap_birthday_reminders_step(repo, survivor, loser_ids, account_id) do
+    all_ids = [survivor.id | loser_ids]
 
     %{rows: rows} =
       repo.query!(
@@ -256,13 +288,71 @@ defmodule Kith.Contacts.Merge do
       )
 
     case rows do
-      [] -> {:ok, :done}
-      _ -> delete_extra_birthday_reminders(repo, rows, survivor_id)
+      [] ->
+        {:ok, :done}
+
+      _ ->
+        {:ok, :done} = delete_extra_birthday_reminders(repo, rows, survivor.id)
+        resync_birthday_reminder(repo, rows, survivor, account_id)
+    end
+  end
+
+  # No merged birthdate means there is no date to re-derive from, so the kept
+  # reminder is left exactly as it was. Deleting it here would be a different
+  # change than this one: a merge that clears a birthdate is not the same event
+  # as a user removing one (which routes through
+  # `Reminders.delete_birthday_reminder/2`), and the engine's contract is that
+  # a merge destroys birthday reminders only to resolve the unique-index
+  # collision.
+  defp resync_birthday_reminder(_repo, _rows, %Contact{birthdate: nil}, _account_id) do
+    {:ok, :done}
+  end
+
+  defp resync_birthday_reminder(repo, rows, survivor, account_id) do
+    keep_id = reminder_keep_id(rows, survivor.id)
+    next_date = Kith.TimeHelper.next_birthday_date(survivor.birthdate)
+    reminder = repo.get!(Kith.Reminders.Reminder, keep_id)
+
+    cond do
+      reminder.next_reminder_date == next_date ->
+        {:ok, :done}
+
+      # A deactivated reminder still tracks the merged birthdate — re-enabling
+      # it later must schedule from the right day — but it must not be put back
+      # on the queue. Deactivation deliberately empties `enqueued_oban_job_ids`,
+      # and enqueuing here would refill it while `active` stays false, leaving
+      # the row inconsistent with itself. `ReminderNotificationWorker.perform/1`
+      # discards an inactive reminder's job anyway, so the enqueue is pure noise.
+      not reminder.active ->
+        repo.update_all(
+          from(r in Kith.Reminders.Reminder, where: r.id == ^keep_id),
+          set: [next_reminder_date: next_date]
+        )
+
+        {:ok, :done}
+
+      true ->
+        cancel_reminder_jobs(repo, [keep_id])
+
+        reminder =
+          reminder
+          |> Ecto.Changeset.change(%{next_reminder_date: next_date, enqueued_oban_job_ids: []})
+          |> repo.update!()
+
+        account = repo.get!(Kith.Accounts.Account, account_id)
+        {:ok, job_ids} = Kith.Reminders.enqueue_jobs_for_reminder(reminder, account)
+
+        repo.update_all(
+          from(r in Kith.Reminders.Reminder, where: r.id == ^keep_id),
+          set: [enqueued_oban_job_ids: job_ids]
+        )
+
+        {:ok, :done}
     end
   end
 
   defp delete_extra_birthday_reminders(repo, rows, survivor_id) do
-    keep_id = birthday_reminder_keep_id(rows, survivor_id)
+    keep_id = reminder_keep_id(rows, survivor_id)
     delete_ids = for [id, _contact_id] <- rows, id != keep_id, do: id
 
     if delete_ids != [] do
@@ -273,13 +363,15 @@ defmodule Kith.Contacts.Merge do
     {:ok, :done}
   end
 
-  # Design spec §2 step 7, and the whole of it: these duplicate birthday
-  # reminders are the *only* reminders a merge destroys. Every other reminder a
-  # loser owns moves to the survivor at `:remap_owned` and must keep its
-  # scheduled job, so there is nothing to cancel per-contact — cancelling here,
-  # where the doomed ids are still known, is the correct scope.
-  # `ReminderNotificationWorker.perform/1` also discards a job whose reminder is
-  # gone, so this trims the queue rather than being the only guard.
+  # Design spec §2 step 7: these duplicate birthday reminders, and the
+  # duplicate stay-in-touch reminders collapsed in
+  # `remap_stay_in_touch_reminders_step/3`, are the only reminders a merge
+  # destroys. Every other reminder a loser owns moves to the survivor at
+  # `:remap_owned` and must keep its scheduled job, so there is nothing to
+  # cancel per-contact — cancelling here, where the doomed ids are still
+  # known, is the correct scope. `ReminderNotificationWorker.perform/1` also
+  # discards a job whose reminder is gone, so this trims the queue rather
+  # than being the only guard.
   defp cancel_reminder_jobs(repo, reminder_ids) do
     %{rows: rows} =
       repo.query!("SELECT enqueued_oban_job_ids FROM reminders WHERE id = ANY($1)", [reminder_ids])
@@ -287,10 +379,48 @@ defmodule Kith.Contacts.Merge do
     rows |> List.flatten() |> Kith.Reminders.cancel_jobs()
   end
 
-  defp birthday_reminder_keep_id(rows, survivor_id) do
+  defp reminder_keep_id(rows, survivor_id) do
     case Enum.find(rows, fn [_id, contact_id] -> contact_id == survivor_id end) do
       [id, _contact_id] -> id
       nil -> rows |> Enum.map(&hd/1) |> Enum.min()
+    end
+  end
+
+  # Stay-in-touch reminders have no unique index (only `reminders_birthday_
+  # unique_idx` exists), so the blanket `:remap_owned` move happily lands two
+  # active rows on the survivor. Nothing raises at write time — the failure
+  # surfaces later and elsewhere, in `Reminders.resolve_stay_in_touch_instance/1`,
+  # whose `Repo.one/1` raises `Ecto.MultipleResultsError` the next time an
+  # interaction is logged. Collapse to one here, where the doomed ids are
+  # still known and their jobs can be cancelled. Same keep rule as birthdays:
+  # the survivor's own row wins, else the lowest id.
+  defp remap_stay_in_touch_reminders_step(repo, loser_ids, survivor_id) do
+    %{rows: rows} =
+      repo.query!(
+        """
+        SELECT id, contact_id FROM reminders
+        WHERE contact_id = ANY($1)
+          AND type = 'stay_in_touch'
+          AND active = true
+        """,
+        [[survivor_id | loser_ids]]
+      )
+
+    case rows do
+      [] ->
+        {:ok, :done}
+
+      [_only_one] ->
+        {:ok, :done}
+
+      _ ->
+        keep_id = reminder_keep_id(rows, survivor_id)
+        delete_ids = for [id, _contact_id] <- rows, id != keep_id, do: id
+
+        cancel_reminder_jobs(repo, delete_ids)
+        repo.query!("DELETE FROM reminders WHERE id = ANY($1)", [delete_ids])
+
+        {:ok, :done}
     end
   end
 
@@ -316,14 +446,60 @@ defmodule Kith.Contacts.Merge do
     {:ok, :done}
   end
 
+  # Contacts met *through* a loser now point at the survivor. The survivor's
+  # own row is excluded: `clear_member_self_reference/2` only coerces when the
+  # caller's field map names `:first_met_through_id`, so a partial resolution
+  # can reach here with the survivor pointing at a loser — and rewriting that
+  # to `survivor_id` produces the self-reference
+  # `Contact.validate_first_met_through_account/1` exists to reject, through an
+  # `update_all` that runs no changeset.
   defp remap_inbound_first_met_step(repo, loser_ids, survivor_id, account_id) do
     {count, _} =
       repo.update_all(
         from(c in Contact,
           where: c.account_id == ^account_id,
+          where: c.id != ^survivor_id,
           where: c.first_met_through_id in ^loser_ids
         ),
         set: [first_met_through_id: survivor_id]
+      )
+
+    {:ok, count}
+  end
+
+  # `import_records.local_entity_id` is an untyped bigint with no foreign key,
+  # so nothing repoints it on its own and `ContactPurgeWorker` will hard-delete
+  # the loser it names 30 days from now. The unique index on
+  # (account_id, source, source_entity_type, source_entity_id) means a
+  # re-import would then map that source contact to a row that no longer
+  # exists instead of to the survivor.
+  defp remap_import_records_step(repo, loser_ids, survivor_id, account_id) do
+    {count, _} =
+      repo.update_all(
+        from(ir in Kith.Imports.ImportRecord,
+          where: ir.account_id == ^account_id,
+          where: ir.local_entity_type == "contact",
+          where: ir.local_entity_id in ^loser_ids
+        ),
+        set: [local_entity_id: survivor_id]
+      )
+
+    {:ok, count}
+  end
+
+  # `users.me_contact_id` is a real FK with `on_delete: :nilify_all`, so a
+  # merge that absorbs a user's "me" card leaves the pointer naming a trashed
+  # contact and nothing complains. Thirty days later `ContactPurgeWorker` hard-
+  # deletes that row, the FK nilifies, and the user loses their own card with
+  # no event to trace it back to. Repoint it here, with the rest of the merge.
+  defp remap_me_contact_step(repo, loser_ids, survivor_id, account_id) do
+    {count, _} =
+      repo.update_all(
+        from(u in Kith.Accounts.User,
+          where: u.account_id == ^account_id,
+          where: u.me_contact_id in ^loser_ids
+        ),
+        set: [me_contact_id: survivor_id]
       )
 
     {:ok, count}
@@ -518,6 +694,9 @@ defmodule Kith.Contacts.Merge do
     result =
       Enum.reduce_while(fields, :ok, fn {field, value}, :ok ->
         cond do
+          not MergeFields.known?(field) ->
+            {:halt, {:error, {:unknown_field, field}}}
+
           value == :clear and MergeFields.non_clearable?(field) ->
             {:halt, {:error, {:not_clearable, field}}}
 
