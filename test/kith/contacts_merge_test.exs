@@ -2158,4 +2158,45 @@ defmodule Kith.Contacts.MergeTest do
       assert Repo.get!(Kith.Accounts.User, ctx.user.id).me_contact_id == survivor.id
     end
   end
+
+  describe "inactive birthday reminders" do
+    setup ctx do
+      import Kith.RemindersFixtures
+
+      reminder =
+        birthday_reminder_fixture(ctx.account_id, ctx.contact_a.id, ctx.user.id)
+
+      Repo.update_all(
+        from(r in Kith.Reminders.Reminder, where: r.id == ^reminder.id),
+        set: [active: false, enqueued_oban_job_ids: []]
+      )
+
+      # A birthdate on the loser that the merge will gap-fill onto the
+      # survivor, forcing next_reminder_date to change.
+      Repo.update_all(
+        from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [birthdate: ~D[1990-06-15]]
+      )
+
+      Map.put(ctx, :reminder, reminder)
+    end
+
+    test "does not enqueue jobs for a deactivated reminder", ctx do
+      {:ok, _survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      kept = Repo.get!(Kith.Reminders.Reminder, ctx.reminder.id)
+
+      assert kept.active == false
+      assert kept.enqueued_oban_job_ids == []
+    end
+
+    test "still tracks the merged birthdate on the date field", ctx do
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      kept = Repo.get!(Kith.Reminders.Reminder, ctx.reminder.id)
+
+      assert survivor.birthdate == ~D[1990-06-15]
+      assert kept.next_reminder_date == Kith.TimeHelper.next_birthday_date(~D[1990-06-15])
+    end
+  end
 end

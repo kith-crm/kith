@@ -305,28 +305,47 @@ defmodule Kith.Contacts.Merge do
   end
 
   defp resync_birthday_reminder(repo, rows, survivor, account_id) do
+    # `reminder_keep_id/2` — renamed from `birthday_reminder_keep_id/2` in Task 2.
     keep_id = reminder_keep_id(rows, survivor.id)
     next_date = Kith.TimeHelper.next_birthday_date(survivor.birthdate)
     reminder = repo.get!(Kith.Reminders.Reminder, keep_id)
 
-    if reminder.next_reminder_date != next_date do
-      cancel_reminder_jobs(repo, [keep_id])
+    cond do
+      reminder.next_reminder_date == next_date ->
+        {:ok, :done}
 
-      reminder =
-        reminder
-        |> Ecto.Changeset.change(%{next_reminder_date: next_date, enqueued_oban_job_ids: []})
-        |> repo.update!()
+      # A deactivated reminder still tracks the merged birthdate — re-enabling
+      # it later must schedule from the right day — but it must not be put back
+      # on the queue. Deactivation deliberately empties `enqueued_oban_job_ids`,
+      # and enqueuing here would refill it while `active` stays false, leaving
+      # the row inconsistent with itself. `ReminderNotificationWorker.perform/1`
+      # discards an inactive reminder's job anyway, so the enqueue is pure noise.
+      not reminder.active ->
+        repo.update_all(
+          from(r in Kith.Reminders.Reminder, where: r.id == ^keep_id),
+          set: [next_reminder_date: next_date]
+        )
 
-      account = repo.get!(Kith.Accounts.Account, account_id)
-      {:ok, job_ids} = Kith.Reminders.enqueue_jobs_for_reminder(reminder, account)
+        {:ok, :done}
 
-      repo.update_all(
-        from(r in Kith.Reminders.Reminder, where: r.id == ^keep_id),
-        set: [enqueued_oban_job_ids: job_ids]
-      )
+      true ->
+        cancel_reminder_jobs(repo, [keep_id])
+
+        reminder =
+          reminder
+          |> Ecto.Changeset.change(%{next_reminder_date: next_date, enqueued_oban_job_ids: []})
+          |> repo.update!()
+
+        account = repo.get!(Kith.Accounts.Account, account_id)
+        {:ok, job_ids} = Kith.Reminders.enqueue_jobs_for_reminder(reminder, account)
+
+        repo.update_all(
+          from(r in Kith.Reminders.Reminder, where: r.id == ^keep_id),
+          set: [enqueued_oban_job_ids: job_ids]
+        )
+
+        {:ok, :done}
     end
-
-    {:ok, :done}
   end
 
   defp delete_extra_birthday_reminders(repo, rows, survivor_id) do
