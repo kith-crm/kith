@@ -793,16 +793,31 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
   end
 
-  # Spec B1: every mergeable scalar is on screen, "including … and the flags".
+  # Spec B1: every mergeable scalar is on screen. The Immich group moves as one
+  # unit and has its own control, and a coupled year-unknown flag is derived
+  # from whichever member supplied its date — neither is a row of its own.
   describe "field coverage (B1)" do
-    test "every mergeable field outside the Immich group has a row", ctx do
+    test "every mergeable field outside the Immich and coupled groups has a row", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
-      shown = Kith.Contacts.MergeFields.all() -- Kith.Contacts.MergeFields.immich_fields()
+      shown =
+        Kith.Contacts.MergeFields.all() --
+          (Kith.Contacts.MergeFields.immich_fields() ++ Kith.Contacts.MergeFields.coupled_flags())
 
       for field <- shown do
         assert has_element?(live, "[data-field='#{field}']"),
                "no row rendered for mergeable field #{field}"
+      end
+    end
+
+    test "a coupled year-unknown flag gets no row of its own", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # Picking the flag independently of its date is what produces a contact
+      # claiming the placeholder year 1900 is a known birth year.
+      for flag <- Kith.Contacts.MergeFields.coupled_flags() do
+        refute has_element?(live, "[data-field='#{flag}']"),
+               "coupled flag #{flag} rendered as an independent control"
       end
     end
 
@@ -1006,24 +1021,40 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   end
 
   describe "not-null columns are never offered as clearable" do
-    # `birthdate_year_unknown` is `null: false` but named by no
-    # `validate_required/2`. Every member holds `false` for it, so once resolved
-    # rows became segmented controls the clear button rendered on essentially
-    # every merge screen — and clicking it drove the engine into a 23502.
-    test "a not-null boolean row renders no Leave empty button", ctx do
+    # `:clear` becomes `nil` at the database, so a `NOT NULL` column raises a
+    # 23502 outside the engine's `{:error, reason}` contract. The year-unknown
+    # flags used to reach the screen as their own rows and made this trivially
+    # reachable; they are coupled fields now and render no control at all, so
+    # the guard that still has to hold is over the choice fields.
+    test "no non-clearable choice field renders a Leave empty button", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
-      assert has_element?(live, "[data-field='birthdate_year_unknown']")
+      non_clearable =
+        Enum.filter(
+          Kith.Contacts.MergeFields.choice_fields(),
+          &Kith.Contacts.MergeFields.non_clearable?/1
+        )
 
-      refute has_element?(
-               live,
-               "button[phx-value-field='birthdate_year_unknown'][phx-value-index='clear']"
-             )
+      # Guards the assertion below against silently becoming vacuous.
+      assert non_clearable != []
 
-      refute has_element?(
-               live,
-               "button[phx-value-field='first_met_year_unknown'][phx-value-index='clear']"
-             )
+      for field <- non_clearable do
+        assert has_element?(live, "[data-field='#{field}']")
+
+        refute has_element?(
+                 live,
+                 "button[phx-value-field='#{field}'][phx-value-index='clear']"
+               ),
+               "non-clearable field #{field} offered a Leave empty button"
+      end
+    end
+
+    test "coupled year-unknown flags are never reachable as a clear target", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      for flag <- Kith.Contacts.MergeFields.coupled_flags() do
+        refute has_element?(live, "button[phx-value-field='#{flag}'][phx-value-index='clear']")
+      end
     end
   end
 
