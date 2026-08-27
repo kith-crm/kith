@@ -1699,8 +1699,8 @@ defmodule Kith.Contacts do
 
   Returns `{:ok, contact}` or `{:error, reason}`, where `reason` is one of
   `:not_found`, `:trashed`, `:different_accounts`, `:survivor_in_losers`,
-  `:no_losers`, `{:unknown_value, field}`, `{:not_clearable, field}`, or
-  `{:invalid_fields, changeset}`.
+  `:no_losers`, `{:unknown_value, field}`, `{:unknown_field, field}`,
+  `{:not_clearable, field}`, or `{:invalid_fields, changeset}`.
   """
   def merge_cluster(scope, survivor_id, loser_ids, resolution) do
     Merge.run(scope, survivor_id, loser_ids, resolution)
