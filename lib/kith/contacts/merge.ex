@@ -237,6 +237,9 @@ defmodule Kith.Contacts.Merge do
     |> Multi.run(:remap_import_records, fn repo, _changes ->
       remap_import_records_step(repo, loser_ids, survivor.id, account_id)
     end)
+    |> Multi.run(:remap_me_contact, fn repo, _changes ->
+      remap_me_contact_step(repo, loser_ids, survivor.id, account_id)
+    end)
     |> Multi.run(:dedupe_owned, fn repo, _changes -> dedupe_owned_step(repo, survivor.id) end)
     |> Multi.run(:remap_relationships, fn repo, _changes ->
       remap_relationships(repo, survivor.id, loser_ids, account_id)
@@ -457,6 +460,24 @@ defmodule Kith.Contacts.Merge do
           where: ir.local_entity_id in ^loser_ids
         ),
         set: [local_entity_id: survivor_id]
+      )
+
+    {:ok, count}
+  end
+
+  # `users.me_contact_id` is a real FK with `on_delete: :nilify_all`, so a
+  # merge that absorbs a user's "me" card leaves the pointer naming a trashed
+  # contact and nothing complains. Thirty days later `ContactPurgeWorker` hard-
+  # deletes that row, the FK nilifies, and the user loses their own card with
+  # no event to trace it back to. Repoint it here, with the rest of the merge.
+  defp remap_me_contact_step(repo, loser_ids, survivor_id, account_id) do
+    {count, _} =
+      repo.update_all(
+        from(u in Kith.Accounts.User,
+          where: u.account_id == ^account_id,
+          where: u.me_contact_id in ^loser_ids
+        ),
+        set: [me_contact_id: survivor_id]
       )
 
     {:ok, count}

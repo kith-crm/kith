@@ -2097,4 +2097,44 @@ defmodule Kith.Contacts.MergeTest do
       assert {:ok, _} = Kith.Reminders.resolve_stay_in_touch_instance(survivor.id)
     end
   end
+
+  describe "me_contact_id" do
+    test "repoints a user whose me-contact is merged away", ctx do
+      {:ok, _user} = Kith.Accounts.link_me_contact(ctx.user, ctx.contact_b.id)
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert Repo.get!(Kith.Accounts.User, ctx.user.id).me_contact_id == survivor.id
+    end
+
+    test "leaves a user whose me-contact is the survivor untouched", ctx do
+      {:ok, _user} = Kith.Accounts.link_me_contact(ctx.user, ctx.contact_a.id)
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert Repo.get!(Kith.Accounts.User, ctx.user.id).me_contact_id == survivor.id
+    end
+
+    test "does not touch a user in another account", ctx do
+      other = Kith.AccountsFixtures.user_fixture()
+      other_contact = ContactsFixtures.contact_fixture(other.account_id)
+      {:ok, _} = Kith.Accounts.link_me_contact(other, other_contact.id)
+
+      {:ok, _survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert Repo.get!(Kith.Accounts.User, other.id).me_contact_id == other_contact.id
+    end
+
+    # The slow-burn failure this guards: the pointer survives the merge, then
+    # the purge worker hard-deletes the loser and the FK nilifies it away.
+    test "survives the 30-day purge of the merged-away contact", ctx do
+      {:ok, _user} = Kith.Accounts.link_me_contact(ctx.user, ctx.contact_b.id)
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      Repo.query!("DELETE FROM contacts WHERE id = $1", [ctx.contact_b.id])
+
+      assert Repo.get!(Kith.Accounts.User, ctx.user.id).me_contact_id == survivor.id
+    end
+  end
 end
