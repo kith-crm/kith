@@ -754,6 +754,30 @@ defmodule Kith.DuplicateDetectionTest do
       assert status_of(ctx.account_id, a, b) == "merged"
     end
 
+    test "is idempotent over a pair it has already dismissed", ctx do
+      %{a: a, b: b} = ctx.contacts
+
+      :ok = Kith.DuplicateDetection.dismiss_selection(ctx.account_id, [a.id, b.id], [])
+      :ok = Kith.DuplicateDetection.dismiss_selection(ctx.account_id, [a.id, b.id], [])
+
+      assert status_of(ctx.account_id, a, b) == "dismissed"
+
+      assert Repo.aggregate(
+               from(d in Kith.Contacts.DuplicateCandidate,
+                 where: d.account_id == ^ctx.account_id
+               ),
+               :count
+             ) == 1
+    end
+
+    # Blind spot: these tests all run on one sandboxed connection, so none of
+    # them reaches the `ON CONFLICT` branch in `insert_dismissed/4`. That branch
+    # fires only when a detection scan inserts the pair between this function's
+    # read and its write, which needs two real connections to provoke. What is
+    # covered here is that both outcomes the branch has to preserve — a fresh
+    # pair becomes "dismissed", a merged pair stays "merged" — hold on the read
+    # path, and that a repeat call does not duplicate a row.
+
     test "rejects a selected id belonging to another account and writes nothing for it", ctx do
       %{a: a, b: b} = ctx.contacts
       other_user = Kith.AccountsFixtures.user_fixture()

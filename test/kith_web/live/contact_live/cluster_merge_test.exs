@@ -1088,4 +1088,59 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert has_element?(live, "details#section-identity[open]")
     end
   end
+
+  describe "crafted event payloads" do
+    # `phx-value-*` is client-controlled. Before these guards, `choose-field`
+    # ran `String.to_existing_atom/1` on it and handed the result to
+    # `Map.fetch!/2`: any atom the node had already created but that is not a
+    # Contact key — `:page_title`, `:flash`, an assign name — killed the
+    # LiveView process. The id handlers had the same shape via
+    # `String.to_integer/1`, which raises on anything non-numeric.
+    test "an unknown field name is ignored rather than crashing the view", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      for field <- ["page_title", "flash", "definitely_not_an_atom_anywhere", ""] do
+        render_click(live, "choose-field", %{"field" => field, "index" => "0"})
+        render_click(live, "choose-field", %{"field" => field, "index" => "clear"})
+      end
+
+      assert has_element?(live, "[data-field='first_name']")
+    end
+
+    test "a policy or coupled field cannot be driven through choose-field", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      # These resolve by policy or by coupling, never by choice — accepting an
+      # override for them would let the client bypass that resolution.
+      for field <-
+            Kith.Contacts.MergeFields.policy_fields() ++
+              Kith.Contacts.MergeFields.coupled_flags() do
+        render_click(live, "choose-field", %{"field" => to_string(field), "index" => "clear"})
+      end
+
+      assert has_element?(live, "[data-field='first_name']")
+    end
+
+    test "a non-numeric id is ignored by every id-carrying handler", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      for id <- ["abc", "1x", "", "-1", "9999999999999999999999"] do
+        render_click(live, "toggle-member", %{"id" => id})
+        render_click(live, "set-primary", %{"id" => id})
+        render_click(live, "choose-immich", %{"id" => id})
+      end
+
+      assert has_element?(live, "[data-field='first_name']")
+    end
+
+    test "an unknown section name is ignored by toggle-section", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      for section <- ["page_title", "nope_not_a_section", "contact_fields", ""] do
+        render_click(live, "toggle-section", %{"section" => section})
+      end
+
+      assert has_element?(live, "[data-field='first_name']")
+    end
+  end
 end

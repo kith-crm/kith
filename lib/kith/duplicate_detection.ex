@@ -490,11 +490,19 @@ defmodule Kith.DuplicateDetection do
   this is a bulk action driven by UI selection state, not a single-resource
   lookup.
 
-  The whole batch of pairs is written inside one transaction. Without it, a
-  mid-loop failure (e.g. a unique-constraint race against a concurrent
-  dismissal) would leave the clique half-written — some rejected matches
+  The whole batch of pairs is written inside one transaction, so a mid-loop
+  failure cannot leave the clique half-written — some rejected matches
   recorded, others not — which for negative edges reopens exactly the
   transitivity hole the clique exists to close.
+
+  The transaction bounds a failure but does not prevent one: `DuplicateCandidate`
+  rows for the same pair are also written by `Kith.Workers.DuplicateDetectionWorker`,
+  and a scan inserting the pair between this function's read and its write would
+  otherwise violate the `[:account_id, :contact_id, :duplicate_contact_id]`
+  unique index. Each pair is written with an upsert instead, so the racing row is
+  dismissed rather than colliding.
+
+  Returns `:ok`, or `{:error, reason}` if the transaction failed.
   """
   def dismiss_selection(account_id, selected_ids, unchecked_ids) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
@@ -515,8 +523,10 @@ defmodule Kith.DuplicateDetection do
       |> Enum.uniq()
       |> Enum.each(fn {low, high} -> upsert_dismissed(account_id, low, high, now) end)
     end)
-
-    :ok
+    |> case do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp owned_ids(_account_id, []), do: []
@@ -538,17 +548,7 @@ defmodule Kith.DuplicateDetection do
            )
          ) do
       nil ->
-        %DuplicateCandidate{account_id: account_id}
-        |> DuplicateCandidate.changeset(%{
-          contact_id: low,
-          duplicate_contact_id: high,
-          score: 0.0,
-          reasons: ["user_rejected"],
-          status: "dismissed",
-          detected_at: now,
-          resolved_at: now
-        })
-        |> Repo.insert!()
+        insert_dismissed(account_id, low, high, now)
 
       %DuplicateCandidate{status: "merged"} = existing ->
         existing
@@ -556,5 +556,39 @@ defmodule Kith.DuplicateDetection do
       existing ->
         existing |> DuplicateCandidate.dismiss_changeset() |> Repo.update!()
     end
+  end
+
+  # A detection scan can insert this pair between the read above and this
+  # write. `ON CONFLICT DO UPDATE` dismisses that row rather than colliding on
+  # the unique index and rolling the whole clique back. The `status != "merged"`
+  # guard preserves the same exemption the read path applies: a pair already
+  # resolved by an actual merge is not reopened as a dismissal.
+  #
+  # When that guard excludes the row, Postgres updates nothing and returns no
+  # row, which Ecto surfaces as `Ecto.StaleEntryError`. That is the intended
+  # outcome — the merged row stands — so it is not a failure of the clique.
+  defp insert_dismissed(account_id, low, high, now) do
+    on_conflict =
+      from(d in DuplicateCandidate,
+        where: d.status != "merged",
+        update: [set: [status: "dismissed", resolved_at: ^now, updated_at: ^now]]
+      )
+
+    %DuplicateCandidate{account_id: account_id}
+    |> DuplicateCandidate.changeset(%{
+      contact_id: low,
+      duplicate_contact_id: high,
+      score: 0.0,
+      reasons: ["user_rejected"],
+      status: "dismissed",
+      detected_at: now,
+      resolved_at: now
+    })
+    |> Repo.insert!(
+      on_conflict: on_conflict,
+      conflict_target: [:account_id, :contact_id, :duplicate_contact_id]
+    )
+  rescue
+    Ecto.StaleEntryError -> :ok
   end
 end

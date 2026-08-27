@@ -27,6 +27,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     {:aliases, "Aliases"}
   ]
 
+  # The collapsible `<details>` blocks, whose open/closed state lives in
+  # `@open_sections`. Distinct from `@sections` above, which names the
+  # categories of droppable owned records. Listed so `toggle-section` has
+  # something to validate its payload against.
+  @toggle_sections ~w(identity contact_details history)a
+
   # Rendered instead of an attribution when every `first_met_through_id`
   # candidate was a member of this merge. `Merge.clear_member_self_reference/2`
   # coerces such a value to `:clear`, so offering it would be offering a value
@@ -131,86 +137,52 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   @impl true
   def handle_event("toggle-member", %{"id" => id}, socket) do
-    id = String.to_integer(id)
-
-    selected =
-      if MapSet.member?(socket.assigns.selected_ids, id) do
-        MapSet.delete(socket.assigns.selected_ids, id)
-      else
-        MapSet.put(socket.assigns.selected_ids, id)
-      end
-
-    if MapSet.size(selected) == 0 do
-      # `MergeResolution.resolve/2` requires a non-empty member list, and there
-      # is no meaningful "merge nothing" state to render — refuse to uncheck
-      # the last remaining member instead of leaving a selection that would
-      # crash the next recompute. Re-assigning an equal `selected_ids` would
-      # not itself produce a diff (`assign/3` skips equal values), which would
-      # leave the browser's checkbox showing unchecked while the server still
-      # holds that member selected — flash a notice so a patch is always sent.
-      {:noreply, put_flash(socket, :info, "At least one contact must stay selected")}
+    with {:ok, id} <- cast_member_id(id) do
+      toggle_member(socket, id)
     else
-      {:noreply,
-       socket
-       |> clear_flash(:info)
-       |> assign(:selected_ids, selected)
-       # Selection changed, so every derived value is stale — including choices
-       # the user made, which may no longer be held by any selected member.
-       |> assign(:overrides, %{})
-       |> assign(:dropped, MapSet.new())
-       |> recompute()}
+      :error -> {:noreply, socket}
     end
   end
 
   def handle_event("set-primary", %{"id" => id}, socket) do
-    {:noreply, socket |> assign(:primary_id, String.to_integer(id)) |> recompute()}
+    case cast_member_id(id) do
+      {:ok, id} -> {:noreply, socket |> assign(:primary_id, id) |> recompute()}
+      :error -> {:noreply, socket}
+    end
   end
 
   # "Leave empty" posts the literal index "clear" (spec B7) rather than a
   # candidate position — route it to the override directly instead of
   # `String.to_integer/1`, which would raise on this value.
   def handle_event("choose-field", %{"field" => field, "index" => "clear"}, socket) do
-    field = String.to_existing_atom(field)
+    case cast_choice_field(field) do
+      {:ok, field} ->
+        {:noreply,
+         socket
+         |> assign(:overrides, Map.put(socket.assigns.overrides, field, :clear))
+         |> assign(:error, nil)}
 
-    {:noreply,
-     socket
-     |> assign(:overrides, Map.put(socket.assigns.overrides, field, :clear))
-     |> assign(:error, nil)}
+      :error ->
+        {:noreply, socket}
+    end
   end
 
   def handle_event("choose-field", %{"field" => field, "index" => index}, socket) do
-    field = String.to_existing_atom(field)
-    index = String.to_integer(index)
-
-    # Must resolve the clicked index the same way it was rendered — against
-    # `visible_candidates/2` over the current selection, never against
-    # `@resolution.conflicts[field]`, which is built by a different, unsorted
-    # helper and could pick a different value than the button the user clicked.
-    case Enum.at(visible_candidates(selected_members(socket), field), index) do
-      nil ->
-        {:noreply, socket}
-
-      candidate ->
-        {:noreply,
-         socket
-         |> assign(:overrides, Map.put(socket.assigns.overrides, field, candidate.value))
-         |> assign(:error, nil)}
+    with {:ok, field} <- cast_choice_field(field),
+         {:ok, index} <- cast_member_id(index) do
+      choose_field(socket, field, index)
+    else
+      :error -> {:noreply, socket}
     end
   end
 
   # `<details open>` is server-state here (see `load_cluster/2`): the summary
   # reports the toggle so the assign and the browser's own toggle agree.
   def handle_event("toggle-section", %{"section" => section}, socket) do
-    section = String.to_existing_atom(section)
-
-    open =
-      if MapSet.member?(socket.assigns.open_sections, section) do
-        MapSet.delete(socket.assigns.open_sections, section)
-      else
-        MapSet.put(socket.assigns.open_sections, section)
-      end
-
-    {:noreply, assign(socket, :open_sections, open)}
+    case cast_section(section) do
+      {:ok, section} -> {:noreply, assign(socket, :open_sections, toggled(socket, section))}
+      :error -> {:noreply, socket}
+    end
   end
 
   def handle_event("toggle-value", %{"type" => type, "id" => id}, socket) do
@@ -248,8 +220,79 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   def handle_event("choose-immich", %{"id" => id}, socket) do
-    id = String.to_integer(id)
+    case cast_member_id(id) do
+      {:ok, id} -> choose_immich(socket, id)
+      :error -> {:noreply, socket}
+    end
+  end
 
+  def handle_event("not-duplicates", _params, socket) do
+    if authorized?(socket) do
+      dismiss_selection(socket)
+    else
+      {:noreply, refuse(socket)}
+    end
+  end
+
+  defp toggle_member(socket, id) do
+    selected =
+      if MapSet.member?(socket.assigns.selected_ids, id) do
+        MapSet.delete(socket.assigns.selected_ids, id)
+      else
+        MapSet.put(socket.assigns.selected_ids, id)
+      end
+
+    if MapSet.size(selected) == 0 do
+      # `MergeResolution.resolve/2` requires a non-empty member list, and there
+      # is no meaningful "merge nothing" state to render — refuse to uncheck
+      # the last remaining member instead of leaving a selection that would
+      # crash the next recompute. Re-assigning an equal `selected_ids` would
+      # not itself produce a diff (`assign/3` skips equal values), which would
+      # leave the browser's checkbox showing unchecked while the server still
+      # holds that member selected — flash a notice so a patch is always sent.
+      {:noreply, put_flash(socket, :info, "At least one contact must stay selected")}
+    else
+      {:noreply,
+       socket
+       |> clear_flash(:info)
+       |> assign(:selected_ids, selected)
+       # Selection changed, so every derived value is stale — including choices
+       # the user made, which may no longer be held by any selected member.
+       |> assign(:overrides, %{})
+       |> assign(:dropped, MapSet.new())
+       |> recompute()}
+    end
+  end
+
+  defp choose_field(socket, field, index) do
+    # Must resolve the clicked index the same way it was rendered — against
+    # `visible_candidates/2` over the current selection, never against
+    # `@resolution.conflicts[field]`, which is built by a different, unsorted
+    # helper and could pick a different value than the button the user clicked.
+    case Enum.at(visible_candidates(selected_members(socket), field), index) do
+      nil ->
+        {:noreply, socket}
+
+      candidate ->
+        {:noreply,
+         socket
+         |> assign(:overrides, Map.put(socket.assigns.overrides, field, candidate.value))
+         |> assign(:error, nil)}
+    end
+  end
+
+  defp toggled(socket, section) do
+    open =
+      if MapSet.member?(socket.assigns.open_sections, section) do
+        MapSet.delete(socket.assigns.open_sections, section)
+      else
+        MapSet.put(socket.assigns.open_sections, section)
+      end
+
+    open
+  end
+
+  defp choose_immich(socket, id) do
     # Must resolve against the *selected* members, not `socket.assigns.members`
     # — the row only renders buttons for selected linked members, but a
     # crafted event carrying a deselected member's id would otherwise adopt
@@ -273,25 +316,24 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     end
   end
 
-  def handle_event("not-duplicates", _params, socket) do
-    if authorized?(socket) do
-      dismiss_selection(socket)
-    else
-      {:noreply, refuse(socket)}
-    end
-  end
-
   defp dismiss_selection(socket) do
-    DuplicateDetection.dismiss_selection(
-      socket.assigns.current_scope.account.id,
-      MapSet.to_list(socket.assigns.selected_ids),
-      unchecked_ids(socket)
-    )
+    case DuplicateDetection.dismiss_selection(
+           socket.assigns.current_scope.account.id,
+           MapSet.to_list(socket.assigns.selected_ids),
+           unchecked_ids(socket)
+         ) do
+      :ok ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Marked as not duplicates")
+         |> redirect(to: ~p"/contacts/duplicates")}
 
-    {:noreply,
-     socket
-     |> put_flash(:info, "Marked as not duplicates")
-     |> redirect(to: ~p"/contacts/duplicates")}
+      # A half-written clique is rolled back, so the screen must not claim the
+      # dismissal stuck. Staying put keeps the selection intact for a retry.
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Could not mark these as not duplicates. Please try again.")}
+    end
   end
 
   # Spec G2 is "open **or** submit": `handle_params/3` only covers the open.
@@ -442,6 +484,49 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       _ -> id
     end
   end
+
+  # ── Casting client-supplied event payloads ─────────────────────────────
+
+  # `phx-value-*` is whatever the client sends, not whatever the template
+  # rendered. Casting it with `String.to_existing_atom/1` alone is not enough:
+  # it narrows the input to atoms this node has already created, and plenty of
+  # those (`:page_title`, `:flash`, every other assign name) are not `Contact`
+  # struct keys, so they reach `Map.fetch!/2` downstream and take the LiveView
+  # process down with a `KeyError`. Each cast below therefore ends in a
+  # membership check against the list the render side actually drew from, and
+  # an unrecognised payload is dropped rather than raised on — matching how
+  # `find_cluster/2` already treats an unparseable id in the URL.
+
+  defp cast_choice_field(field) when is_binary(field) do
+    cast_known_atom(field, MergeFields.choice_fields())
+  end
+
+  defp cast_choice_field(_field), do: :error
+
+  defp cast_section(section) when is_binary(section) do
+    cast_known_atom(section, @toggle_sections)
+  end
+
+  defp cast_section(_section), do: :error
+
+  defp cast_known_atom(string, allowed) do
+    atom = String.to_existing_atom(string)
+    if atom in allowed, do: {:ok, atom}, else: :error
+  rescue
+    # No atom by this name exists, so it cannot be in `allowed` either.
+    ArgumentError -> :error
+  end
+
+  # Also used for the candidate index in `choose-field`, which is a position in
+  # a rendered list and so is bounded by the same non-negative-integer shape.
+  defp cast_member_id(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {int, ""} when int >= 0 -> {:ok, int}
+      _ -> :error
+    end
+  end
+
+  defp cast_member_id(_id), do: :error
 
   # ── Rendering helpers ──────────────────────────────────────────────────
 
