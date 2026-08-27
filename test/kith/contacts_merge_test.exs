@@ -52,6 +52,13 @@ defmodule Kith.Contacts.MergeTest do
     job
   end
 
+  # The choice map the wizard actually sends after Task 1: only fields the
+  # user clicked. Tests asserting resolver behaviour should run through this
+  # too — the 2-arity path is not the path the UI takes.
+  defp wizard_merge(survivor_id, loser_id, clicked) do
+    Contacts.merge_contacts(survivor_id, loser_id, clicked)
+  end
+
   # A contact in a different account, used to force a changeset failure on the
   # survivor that D4's coercion does not pre-empt.
   defp foreign_contact do
@@ -296,8 +303,34 @@ defmodule Kith.Contacts.MergeTest do
       assert survivor.middle_name == "Jo"
     end
 
+    test "fills a gap on the survivor from the loser through the wizard path", ctx do
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [middle_name: nil]
+      )
+
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [middle_name: "Jo"]
+      )
+
+      # The user clicked one unrelated field; middle_name was never touched.
+      {:ok, survivor} =
+        wizard_merge(ctx.contact_a.id, ctx.contact_b.id, %{"company" => "non_survivor"})
+
+      assert survivor.middle_name == "Jo"
+      assert survivor.company == "New Corp"
+    end
+
     test "never overrides an existing survivor value by default", ctx do
       {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert survivor.company == "Old Corp"
+    end
+
+    test "never overrides an existing survivor value through the wizard path", ctx do
+      # The user clicked an unrelated field; company was never touched, so the
+      # resolver's survivor-value protection must still hold for it.
+      {:ok, survivor} =
+        wizard_merge(ctx.contact_a.id, ctx.contact_b.id, %{"occupation" => "survivor"})
 
       assert survivor.company == "Old Corp"
     end
@@ -311,6 +344,21 @@ defmodule Kith.Contacts.MergeTest do
       )
 
       {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert survivor.company == "Old Corp"
+    end
+
+    test "keeps the survivor's value even when the loser was updated later, through the wizard path",
+         ctx do
+      # Same conflict-default scenario, but with an unrelated field clicked —
+      # proves the presence of another explicit choice doesn't short-circuit
+      # the survivor-value protection for the untouched field.
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_b.id),
+        set: [updated_at: DateTime.add(DateTime.utc_now(:second), 3600, :second)]
+      )
+
+      {:ok, survivor} =
+        wizard_merge(ctx.contact_a.id, ctx.contact_b.id, %{"occupation" => "survivor"})
 
       assert survivor.company == "Old Corp"
     end
@@ -348,6 +396,21 @@ defmodule Kith.Contacts.MergeTest do
       )
 
       {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert survivor.first_met_through_id == nil
+    end
+
+    test "clears first_met_through rather than pointing at the trashed loser, through the wizard path",
+         ctx do
+      # Same D4 self-reference clearing, but with an unrelated field clicked —
+      # proves the presence of another explicit choice doesn't bypass the
+      # clear.
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [first_met_through_id: ctx.contact_b.id]
+      )
+
+      {:ok, survivor} =
+        wizard_merge(ctx.contact_a.id, ctx.contact_b.id, %{"occupation" => "survivor"})
 
       assert survivor.first_met_through_id == nil
     end

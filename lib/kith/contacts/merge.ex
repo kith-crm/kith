@@ -83,6 +83,11 @@ defmodule Kith.Contacts.Merge do
     Kith.Contacts.ImmichCandidate
   ]
 
+  @doc false
+  # Exposed for `Kith.Contacts.MergeInvariantsTest`, which asserts this
+  # registry still covers every table carrying a contact_id.
+  def __owned_schemas__, do: @owned_schemas
+
   # Which schema backs each key of `resolution.drop`. Tags are the exception:
   # `contact_tags` is a bare join table, so its ids are tag ids.
   @drop_schemas %{
