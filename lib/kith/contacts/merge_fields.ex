@@ -81,8 +81,8 @@ defmodule Kith.Contacts.MergeFields do
   merge engine's documented `{:error, reason}` contract — and the changeset's
   required list does not cover them: `birthdate_year_unknown` and
   `first_met_year_unknown` are `null: false` booleans that no
-  `validate_required/2` names, so they were offered as clearable and two clicks
-  on the cluster merge screen crashed the LiveView.
+  `validate_required/2` names, so the column check is the only thing standing
+  between them and a crash on the cluster merge screen.
 
   Read from `information_schema` rather than restated here so a column added
   with `null: false` later is covered on its own.

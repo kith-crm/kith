@@ -17,9 +17,9 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   # The value sections, keyed on the identifier the drop payload and the
   # summary both use. The display label is a rendering detail hanging off that
-  # key, never the key itself: `drop_key/1` used to match on the label, so a
-  # copy edit or an i18n pass would have made it return `nil` for everything
-  # and every unchecked value would have silently come back on the survivor.
+  # key, never the key itself: were `drop_key/1` to match on the label, a copy
+  # edit or an i18n pass would make it return `nil` for everything, and every
+  # unchecked value would silently come back on the survivor.
   @sections [
     {:contact_fields, "Fields"},
     {:addresses, "Addresses"},

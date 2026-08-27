@@ -750,8 +750,8 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
   # Spec B6: "Resolved rows show the value plus attribution and are
   # click-to-change, opening in place as a segmented control including 'Leave
-  # empty'." Before this, the non-conflict branch rendered two inert spans
-  # while the section header claimed every value was clickable.
+  # empty'." The section header tells the user every value is clickable, so the
+  # non-conflict branch has to render controls rather than inert spans.
   describe "resolved rows are editable (B6/B7)" do
     test "a resolved row exposes its candidates as a segmented control", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
@@ -939,10 +939,10 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   end
 
   describe "drop payload keys" do
-    # `drop_key/1` used to match the literal display labels the template
-    # supplied ("Fields"/"Addresses"/"Tags"). A copy edit or an i18n pass would
-    # have made it return nil for everything, `build_drop/1` return `%{}`, and
-    # every unchecked value silently come back on the survivor.
+    # `drop_key/1` must not match the literal display labels the template
+    # supplies ("Fields"/"Addresses"/"Tags"). If it did, a copy edit or an i18n
+    # pass would make it return nil for everything, `build_drop/1` return `%{}`,
+    # and every unchecked value silently come back on the survivor.
     test "value rows are keyed on section identifiers, not display copy", ctx do
       email_type =
         Kith.Repo.one!(
@@ -1023,9 +1023,8 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   describe "not-null columns are never offered as clearable" do
     # `:clear` becomes `nil` at the database, so a `NOT NULL` column raises a
     # 23502 outside the engine's `{:error, reason}` contract. The year-unknown
-    # flags used to reach the screen as their own rows and made this trivially
-    # reachable; they are coupled fields now and render no control at all, so
-    # the guard that still has to hold is over the choice fields.
+    # flags are coupled fields and render no control at all, so the guard that
+    # has to hold on this screen is over the choice fields.
     test "no non-clearable choice field renders a Leave empty button", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
@@ -1090,12 +1089,11 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   end
 
   describe "crafted event payloads" do
-    # `phx-value-*` is client-controlled. Before these guards, `choose-field`
-    # ran `String.to_existing_atom/1` on it and handed the result to
-    # `Map.fetch!/2`: any atom the node had already created but that is not a
-    # Contact key — `:page_title`, `:flash`, an assign name — killed the
-    # LiveView process. The id handlers had the same shape via
-    # `String.to_integer/1`, which raises on anything non-numeric.
+    # `phx-value-*` is client-controlled, so nothing stops a crafted payload
+    # naming an atom that exists on the node but is not a Contact key —
+    # `:page_title`, `:flash`, an assign name. Reaching `Map.fetch!/2` with one
+    # kills the LiveView process, as does a non-numeric id reaching
+    # `String.to_integer/1`.
     test "an unknown field name is ignored rather than crashing the view", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 

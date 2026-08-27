@@ -148,9 +148,9 @@ defmodule Kith.Contacts.MergeSummary do
         # Relationships are the one history table a member can be on either end
         # of, and `Merge`'s `remap_relationships/4` rewrites both `contact_id`
         # and `related_contact_id`. Counting only the first endpoint reports 0
-        # for a member that is purely the *target* of relationships, so the
-        # screen understated what the merge moves. A row with both endpoints in
-        # the cluster is still one row, so `or` counts it once.
+        # for a member that is purely the *target* of relationships, which
+        # understates what the merge moves. A row with both endpoints in the
+        # cluster is still one row, so `or` counts it once.
         {:relationships, schema} ->
           {:relationships,
            Repo.aggregate(

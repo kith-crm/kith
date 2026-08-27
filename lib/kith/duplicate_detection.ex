@@ -325,9 +325,9 @@ defmodule Kith.DuplicateDetection do
   #
   # This is what keeps the derivation bounded. Dismissed rows are permanent and
   # `dismiss_selection/3` writes a full clique over the selection, so the
-  # account's dismissed set grows without limit — loading all of it made every
-  # derivation proportional to the account's whole dismissal history rather
-  # than to the work actually pending.
+  # account's dismissed set grows without limit; loading all of it would make
+  # every derivation proportional to the account's whole dismissal history
+  # rather than to the work actually pending.
   #
   # The endpoints came from the join above, so they are already known live and
   # account-scoped; the contacts join is not repeated here.

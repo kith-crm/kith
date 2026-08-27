@@ -137,7 +137,7 @@ defmodule Kith.Contacts.MergeSummaryTest do
   # `Merge`'s `remap_relationships/4` rewrites `related_contact_id` as well as
   # `contact_id`, so a member that is only ever the target of relationships
   # still has rows moved onto the survivor. Counting the first endpoint alone
-  # reported 0 for it and understated the "records move to the primary" line.
+  # reports 0 for it and understates the "records move to the primary" line.
   test "history counts relationships pointing at a member as well as from it", ctx do
     [friend_type | _] = Repo.all(from(rt in "relationship_types", select: rt.id, limit: 1))
 
@@ -165,10 +165,10 @@ defmodule Kith.Contacts.MergeSummaryTest do
 
   # `Kith.Contacts.Merge`'s dedupe runs `lower(btrim(value))`, and one-argument
   # `btrim` strips SPACES ONLY. `String.trim/1` strips every Unicode whitespace
-  # character, so a tab-prefixed value used to read as "duplicate · dropped" on
-  # screen while the engine kept both rows — and a caller expanding a dropped
-  # entry over everything sharing its key would then drop a value the user
-  # never excluded.
+  # character. Trimming with it would make a tab-prefixed value read as
+  # "duplicate · dropped" on screen while the engine keeps both rows, and a
+  # caller expanding a dropped entry over everything sharing its key would then
+  # drop a value the user never excluded.
   test "a tab-prefixed value is not a duplicate, matching the engine's btrim", ctx do
     ContactsFixtures.contact_field_fixture(ctx.a, ctx.email_type.id, %{"value" => "s@example.com"})
 
