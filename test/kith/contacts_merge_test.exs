@@ -692,6 +692,27 @@ defmodule Kith.Contacts.MergeTest do
       assert after_a.deleted_at == nil
       assert after_b.deleted_at == nil
     end
+
+    test "returns an error for a field key that is not a contact field", ctx do
+      assert {:error, {:unknown_field, :not_a_real_field}} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{not_a_real_field: "whatever"},
+                 drop: %{},
+                 unchecked_ids: []
+               })
+    end
+
+    test "rejects an unknown field even when its value is :clear", ctx do
+      # :clear alone is not proof the field is known — an unrecognised field
+      # carrying :clear must not slip through the `value == :clear` branch
+      # before the known?/1 guard has a chance to reject it.
+      assert {:error, {:unknown_field, :not_a_real_field}} =
+               Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+                 fields: %{not_a_real_field: :clear},
+                 drop: %{},
+                 unchecked_ids: []
+               })
+    end
   end
 
   describe "merge_cluster/4 remapping" do

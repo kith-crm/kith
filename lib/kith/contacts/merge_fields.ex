@@ -65,6 +65,9 @@ defmodule Kith.Contacts.MergeFields do
     @choice_fields ++ @policy_fields ++ @array_fields ++ @immich_fields ++ coupled_flags()
   end
 
+  @doc "Whether `field` is a field the merge engine knows how to resolve."
+  def known?(field), do: field in all()
+
   @doc """
   Fields that cannot be set to `:clear`, derived from the contact update
   changeset's `validate_required/2` list rather than maintained by hand.

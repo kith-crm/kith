@@ -109,7 +109,7 @@ defmodule Kith.Contacts.Merge do
 
   Returns `{:ok, contact}` or `{:error, reason}`, where `reason` is one of
   `:not_found`, `:trashed`, `:different_accounts`, `:survivor_in_losers`,
-  `:no_losers`, `{:unknown_value, field}`, `{:not_clearable, field}`,
+  `:no_losers`, `{:unknown_value, field}`, `{:unknown_field, field}`, `{:not_clearable, field}`,
   `{:unknown_drop, key}`, or `{:invalid_fields, changeset}` if the resolved
   values fail changeset validation on the survivor.
   """
@@ -668,6 +668,9 @@ defmodule Kith.Contacts.Merge do
     result =
       Enum.reduce_while(fields, :ok, fn {field, value}, :ok ->
         cond do
+          not MergeFields.known?(field) ->
+            {:halt, {:error, {:unknown_field, field}}}
+
           value == :clear and MergeFields.non_clearable?(field) ->
             {:halt, {:error, {:not_clearable, field}}}
 
