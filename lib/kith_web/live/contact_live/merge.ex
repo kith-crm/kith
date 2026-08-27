@@ -326,7 +326,7 @@ defmodule KithWeb.ContactLive.Merge do
                 phx-value-source="survivor"
                 class={[
                   "text-start text-sm px-3 py-2 rounded-[var(--radius-md)] border transition-colors cursor-pointer",
-                  if(Map.get(@field_choices, field) == "survivor",
+                  if(effective_choice(@field_choices, @contact_a, @contact_b, field) == "survivor",
                     do:
                       "border-[var(--color-accent)] bg-[var(--color-accent-subtle)] text-[var(--color-accent)]",
                     else: "border-[var(--color-border)] hover:border-[var(--color-border-focus)]/50"
@@ -341,7 +341,8 @@ defmodule KithWeb.ContactLive.Merge do
                 phx-value-source="non_survivor"
                 class={[
                   "text-start text-sm px-3 py-2 rounded-[var(--radius-md)] border transition-colors cursor-pointer",
-                  if(Map.get(@field_choices, field) == "non_survivor",
+                  if(
+                    effective_choice(@field_choices, @contact_a, @contact_b, field) == "non_survivor",
                     do:
                       "border-[var(--color-accent)] bg-[var(--color-accent-subtle)] text-[var(--color-accent)]",
                     else: "border-[var(--color-border)] hover:border-[var(--color-border-focus)]/50"
@@ -430,10 +431,28 @@ defmodule KithWeb.ContactLive.Merge do
   defp step_label(2), do: "Choose fields"
   defp step_label(3), do: "Review & merge"
 
-  defp default_field_choices do
-    @mergeable_fields
-    |> Enum.map(&{&1, "survivor"})
-    |> Map.new()
+  # Seeds no choices at all. A field the user never clicks must stay absent
+  # from this map: `Contacts.apply_legacy_choices/4` treats any present key as
+  # a deliberate pin and writes `:clear` when the chosen contact's value is
+  # nil, which silently discarded the resolver's gap fill for every wizard
+  # merge. Absent means "let the resolver decide", which is the whole point of
+  # the gap fill. `effective_choice/4` supplies the radio's display state so
+  # the UI still shows which value survives.
+  defp default_field_choices, do: %{}
+
+  # Which column the radio should show as selected. An explicit click wins.
+  # Otherwise mirror what `MergeResolution` will do: the survivor's value
+  # stands, unless the survivor has none and the loser has one.
+  defp effective_choice(choices, survivor, non_survivor, field) do
+    case Map.get(choices, field) do
+      nil ->
+        if is_nil(field_value(survivor, field)) and not is_nil(field_value(non_survivor, field)),
+          do: "non_survivor",
+          else: "survivor"
+
+      choice ->
+        choice
+    end
   end
 
   defp field_value(contact, field) do
