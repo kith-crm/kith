@@ -6,6 +6,8 @@ defmodule Kith.Contacts.MergeTest do
   alias Kith.ContactsFixtures
   alias Kith.AccountsFixtures
 
+  import Kith.RemindersFixtures
+
   setup do
     ContactsFixtures.seed_reference_data!()
     user = AccountsFixtures.user_fixture()
@@ -2034,6 +2036,65 @@ defmodule Kith.Contacts.MergeTest do
       assert merged.immich_status == "needs_review"
 
       assert merged.id in Enum.map(Contacts.list_needs_review(ctx.account_id), & &1.id)
+    end
+  end
+
+  describe "stay-in-touch reminders" do
+    setup ctx do
+      survivor_reminder =
+        stay_in_touch_reminder_fixture(ctx.account_id, ctx.contact_a.id, ctx.user.id, "monthly")
+
+      loser_reminder =
+        stay_in_touch_reminder_fixture(ctx.account_id, ctx.contact_b.id, ctx.user.id, "weekly")
+
+      Map.merge(ctx, %{
+        survivor_reminder: survivor_reminder,
+        loser_reminder: loser_reminder
+      })
+    end
+
+    test "leaves the survivor with exactly one active stay-in-touch reminder", ctx do
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      count =
+        Repo.aggregate(
+          from(r in Kith.Reminders.Reminder,
+            where: r.contact_id == ^survivor.id and r.type == "stay_in_touch" and r.active == true
+          ),
+          :count
+        )
+
+      assert count == 1
+    end
+
+    test "keeps the survivor's own reminder, not the loser's", ctx do
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      kept =
+        Repo.one!(
+          from(r in Kith.Reminders.Reminder,
+            where: r.contact_id == ^survivor.id and r.type == "stay_in_touch" and r.active == true
+          )
+        )
+
+      assert kept.id == ctx.survivor_reminder.id
+      assert kept.frequency == "monthly"
+    end
+
+    test "cancels the Oban jobs of the reminder it discards", ctx do
+      job = notification_job!(ctx.loser_reminder)
+
+      {:ok, _survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert Repo.get(Oban.Job, job.id).state in ["cancelled", "discarded"]
+    end
+
+    # The regression this whole task exists for: a second active reminder makes
+    # Reminders.resolve_stay_in_touch_instance/1 raise Ecto.MultipleResultsError.
+    test "logging an interaction after the merge does not raise", ctx do
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert {:ok, _} = Kith.Reminders.resolve_stay_in_touch_instance(survivor.id)
     end
   end
 end

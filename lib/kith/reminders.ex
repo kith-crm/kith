@@ -199,9 +199,17 @@ defmodule Kith.Reminders do
     end
   end
 
+  # `limit: 1` rather than a bare `Repo.one/1`: nothing in the schema enforces
+  # one active stay-in-touch reminder per contact (the only partial unique
+  # index on `reminders` covers birthdays), so any path that creates a second
+  # one — a merge, the API, a restored contact — would otherwise turn this
+  # into an `Ecto.MultipleResultsError` at the caller. `Kith.Contacts.Merge`
+  # dedupes on merge; this keeps the read total regardless.
   defp get_stay_in_touch_reminder(contact_id) do
     from(r in Reminder,
-      where: r.contact_id == ^contact_id and r.type == "stay_in_touch" and r.active == true
+      where: r.contact_id == ^contact_id and r.type == "stay_in_touch" and r.active == true,
+      order_by: [asc: r.id],
+      limit: 1
     )
     |> Repo.one()
   end
