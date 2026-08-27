@@ -669,8 +669,8 @@ defmodule Kith.Contacts.MergeTest do
       # such a pointer could exist). Resolving to that value passes
       # held_by_member?/3 — a member holds it — but applying it to the survivor
       # is rejected by Contact.update_changeset/2. A pointer at a merged member
-      # can no longer serve as the injection here: the engine coerces that to
-      # nil before validation (design spec D4).
+      # cannot serve as the injection here: the engine coerces that to nil
+      # before validation (design spec D4).
       stranger = foreign_contact()
 
       Repo.update_all(

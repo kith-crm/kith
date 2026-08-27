@@ -59,10 +59,10 @@ defmodule Kith.Contacts.Merge do
                      MergeFields.array_fields() ++
                      MergeFields.immich_fields() ++ MergeFields.coupled_flags()
 
-  # Every schema owning a contact_id that must follow the survivor. The six
-  # after `Reminder` are the ones the previous two-contact engine silently
-  # orphaned (Bug 1 in the design spec). `import_records` is deliberately
-  # absent: it references a contact through an untyped `local_entity_id`
+  # Every schema owning a contact_id that must follow the survivor. A schema
+  # missing from this list is silently orphaned by a merge, so it must stay
+  # exhaustive — `Kith.Contacts.MergeInvariantsTest` asserts it covers every
+  # table carrying a contact_id. `import_records` is deliberately absent: it references a contact through an untyped `local_entity_id`
   # bigint with no FK, so it gets its own step (`remap_import_records_step/4`)
   # rather than the blanket `contact_id` move.
   @owned_schemas [
@@ -213,10 +213,9 @@ defmodule Kith.Contacts.Merge do
     end)
     |> Multi.run(:remap_contact_tags, fn repo, _changes ->
       # contact_tags is a bare join table with no Ecto schema, so it is
-      # invisible to @owned_schemas but must still follow the survivor —
-      # mirrors the old engine's `:remap_contact_tags` step. unique_index
-      # on (contact_id, tag_id); two losers can share a tag the survivor
-      # doesn't have, so this dedupes across the whole cluster too.
+      # invisible to @owned_schemas but must still follow the survivor.
+      # unique_index on (contact_id, tag_id); two losers can share a tag the
+      # survivor doesn't have, so this dedupes across the whole cluster too.
       # Dropped tag ids are excluded from the move: a loser's link to a
       # dropped tag stays on the loser and rides to trash with it.
       dedupe_and_move_tags(repo, loser_ids, survivor.id, dropped_ids.tags)
@@ -310,7 +309,6 @@ defmodule Kith.Contacts.Merge do
   end
 
   defp resync_birthday_reminder(repo, rows, survivor, account_id) do
-    # `reminder_keep_id/2` — renamed from `birthday_reminder_keep_id/2` in Task 2.
     keep_id = reminder_keep_id(rows, survivor.id)
     next_date = Kith.TimeHelper.next_birthday_date(survivor.birthdate)
     reminder = repo.get!(Kith.Reminders.Reminder, keep_id)
