@@ -31,12 +31,16 @@ defmodule Kith.DuplicateDetection do
   end
 
   def dismiss_candidate(%DuplicateCandidate{} = candidate) do
+    invalidate_cluster_count(candidate.account_id)
     candidate |> DuplicateCandidate.dismiss_changeset() |> Repo.update()
   end
 
   def mark_merged(%DuplicateCandidate{} = candidate) do
+    invalidate_cluster_count(candidate.account_id)
     candidate |> DuplicateCandidate.merge_changeset() |> Repo.update()
   end
+
+  @cluster_count_ttl :timer.minutes(5)
 
   def pending_count(account_id) do
     DuplicateCandidate
@@ -161,6 +165,8 @@ defmodule Kith.DuplicateDetection do
   end
 
   defp merge_or_insert(account_id, low, high, candidate) do
+    invalidate_cluster_count(account_id)
+
     existing =
       Repo.one(
         from(d in DuplicateCandidate,
@@ -240,10 +246,39 @@ defmodule Kith.DuplicateDetection do
 
   Counts groups directly from the union-find derivation rather than building
   full `%Cluster{}` structs, so it never queries contacts.
+
+  Cached per account. This is the sidebar badge, which `KithWeb.UserAuth`
+  resolves in an `on_mount` hook — so it runs for every authenticated
+  LiveView, twice per navigation (disconnected then connected mount), on a
+  screen that may have nothing to do with duplicates. Every write path that
+  can change the answer drops the entry, so the TTL is only a backstop against
+  a change made outside this module.
   """
   def cluster_count(account_id) do
+    case Cachex.fetch(:kith_cache, cluster_count_key(account_id), fn _key ->
+           {:commit, compute_cluster_count(account_id), ttl: @cluster_count_ttl}
+         end) do
+      {:ok, count} -> count
+      {:commit, count} -> count
+      # A cache that is down or erroring must not take the badge — and with it
+      # every authenticated page — down with it.
+      _ -> compute_cluster_count(account_id)
+    end
+  end
+
+  defp compute_cluster_count(account_id) do
     {acc, _pending} = derive_groups(account_id)
     Enum.count(acc.groups, fn {_id, members} -> MapSet.size(members) >= 2 end)
+  end
+
+  defp cluster_count_key(account_id), do: {:duplicate_cluster_count, account_id}
+
+  # Called from every path that inserts, updates or resolves a candidate row.
+  # Placed on the low-level writes rather than the public entry points so a new
+  # caller cannot route around it.
+  defp invalidate_cluster_count(account_id) do
+    Cachex.del(:kith_cache, cluster_count_key(account_id))
+    :ok
   end
 
   defp build_clusters(account_id) do
@@ -252,23 +287,8 @@ defmodule Kith.DuplicateDetection do
   end
 
   defp derive_groups(account_id) do
-    candidates =
-      DuplicateCandidate
-      |> scope_to_account(account_id)
-      |> where([d], d.status in ["pending", "dismissed"])
-      |> join(:inner, [d], one in Contact,
-        on: one.id == d.contact_id and one.account_id == ^account_id
-      )
-      |> join(:inner, [d, one], two in Contact,
-        on: two.id == d.duplicate_contact_id and two.account_id == ^account_id
-      )
-      |> where([d, one, two], is_nil(one.deleted_at) and is_nil(two.deleted_at))
-      |> select([d], d)
-      |> Repo.all()
-
-    {pending, dismissed} = Enum.split_with(candidates, &(&1.status == "pending"))
-
-    negatives = index_negatives(dismissed)
+    pending = pending_candidates(account_id)
+    negatives = pending |> blocking_dismissed(account_id) |> index_negatives()
 
     acc =
       pending
@@ -282,12 +302,55 @@ defmodule Kith.DuplicateDetection do
     {acc, pending}
   end
 
+  defp pending_candidates(account_id) do
+    DuplicateCandidate
+    |> scope_to_account(account_id)
+    |> where([d], d.status == "pending")
+    |> join(:inner, [d], one in Contact,
+      on: one.id == d.contact_id and one.account_id == ^account_id
+    )
+    |> join(:inner, [d, one], two in Contact,
+      on: two.id == d.duplicate_contact_id and two.account_id == ^account_id
+    )
+    |> where([d, one, two], is_nil(one.deleted_at) and is_nil(two.deleted_at))
+    |> select([d], d)
+    |> Repo.all()
+  end
+
+  # Only dismissed pairs with *both* endpoints in the pending set can change
+  # the outcome: `ensure_group/2` is called with nothing but pending endpoints,
+  # so every group member is one, and `blocked?/4` only ever looks up ids drawn
+  # from two groups. A negative edge touching a contact no pending pair
+  # mentions can never be consulted.
+  #
+  # This is what keeps the derivation bounded. Dismissed rows are permanent and
+  # `dismiss_selection/3` writes a full clique over the selection, so the
+  # account's dismissed set grows without limit — loading all of it made every
+  # derivation proportional to the account's whole dismissal history rather
+  # than to the work actually pending.
+  #
+  # The endpoints came from the join above, so they are already known live and
+  # account-scoped; the contacts join is not repeated here.
+  defp blocking_dismissed([], _account_id), do: []
+
+  defp blocking_dismissed(pending, account_id) do
+    ids =
+      Enum.reduce(pending, MapSet.new(), fn d, acc ->
+        acc |> MapSet.put(d.contact_id) |> MapSet.put(d.duplicate_contact_id)
+      end)
+      |> MapSet.to_list()
+
+    DuplicateCandidate
+    |> scope_to_account(account_id)
+    |> where([d], d.status == "dismissed")
+    |> where([d], d.contact_id in ^ids and d.duplicate_contact_id in ^ids)
+    |> select([d], d)
+    |> Repo.all()
+  end
+
   # Dismissed pairs indexed as contact_id => the set of contact ids it was
   # dismissed against, so `blocked?/4` can look up membership instead of
-  # scanning every dismissed row. Dismissed rows are permanent negative edges
-  # (never deleted), so that set grows for the life of the account while the
-  # pending set stays small — without this index `blocked?/4` was the
-  # dominant cost of every cluster derivation.
+  # scanning them. Only the pairs `blocking_dismissed/2` kept reach here.
   defp index_negatives(dismissed) do
     Enum.reduce(dismissed, %{}, fn d, acc ->
       acc
@@ -505,6 +568,7 @@ defmodule Kith.DuplicateDetection do
   Returns `:ok`, or `{:error, reason}` if the transaction failed.
   """
   def dismiss_selection(account_id, selected_ids, unchecked_ids) do
+    invalidate_cluster_count(account_id)
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     selected_ids = owned_ids(account_id, selected_ids)

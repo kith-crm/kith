@@ -137,9 +137,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   @impl true
   def handle_event("toggle-member", %{"id" => id}, socket) do
-    with {:ok, id} <- cast_member_id(id) do
-      toggle_member(socket, id)
-    else
+    case cast_member_id(id) do
+      {:ok, id} -> toggle_member(socket, id)
       :error -> {:noreply, socket}
     end
   end

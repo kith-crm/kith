@@ -88,42 +88,63 @@ defmodule Kith.Contacts.MergeFields do
   with `null: false` later is covered on its own.
   """
   def non_clearable do
-    changeset_required =
-      %Contact{}
-      |> Contact.update_changeset(%{})
-      |> Map.fetch!(:required)
+    cached(:non_clearable, fn ->
+      changeset_required =
+        %Contact{}
+        |> Contact.update_changeset(%{})
+        |> Map.fetch!(:required)
 
-    Enum.uniq(changeset_required ++ not_null_fields())
+      Enum.uniq(changeset_required ++ not_null_fields())
+    end)
   end
 
   @doc """
   Mergeable fields backed by a `NOT NULL` column on `contacts`.
-
-  Cached in `:persistent_term` — the answer is a property of the deployed
-  schema, and `non_clearable?/1` is called once per field per render and again
-  for every field inside the merge transaction.
   """
   def not_null_fields do
-    key = {__MODULE__, :not_null_fields}
+    cached(:not_null_fields, &query_not_null_fields/0)
+  end
+
+  # Both halves of `non_clearable/0` are cached, not just the query: the
+  # changeset half builds a `%Contact{}` and runs `update_changeset/2` over it,
+  # and `non_clearable?/1` is called once per choice field per render — 17
+  # changesets a render — and again for every field inside the merge
+  # transaction.
+  #
+  # `:persistent_term` because both answers are properties of the deployed
+  # schema and the compiled changeset, so they cannot change while the node is
+  # running. A migration that relaxes a nullability constraint is picked up on
+  # the next restart, which is when the migration's own deploy happens anyway;
+  # there is no purge path because nothing would call it.
+  defp cached(name, fun) do
+    key = {__MODULE__, name}
 
     case :persistent_term.get(key, nil) do
       nil ->
-        fields = query_not_null_fields()
-        :persistent_term.put(key, fields)
-        fields
+        value = fun.()
+        :persistent_term.put(key, value)
+        value
 
-      fields ->
-        fields
+      value ->
+        value
     end
   end
 
   # Compared as strings and filtered against the registry, so no atom is
   # created from a database identifier.
+  #
+  # Scoped to `current_schema()`: `information_schema.columns` spans every
+  # schema in the database, so without it any other `contacts` table — a
+  # leftover, a second tenant schema — contributes its `NOT NULL` columns to
+  # the union, and a column nullable here but `NOT NULL` there would be
+  # reported non-clearable and hide the "Leave empty" button.
   defp query_not_null_fields do
     %{rows: rows} =
       Kith.Repo.query!("""
       SELECT column_name FROM information_schema.columns
-      WHERE table_name = 'contacts' AND is_nullable = 'NO'
+      WHERE table_name = 'contacts'
+        AND table_schema = current_schema()
+        AND is_nullable = 'NO'
       """)
 
     names = rows |> List.flatten() |> MapSet.new()

@@ -134,6 +134,35 @@ defmodule Kith.Contacts.MergeSummaryTest do
     assert summary.history.calls == 0
   end
 
+  # `Merge`'s `remap_relationships/4` rewrites `related_contact_id` as well as
+  # `contact_id`, so a member that is only ever the target of relationships
+  # still has rows moved onto the survivor. Counting the first endpoint alone
+  # reported 0 for it and understated the "records move to the primary" line.
+  test "history counts relationships pointing at a member as well as from it", ctx do
+    [friend_type | _] = Repo.all(from(rt in "relationship_types", select: rt.id, limit: 1))
+
+    outsider =
+      ContactsFixtures.contact_fixture(ctx.user.account_id, %{first_name: "Outsider"})
+
+    # Neither member is the `contact_id` of either row.
+    ContactsFixtures.relationship_fixture(outsider, ctx.a, friend_type)
+    ContactsFixtures.relationship_fixture(outsider, ctx.b, friend_type)
+
+    summary = MergeSummary.build([ctx.a, ctx.b])
+
+    assert summary.history.relationships == 2
+  end
+
+  test "history counts a relationship between two members once", ctx do
+    [friend_type | _] = Repo.all(from(rt in "relationship_types", select: rt.id, limit: 1))
+
+    ContactsFixtures.relationship_fixture(ctx.a, ctx.b, friend_type)
+
+    summary = MergeSummary.build([ctx.a, ctx.b])
+
+    assert summary.history.relationships == 1
+  end
+
   # `Kith.Contacts.Merge`'s dedupe runs `lower(btrim(value))`, and one-argument
   # `btrim` strips SPACES ONLY. `String.trim/1` strips every Unicode whitespace
   # character, so a tab-prefixed value used to read as "duplicate · dropped" on

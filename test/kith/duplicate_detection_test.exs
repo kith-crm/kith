@@ -604,6 +604,35 @@ defmodule Kith.DuplicateDetectionTest do
       assert Kith.DuplicateDetection.cluster_count(ctx.account_id) == 2
     end
 
+    # cluster_count/1 is the sidebar badge and is cached per account, so every
+    # write path has to drop the entry. Without that, dismissing a cluster
+    # leaves the badge claiming it is still waiting for review.
+    test "cluster_count/1 reflects a dismissal made after it was first read", ctx do
+      %{a: a, b: b, d: d, e: e} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+      candidate!(ctx.account_id, d, e)
+
+      assert Kith.DuplicateDetection.cluster_count(ctx.account_id) == 2
+
+      :ok = Kith.DuplicateDetection.dismiss_selection(ctx.account_id, [a.id, b.id], [])
+
+      assert Kith.DuplicateDetection.cluster_count(ctx.account_id) == 1
+    end
+
+    # A dismissed pair only matters if both its endpoints are in the pending
+    # set, which is what `blocking_dismissed/2` relies on to stay bounded.
+    test "a dismissal against a contact with no pending pair changes nothing", ctx do
+      %{a: a, b: b, d: d} = ctx.contacts
+      candidate!(ctx.account_id, a, b)
+      candidate!(ctx.account_id, a, d, status: "dismissed")
+
+      before = Kith.DuplicateDetection.list_clusters(ctx.account_id)
+
+      assert Kith.DuplicateDetection.cluster_count(ctx.account_id) == 1
+      assert [cluster] = before
+      assert Enum.sort(member_ids(cluster)) == Enum.sort([a.id, b.id])
+    end
+
     test "equal max_score breaks the tie by ascending key", ctx do
       %{a: a, b: b, d: d, e: e} = ctx.contacts
       candidate!(ctx.account_id, a, b, score: 0.8)
