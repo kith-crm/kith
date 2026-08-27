@@ -35,15 +35,6 @@ defmodule Kith.Contacts do
   alias Kith.Activities.{Activity, Call}
   alias Kith.Storage
 
-  # Suppress Ecto.Multi opaque type warnings (Dialyzer false positives)
-  @dialyzer [
-    {:nowarn_function, set_avatar: 2},
-    {:nowarn_function, confirm_immich_link: 3},
-    {:nowarn_function, unlink_immich: 1},
-    {:nowarn_function, merge_tags: 3},
-    {:nowarn_function, merge_contacts: 3}
-  ]
-
   ## Contacts
 
   def list_contacts(account_id, opts \\ []) do

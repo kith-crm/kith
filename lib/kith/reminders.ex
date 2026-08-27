@@ -25,17 +25,6 @@ defmodule Kith.Reminders do
     ReminderRule
   }
 
-  # Suppress Ecto.Multi opaque type warnings (Dialyzer false positives)
-  @dialyzer [
-    {:nowarn_function, create_reminder: 3},
-    {:nowarn_function, update_reminder: 2},
-    {:nowarn_function, delete_reminder: 1},
-    {:nowarn_function, resolve_stay_in_touch_instance: 1},
-    {:nowarn_function, resolve_instance: 1},
-    {:nowarn_function, dismiss_instance: 1},
-    {:nowarn_function, cancel_enqueued_jobs_step: 2}
-  ]
-
   # ── Reminders CRUD ──────────────────────────────────────────────────────
 
   @doc """
