@@ -69,11 +69,42 @@ defmodule KithWeb.ContactLive.MergeTest do
     test "an untouched field with a nil survivor value highlights the loser column",
          %{conn: conn, survivor: survivor, loser: loser} do
       view = open_on_step_two(conn, survivor, loser)
-      html = render(view)
 
-      # `company` is nil on the survivor and set on the loser, so the loser's
-      # cell is the one that survives — the radio must say so.
-      assert html =~ "Acme"
+      survivor_button =
+        view
+        |> element(~s{button[phx-value-field="company"][phx-value-source="survivor"]})
+        |> render()
+
+      loser_button =
+        view
+        |> element(~s{button[phx-value-field="company"][phx-value-source="non_survivor"]})
+        |> render()
+
+      # `company` is nil on the survivor and "Acme" on the loser, so the
+      # loser's value is the one that survives — the highlight must be on
+      # that button, not the survivor's.
+      assert loser_button =~ "color-accent-subtle"
+      refute survivor_button =~ "color-accent-subtle"
+    end
+
+    test "an untouched field the survivor holds keeps the highlight on the survivor",
+         %{conn: conn, survivor: survivor, loser: loser} do
+      view = open_on_step_two(conn, survivor, loser)
+
+      survivor_button =
+        view
+        |> element(~s{button[phx-value-field="occupation"][phx-value-source="survivor"]})
+        |> render()
+
+      loser_button =
+        view
+        |> element(~s{button[phx-value-field="occupation"][phx-value-source="non_survivor"]})
+        |> render()
+
+      # `occupation` is "Designer" on the survivor and nil on the loser, so
+      # the survivor's value stands and its button keeps the highlight.
+      assert survivor_button =~ "color-accent-subtle"
+      refute loser_button =~ "color-accent-subtle"
     end
 
     test "an explicit survivor choice still pins a nil, clearing the field",
