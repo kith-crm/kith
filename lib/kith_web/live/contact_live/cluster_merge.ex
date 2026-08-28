@@ -14,6 +14,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   alias Kith.Contacts.{MergeFields, MergeResolution, MergeSummary}
   alias Kith.DuplicateDetection
   alias Kith.Policy
+  alias Kith.Storage
+  alias KithWeb.ContactLive.SectionNav
 
   # The value sections, keyed on the identifier the drop payload and the
   # summary both use. The display label is a rendering detail hanging off that
@@ -893,6 +895,31 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       current_path={@current_path}
       pending_duplicates_count={@pending_duplicates_count}
     >
+      <%!--
+        Section header + sub-nav. The wizard is its own LiveView, so it does not
+        inherit the Contacts tab bar from `ContactLive.Index`; render the shared
+        one here and give the user a way back to where they came from. A
+        synthetic merge (manual / `?with=`) was not reached from the duplicates
+        list, so it points back at the contacts index instead.
+      --%>
+      <div class="max-w-4xl mx-auto space-y-4 mb-4">
+        <.link
+          navigate={if @synthetic?, do: ~p"/contacts", else: ~p"/contacts/duplicates"}
+          class="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+        >
+          <.icon name="hero-arrow-left" class="size-4" />
+          {if @synthetic?, do: "Back to contacts", else: "Back to duplicates"}
+        </.link>
+        <h1 class="text-2xl font-semibold text-[var(--color-text-primary)] tracking-tight">
+          Merge duplicates
+        </h1>
+        <SectionNav.section_nav
+          active={if @synthetic?, do: :index, else: :duplicates}
+          pending_duplicates_count={@pending_duplicates_count}
+          link_mode={:navigate}
+        />
+      </div>
+
       <div class="max-w-4xl mx-auto space-y-4">
         <div
           :if={@error}
@@ -1052,7 +1079,13 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                   )
                 ]}
               >
-                {display(assigns, field, candidate.value)}
+                <%!--
+                  `avatar` holds a storage key, not a label: render the image it
+                  points at (initials fallback is `KithUI.avatar`'s own job when
+                  the URL is blank), mirroring the member chips above.
+                --%>
+                <KithUI.avatar :if={field == :avatar} src={Storage.url(candidate.value)} size={:md} />
+                <span :if={field != :avatar}>{display(assigns, field, candidate.value)}</span>
                 <span class="block text-[10px] opacity-70">{candidate.count} record(s)</span>
               </button>
               <button
