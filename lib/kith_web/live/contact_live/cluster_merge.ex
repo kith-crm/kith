@@ -65,6 +65,33 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   @impl true
   def mount(_params, _session, socket), do: {:ok, assign(socket, :error, nil)}
 
+  # A contact id from the URL, or `nil` if it could never name a row: not an
+  # integer, or outside what the column can hold.
+  defp parse_contact_id(raw) when is_binary(raw) do
+    case Integer.parse(raw) do
+      {id, ""} when id > 0 and id <= @max_bigint -> id
+      _ -> nil
+    end
+  end
+
+  defp parse_contact_id(_raw), do: nil
+
+  # Resolves a client-supplied id against records the socket already holds.
+  #
+  # Every id in an event payload here names something already on screen, so
+  # none of them is ever parsed and handed to the database: LiveView payloads
+  # are fully attacker-controlled (see the framework's security guide), and
+  # matching on the rendered form means an unknown, malformed, or oversized id
+  # simply finds nothing instead of reaching Postgrex.
+  defp find_by_id(records, id) when is_binary(id) do
+    Enum.find(records, &(to_string(&1.id) == id))
+  end
+
+  # A payload value that is not a string cannot name anything on screen —
+  # every id is rendered as a string — so it finds nothing, exactly as an
+  # unknown string id would.
+  defp find_by_id(_records, _id), do: nil
+
   @impl true
   def handle_params(%{"id" => id} = params, _uri, socket) do
     scope = socket.assigns.current_scope
@@ -74,11 +101,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     # "not found" redirect as an unknown id rather than raising. An id wider
     # than `bigint` is refused for the same reason: it parses, but Postgrex
     # then refuses to encode it.
-    contact_id =
-      case Integer.parse(id) do
-        {contact_id, ""} when contact_id in 0..@max_bigint -> contact_id
-        _ -> nil
-      end
+    contact_id = parse_contact_id(id)
 
     cond do
       not Policy.can?(scope.user, :update, :contact) ->
@@ -117,9 +140,9 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       with_param
       |> String.split(",", trim: true)
       |> Enum.flat_map(fn raw ->
-        case Integer.parse(raw) do
-          {id, ""} when id in 0..@max_bigint -> [id]
-          _ -> []
+        case parse_contact_id(raw) do
+          nil -> []
+          id -> [id]
         end
       end)
       |> Enum.uniq()
@@ -228,7 +251,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   @impl true
   def handle_event("search", %{"query" => query}, socket) do
     results =
-      if String.length(query) >= 2 do
+      if is_binary(query) and String.length(query) >= 2 do
         current = MapSet.new(socket.assigns.members, & &1.id)
 
         socket.assigns.current_scope.account.id
@@ -246,6 +269,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       else
         []
       end
+
+    query = if is_binary(query), do: query, else: ""
 
     {:noreply, socket |> assign(:search_query, query) |> assign(:search_results, results)}
   end
@@ -435,72 +460,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     end
   end
 
-  defp toggled(socket, section) do
-    open =
-      if MapSet.member?(socket.assigns.open_sections, section) do
-        MapSet.delete(socket.assigns.open_sections, section)
-      else
-        MapSet.put(socket.assigns.open_sections, section)
-      end
-
-    open
-  end
-
-  defp choose_immich(socket, id) do
-    # Must resolve against the *selected* members, not `socket.assigns.members`
-    # — the row only renders buttons for selected linked members, but a
-    # crafted event carrying a deselected member's id would otherwise adopt
-    # that member's Immich group unchallenged, since slice 1 exempts the
-    # Immich group from `held_by_member?/3`.
-    case Enum.find(selected_members(socket), &(&1.id == id)) do
-      nil ->
-        {:noreply, socket}
-
-      member ->
-        # All four columns move together or the survivor ends up with one
-        # record's person id and another's sync timestamp.
-        overrides =
-          MergeFields.immich_fields()
-          |> Enum.reduce(socket.assigns.overrides, fn field, acc ->
-            Map.put(acc, field, Map.fetch!(member, field) || :clear)
-          end)
-          |> Map.put(:__immich__, id)
-
-        {:noreply, assign(socket, :overrides, overrides)}
-    end
-  end
-
-  defp dismiss_selection(socket) do
-    case DuplicateDetection.dismiss_selection(
-           socket.assigns.current_scope.account.id,
-           MapSet.to_list(socket.assigns.selected_ids),
-           unchecked_ids(socket)
-         ) do
-      :ok ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Marked as not duplicates")
-         |> redirect(to: ~p"/contacts/duplicates")}
-
-      # A half-written clique is rolled back, so the screen must not claim the
-      # dismissal stuck. Staying put keeps the selection intact for a retry.
-      {:error, _reason} ->
-        {:noreply,
-         put_flash(socket, :error, "Could not mark these as not duplicates. Please try again.")}
-    end
-  end
-
-  # Spec G2 is "open **or** submit": `handle_params/3` only covers the open.
-  # A role downgrade while this page is open, or a reused socket, leaves a
-  # mounted screen whose submit would otherwise never be re-checked.
-  defp authorized?(socket),
-    do: Policy.can?(socket.assigns.current_scope.user, :update, :contact)
-
-  defp refuse(socket) do
-    socket
-    |> put_flash(:error, "You don't have permission to merge contacts")
-    |> push_navigate(to: ~p"/contacts")
-  end
+  defp choose_field_candidate(_socket, _field, _index), do: nil
 
   defp run_merge(socket) do
     survivor_id = socket.assigns.primary_id

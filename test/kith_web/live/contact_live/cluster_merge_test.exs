@@ -1506,4 +1506,29 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert html =~ "Zoe"
     end
   end
+
+  describe "malformed event payloads" do
+    test "non-binary ids are ignored rather than crashing", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      for event <- ["toggle-member", "set-primary", "add-member", "choose-immich"] do
+        assert render_hook(live, event, %{"id" => 5})
+        assert Process.alive?(live.pid)
+      end
+    end
+
+    test "non-binary field index is ignored", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert render_hook(live, "choose-field", %{"field" => "company", "index" => 0})
+      assert Process.alive?(live.pid)
+    end
+
+    test "non-binary search query is ignored", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert render_hook(live, "search", %{"query" => 12_345})
+      assert Process.alive?(live.pid)
+    end
+  end
 end
