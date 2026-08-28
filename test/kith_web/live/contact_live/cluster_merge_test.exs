@@ -1527,8 +1527,16 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     test "non-binary search query is ignored", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
-      assert render_hook(live, "search", %{"query" => 12_345})
+      render_hook(live, "search", %{"query" => 12_345})
+
       assert Process.alive?(live.pid)
+
+      # The guard alone stops the crash; only the rebind stops the integer
+      # from reaching `:search_query` and round-tripping into the rendered
+      # input's value.
+      input = live |> element(~s(input[name="query"])) |> render()
+      assert input =~ ~s(value="")
+      refute input =~ ~s(value="12345")
     end
   end
 end
