@@ -21,15 +21,6 @@ defmodule Kith.Accounts do
     WebauthnCredential
   }
 
-  # Suppress Ecto.Multi opaque type warnings (Dialyzer false positives)
-  @dialyzer [
-    {:nowarn_function, register_user: 1},
-    {:nowarn_function, confirm_user: 1},
-    {:nowarn_function, register_oauth_user: 4},
-    {:nowarn_function, accept_invitation: 2},
-    {:nowarn_function, do_remove_user: 1}
-  ]
-
   ## Database getters
 
   @doc """

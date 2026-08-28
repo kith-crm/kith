@@ -350,10 +350,10 @@ defmodule KithWeb.Router do
       live "/contacts/archived", ContactLive.Index, :archived
       live "/contacts/trash", ContactLive.Index, :trash
       live "/contacts/duplicates", ContactLive.Index, :duplicates
+      live "/contacts/duplicates/cluster/:id", ContactLive.ClusterMerge, :show
       live "/contacts/new", ContactLive.New, :new
       live "/contacts/:id", ContactLive.Show, :show
       live "/contacts/:id/edit", ContactLive.Edit, :edit
-      live "/contacts/:id/merge", ContactLive.Merge, :index
 
       # Settings
       live "/settings/tags", SettingsLive.Tags, :index

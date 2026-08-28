@@ -1,6 +1,7 @@
 defmodule KithWeb.API.ContactControllerTest do
   use KithWeb.ConnCase
 
+  import Ecto.Query
   import Kith.AccountsFixtures
   import Kith.ContactsFixtures
 
@@ -172,6 +173,44 @@ defmodule KithWeb.API.ContactControllerTest do
       # Non-survivor should be gone (soft-deleted)
       get_resp = conn |> get(~p"/api/contacts/#{non_survivor.id}") |> json_response(404)
       assert get_resp["status"] == 404
+    end
+
+    test "keeps the survivor's value when the non-survivor is newer, and fills gaps", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      conn = authed_conn(conn, user)
+
+      survivor =
+        contact_fixture(user.account_id, %{
+          first_name: "Survivor",
+          last_name: "Smith",
+          middle_name: nil
+        })
+
+      non_survivor =
+        contact_fixture(user.account_id, %{
+          first_name: "NonSurvivor",
+          last_name: "Jones",
+          middle_name: "Filled"
+        })
+
+      # The resolver breaks a 1-1 conflict by most-recently-updated, so make the
+      # non-survivor unambiguously newer: without the survivor-value protection
+      # this merge renames the survivor to "NonSurvivor".
+      Kith.Repo.update_all(
+        from(c in Kith.Contacts.Contact, where: c.id == ^non_survivor.id),
+        set: [updated_at: DateTime.add(DateTime.utc_now(:second), 3600, :second)]
+      )
+
+      body = %{"survivor_id" => survivor.id, "non_survivor_id" => non_survivor.id}
+
+      resp = conn |> post(~p"/api/contacts/merge", body) |> json_response(200)
+
+      assert resp["data"]["first_name"] == "Survivor"
+      assert resp["data"]["last_name"] == "Smith"
+      # A field the survivor had no value for is still gap-filled (design spec §6).
+      assert resp["data"]["middle_name"] == "Filled"
     end
   end
 

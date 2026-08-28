@@ -231,7 +231,7 @@ defmodule KithWeb.UserAuth do
        Phoenix.Component.assign(
          socket,
          :pending_duplicates_count,
-         DuplicateDetection.pending_count(account_id)
+         DuplicateDetection.cluster_count(account_id)
        )}
     else
       socket =

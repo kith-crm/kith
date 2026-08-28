@@ -180,6 +180,17 @@
               <.icon name="hero-trash" class="size-3.5" /> Delete
             </button>
 
+            <%= if MapSet.size(@selected_ids) > 1 do %>
+              <div class="w-px h-5 bg-[var(--color-border)]" />
+              <.link
+                data-role="merge-selected"
+                navigate={merge_selected_path(@selected_ids)}
+                class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-sunken)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
+              >
+                <.icon name="hero-arrows-right-left" class="size-3.5" /> Merge selected
+              </.link>
+            <% end %>
+
             <%!-- Bulk tag dropdowns --%>
             <%= if @tags != [] do %>
               <div class="w-px h-5 bg-[var(--color-border)]" />
@@ -379,11 +390,9 @@
     <%!-- Duplicates panel --%>
     <%= if @live_action == :duplicates do %>
       <div class="flex items-center justify-between">
-        <div>
-          <p class="text-sm text-[var(--color-text-secondary)]">
-            {@duplicates_total} potential duplicate{if @duplicates_total != 1, do: "s"} found
-          </p>
-        </div>
+        <p class="text-sm text-[var(--color-text-secondary)]">
+          {@clusters_total} possible duplicate{if @clusters_total != 1, do: "s"} found
+        </p>
         <button
           phx-click="scan"
           class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-accent-foreground)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-accent-hover)] transition-colors cursor-pointer"
@@ -392,7 +401,7 @@
         </button>
       </div>
 
-      <%= if @candidates == [] do %>
+      <%= if @clusters == [] do %>
         <KithUI.empty_state
           icon="hero-check-circle"
           title="No duplicates found"
@@ -400,79 +409,46 @@
         />
       <% else %>
         <div class="space-y-4">
-          <%= for candidate <- @candidates do %>
-            <div class="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] shadow-sm p-4">
-              <div class="flex items-center justify-between mb-3">
-                <div class="flex items-center gap-2">
-                  <span class={[
-                    "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-                    candidate.score >= 0.8 &&
-                      "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-                    candidate.score >= 0.5 && candidate.score < 0.8 &&
-                      "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400",
-                    candidate.score < 0.5 &&
-                      "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                  ]}>
-                    {Float.round(candidate.score * 100, 0)}% match
-                  </span>
-                  <span class="text-xs text-[var(--color-text-tertiary)]">
-                    {Enum.join(candidate.reasons, ", ")}
-                  </span>
-                </div>
+          <.link
+            :for={cluster <- @clusters}
+            navigate={~p"/contacts/duplicates/cluster/#{cluster.key}"}
+            class="block rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] shadow-sm p-4 hover:border-[var(--color-border-focus)] transition-colors"
+          >
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <span class="inline-flex items-center rounded-full bg-[var(--color-accent-subtle)] text-[var(--color-accent)] px-2 py-0.5 text-xs font-medium">
+                  {round(cluster.max_score * 100)}% match
+                </span>
                 <span class="text-xs text-[var(--color-text-tertiary)]">
-                  Detected <KithUI.date_display date={candidate.detected_at} />
+                  {Enum.join(cluster.reasons, ", ")}
                 </span>
               </div>
-
-              <div class="grid grid-cols-2 gap-4">
-                <div class="rounded-[var(--radius-md)] border border-[var(--color-border-subtle)] p-3">
-                  <.link
-                    navigate={~p"/contacts/#{candidate.contact.id}"}
-                    class="text-sm font-semibold text-[var(--color-accent)] hover:underline"
-                  >
-                    {candidate.contact.display_name}
-                  </.link>
-                </div>
-                <div class="rounded-[var(--radius-md)] border border-[var(--color-border-subtle)] p-3">
-                  <.link
-                    navigate={~p"/contacts/#{candidate.duplicate_contact.id}"}
-                    class="text-sm font-semibold text-[var(--color-accent)] hover:underline"
-                  >
-                    {candidate.duplicate_contact.display_name}
-                  </.link>
-                </div>
-              </div>
-
-              <div class="flex gap-2 mt-3">
-                <.link
-                  navigate={
-                    ~p"/contacts/#{candidate.contact.id}/merge?with=#{candidate.duplicate_contact.id}&candidate_id=#{candidate.id}"
-                  }
-                  class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-accent-foreground)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--color-accent-hover)] transition-colors"
-                >
-                  <.icon name="hero-arrows-right-left" class="size-4" /> Merge
-                </.link>
-                <button
-                  phx-click="dismiss"
-                  phx-value-id={candidate.id}
-                  class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] px-3 py-1.5 text-xs font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-sunken)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
-                >
-                  <.icon name="hero-x-mark" class="size-4" /> Dismiss
-                </button>
-              </div>
+              <span class="text-sm font-medium text-[var(--color-text-secondary)]">
+                {length(cluster.contacts)} contacts
+              </span>
             </div>
-          <% end %>
 
-          <%= if @duplicates_has_more do %>
-            <div class="flex justify-center pt-2 pb-4">
-              <button
-                phx-click="load_more_duplicates"
-                class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-sunken)] hover:text-[var(--color-text-primary)] border border-[var(--color-border)] transition-colors cursor-pointer"
+            <div class="flex flex-wrap items-center gap-2">
+              <span
+                :for={contact <- cluster.contacts}
+                class="inline-flex items-center gap-2 rounded-full border border-[var(--color-border-subtle)] ps-1 pe-3 py-1"
               >
-                Load more
-              </button>
+                <KithUI.avatar name={contact.display_name} src={avatar_url(contact)} size={:sm} />
+                <span class="text-sm text-[var(--color-text-primary)]">
+                  {contact.display_name}
+                </span>
+              </span>
             </div>
-          <% end %>
+          </.link>
+
+          <div :if={@clusters_has_more} class="flex justify-center pt-2 pb-4">
+            <button
+              phx-click="load_more_duplicates"
+              class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-sunken)] hover:text-[var(--color-text-primary)] border border-[var(--color-border)] transition-colors cursor-pointer"
+            >
+              Load more
+            </button>
+          </div>
         </div>
       <% end %>
     <% end %>

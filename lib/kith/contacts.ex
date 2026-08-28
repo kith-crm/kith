@@ -21,6 +21,9 @@ defmodule Kith.Contacts do
     Gender,
     ImmichCandidate,
     LifeEventType,
+    Merge,
+    MergeFields,
+    MergeResolution,
     Note,
     PhoneFormatter,
     Photo,
@@ -31,15 +34,6 @@ defmodule Kith.Contacts do
 
   alias Kith.Activities.{Activity, Call}
   alias Kith.Storage
-
-  # Suppress Ecto.Multi opaque type warnings (Dialyzer false positives)
-  @dialyzer [
-    {:nowarn_function, set_avatar: 2},
-    {:nowarn_function, confirm_immich_link: 3},
-    {:nowarn_function, unlink_immich: 1},
-    {:nowarn_function, merge_tags: 3},
-    {:nowarn_function, merge_contacts: 3}
-  ]
 
   ## Contacts
 
@@ -70,31 +64,55 @@ defmodule Kith.Contacts do
     |> Repo.all()
   end
 
-  def search_contacts(account_id, query) do
+  @doc """
+  Searches contacts by name, nickname, company, alias or contact-field value.
+
+  ## Options
+
+    * `:limit` - cap the rows the database returns (default: no cap)
+    * `:preload_tags` - preload `:tags` on each result (default: `true`)
+  """
+  def search_contacts(account_id, query, opts \\ []) do
     search = "%#{String.replace(query, ~r/[%_\\]/, "\\\\\\0")}%"
 
-    Contact
-    |> scope_active(account_id)
-    |> join(:left, [c], cf in ContactField, on: cf.contact_id == c.id)
-    |> where(
-      [c, cf],
-      ilike(c.first_name, ^search) or
-        ilike(c.last_name, ^search) or
-        ilike(c.display_name, ^search) or
-        ilike(c.nickname, ^search) or
-        ilike(c.company, ^search) or
-        ilike(cf.value, ^search) or
-        fragment(
-          "EXISTS (SELECT 1 FROM unnest(?) AS alias WHERE alias ILIKE ?)",
-          c.aliases,
-          ^search
-        )
-    )
-    |> distinct([c], c.id)
-    |> order_by([c], asc: c.display_name)
-    |> preload([:tags])
+    # `distinct([c], c.id)` forces `c.id` to the front of the generated
+    # ORDER BY, so an alphabetical sort cannot live in the same query — it
+    # would only ever break ties between rows sharing an id. Deduplicating in
+    # a subquery frees the outer query to order by name, which is what makes
+    # `:limit` meaningful: without it the cap returns the oldest matches
+    # rather than the closest ones.
+    matches =
+      Contact
+      |> scope_active(account_id)
+      |> join(:left, [c], cf in ContactField, on: cf.contact_id == c.id)
+      |> where(
+        [c, cf],
+        ilike(c.first_name, ^search) or
+          ilike(c.last_name, ^search) or
+          ilike(c.display_name, ^search) or
+          ilike(c.nickname, ^search) or
+          ilike(c.company, ^search) or
+          ilike(cf.value, ^search) or
+          fragment(
+            "EXISTS (SELECT 1 FROM unnest(?) AS alias WHERE alias ILIKE ?)",
+            c.aliases,
+            ^search
+          )
+      )
+      |> distinct([c], c.id)
+      |> select([c], c)
+
+    from(c in subquery(matches), order_by: [asc: c.display_name, asc: c.id])
+    |> maybe_limit(Keyword.get(opts, :limit))
+    |> maybe_preload_tags(Keyword.get(opts, :preload_tags, true))
     |> Repo.all()
   end
+
+  defp maybe_limit(query, nil), do: query
+  defp maybe_limit(query, n) when is_integer(n), do: limit(query, ^n)
+
+  defp maybe_preload_tags(query, true), do: preload(query, [:tags])
+  defp maybe_preload_tags(query, _falsy), do: query
 
   @doc """
   Lists contacts with cursor-based pagination.
@@ -1260,6 +1278,20 @@ defmodule Kith.Contacts do
   end
 
   @doc """
+  Returns the non-deleted contacts matching `ids` for an account.
+
+  One round trip regardless of list length. Ids naming a contact in another
+  account, a soft-deleted contact, or nothing at all are simply absent from
+  the result.
+  """
+  def list_contacts_by_ids(account_id, ids) when is_list(ids) do
+    Contact
+    |> scope_active(account_id)
+    |> where([c], c.id in ^ids)
+    |> Repo.all()
+  end
+
+  @doc """
   Counts all non-deleted contacts for an account.
   """
   def count_contacts(account_id) do
@@ -1686,196 +1718,196 @@ defmodule Kith.Contacts do
   # ── Contact Merge ──────────────────────────────────────────────────────
 
   @doc """
-  Merges two contacts. The survivor keeps chosen field values and receives
-  all sub-entities from the non-survivor. The non-survivor is soft-deleted.
+  Merges `loser_ids` into `survivor_id`, applying `resolution`.
 
-  `field_choices` is a map of `%{"field_name" => "survivor" | "non_survivor"}`
-  indicating which contact's value to keep for each identity field.
+  See `Kith.Contacts.MergeResolution` for how a resolution is produced.
+  `resolution` may include an optional `:unchecked_ids` key (default `[]`)
+  naming every candidate contact the caller's UI presented but the user did
+  not include in this merge — see `Kith.Contacts.Merge.run/4` for what
+  omitting it costs.
 
-  Both contacts must belong to the same account.
+  Returns `{:ok, contact}` or `{:error, reason}`, where `reason` is one of
+  `:not_found`, `:trashed`, `:different_accounts`, `:survivor_in_losers`,
+  `:no_losers`, `{:unknown_value, field}`, `{:unknown_field, field}`,
+  `{:not_clearable, field}`, `{:unknown_drop, key}`, or `{:invalid_fields, changeset}`.
+  """
+  def merge_cluster(scope, survivor_id, loser_ids, resolution) do
+    Merge.run(scope, survivor_id, loser_ids, resolution)
+  end
 
-  Returns `{:ok, %{survivor: contact}}` or `{:error, step, changeset, changes}`.
+  @doc """
+  Names for the association ids `members` hold, as `%{field => %{id => name}}`.
+
+  Design spec §3, "Association ids": a merge screen renders the associated
+  record's name, never the raw id. Covers only the three association columns
+  in `Kith.Contacts.MergeFields.choice_fields/0`; ids with no surviving row
+  are simply absent, and the caller falls back to the id.
+
+  `first_met_through_id` may point at any contact in the account, not only a
+  cluster member, so it is looked up rather than read off `members`.
+  """
+  def merge_association_labels([]), do: empty_association_labels()
+
+  def merge_association_labels([%Contact{} | _] = members) do
+    account_id = hd(members).account_id
+
+    %{
+      gender_id: label_map(Gender, ids_held(members, :gender_id), :name),
+      currency_id: label_map(Currency, ids_held(members, :currency_id), :name),
+      first_met_through_id:
+        Contact
+        |> where([c], c.account_id == ^account_id)
+        |> label_map(ids_held(members, :first_met_through_id), :display_name)
+    }
+  end
+
+  defp empty_association_labels,
+    do: %{gender_id: %{}, currency_id: %{}, first_met_through_id: %{}}
+
+  defp ids_held(members, field) do
+    members |> Enum.map(&Map.fetch!(&1, field)) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+  end
+
+  defp label_map(_queryable, [], _name_field), do: %{}
+
+  defp label_map(queryable, ids, name_field) do
+    from(r in queryable, where: r.id in ^ids, select: {r.id, field(r, ^name_field)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  @doc """
+  Merges `non_survivor_id` into `survivor_id`.
+
+  Retained for the Monica CRM importer (`Kith.Imports.Sources.MonicaAPI`) —
+  the merge wizard this once served and the REST API's `/api/contacts/merge`
+  endpoint have both moved onto `MergeResolution.resolve/1` and
+  `merge_cluster/4` directly. `field_choices` uses the old
+  `%{"field" => "survivor" | "non_survivor"}` shape; everything not named is
+  resolved by `legacy_resolution_fields/2` — see there for how a survivor's
+  existing value is protected — before `field_choices` overrides are applied
+  on top.
   """
   def merge_contacts(survivor_id, non_survivor_id, field_choices \\ %{}) do
-    alias Kith.Activities.{Call, LifeEvent}
-
     with {:ok, survivor} <- fetch_active_contact(survivor_id),
          {:ok, non_survivor} <- fetch_active_contact(non_survivor_id),
          :ok <- validate_merge(survivor, non_survivor) do
-      account_id = survivor.account_id
+      scope = Kith.Accounts.Scope.system_for_account_id(survivor.account_id)
 
-      Ecto.Multi.new()
-      # (a) Update survivor identity fields
-      |> Ecto.Multi.run(:update_survivor_fields, fn _repo, _changes ->
-        update_survivor_fields(survivor, non_survivor, field_choices)
-      end)
-      # (b) Remap notes
-      |> Ecto.Multi.update_all(
-        :remap_notes,
-        fn _changes ->
-          from(n in Note, where: n.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # Remap activity_contacts
-      |> Ecto.Multi.run(:remap_activity_contacts, fn repo, _changes ->
-        # Delete activity_contacts that would create duplicates
-        repo.query(
-          "DELETE FROM activity_contacts WHERE contact_id = $1 AND activity_id IN (SELECT activity_id FROM activity_contacts WHERE contact_id = $2)",
-          [non_survivor.id, survivor.id]
-        )
+      fields =
+        survivor
+        |> legacy_resolution_fields(non_survivor)
+        |> apply_legacy_choices(survivor, non_survivor, field_choices)
 
-        repo.update_all(
-          from(ac in "activity_contacts", where: ac.contact_id == ^non_survivor.id),
-          set: [contact_id: survivor.id]
-        )
+      merge_cluster(scope, survivor.id, [non_survivor.id], %{fields: fields, drop: %{}})
+    end
+  end
 
-        {:ok, :done}
-      end)
-      # Remap calls
-      |> Ecto.Multi.update_all(
-        :remap_calls,
-        fn _changes ->
-          from(c in Call, where: c.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # Remap life_events
-      |> Ecto.Multi.update_all(
-        :remap_life_events,
-        fn _changes ->
-          from(le in LifeEvent, where: le.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # Remap documents
-      |> Ecto.Multi.update_all(
-        :remap_documents,
-        fn _changes ->
-          from(d in Document, where: d.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # Remap photos (delete duplicates by content_hash first, then move remaining)
-      |> Ecto.Multi.run(:remap_photos, fn repo, _changes ->
-        # Delete photos from non-survivor that already exist on survivor (same content_hash)
-        repo.query(
-          """
-          DELETE FROM photos
-          WHERE contact_id = $1
-            AND content_hash IS NOT NULL
-            AND content_hash IN (
-              SELECT content_hash FROM photos WHERE contact_id = $2 AND content_hash IS NOT NULL
-            )
-          """,
-          [non_survivor.id, survivor.id]
-        )
+  @doc """
+  Resolves a two-contact legacy merge via `Kith.Contacts.MergeResolution`,
+  then protects the survivor's own values: for every
+  `MergeFields.choice_fields/0` entry the survivor already holds a non-nil
+  value for, that value wins over whatever the resolver's conflict-default
+  picked — a survivor's existing value is never silently overridden, only
+  gap-filled when the survivor has none (design spec §6).
 
-        # Move remaining photos
-        {count, _} =
-          from(p in Photo, where: p.contact_id == ^non_survivor.id)
-          |> repo.update_all(set: [contact_id: survivor.id])
+  The one exception is a field the resolver cleared because it pointed back
+  at a member being merged away (e.g. `first_met_through_id` referencing
+  `loser`) — restoring the survivor's raw value there would leave the field
+  pointing at a contact about to be soft-deleted, so the resolver's `:clear`
+  is left standing instead (design spec scenario D4).
 
-        {:ok, count}
-      end)
-      # Remap addresses
-      |> Ecto.Multi.update_all(
-        :remap_addresses,
-        fn _changes ->
-          from(a in Address, where: a.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # Remap contact_fields (then deduplicate)
-      |> Ecto.Multi.run(:remap_contact_fields, fn repo, _changes ->
-        # Move all contact fields
-        repo.update_all(
-          from(cf in ContactField, where: cf.contact_id == ^non_survivor.id),
-          set: [contact_id: survivor.id]
-        )
+  A date's year-unknown flag follows whichever date survives this protection:
+  restoring the survivor's `birthdate` also restores the survivor's
+  `birthdate_year_unknown`, so a gap-filled placeholder year is never marked
+  as a known one.
 
-        # Deduplicate: remove exact dupes (same type + same value)
-        repo.query(
-          """
-          DELETE FROM contact_fields
-          WHERE id IN (
-            SELECT cf.id FROM contact_fields cf
-            WHERE cf.contact_id = $1
-            AND EXISTS (
-              SELECT 1 FROM contact_fields cf2
-              WHERE cf2.contact_id = $1
-              AND cf2.contact_field_type_id = cf.contact_field_type_id
-              AND cf2.value = cf.value
-              AND cf2.id < cf.id
-            )
-          )
-          """,
-          [survivor.id]
-        )
+  Shared by the legacy `merge_contacts/3` shim (now only used by the Monica
+  CRM importer) and the REST API merge endpoint, so the two two-contact
+  callers stay consistent with the cluster merge engine's conflict
+  resolution.
+  """
+  def legacy_resolution_fields(survivor, loser) do
+    fields =
+      [survivor, loser]
+      |> MergeResolution.resolve(survivor.id)
+      |> Map.fetch!(:fields)
 
-        {:ok, :done}
-      end)
-      # Remap contact_tags (handle duplicates)
-      |> Ecto.Multi.run(:remap_contact_tags, fn repo, _changes ->
-        # Delete tags that already exist on survivor
-        repo.query(
-          "DELETE FROM contact_tags WHERE contact_id = $1 AND tag_id IN (SELECT tag_id FROM contact_tags WHERE contact_id = $2)",
-          [non_survivor.id, survivor.id]
-        )
+    member_ids = [survivor.id, loser.id]
 
-        # Move remaining tags
-        repo.update_all(
-          from(ct in "contact_tags", where: ct.contact_id == ^non_survivor.id),
-          set: [contact_id: survivor.id]
-        )
+    MergeFields.choice_fields()
+    |> Enum.reduce(fields, fn field, acc ->
+      keep_survivor_value(acc, field, Map.fetch!(survivor, field), member_ids)
+    end)
+    |> keep_survivor_coupled_flags(survivor)
+  end
 
-        {:ok, :done}
-      end)
-      # Remap reminders
-      |> Ecto.Multi.update_all(
-        :remap_reminders,
-        fn _changes ->
-          from(r in Kith.Reminders.Reminder, where: r.contact_id == ^non_survivor.id)
-        end,
-        set: [contact_id: survivor.id]
-      )
-      # (c) Remap relationships
-      |> Ecto.Multi.run(:remap_relationships, fn repo, _changes ->
-        remap_relationships(repo, survivor, non_survivor)
-      end)
-      # (d) Cancel Oban jobs for non-survivor reminders
-      |> Ecto.Multi.run(:cancel_oban_jobs, fn _repo, _changes ->
-        Kith.Reminders.cancel_all_for_contact(non_survivor.id, account_id)
-      end)
-      # (f) Update survivor's last_talked_to
-      |> Ecto.Multi.run(:update_last_talked_to, fn repo, _changes ->
-        merge_last_talked_to(repo, survivor, non_survivor)
-      end)
-      # (e) Soft-delete non-survivor
-      |> Ecto.Multi.run(:soft_delete_non_survivor, fn repo, _changes ->
-        non_survivor
-        |> Ecto.Changeset.change(%{deleted_at: DateTime.utc_now(:second)})
-        |> repo.update()
-      end)
-      |> Repo.transaction()
-      |> case do
-        {:ok, %{update_survivor_fields: survivor}} -> {:ok, survivor}
-        {:error, step, reason, _changes} -> {:error, {step, reason}}
+  # `keep_survivor_value/4` may have just restored the survivor's date over the
+  # resolver's pick, in which case the flag the resolver attached describes the
+  # *other* date. Re-derive each flag from whichever date actually survived.
+  defp keep_survivor_coupled_flags(fields, survivor) do
+    Enum.reduce(MergeFields.coupled_fields(), fields, fn {date_field, flag_field}, acc ->
+      survivor_date = Map.fetch!(survivor, date_field)
+
+      if not is_nil(survivor_date) and Map.get(acc, date_field) == survivor_date do
+        Map.put(acc, flag_field, Map.fetch!(survivor, flag_field))
+      else
+        acc
       end
-    end
+    end)
   end
 
-  defp merge_last_talked_to(repo, survivor, non_survivor) do
-    more_recent = most_recent_date(survivor.last_talked_to, non_survivor.last_talked_to)
+  # The survivor holds nothing here, so whatever the resolver produced stands
+  # (that is the gap fill). A value the resolver cleared because it points at a
+  # member being merged away also stands cleared — restoring it would leave the
+  # field referencing a contact about to be soft-deleted.
+  defp keep_survivor_value(fields, _field, nil, _member_ids), do: fields
 
-    if more_recent != survivor.last_talked_to do
-      survivor
-      |> Ecto.Changeset.change(%{last_talked_to: more_recent})
-      |> repo.update()
+  defp keep_survivor_value(fields, field, value, member_ids) do
+    if Map.get(fields, field) == :clear and value in member_ids do
+      fields
     else
-      {:ok, survivor}
+      Map.put(fields, field, value)
     end
   end
+
+  # Iterates the known field registry rather than the caller-supplied
+  # `choices` map, and never converts a client-controlled key to an atom —
+  # the wizard's "choose-field" LiveView event puts the raw client string
+  # into `field_choices` with no allowlist, so a crafted/unknown field name
+  # must be silently dropped rather than crashing the merge (and the
+  # LiveView process) on `String.to_existing_atom/1`. Coupled flags are not
+  # choice fields, so a choice naming one is dropped here too — writing
+  # `:clear` to a `null: false` boolean raises inside the transaction.
+  #
+  # An explicit choice pins that contact's value even when it is nil (the
+  # user asked for the field to be empty); a field with no choice keeps
+  # whatever the resolver produced, which is what gap-fills the survivor.
+  # Choosing a date also pins that same contact's year-unknown flag: to the
+  # user the two are one value.
+  defp apply_legacy_choices(fields, survivor, non_survivor, choices) do
+    Enum.reduce(MergeFields.choice_fields(), fields, fn field, acc ->
+      case Map.get(choices, Atom.to_string(field)) do
+        "non_survivor" -> pin_choice(acc, field, non_survivor)
+        "survivor" -> pin_choice(acc, field, survivor)
+        _ -> acc
+      end
+    end)
+  end
+
+  defp pin_choice(fields, field, contact) do
+    fields = Map.put(fields, field, clearable_value(Map.fetch!(contact, field)))
+
+    case List.keyfind(MergeFields.coupled_fields(), field, 0) do
+      {^field, flag_field} -> Map.put(fields, flag_field, Map.fetch!(contact, flag_field))
+      nil -> fields
+    end
+  end
+
+  # Only `nil` means "unset". A `false` is a value, and coercing it to
+  # `:clear` writes NULL to a `null: false` column.
+  defp clearable_value(nil), do: :clear
+  defp clearable_value(value), do: value
 
   defp fetch_active_contact(id) do
     contact = Repo.get(Contact, id)
@@ -1893,91 +1925,6 @@ defmodule Kith.Contacts do
       survivor.account_id != non_survivor.account_id -> {:error, :different_accounts}
       true -> :ok
     end
-  end
-
-  defp update_survivor_fields(survivor, non_survivor, field_choices) do
-    mergeable_fields = ~w(first_name last_name nickname birthdate description
-                          occupation company avatar)a
-
-    changes =
-      Enum.reduce(mergeable_fields, %{}, fn field, acc ->
-        field_str = Atom.to_string(field)
-
-        case Map.get(field_choices, field_str, "survivor") do
-          "non_survivor" ->
-            Map.put(acc, field, Map.get(non_survivor, field))
-
-          _ ->
-            acc
-        end
-      end)
-
-    if map_size(changes) > 0 do
-      survivor
-      |> Ecto.Changeset.change(changes)
-      |> Repo.update()
-    else
-      {:ok, survivor}
-    end
-  end
-
-  defp remap_relationships(repo, survivor, non_survivor) do
-    # Remap forward relationships (contact_id = non_survivor)
-    # First delete any that would create duplicates or self-references
-    repo.query(
-      """
-      DELETE FROM relationships WHERE contact_id = $1
-      AND (
-        related_contact_id = $2
-        OR (related_contact_id, relationship_type_id) IN (
-          SELECT related_contact_id, relationship_type_id
-          FROM relationships WHERE contact_id = $2
-        )
-      )
-      """,
-      [non_survivor.id, survivor.id]
-    )
-
-    repo.update_all(
-      from(r in Relationship, where: r.contact_id == ^non_survivor.id),
-      set: [contact_id: survivor.id]
-    )
-
-    # Remap reverse relationships (related_contact_id = non_survivor)
-    repo.query(
-      """
-      DELETE FROM relationships WHERE related_contact_id = $1
-      AND (
-        contact_id = $2
-        OR (contact_id, relationship_type_id) IN (
-          SELECT contact_id, relationship_type_id
-          FROM relationships WHERE related_contact_id = $2
-        )
-      )
-      """,
-      [non_survivor.id, survivor.id]
-    )
-
-    repo.update_all(
-      from(r in Relationship, where: r.related_contact_id == ^non_survivor.id),
-      set: [related_contact_id: survivor.id]
-    )
-
-    # Clean up any self-referential relationships
-    repo.delete_all(
-      from(r in Relationship,
-        where: r.contact_id == ^survivor.id and r.related_contact_id == ^survivor.id
-      )
-    )
-
-    {:ok, :done}
-  end
-
-  defp most_recent_date(nil, date), do: date
-  defp most_recent_date(date, nil), do: date
-
-  defp most_recent_date(date1, date2) do
-    if DateTime.compare(date1, date2) == :gt, do: date1, else: date2
   end
 
   @doc """

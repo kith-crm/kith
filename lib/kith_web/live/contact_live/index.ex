@@ -32,9 +32,9 @@ defmodule KithWeb.ContactLive.Index do
      |> assign(:contacts, [])
      |> assign(:meta, nil)
      |> assign(:tags, Contacts.list_tags(account_id))
-     |> assign(:candidates, [])
-     |> assign(:duplicates_total, 0)
-     |> assign(:duplicates_has_more, false)
+     |> assign(:clusters, [])
+     |> assign(:clusters_total, 0)
+     |> assign(:clusters_has_more, false)
      |> assign(:trashed_contacts, [])}
   end
 
@@ -61,14 +61,15 @@ defmodule KithWeb.ContactLive.Index do
 
   defp apply_action(socket, :duplicates, _params) do
     account_id = socket.assigns.account_id
-    candidates = DuplicateDetection.list_candidates(account_id, limit: @duplicates_page_size)
-    total_count = DuplicateDetection.pending_count(account_id)
+
+    %{clusters: clusters, total: total} =
+      DuplicateDetection.list_clusters_page(account_id, limit: @duplicates_page_size)
 
     socket
     |> assign(:page_title, "Duplicate Contacts")
-    |> assign(:candidates, candidates)
-    |> assign(:duplicates_total, total_count)
-    |> assign(:duplicates_has_more, length(candidates) >= @duplicates_page_size)
+    |> assign(:clusters, clusters)
+    |> assign(:clusters_total, total)
+    |> assign(:clusters_has_more, total > length(clusters))
   end
 
   defp apply_action(socket, :trash, _params) do
@@ -247,36 +248,21 @@ defmodule KithWeb.ContactLive.Index do
 
   # ── Duplicates events ──────────────────────────────────────────────────
 
-  def handle_event("dismiss", %{"id" => id}, socket) do
-    candidate =
-      DuplicateDetection.get_candidate!(socket.assigns.account_id, String.to_integer(id))
-
-    {:ok, _} = DuplicateDetection.dismiss_candidate(candidate)
-
-    candidates = Enum.reject(socket.assigns.candidates, &(&1.id == candidate.id))
-    total = socket.assigns.duplicates_total - 1
-
-    {:noreply,
-     socket
-     |> assign(:candidates, candidates)
-     |> assign(:duplicates_total, total)
-     |> assign(:pending_duplicates_count, total)
-     |> put_flash(:info, "Duplicate dismissed.")}
-  end
-
   def handle_event("load_more_duplicates", _params, socket) do
-    offset = length(socket.assigns.candidates)
+    account_id = socket.assigns.account_id
 
     more =
-      DuplicateDetection.list_candidates(socket.assigns.account_id,
+      DuplicateDetection.list_clusters(account_id,
         limit: @duplicates_page_size,
-        offset: offset
+        offset: length(socket.assigns.clusters)
       )
+
+    clusters = socket.assigns.clusters ++ more
 
     {:noreply,
      socket
-     |> assign(:candidates, socket.assigns.candidates ++ more)
-     |> assign(:duplicates_has_more, length(more) >= @duplicates_page_size)}
+     |> assign(:clusters, clusters)
+     |> assign(:clusters_has_more, socket.assigns.clusters_total > length(clusters))}
   end
 
   def handle_event("scan", _params, socket) do
@@ -437,6 +423,11 @@ defmodule KithWeb.ContactLive.Index do
 
   defp days_until_deletion(deleted_at) do
     DateTime.diff(DateTime.utc_now(), deleted_at, :day) |> then(&(30 - &1))
+  end
+
+  defp merge_selected_path(selected_ids) do
+    [first | rest] = Enum.sort(selected_ids)
+    ~p"/contacts/duplicates/cluster/#{first}?#{[with: Enum.join(rest, ",")]}"
   end
 
   defp days_remaining_label(deleted_at) do

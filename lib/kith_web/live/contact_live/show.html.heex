@@ -191,7 +191,7 @@
                   </button>
                 <% end %>
                 <.link
-                  navigate={~p"/contacts/#{@contact.id}/merge"}
+                  navigate={~p"/contacts/duplicates/cluster/#{@contact.id}"}
                   class="flex w-full items-center gap-2 rounded-[var(--radius-md)] px-2.5 py-1.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-surface)] transition-colors"
                 >
                   <.icon name="hero-arrows-right-left" class="size-4" /> Merge

@@ -1,5 +1,11 @@
 defmodule Kith.Accounts.TosAcceptanceTest do
-  use Kith.DataCase, async: true
+  # async: false — the ToS requirement is read from `Application.get_env/3`,
+  # which is node-global. Flipping it inside an async case leaks into every
+  # other case running at the same time: any concurrent test building a
+  # registration changeset without `tos_accepted` fails, and this module's own
+  # expectations get clobbered in return. ExUnit runs sync cases serially and
+  # never alongside async ones, which is what makes the mutation safe here.
+  use Kith.DataCase, async: false
 
   alias Kith.Accounts.User
 
