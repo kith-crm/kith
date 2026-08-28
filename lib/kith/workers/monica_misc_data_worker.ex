@@ -473,11 +473,66 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   end
 
   defp import_single_reminder(account_id, user_id, contact, reminder_data, import_job) do
+    if birthday_reminder?(reminder_data["frequency_type"], reminder_data) and
+         not is_nil(contact.birthdate) do
+      import_birthday_reminder(account_id, user_id, contact, reminder_data, import_job)
+    else
+      import_generic_reminder(account_id, user_id, contact, reminder_data, import_job)
+    end
+  end
+
+  # Monica's birthday / special-date reminders come through this same
+  # endpoint. They map to `frequency_type == "year"` and carry no
+  # user-authored title. When the contact already has a birthdate we route
+  # them through `Kith.Reminders.create_birthday_reminder/2` so there is a
+  # single code path (and a single row) for birthday reminders, instead of
+  # a generic `recurring`/`annually` reminder that duplicates it.
+  #
+  # Signal: `frequency_type == "year"` AND a blank/absent title. Monica's
+  # payload has no explicit "this is a birthday" flag on the reminder, so
+  # the empty title is the safest conservative signal available.
+  defp birthday_reminder?("year", reminder_data), do: blank?(reminder_data["title"])
+  defp birthday_reminder?(_frequency_type, _reminder_data), do: false
+
+  defp blank?(nil), do: true
+  defp blank?(str) when is_binary(str), do: String.trim(str) == ""
+  defp blank?(_), do: false
+
+  defp import_birthday_reminder(account_id, user_id, contact, reminder_data, import_job) do
+    case Kith.Reminders.get_birthday_reminder(contact.id, account_id) do
+      nil ->
+        case Kith.Reminders.create_birthday_reminder(contact, user_id) do
+          {:ok, reminder} ->
+            maybe_record_entity(
+              import_job,
+              "reminder",
+              reminder_data["id"],
+              "reminder",
+              reminder.id
+            )
+
+            :ok
+
+          {:error, reason} ->
+            Logger.warning("[MonicaMiscData] reminder error: #{inspect_errors(reason)}")
+            {:error, reason}
+        end
+
+      existing ->
+        # A birthday reminder already covers this contact — record the
+        # mapping to it and skip creating a duplicate generic reminder.
+        maybe_record_entity(import_job, "reminder", reminder_data["id"], "reminder", existing.id)
+        :ok
+    end
+  end
+
+  defp import_generic_reminder(account_id, user_id, contact, reminder_data, import_job) do
     {type, frequency} = map_monica_reminder_frequency(reminder_data["frequency_type"])
 
     next_date =
-      parse_date_string(reminder_data["next_expected_date"]) ||
-        Date.utc_today()
+      reminder_next_date(reminder_data["next_expected_date"]) ||
+        reminder_next_date(reminder_data["initial_date"]) ||
+        fallback_today(reminder_data)
 
     attrs = %{
       "contact_id" => contact.id,
@@ -496,6 +551,22 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
         Logger.warning("[MonicaMiscData] reminder error: #{inspect_errors(reason)}")
         {:error, reason}
     end
+  end
+
+  # Monica serialises date fields as an object
+  # `%{"date" => "2024-06-01 00:00:00", "timezone" => "UTC", ...}`; newer
+  # versions may send a plain ISO string instead. Accept both shapes, plus
+  # nil. Mirrors `Kith.Imports.Sources.MonicaApi.parse_special_date/1`.
+  defp reminder_next_date(%{"date" => d}) when is_binary(d), do: parse_date_string(d)
+  defp reminder_next_date(d) when is_binary(d), do: parse_date_string(d)
+  defp reminder_next_date(_), do: nil
+
+  defp fallback_today(reminder_data) do
+    Logger.warning(
+      "[MonicaMiscData] reminder #{reminder_data["id"]} has no parseable date; using today"
+    )
+
+    Date.utc_today()
   end
 
   defp import_contact_conversations(credential, user_id, contact, source_id, import_job) do
@@ -657,20 +728,34 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   defp parse_date_string(nil), do: nil
 
+  # Monica also sends "2024-06-01 00:00:00" (space separator, no offset) —
+  # not valid ISO 8601 for Date/DateTime, but a valid NaiveDateTime.
   defp parse_date_string(str) when is_binary(str) do
-    case Date.from_iso8601(str) do
-      {:ok, date} ->
-        date
-
-      {:error, _} ->
-        case DateTime.from_iso8601(str) do
-          {:ok, dt, _offset} -> DateTime.to_date(dt)
-          _ -> nil
-        end
-    end
+    parse_iso_date(str) || parse_iso_datetime(str) || parse_naive_datetime(str)
   end
 
   defp parse_date_string(_), do: nil
+
+  defp parse_iso_date(str) do
+    case Date.from_iso8601(str) do
+      {:ok, date} -> date
+      _ -> nil
+    end
+  end
+
+  defp parse_iso_datetime(str) do
+    case DateTime.from_iso8601(str) do
+      {:ok, dt, _offset} -> DateTime.to_date(dt)
+      _ -> nil
+    end
+  end
+
+  defp parse_naive_datetime(str) do
+    case NaiveDateTime.from_iso8601(str) do
+      {:ok, ndt} -> NaiveDateTime.to_date(ndt)
+      _ -> nil
+    end
+  end
 
   defp inspect_errors(%Ecto.Changeset{} = changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->

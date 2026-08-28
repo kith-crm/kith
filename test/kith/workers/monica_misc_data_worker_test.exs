@@ -3,11 +3,14 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
   use Oban.Testing, repo: Kith.Repo
 
   import Ecto.Query
+  import ExUnit.CaptureLog
   import Kith.AccountsFixtures
   import Kith.ContactsFixtures
   import Kith.ImportsFixtures
 
   alias Kith.Imports
+  alias Kith.Reminders.Reminder
+  alias Kith.TimeHelper
   alias Kith.Workers.MonicaMiscDataWorker
 
   @stub_name MonicaMiscDataReqStub
@@ -149,6 +152,176 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert is_map(updated.summary["misc"])
       assert updated.summary["misc"]["calls"] >= 0
     end
+  end
+
+  describe "reminders import — date handling (issue #5)" do
+    setup %{user: user, account_id: account_id} do
+      %{import_job: api_import(account_id, user.id)}
+    end
+
+    test "object-shaped next_expected_date is parsed to the underlying date", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id)
+
+      assert :ok =
+               import_reminders(import_job, contact, [
+                 %{
+                   "id" => 1,
+                   "frequency_type" => "one_time",
+                   "title" => "Call about the move",
+                   "next_expected_date" => %{"date" => "2024-06-01 00:00:00", "timezone" => "UTC"}
+                 }
+               ])
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.next_reminder_date == ~D[2024-06-01]
+      assert reminder.type == "one_time"
+    end
+
+    test "plain ISO string next_expected_date is parsed", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id)
+
+      assert :ok =
+               import_reminders(import_job, contact, [
+                 %{
+                   "id" => 2,
+                   "frequency_type" => "one_time",
+                   "title" => "Follow up",
+                   "next_expected_date" => "2024-07-15"
+                 }
+               ])
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.next_reminder_date == ~D[2024-07-15]
+    end
+
+    test "falls back to initial_date when next_expected_date is absent", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id)
+
+      assert :ok =
+               import_reminders(import_job, contact, [
+                 %{
+                   "id" => 3,
+                   "frequency_type" => "one_time",
+                   "title" => "Renew passport",
+                   "next_expected_date" => nil,
+                   "initial_date" => %{"date" => "2023-03-09 00:00:00"}
+                 }
+               ])
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.next_reminder_date == ~D[2023-03-09]
+    end
+
+    test "with no parseable date, uses today and logs a warning", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id)
+
+      log =
+        capture_log(fn ->
+          assert :ok =
+                   import_reminders(import_job, contact, [
+                     %{"id" => 42, "frequency_type" => "one_time", "title" => "Mystery"}
+                   ])
+        end)
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.next_reminder_date == Date.utc_today()
+      assert log =~ "reminder 42 has no parseable date"
+    end
+
+    test "year frequency + blank title + contact birthdate creates a single birthday reminder", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id, %{birthdate: ~D[1990-06-15]})
+
+      assert :ok =
+               import_reminders(import_job, contact, [
+                 %{
+                   "id" => 9,
+                   "frequency_type" => "year",
+                   "title" => "",
+                   "next_expected_date" => %{"date" => "2024-06-15 00:00:00"}
+                 }
+               ])
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.type == "birthday"
+      assert reminder.next_reminder_date == TimeHelper.next_birthday_date(~D[1990-06-15])
+    end
+
+    test "year frequency birthday reminder does not duplicate an existing one", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id, %{birthdate: ~D[1990-06-15]})
+
+      payload = [
+        %{
+          "id" => 9,
+          "frequency_type" => "year",
+          "title" => "",
+          "next_expected_date" => %{"date" => "2024-06-15 00:00:00"}
+        }
+      ]
+
+      assert :ok = import_reminders(import_job, contact, payload)
+      assert :ok = import_reminders(import_job, contact, payload)
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.type == "birthday"
+    end
+
+    test "year frequency with a real title stays a generic recurring reminder", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id, %{birthdate: ~D[1990-06-15]})
+
+      assert :ok =
+               import_reminders(import_job, contact, [
+                 %{
+                   "id" => 10,
+                   "frequency_type" => "year",
+                   "title" => "Wedding anniversary",
+                   "next_expected_date" => %{"date" => "2024-09-20 00:00:00"}
+                 }
+               ])
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.type == "recurring"
+      assert reminder.frequency == "annually"
+      assert reminder.next_reminder_date == ~D[2024-09-20]
+    end
+  end
+
+  defp import_reminders(import_job, contact, reminders) do
+    Req.Test.stub(@stub_name, fn conn ->
+      case conn.request_path do
+        "/api/contacts/7/reminders" -> Req.Test.json(conn, %{"data" => reminders})
+        _ -> Req.Test.json(conn, %{"data" => []})
+      end
+    end)
+
+    plan = [%{"source_id" => "7", "local_id" => contact.id, "endpoints" => ["reminders"]}]
+    perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+  end
+
+  defp contact_reminders(account_id, contact_id) do
+    Reminder
+    |> where([r], r.account_id == ^account_id and r.contact_id == ^contact_id)
+    |> Repo.all()
   end
 
   defp collect_requests(acc) do
