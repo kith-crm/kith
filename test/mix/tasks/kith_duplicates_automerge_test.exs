@@ -36,20 +36,19 @@ defmodule Mix.Tasks.Kith.Duplicates.AutomergeTest do
     )
   end
 
-  test "--dry-run reports the merge but writes nothing", %{account: account} do
+  test "--dry-run writes nothing at all", %{account: account} do
     identical_pair(account)
 
     Mix.shell(Mix.Shell.Process)
 
     Automerge.run(["--account", Integer.to_string(account.id), "--dry-run"])
 
+    # Both contacts still active, and the detector scan the pass runs is rolled
+    # back, so not a single DuplicateCandidate row persists.
     assert active_count(account.id) == 2
 
-    # No candidate rows were resolved — the pair is still pending.
     assert Repo.aggregate(
-             from(d in DuplicateCandidate,
-               where: d.account_id == ^account.id and d.status == "merged"
-             ),
+             from(d in DuplicateCandidate, where: d.account_id == ^account.id),
              :count
            ) == 0
   after

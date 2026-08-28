@@ -786,6 +786,25 @@ defmodule KithWeb.ImportWizardLive do
                 <span class="font-semibold">{@results["merged"] || @results[:merged]}</span>
                 duplicate contacts auto-merged
               </p>
+              <p
+                :if={(@results["merged_by_detection"] || @results[:merged_by_detection] || 0) > 0}
+                class="text-[var(--color-text-tertiary)] text-sm"
+              >
+                including
+                <span class="font-semibold">
+                  {@results["merged_by_detection"] || @results[:merged_by_detection]}
+                </span>
+                matched by duplicate detection
+              </p>
+              <p
+                :if={(@results["automerge_skipped"] || @results[:automerge_skipped] || 0) > 0}
+                class="text-[var(--color-warning)] text-sm"
+              >
+                <span class="font-semibold">
+                  {@results["automerge_skipped"] || @results[:automerge_skipped]}
+                </span>
+                likely duplicate group(s) left unmerged — review them on the duplicates page
+              </p>
             </div>
 
             <div

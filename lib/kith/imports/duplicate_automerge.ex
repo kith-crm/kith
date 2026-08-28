@@ -2,7 +2,7 @@ defmodule Kith.Imports.DuplicateAutomerge do
   @moduledoc """
   Second pass of the Monica-import auto-merge (issue #2).
 
-  The importer's first pass (`Kith.Imports.Sources.MonicaApi.auto_merge_duplicates/2`)
+  The importer's first pass (`Kith.Imports.Sources.MonicaApi.auto_merge_duplicates/3`)
   only merges contacts that share an exact normalized `{first_name, last_name}`
   group **and** a concrete shared email/phone/address. The detector
   (`Kith.DuplicateDetection.scan_account/1`) scores pairs independently and
@@ -11,23 +11,32 @@ defmodule Kith.Imports.DuplicateAutomerge do
   different signal. Those clusters survive the first pass and show up in the
   duplicates UI at "100%".
 
-  This pass runs a fresh scan, clusters the resulting `pending`
-  `DuplicateCandidate` rows (optionally restricted to a set of contact ids —
-  e.g. one import's records, so pre-existing contacts are never touched),
-  keeps clusters that carry at least one pair scoring `>= min_score`
-  (default `1.0`), and merges each surviving cluster through
-  `Kith.Contacts.merge_contacts/2` with `Kith.DuplicateDetection.default_primary/1`
-  choosing the survivor. The merge path already settles the merged
-  `DuplicateCandidate` rows via `Kith.DuplicateDetection.resolve_after_merge/4`,
-  so `cluster_count/1` drops without extra work here.
+  This pass runs a fresh scan, then works over the scoped `pending`
+  `DuplicateCandidate` graph (optionally restricted to a set of contact ids —
+  e.g. one import's records, so pre-existing contacts are never touched):
 
-  Safety guards — a qualifying cluster is skipped (and `Logger.info`-logged)
-  when:
+    * an **edge** is a candidate pair; a **strong edge** scores `>= min_score`
+      (default `1.0`);
+    * a connected component of *strong* edges with two or more members is a
+      merge target — every internal edge clears the floor by construction;
+    * contacts that hang off such a component only through a weaker edge (a
+      `0.85` email, a `0.60` address, a `name_sim < 1.0` name match) are left
+      unmerged and `Logger.info`-logged.
 
-    * any pair's only reason is `["name_match"]` with similarity `< 1.0`
-      (a fuzzy name match must never drive an automatic merge, and it must
-      not do so by transitivity either), or
-    * two members carry different non-empty `birthdate`s.
+  Each merge target is merged through `Kith.Contacts.merge_contacts/2` with
+  `Kith.DuplicateDetection.default_primary/1` choosing the survivor. The merge
+  path already settles the merged `DuplicateCandidate` rows via
+  `Kith.DuplicateDetection.resolve_after_merge/4`, so `cluster_count/1` drops
+  without extra work here.
+
+  A merge target is still skipped (and `Logger.info`-logged) when two members
+  carry different non-empty `birthdate`s.
+
+  Requiring *every* internal edge to clear `min_score` subsumes the earlier
+  explicit "fuzzy name-only edge" guard: at the default floor of `1.0` a
+  name-only edge with `name_sim < 1.0` has `score < 1.0` and is simply not a
+  strong edge. An operator who lowers `--min-score` is deliberately widening
+  what counts as confident.
   """
 
   import Ecto.Query
@@ -45,6 +54,7 @@ defmodule Kith.Imports.DuplicateAutomerge do
   @type result :: %{
           merged: non_neg_integer(),
           skipped: non_neg_integer(),
+          left_behind: non_neg_integer(),
           clusters_merged: non_neg_integer(),
           errors: [String.t()]
         }
@@ -57,55 +67,72 @@ defmodule Kith.Imports.DuplicateAutomerge do
     * `:restrict_ids` — a list of contact ids; only candidate pairs whose
       *both* endpoints are in this list are considered. `nil` (default) scans
       the whole account.
-    * `:min_score` — minimum pair score for a cluster to qualify
-      (default `#{@auto_merge_score}`). Never lowered below `1.0` by callers
-      in this codebase.
-    * `:dry_run` — when `true`, report what would be merged without writing.
+    * `:min_score` — the strong-edge floor (default `#{@auto_merge_score}`).
+      Callers in this codebase never lower it below `1.0` except an explicit
+      operator override.
+    * `:dry_run` — when `true`, report what would be merged and write nothing.
+      The whole pass (including the detector scan it runs) executes inside a
+      transaction that is always rolled back, so a dry run leaves zero rows
+      behind.
 
-  Returns `t:result/0`.
+  Returns `t:result/0`. `skipped` counts merge targets held back by the
+  birthdate guard; `left_behind` counts contacts dropped from a component
+  because their only link to it was a sub-floor edge.
   """
   @spec run(integer(), keyword()) :: result()
   def run(account_id, opts \\ []) when is_integer(account_id) do
-    dry_run = Keyword.get(opts, :dry_run, false)
+    if Keyword.get(opts, :dry_run, false) do
+      {:error, result} =
+        Repo.transaction(fn -> Repo.rollback(execute(account_id, opts)) end)
+
+      result
+    else
+      execute(account_id, opts)
+    end
+  end
+
+  defp execute(account_id, opts) do
     min_score = Keyword.get(opts, :min_score, @auto_merge_score)
+    dry_run = Keyword.get(opts, :dry_run, false)
     restrict_ids = opts[:restrict_ids]
 
     DuplicateDetection.scan_account(account_id)
 
-    clusters =
-      account_id
-      |> pending_pairs(restrict_ids)
-      |> build_clusters()
+    pairs = pending_pairs(account_id, restrict_ids)
+    strong_pairs = Enum.filter(pairs, &(&1.score >= min_score))
 
-    contacts_by_id = load_contacts(account_id, clusters)
+    strong_components = components(strong_pairs)
+    left_behind = left_behind_ids(components(pairs), strong_components)
+    log_left_behind(left_behind)
 
-    Enum.reduce(clusters, blank_result(), fn {member_ids, pairs}, acc ->
+    contacts_by_id = load_contacts(account_id, strong_components)
+
+    strong_components
+    |> Enum.filter(&(MapSet.size(&1) >= 2))
+    |> Enum.reduce(blank_result(left_behind), fn member_set, acc ->
       members =
-        member_ids
+        member_set
         |> Enum.map(&Map.get(contacts_by_id, &1))
         |> Enum.reject(&is_nil/1)
 
-      process_cluster(members, pairs, min_score, dry_run, acc)
+      process_cluster(members, dry_run, acc)
     end)
   end
 
-  defp blank_result, do: %{merged: 0, skipped: 0, clusters_merged: 0, errors: []}
+  defp blank_result(left_behind) do
+    %{
+      merged: 0,
+      skipped: 0,
+      left_behind: MapSet.size(left_behind),
+      clusters_merged: 0,
+      errors: []
+    }
+  end
 
-  defp process_cluster(members, pairs, min_score, dry_run, acc) do
+  defp process_cluster(members, dry_run, acc) do
     cond do
       length(members) < 2 ->
         acc
-
-      not Enum.any?(pairs, &(&1.score >= min_score)) ->
-        acc
-
-      fuzzy_name_only_pair?(pairs) ->
-        Logger.info(
-          "[DuplicateAutomerge] skipping cluster #{inspect(ids(members))}: a pair rests only " <>
-            "on a fuzzy name match (name_sim < 1.0)"
-        )
-
-        %{acc | skipped: acc.skipped + 1}
 
       birthdate_conflict?(members) ->
         Logger.info(
@@ -127,10 +154,8 @@ defmodule Kith.Imports.DuplicateAutomerge do
     end
   end
 
-  defp fuzzy_name_only_pair?(pairs) do
-    Enum.any?(pairs, fn p -> p.reasons == ["name_match"] and p.score < 1.0 end)
-  end
-
+  # Conservative on purpose: a `birthdate_year_unknown` contact whose day/month
+  # happens to match another's full date is still treated as a conflict here.
   defp birthdate_conflict?(members) do
     members
     |> Enum.map(& &1.birthdate)
@@ -169,6 +194,33 @@ defmodule Kith.Imports.DuplicateAutomerge do
 
   defp ids(members), do: members |> Enum.map(& &1.id) |> Enum.sort()
 
+  defp log_left_behind(left_behind) do
+    if MapSet.size(left_behind) > 0 do
+      Logger.info(
+        "[DuplicateAutomerge] not merging #{inspect(Enum.sort(left_behind))}: linked to a " <>
+          "merged cluster only by an edge scoring below the floor"
+      )
+    end
+  end
+
+  # Contacts that a full-graph component contains but no strong component does —
+  # i.e. they were only ever attached through a sub-floor edge. Components with
+  # no strong part at all (a plain non-confident pair) are not "left behind",
+  # they simply never qualified, so they are excluded.
+  defp left_behind_ids(full_components, strong_components) do
+    strong_union = Enum.reduce(strong_components, MapSet.new(), &MapSet.union(&2, &1))
+
+    Enum.reduce(full_components, MapSet.new(), fn full, acc ->
+      dropped = MapSet.difference(full, strong_union)
+
+      if MapSet.size(dropped) > 0 and MapSet.size(dropped) < MapSet.size(full) do
+        MapSet.union(acc, dropped)
+      else
+        acc
+      end
+    end)
+  end
+
   # ── Candidate loading + clustering ───────────────────────────────────
 
   defp pending_pairs(account_id, restrict_ids) do
@@ -194,11 +246,13 @@ defmodule Kith.Imports.DuplicateAutomerge do
     )
   end
 
-  # Small union-find over the candidate pairs. `Kith.DuplicateDetection`'s own
-  # `build_clusters/1` is private and re-queries the DB with its dismissed-edge
-  # handling; here the input is an already-loaded, already-filtered pending
-  # list, so a local pass is simpler and avoids widening that module's surface.
-  defp build_clusters(pairs) do
+  # Connected components (as a list of id `MapSet`s) over the given edge list,
+  # via union-find. `Kith.DuplicateDetection`'s own clustering is private and
+  # re-queries the DB with dismissed-edge handling; here the input is an
+  # already-loaded, already-filtered list, so a local pass is simpler.
+  defp components([]), do: []
+
+  defp components(pairs) do
     parent =
       Enum.reduce(pairs, %{}, fn p, acc ->
         acc
@@ -214,18 +268,7 @@ defmodule Kith.Imports.DuplicateAutomerge do
     parent
     |> Map.keys()
     |> Enum.group_by(&find(parent, &1))
-    |> Enum.map(fn {_root, member_ids} ->
-      member_set = MapSet.new(member_ids)
-
-      cluster_pairs =
-        Enum.filter(pairs, fn p ->
-          MapSet.member?(member_set, p.contact_id) and
-            MapSet.member?(member_set, p.duplicate_contact_id)
-        end)
-
-      {Enum.sort(member_ids), cluster_pairs}
-    end)
-    |> Enum.filter(fn {member_ids, _pairs} -> length(member_ids) >= 2 end)
+    |> Enum.map(fn {_root, member_ids} -> MapSet.new(member_ids) end)
   end
 
   defp find(parent, node) do
@@ -244,11 +287,11 @@ defmodule Kith.Imports.DuplicateAutomerge do
 
   defp load_contacts(_account_id, []), do: %{}
 
-  defp load_contacts(account_id, clusters) do
+  defp load_contacts(account_id, components) do
     ids =
-      clusters
-      |> Enum.flat_map(fn {member_ids, _pairs} -> member_ids end)
-      |> Enum.uniq()
+      components
+      |> Enum.reduce(MapSet.new(), &MapSet.union(&2, &1))
+      |> MapSet.to_list()
 
     Contact
     |> where([c], c.account_id == ^account_id and c.id in ^ids)

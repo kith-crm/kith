@@ -1530,6 +1530,53 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert length(active) == 2
     end
 
+    # Issue #2: the import option lowers the strong-edge floor for the second
+    # pass. These two share an email (~0.9) but no name_key, so nothing would
+    # merge at the default 1.0 floor (covered by the DuplicateAutomerge
+    # min_score test); with the override it does.
+    test "honours opts[\"auto_merge_score\"] override", %{user: user, account_id: account_id} do
+      contacts = [
+        contact_json(
+          id: 1,
+          first_name: "Sam",
+          last_name: "Bell",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        ),
+        contact_json(
+          id: 2,
+          first_name: "Sam",
+          last_name: "Bella",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true,
+                 "auto_merge_score" => 0.85
+               })
+
+      assert summary.merged == 1
+      assert summary.merged_by_detection == 1
+
+      active =
+        Repo.all(
+          from(c in Contacts.Contact,
+            where:
+              c.first_name in ["Sam"] and c.account_id == ^account_id and
+                is_nil(c.deleted_at)
+          )
+        )
+
+      assert length(active) == 1
+    end
+
     test "merges contacts with same name and phone", %{user: user, account_id: account_id} do
       contacts = [
         contact_json(

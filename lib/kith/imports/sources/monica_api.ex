@@ -101,9 +101,16 @@ defmodule Kith.Imports.Sources.MonicaApi do
     # Runs AFTER Phase 1.4 so backfilled contacts participate in auto-merge.
     merge_result =
       if opts["auto_merge_duplicates"] do
-        auto_merge_duplicates(account_id, import_job)
+        auto_merge_duplicates(account_id, import_job, opts)
       else
-        %{merged: 0, merged_by_name_group: 0, merged_by_detection: 0, skipped: 0, errors: []}
+        %{
+          merged: 0,
+          merged_by_name_group: 0,
+          merged_by_detection: 0,
+          skipped: 0,
+          left_behind: 0,
+          errors: []
+        }
       end
 
     # Phase 2: Resolve cross-references
@@ -145,7 +152,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
        skipped: acc.skipped,
        merged: merge_result.merged,
        merged_by_detection: merge_result.merged_by_detection,
-       automerge_skipped: merge_result.skipped,
+       automerge_skipped: merge_result.skipped + merge_result.left_behind,
        error_count: error_count,
        errors: Enum.take(all_errors, 50),
        misc_data_plan: Enum.reverse(deferred.misc_data),
@@ -857,7 +864,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   # ── Phase 1.5: Auto-merge definite duplicates ───────────────────────
 
-  defp auto_merge_duplicates(account_id, import_job) do
+  defp auto_merge_duplicates(account_id, import_job, opts) do
     # Get all contact IDs imported in this batch
     import_records =
       Repo.all(
@@ -895,14 +902,22 @@ defmodule Kith.Imports.Sources.MonicaApi do
     # {first_name, last_name} and a concrete email/phone/address. The detector
     # also flags identical-`display_name` pairs and transitive chains at 100%;
     # those are merged here, restricted to this import's own contacts so
-    # pre-existing records are never touched.
-    detection = DuplicateAutomerge.run(account_id, restrict_ids: import_records)
+    # pre-existing records are never touched. `opts["auto_merge_score"]`, when
+    # present, overrides the default strong-edge floor of 1.0.
+    detection_opts =
+      case opts["auto_merge_score"] do
+        nil -> [restrict_ids: import_records]
+        score -> [restrict_ids: import_records, min_score: score]
+      end
+
+    detection = DuplicateAutomerge.run(account_id, detection_opts)
 
     total = merged_count + detection.merged
 
     Logger.info(
       "[MonicaApi] Auto-merge: #{merged_count} by name group + #{detection.merged} by detection " <>
-        "= #{total} contacts merged (#{detection.skipped} cluster(s) skipped by safety guard)"
+        "= #{total} contacts merged (#{detection.skipped} cluster(s) skipped, " <>
+        "#{detection.left_behind} contact(s) left behind by a sub-floor edge)"
     )
 
     %{
@@ -910,6 +925,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
       merged_by_name_group: merged_count,
       merged_by_detection: detection.merged,
       skipped: detection.skipped,
+      left_behind: detection.left_behind,
       errors: errors ++ detection.errors
     }
   end
