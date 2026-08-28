@@ -992,7 +992,10 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
           overrides: %{},
           dropped: MapSet.new(),
           resolution: Kith.Contacts.MergeResolution.resolve(members, ctx.a.id),
-          error: nil
+          error: nil,
+          # This cluster is detected (ctx.a/ctx.b are candidates from setup),
+          # not hand-picked — the synthetic branch must not shadow this check.
+          synthetic?: false
         }
       }
 
@@ -1426,6 +1429,50 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
         live(ctx.conn, "/contacts/duplicates/cluster/#{lead.id}?with=#{with_param}")
 
       assert html =~ "51 contacts"
+    end
+
+    test "hand-picked merges offer Cancel, not 'Not duplicates'", ctx do
+      alice =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          last_name: "Smith"
+        })
+
+      bob =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Bob", last_name: "Jones"})
+
+      [lead, other] = Enum.sort([alice.id, bob.id])
+
+      {:ok, live, html} =
+        live(ctx.conn, "/contacts/duplicates/cluster/#{lead}?with=#{other}")
+
+      assert html =~ "Cancel"
+      refute html =~ "Not duplicates"
+
+      # The button is gone, but the event is still reachable over the wire —
+      # confirm it's a no-op rather than inserting a dismissed row for a pair
+      # detection never proposed (setup already seeds an unrelated candidate
+      # for ctx.a/ctx.b, so this must be scoped to alice/bob, not global).
+      candidate_for_pair = fn ->
+        Kith.Repo.aggregate(
+          from(d in Kith.Contacts.DuplicateCandidate,
+            where:
+              (d.contact_id == ^alice.id and d.duplicate_contact_id == ^bob.id) or
+                (d.contact_id == ^bob.id and d.duplicate_contact_id == ^alice.id)
+          ),
+          :count
+        )
+      end
+
+      assert candidate_for_pair.() == 0
+      render_hook(live, "not-duplicates", %{})
+      assert candidate_for_pair.() == 0
+    end
+
+    test "detected clusters still offer 'Not duplicates'", ctx do
+      {:ok, _live, html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert html =~ "Not duplicates"
     end
   end
 

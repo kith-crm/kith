@@ -412,10 +412,13 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   def handle_event("not-duplicates", _params, socket) do
-    if authorized?(socket) do
-      dismiss_selection(socket)
-    else
-      {:noreply, refuse(socket)}
+    cond do
+      # Never rendered for a hand-picked set (see the template), so a client
+      # sending it anyway gets nothing rather than dismissed rows for pairs
+      # detection never proposed.
+      socket.assigns.synthetic? -> {:noreply, socket}
+      authorized?(socket) -> dismiss_selection(socket)
+      true -> {:noreply, refuse(socket)}
     end
   end
 
@@ -1182,7 +1185,16 @@ defmodule KithWeb.ContactLive.ClusterMerge do
               </span>
             </p>
             <div class="flex gap-2">
-              <UI.button variant="secondary" phx-click="not-duplicates">Not duplicates</UI.button>
+              <%!-- A hand-picked set was never proposed as duplicates, so there
+                    is nothing to dismiss — marking it would insert dismissed
+                    candidate rows for pairs detection never suggested and
+                    permanently suppress real future matches. --%>
+              <UI.button :if={@synthetic?} variant="secondary" navigate={~p"/contacts"}>
+                Cancel
+              </UI.button>
+              <UI.button :if={not @synthetic?} variant="secondary" phx-click="not-duplicates">
+                Not duplicates
+              </UI.button>
               <UI.button phx-click="merge" disabled={MapSet.size(@selected_ids) < 2}>
                 Merge {MapSet.size(@selected_ids)} contacts
               </UI.button>
