@@ -20,13 +20,19 @@ defmodule Kith.Imports.DuplicateAutomerge do
 
   Over that graph:
 
-    * an **edge** is a candidate pair; a **strong edge** scores `>= min_score`
-      (default `1.0`);
+    * an **edge** is a candidate pair; a **strong edge** must both score
+      `>= min_score` (default `1.0`) **and** carry at least one concrete-signal
+      reason — `email_match`, `phone_match`, or `address_match`;
+    * a pair whose only reason is `name_match` is **never** a strong edge, even
+      at score `1.0`. Two different people routinely share an identical
+      first+last name, so a name-only match is left as a pending
+      `DuplicateCandidate` for manual review and never auto-merged;
     * a connected component of *strong* edges with two or more members is a
-      merge target — every internal edge clears the floor by construction;
-    * contacts that hang off such a component only through a weaker edge (a
-      `0.85` email, a `0.60` address, a `name_sim < 1.0` name match) are left
-      unmerged and `Logger.info`-logged.
+      merge target — every internal edge clears the floor and rests on a
+      concrete signal by construction;
+    * contacts that hang off such a component only through a non-strong edge
+      (a sub-floor score, or a name-only match at any score) are left unmerged
+      and `Logger.info`-logged.
 
   Each merge target is merged through `Kith.Contacts.merge_contacts/2` with
   `Kith.DuplicateDetection.default_primary/1` choosing the survivor. The merge
@@ -36,12 +42,6 @@ defmodule Kith.Imports.DuplicateAutomerge do
 
   A merge target is still skipped (and `Logger.info`-logged) when two members
   carry different non-empty `birthdate`s.
-
-  Requiring *every* internal edge to clear `min_score` subsumes the earlier
-  explicit "fuzzy name-only edge" guard: at the default floor of `1.0` a
-  name-only edge with `name_sim < 1.0` has `score < 1.0` and is simply not a
-  strong edge. An operator who lowers `--min-score` is deliberately widening
-  what counts as confident.
   """
 
   import Ecto.Query
@@ -55,6 +55,12 @@ defmodule Kith.Imports.DuplicateAutomerge do
   alias Kith.Repo
 
   @auto_merge_score 1.0
+
+  # A name-only candidate never auto-merges, whatever its score: two different
+  # people routinely share an identical first+last name. Such a pair stays a
+  # pending `DuplicateCandidate` for manual review. A strong edge must carry at
+  # least one of these concrete-signal reasons.
+  @concrete_reasons ~w(email_match phone_match address_match)
 
   @type result :: %{
           merged: non_neg_integer(),
@@ -72,17 +78,18 @@ defmodule Kith.Imports.DuplicateAutomerge do
     * `:restrict_ids` — a list of contact ids; only candidate pairs whose
       *both* endpoints are in this list are considered. `nil` (default) scans
       the whole account.
-    * `:min_score` — the strong-edge floor (default `#{@auto_merge_score}`).
+    * `:min_score` — the strong-edge score floor (default `#{@auto_merge_score}`).
       Callers in this codebase never lower it below `1.0` except an explicit
-      operator override.
+      operator override. A name-only pair is excluded regardless of this value.
     * `:dry_run` — when `true`, report what would be merged and write nothing.
       The whole pass (including the detector scan it runs) executes inside a
       transaction that is always rolled back, so a dry run leaves zero rows
       behind.
 
   Returns `t:result/0`. `skipped` counts merge targets held back by the
-  birthdate guard; `left_behind` counts contacts dropped from a component
-  because their only link to it was a sub-floor edge.
+  birthdate guard; `left_behind` counts contacts dropped from a merge target
+  because their only link to it was a non-strong edge (sub-floor score or a
+  name-only match).
   """
   @spec run(integer(), keyword()) :: result()
   def run(account_id, opts \\ []) when is_integer(account_id) do
@@ -104,7 +111,7 @@ defmodule Kith.Imports.DuplicateAutomerge do
     DuplicateDetection.scan_account(account_id)
 
     pairs = pending_pairs(account_id, restrict_ids)
-    strong_pairs = Enum.filter(pairs, &(&1.score >= min_score))
+    strong_pairs = Enum.filter(pairs, &strong_edge?(&1, min_score))
 
     strong_components = components(strong_pairs)
     left_behind = left_behind_ids(components(pairs), strong_components)
@@ -159,6 +166,13 @@ defmodule Kith.Imports.DuplicateAutomerge do
     end
   end
 
+  # A strong edge clears the score floor AND rests on at least one concrete
+  # signal (shared email/phone/address). A pair whose only reason is
+  # `"name_match"` is never strong, even at score 1.0.
+  defp strong_edge?(pair, min_score) do
+    pair.score >= min_score and Enum.any?(pair.reasons, &(&1 in @concrete_reasons))
+  end
+
   # Conservative on purpose: a `birthdate_year_unknown` contact whose day/month
   # happens to match another's full date is still treated as a conflict here.
   defp birthdate_conflict?(members) do
@@ -203,15 +217,16 @@ defmodule Kith.Imports.DuplicateAutomerge do
     if MapSet.size(left_behind) > 0 do
       Logger.info(
         "[DuplicateAutomerge] not merging #{inspect(Enum.sort(left_behind))}: linked to a " <>
-          "merged cluster only by an edge scoring below the floor"
+          "merged cluster only by a non-strong edge (sub-floor score, or a name-only match)"
       )
     end
   end
 
   # Contacts that a full-graph component contains but no strong component does —
-  # i.e. they were only ever attached through a sub-floor edge. Components with
-  # no strong part at all (a plain non-confident pair) are not "left behind",
-  # they simply never qualified, so they are excluded.
+  # i.e. they were only ever attached through a non-strong edge (sub-floor score
+  # or name-only). Components with no strong part at all (a plain name-only or
+  # non-confident pair) are not "left behind": they simply never qualified and
+  # stay as pending candidates, so they are excluded.
   defp left_behind_ids(full_components, strong_components) do
     strong_union = Enum.reduce(strong_components, MapSet.new(), &MapSet.union(&2, &1))
 

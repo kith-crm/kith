@@ -57,31 +57,36 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
     |> Enum.sort()
   end
 
-  describe "run/2 — divergence case (a): identical display_name, nothing else shared" do
-    test "merges the pair and clears the cluster", %{account: account} do
+  describe "run/2 — case (a): identical display_name, nothing else shared" do
+    test "never auto-merges a name-only pair; leaves it pending for manual review", %{
+      account: account
+    } do
       a = contact(account, "Nadia Khan", "Nadia", "Khan")
       b = contact(account, "Nadia Khan", "Nadia", "Khan")
 
-      assert %{merged: 1, skipped: 0, clusters_merged: 1, errors: []} =
+      assert %{merged: 0, skipped: 0, clusters_merged: 0, left_behind: 0, errors: []} =
                DuplicateAutomerge.run(account.id)
 
       remaining = active_ids(account.id)
-      assert length(remaining) == 1
-      assert hd(remaining) in [a.id, b.id]
-      assert DuplicateDetection.cluster_count(account.id) == 0
+      assert length(remaining) == 2
+      assert a.id in remaining
+      assert b.id in remaining
+      # The detector still flags the pair — it is only held back from auto-merge.
+      assert DuplicateDetection.cluster_count(account.id) >= 1
     end
   end
 
-  describe "run/2 — divergence case (b): transitive chain where every edge clears the floor" do
-    test "merges all three members of an all-1.0 A–B–C chain", %{account: account} do
+  describe "run/2 — case (b): transitive chain where every edge is strong" do
+    test "merges all three members of an all-1.0 name+concrete A–B–C chain", %{account: account} do
       # Distinct display names so the scan adds no edges of its own; the chain
-      # is seeded explicitly as A–B and B–C, both at 1.0, with no A–C edge.
+      # is seeded explicitly as A–B and B–C, both at 1.0 and each resting on a
+      # concrete signal, with no A–C edge.
       a = contact(account, "Aaa One", "Aaa", "One")
       b = contact(account, "Bbb Two", "Bbb", "Two")
       c = contact(account, "Ccc Three", "Ccc", "Three")
 
-      seed_pair(account.id, a, b, 1.0, ["email_match"])
-      seed_pair(account.id, b, c, 1.0, ["phone_match"])
+      seed_pair(account.id, a, b, 1.0, ["name_match", "email_match"])
+      seed_pair(account.id, b, c, 1.0, ["name_match", "phone_match"])
 
       assert %{merged: 2, skipped: 0, left_behind: 0, clusters_merged: 1} =
                DuplicateAutomerge.run(account.id)
@@ -90,7 +95,7 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
     end
   end
 
-  describe "run/2 — ruling: a sub-floor edge leaves its contact behind" do
+  describe "run/2 — ruling: a non-strong edge leaves its contact behind" do
     test "merges A–B but not the C that hangs off a 0.85 edge, and logs it", %{account: account} do
       a = contact(account, "Aaa One", "Aaa", "One")
       b = contact(account, "Bbb Two", "Bbb", "Two")
@@ -107,18 +112,18 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
       assert c.id in remaining
     end
 
-    test "a fuzzy name-only edge is sub-floor at the default 1.0 and is dropped", %{
-      account: account
-    } do
-      a = contact(account, "Dana Park", "Dana", "Park")
-      _b = contact(account, "Dana Park", "Dana", "Park")
-      c = contact(account, "Cara Diaz", "Cara", "Diaz")
+    test "a name-only edge is never strong, even at 1.0: A–B (name+email) merges, C is left behind",
+         %{account: account} do
+      a = contact(account, "Aaa One", "Aaa", "One")
+      b = contact(account, "Bbb Two", "Bbb", "Two")
+      c = contact(account, "Ccc Three", "Ccc", "Three")
 
-      # Deliberate fuzzy (name-only, sim < 1.0) link from A to C; the scan adds
-      # the exact A–B match at 1.0.
-      seed_pair(account.id, a, c, 0.7, ["name_match"])
+      # A–B rests on a concrete signal; B–C is name-only at full score and so is
+      # never a strong edge — C hangs off the merged component and is dropped.
+      seed_pair(account.id, a, b, 1.0, ["name_match", "email_match"])
+      seed_pair(account.id, b, c, 1.0, ["name_match"])
 
-      assert %{merged: 1, skipped: 0, left_behind: 1} =
+      assert %{merged: 1, skipped: 0, left_behind: 1, clusters_merged: 1} =
                DuplicateAutomerge.run(account.id)
 
       remaining = active_ids(account.id)
@@ -128,17 +133,19 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
   end
 
   describe "run/2 — safety guard (d): members disagree on birthdate" do
-    test "skips", %{account: account} do
-      contact(account, "Evan Cole", "Evan", "Cole", %{birthdate: ~D[1980-01-01]})
-      contact(account, "Evan Cole", "Evan", "Cole", %{birthdate: ~D[1990-01-01]})
+    test "skips a strong edge whose members carry different birthdates", %{account: account} do
+      a = contact(account, "Evan Cole", "Evan", "Cole", %{birthdate: ~D[1980-01-01]})
+      b = contact(account, "Evan Cole", "Evan", "Cole", %{birthdate: ~D[1990-01-01]})
+      seed_pair(account.id, a, b, 1.0, ["name_match", "email_match"])
 
       assert %{merged: 0, skipped: 1} = DuplicateAutomerge.run(account.id)
       assert length(active_ids(account.id)) == 2
     end
 
     test "merges when only one member has a birthdate", %{account: account} do
-      contact(account, "Ivy Ross", "Ivy", "Ross", %{birthdate: ~D[1980-01-01]})
-      contact(account, "Ivy Ross", "Ivy", "Ross")
+      a = contact(account, "Ivy Ross", "Ivy", "Ross", %{birthdate: ~D[1980-01-01]})
+      b = contact(account, "Ivy Ross", "Ivy", "Ross")
+      seed_pair(account.id, a, b, 1.0, ["name_match", "email_match"])
 
       assert %{merged: 1, skipped: 0} = DuplicateAutomerge.run(account.id)
       assert length(active_ids(account.id)) == 1
@@ -146,11 +153,18 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
   end
 
   describe "run/2 — restrict_ids" do
-    test "never touches contacts outside the id set", %{account: account} do
+    test "never touches contacts outside the id set", %{
+      account: account,
+      email_type_id: email_type_id
+    } do
       a = contact(account, "Amy Poe", "Amy", "Poe")
       b = contact(account, "Amy Poe", "Amy", "Poe")
+      contact_field_fixture(a, email_type_id, %{"value" => "amy@example.com"})
+      contact_field_fixture(b, email_type_id, %{"value" => "amy@example.com"})
       x = contact(account, "Old Timer", "Old", "Timer")
       y = contact(account, "Old Timer", "Old", "Timer")
+      contact_field_fixture(x, email_type_id, %{"value" => "old@example.com"})
+      contact_field_fixture(y, email_type_id, %{"value" => "old@example.com"})
 
       assert %{merged: 1, clusters_merged: 1} =
                DuplicateAutomerge.run(account.id, restrict_ids: [a.id, b.id])
@@ -163,9 +177,14 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
   end
 
   describe "run/2 — dry_run" do
-    test "reports the merge and writes nothing at all", %{account: account} do
-      contact(account, "Rae Lin", "Rae", "Lin")
-      contact(account, "Rae Lin", "Rae", "Lin")
+    test "reports the merge and writes nothing at all", %{
+      account: account,
+      email_type_id: email_type_id
+    } do
+      a = contact(account, "Rae Lin", "Rae", "Lin")
+      b = contact(account, "Rae Lin", "Rae", "Lin")
+      contact_field_fixture(a, email_type_id, %{"value" => "rae@example.com"})
+      contact_field_fixture(b, email_type_id, %{"value" => "rae@example.com"})
 
       before_candidates = Repo.aggregate(DuplicateCandidate, :count)
 

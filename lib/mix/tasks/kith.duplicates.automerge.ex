@@ -9,13 +9,19 @@ defmodule Mix.Tasks.Kith.Duplicates.Automerge do
 
   It runs a fresh `Kith.DuplicateDetection.scan_account/1`, then over the
   account's `pending` `DuplicateCandidate` graph it merges every connected
-  component in which **every** candidate edge scores `>= --min-score`
-  (default `1.0`). A contact attached to such a component only through a
-  weaker edge (e.g. a `0.85` email or a `name_sim < 1.0` name match) is left
-  unmerged and logged — reported as `left_behind`. A component is also
-  skipped (reported as `skipped`) when two of its members carry different
-  non-empty birthdates. There is no separate fuzzy-name guard: a name-only
-  edge below `1.0` is simply not a strong edge.
+  component in which **every** candidate edge is a *strong* edge: it scores
+  `>= --min-score` (default `1.0`) **and** carries at least one concrete
+  signal — `email_match`, `phone_match`, or `address_match`.
+
+  A **name-only** pair (`reasons == ["name_match"]`) is never auto-merged,
+  even at score `1.0` and even with `--min-score` lowered — identical first
+  and last names for different people are common. Such pairs stay as pending
+  `DuplicateCandidate`s for manual review.
+
+  A contact attached to a merge target only through a non-strong edge (a
+  sub-floor score, or a name-only match at any score) is left unmerged and
+  logged — reported as `left_behind`. A component is skipped (reported as
+  `skipped`) when two of its members carry different non-empty birthdates.
 
   This task is **account-wide** — there is no `--restrict` option. Unlike the
   importer's own second pass, which is scoped to the contacts a single import

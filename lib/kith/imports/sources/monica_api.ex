@@ -909,11 +909,13 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
     # Second pass: reconcile with the duplicate detector (issue #2). The
     # name-group pass above only catches pairs that share an exact normalized
-    # {first_name, last_name} and a concrete email/phone/address. The detector
-    # also flags identical-`display_name` pairs and transitive chains at 100%;
-    # those are merged here, restricted to `created_ids` so pre-existing
-    # records are never touched. `opts["auto_merge_score"]`, when present,
-    # overrides the default strong-edge floor of 1.0.
+    # {first_name, last_name} AND a concrete email/phone/address. The detector
+    # also flags transitive chains where each link rests on a different concrete
+    # signal; those are merged here, restricted to `created_ids` so pre-existing
+    # records are never touched. Name-only matches (identical display_name,
+    # nothing else shared) are deliberately NOT merged at any score — they stay
+    # as pending candidates for manual review. `opts["auto_merge_score"]`, when
+    # present, overrides the default strong-edge score floor of 1.0.
     detection_opts =
       case opts["auto_merge_score"] do
         nil -> [restrict_ids: created_ids]

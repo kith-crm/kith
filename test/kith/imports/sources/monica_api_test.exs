@@ -1401,9 +1401,11 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
     end
 
     # Issue #2: the name-group pass leaves this pair alone (no shared
-    # email/phone/address), but the detector scores an identical `display_name`
-    # at 1.0, so the second pass merges it.
-    test "merges same-name contacts with no shared field via the detector second pass", %{
+    # email/phone/address), and the detector flags it only on `name_match`.
+    # A name-only match is never auto-merged — two different people routinely
+    # share an identical first+last name — so the pair stays a pending
+    # candidate for manual review.
+    test "does not auto-merge same-name contacts whose only shared signal is the name", %{
       user: user,
       account_id: account_id
     } do
@@ -1433,8 +1435,8 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                  "auto_merge_duplicates" => true
                })
 
-      assert summary.merged == 1
-      assert summary.merged_by_detection == 1
+      assert summary.merged == 0
+      assert summary.merged_by_detection == 0
 
       active =
         Repo.all(
@@ -1445,12 +1447,15 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
           )
         )
 
-      assert length(active) == 1
+      assert length(active) == 2
+      # The detector still flags the pair — it is deliberately not auto-merged.
+      assert Kith.DuplicateDetection.cluster_count(account_id) >= 1
     end
 
     # Issue #2, pure divergence case (a): first/last names differ, so the
-    # name-group pass never groups them, yet `display_name` collides exactly.
-    test "merges contacts whose display_name collides but first/last differ", %{
+    # name-group pass never groups them, and `display_name` collides exactly —
+    # a name-only match. It is never auto-merged and stays a pending candidate.
+    test "does not auto-merge contacts whose display_name collides but nothing else is shared", %{
       user: user,
       account_id: account_id
     } do
@@ -1470,8 +1475,8 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                  "auto_merge_duplicates" => true
                })
 
-      assert summary.merged == 1
-      assert summary.merged_by_detection == 1
+      assert summary.merged == 0
+      assert summary.merged_by_detection == 0
 
       active =
         Repo.aggregate(
@@ -1481,25 +1486,32 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
           :count
         )
 
-      assert active == 1
-      assert Kith.DuplicateDetection.cluster_count(account_id) == 0
+      assert active == 2
+      # The detector still flags the pair — it is deliberately not auto-merged.
+      assert Kith.DuplicateDetection.cluster_count(account_id) >= 1
     end
 
-    test "does not merge same-name contacts that disagree on birthdate", %{
+    # A strong edge (identical display_name + a shared email) that the detector
+    # scores at 1.0, but whose members carry different non-empty birthdates:
+    # the second pass holds it back rather than merging. First/last names
+    # differ, so the name-group first pass never groups them.
+    test "does not merge a strong-edge pair whose members disagree on birthdate", %{
       user: user,
       account_id: account_id
     } do
       contacts = [
         contact_json(
           id: 1,
-          first_name: "Bob",
-          last_name: "Smith",
+          first_name: "Bob Smith",
+          last_name: "",
+          contact_fields: [contact_field_json(content: "bob@example.com", type_name: "Email")],
           birthdate: %{"date" => "1985-06-15T00:00:00Z", "is_year_unknown" => false}
         ),
         contact_json(
           id: 2,
           first_name: "Bob",
           last_name: "Smith",
+          contact_fields: [contact_field_json(content: "bob@example.com", type_name: "Email")],
           birthdate: %{"date" => "1990-01-01T00:00:00Z", "is_year_unknown" => false}
         )
       ]
@@ -1521,9 +1533,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       active =
         Repo.all(
           from(c in Contacts.Contact,
-            where:
-              c.first_name == "Bob" and c.last_name == "Smith" and
-                c.account_id == ^account_id and is_nil(c.deleted_at)
+            where: c.account_id == ^account_id and is_nil(c.deleted_at)
           )
         )
 

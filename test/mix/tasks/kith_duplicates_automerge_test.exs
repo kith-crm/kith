@@ -20,20 +20,34 @@ defmodule Mix.Tasks.Kith.Duplicates.AutomergeTest do
     |> Repo.aggregate(:count)
   end
 
+  # A strong-edge pair: identical name AND a shared email, which the detector
+  # scores at 1.0 with a concrete signal. A name-only pair is never auto-merged.
   defp identical_pair(account) do
-    insert(:contact,
-      account: account,
-      display_name: "Uma Vale",
-      first_name: "Uma",
-      last_name: "Vale"
-    )
+    email_type_id =
+      Repo.one!(
+        from(t in "contact_field_types", where: t.protocol == "mailto:", select: t.id, limit: 1)
+      )
 
-    insert(:contact,
-      account: account,
-      display_name: "Uma Vale",
-      first_name: "Uma",
-      last_name: "Vale"
-    )
+    a =
+      insert(:contact,
+        account: account,
+        display_name: "Uma Vale",
+        first_name: "Uma",
+        last_name: "Vale"
+      )
+
+    b =
+      insert(:contact,
+        account: account,
+        display_name: "Uma Vale",
+        first_name: "Uma",
+        last_name: "Vale"
+      )
+
+    contact_field_fixture(a, email_type_id, %{"value" => "uma@example.com"})
+    contact_field_fixture(b, email_type_id, %{"value" => "uma@example.com"})
+
+    {a, b}
   end
 
   test "--dry-run writes nothing at all", %{account: account} do
