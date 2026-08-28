@@ -33,6 +33,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
   alias Kith.Contacts
   alias Kith.Contacts.PhoneFormatter
   alias Kith.Imports
+  alias Kith.Imports.DuplicateAutomerge
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
   alias Kith.Repo
   alias Kith.Workers.MonicaDocumentImportWorker
@@ -102,7 +103,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
       if opts["auto_merge_duplicates"] do
         auto_merge_duplicates(account_id, import_job)
       else
-        %{merged: 0, errors: []}
+        %{merged: 0, merged_by_name_group: 0, merged_by_detection: 0, skipped: 0, errors: []}
       end
 
     # Phase 2: Resolve cross-references
@@ -143,6 +144,8 @@ defmodule Kith.Imports.Sources.MonicaApi do
        notes: acc.notes,
        skipped: acc.skipped,
        merged: merge_result.merged,
+       merged_by_detection: merge_result.merged_by_detection,
+       automerge_skipped: merge_result.skipped,
        error_count: error_count,
        errors: Enum.take(all_errors, 50),
        misc_data_plan: Enum.reverse(deferred.misc_data),
@@ -157,6 +160,8 @@ defmodule Kith.Imports.Sources.MonicaApi do
          notes: 0,
          skipped: 0,
          merged: 0,
+         merged_by_detection: 0,
+         automerge_skipped: 0,
          error_count: 1,
          errors: ["Import cancelled"],
          coverage_backfill: empty_backfill_stats()
@@ -885,8 +890,28 @@ defmodule Kith.Imports.Sources.MonicaApi do
     merged_ids = MapSet.new()
     {merged_count, errors, _} = merge_name_groups(name_groups, account_id, import_job, merged_ids)
 
-    Logger.info("[MonicaApi] Auto-merge: #{merged_count} contacts merged")
-    %{merged: merged_count, errors: errors}
+    # Second pass: reconcile with the duplicate detector (issue #2). The
+    # name-group pass above only catches pairs that share an exact normalized
+    # {first_name, last_name} and a concrete email/phone/address. The detector
+    # also flags identical-`display_name` pairs and transitive chains at 100%;
+    # those are merged here, restricted to this import's own contacts so
+    # pre-existing records are never touched.
+    detection = DuplicateAutomerge.run(account_id, restrict_ids: import_records)
+
+    total = merged_count + detection.merged
+
+    Logger.info(
+      "[MonicaApi] Auto-merge: #{merged_count} by name group + #{detection.merged} by detection " <>
+        "= #{total} contacts merged (#{detection.skipped} cluster(s) skipped by safety guard)"
+    )
+
+    %{
+      merged: total,
+      merged_by_name_group: merged_count,
+      merged_by_detection: detection.merged,
+      skipped: detection.skipped,
+      errors: errors ++ detection.errors
+    }
   end
 
   defp merge_name_groups(groups, account_id, import_job, merged_ids) do
