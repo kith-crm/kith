@@ -63,7 +63,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp build_credential(args) do
     %{
       url: args["credential_url"],
-      api_key: args["credential_api_key"],
+      api_key: Imports.decrypt_credential(args["credential_api_key"]),
       req_options: Application.get_env(:kith, :monica_req_options, [])
     }
   end

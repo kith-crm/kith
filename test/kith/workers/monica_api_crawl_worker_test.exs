@@ -134,10 +134,15 @@ defmodule Kith.Workers.MonicaApiCrawlWorkerTest do
         worker: MonicaPhotoSyncWorker,
         args: %{
           "import_id" => import_job.id,
-          "credential_url" => "https://monica.test",
-          "credential_api_key" => "test-key"
+          "credential_url" => "https://monica.test"
         }
       )
+
+      # The API key must not be enqueued in plaintext — Oban stores job args
+      # as plaintext JSON and the Oban Web dashboard renders them as-is.
+      [job] = all_enqueued(worker: MonicaPhotoSyncWorker)
+      refute job.args["credential_api_key"] == "test-key"
+      assert Imports.decrypt_credential(job.args["credential_api_key"]) == "test-key"
     end
 
     test "does not enqueue MonicaPhotoSyncWorker when photos opt-out", %{

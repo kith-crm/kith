@@ -32,7 +32,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     %{
       "import_id" => import_job.id,
       "credential_url" => "https://monica.test",
-      "credential_api_key" => "test-key",
+      "credential_api_key" => Imports.encrypt_credential("test-key"),
       "plan" => plan
     }
   end
