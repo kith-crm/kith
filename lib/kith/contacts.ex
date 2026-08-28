@@ -75,30 +75,34 @@ defmodule Kith.Contacts do
   def search_contacts(account_id, query, opts \\ []) do
     search = "%#{String.replace(query, ~r/[%_\\]/, "\\\\\\0")}%"
 
-    Contact
-    |> scope_active(account_id)
-    |> join(:left, [c], cf in ContactField, on: cf.contact_id == c.id)
-    |> where(
-      [c, cf],
-      ilike(c.first_name, ^search) or
-        ilike(c.last_name, ^search) or
-        ilike(c.display_name, ^search) or
-        ilike(c.nickname, ^search) or
-        ilike(c.company, ^search) or
-        ilike(cf.value, ^search) or
-        fragment(
-          "EXISTS (SELECT 1 FROM unnest(?) AS alias WHERE alias ILIKE ?)",
-          c.aliases,
-          ^search
-        )
-    )
-    # Results come back in id order. `distinct([c], c.id)` forces `c.id` to the
-    # front of the generated ORDER BY, so an `asc: c.display_name` here would
-    # only ever break ties between rows sharing an id — i.e. never. It read as
-    # an alphabetical sort and delivered nothing, so it is gone rather than
-    # left to mislead; sorting by name needs a DISTINCT ON subquery with an
-    # outer ORDER BY.
-    |> distinct([c], c.id)
+    # `distinct([c], c.id)` forces `c.id` to the front of the generated
+    # ORDER BY, so an alphabetical sort cannot live in the same query — it
+    # would only ever break ties between rows sharing an id. Deduplicating in
+    # a subquery frees the outer query to order by name, which is what makes
+    # `:limit` meaningful: without it the cap returns the oldest matches
+    # rather than the closest ones.
+    matches =
+      Contact
+      |> scope_active(account_id)
+      |> join(:left, [c], cf in ContactField, on: cf.contact_id == c.id)
+      |> where(
+        [c, cf],
+        ilike(c.first_name, ^search) or
+          ilike(c.last_name, ^search) or
+          ilike(c.display_name, ^search) or
+          ilike(c.nickname, ^search) or
+          ilike(c.company, ^search) or
+          ilike(cf.value, ^search) or
+          fragment(
+            "EXISTS (SELECT 1 FROM unnest(?) AS alias WHERE alias ILIKE ?)",
+            c.aliases,
+            ^search
+          )
+      )
+      |> distinct([c], c.id)
+      |> select([c], c)
+
+    from(c in subquery(matches), order_by: [asc: c.display_name, asc: c.id])
     |> maybe_limit(Keyword.get(opts, :limit))
     |> maybe_preload_tags(Keyword.get(opts, :preload_tags, true))
     |> Repo.all()

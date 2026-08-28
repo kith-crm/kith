@@ -33,4 +33,30 @@ defmodule Kith.ContactsSearchTest do
 
     assert %Ecto.Association.NotLoaded{} = contact.tags
   end
+
+  test "limit keeps the alphabetically first matches, not the oldest rows", ctx do
+    # Created oldest-first, named reverse-alphabetically, so id order and
+    # display_name order disagree on every row.
+    for name <- ["Zoe Adams", "Yara Adams", "Xena Adams"] do
+      [first, last] = String.split(name, " ")
+      ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: first, last_name: last})
+    end
+
+    # Created last (highest id), sorts first by name.
+    ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Aaron", last_name: "Adams"})
+
+    results = Contacts.search_contacts(ctx.account_id, "Adams", limit: 2)
+
+    assert Enum.map(results, & &1.display_name) == ["Aaron Adams", "Xena Adams"]
+  end
+
+  test "results are ordered by display_name when unlimited", ctx do
+    # guards against the outer ORDER BY being dropped by a later refactor
+    ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Zoe", last_name: "Brown"})
+    ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Amy", last_name: "Brown"})
+
+    names = ctx.account_id |> Contacts.search_contacts("Brown") |> Enum.map(& &1.display_name)
+
+    assert names == Enum.sort(names)
+  end
 end
