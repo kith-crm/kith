@@ -281,14 +281,18 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   def handle_event("add-member", %{"id" => id}, socket) do
     existing = MapSet.new(socket.assigns.members, & &1.id)
 
-    # The id is client-supplied, so it is parsed rather than cast, and an id
-    # already in the strip is ignored: `selected_members/1` filters `:members`,
-    # so a repeat would reach the resolution and the summary twice and make the
-    # chip strip, the button count and the trash line disagree.
-    with {id, ""} <- Integer.parse(id),
-         false <- MapSet.member?(existing, id),
+    # The id is client-supplied, so it names one of the results just offered
+    # rather than anything in the account: resolving it against
+    # `:search_results` means an id that was never rendered — or that is not a
+    # string at all — finds nothing instead of reaching the database. The row
+    # is then re-fetched for the preloads the search projection does not carry.
+    # An id already in the strip is ignored: `selected_members/1` filters
+    # `:members`, so a repeat would reach the resolution and the summary twice
+    # and make the chip strip, the button count and the trash line disagree.
+    with result when not is_nil(result) <- find_by_id(socket.assigns.search_results, id),
+         false <- MapSet.member?(existing, result.id),
          contact when not is_nil(contact) <-
-           Contacts.get_contact(socket.assigns.current_scope.account.id, id) do
+           Contacts.get_contact(socket.assigns.current_scope.account.id, result.id) do
       # An added member is indistinguishable from a detected one from here
       # on; the engine does not care how it got into the strip. Discarding
       # overrides/dropped mirrors "toggle-member": the selection changed, so
@@ -311,16 +315,19 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   def handle_event("toggle-member", %{"id" => id}, socket) do
-    case cast_member_id(id) do
-      {:ok, id} -> toggle_member(socket, id)
-      :error -> {:noreply, socket}
+    case find_by_id(socket.assigns.members, id) do
+      nil -> {:noreply, socket}
+      member -> toggle_member(socket, member.id)
     end
   end
 
+  # Resolved against the members on screen rather than merely parsed: the
+  # primary is the survivor the merge writes into, so a well-formed id naming
+  # a contact outside this cluster must find nothing instead of becoming one.
   def handle_event("set-primary", %{"id" => id}, socket) do
-    case cast_member_id(id) do
-      {:ok, id} -> {:noreply, socket |> assign(:primary_id, id) |> recompute()}
-      :error -> {:noreply, socket}
+    case find_by_id(socket.assigns.members, id) do
+      nil -> {:noreply, socket}
+      member -> {:noreply, socket |> assign(:primary_id, member.id) |> recompute()}
     end
   end
 
@@ -406,9 +413,9 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   def handle_event("choose-immich", %{"id" => id}, socket) do
-    case cast_member_id(id) do
-      {:ok, id} -> choose_immich(socket, id)
-      :error -> {:noreply, socket}
+    case find_by_id(selected_members(socket), id) do
+      nil -> {:noreply, socket}
+      member -> choose_immich(socket, member.id)
     end
   end
 
@@ -470,7 +477,72 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     end
   end
 
-  defp choose_field_candidate(_socket, _field, _index), do: nil
+  defp toggled(socket, section) do
+    open =
+      if MapSet.member?(socket.assigns.open_sections, section) do
+        MapSet.delete(socket.assigns.open_sections, section)
+      else
+        MapSet.put(socket.assigns.open_sections, section)
+      end
+
+    open
+  end
+
+  defp choose_immich(socket, id) do
+    # Must resolve against the *selected* members, not `socket.assigns.members`
+    # — the row only renders buttons for selected linked members, but a
+    # crafted event carrying a deselected member's id would otherwise adopt
+    # that member's Immich group unchallenged, since slice 1 exempts the
+    # Immich group from `held_by_member?/3`.
+    case Enum.find(selected_members(socket), &(&1.id == id)) do
+      nil ->
+        {:noreply, socket}
+
+      member ->
+        # All four columns move together or the survivor ends up with one
+        # record's person id and another's sync timestamp.
+        overrides =
+          MergeFields.immich_fields()
+          |> Enum.reduce(socket.assigns.overrides, fn field, acc ->
+            Map.put(acc, field, Map.fetch!(member, field) || :clear)
+          end)
+          |> Map.put(:__immich__, id)
+
+        {:noreply, assign(socket, :overrides, overrides)}
+    end
+  end
+
+  defp dismiss_selection(socket) do
+    case DuplicateDetection.dismiss_selection(
+           socket.assigns.current_scope.account.id,
+           MapSet.to_list(socket.assigns.selected_ids),
+           unchecked_ids(socket)
+         ) do
+      :ok ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Marked as not duplicates")
+         |> redirect(to: ~p"/contacts/duplicates")}
+
+      # A half-written clique is rolled back, so the screen must not claim the
+      # dismissal stuck. Staying put keeps the selection intact for a retry.
+      {:error, _reason} ->
+        {:noreply,
+         put_flash(socket, :error, "Could not mark these as not duplicates. Please try again.")}
+    end
+  end
+
+  # Spec G2 is "open **or** submit": `handle_params/3` only covers the open.
+  # A role downgrade while this page is open, or a reused socket, leaves a
+  # mounted screen whose submit would otherwise never be re-checked.
+  defp authorized?(socket),
+    do: Policy.can?(socket.assigns.current_scope.user, :update, :contact)
+
+  defp refuse(socket) do
+    socket
+    |> put_flash(:error, "You don't have permission to merge contacts")
+    |> push_navigate(to: ~p"/contacts")
+  end
 
   defp run_merge(socket) do
     survivor_id = socket.assigns.primary_id
