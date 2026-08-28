@@ -51,6 +51,10 @@ config :kith, Oban,
     purge: 1
   ],
   plugins: [
+    # Retention for terminal `oban_jobs` rows. Default 7 days; `OBAN_PRUNER_MAX_AGE_DAYS`
+    # overrides it (whole days). In `:prod` the worker container re-reads this at boot via
+    # `Kith.ConfigHelpers.oban_pruner_max_age_seconds/0` (see `config/runtime.exs`), which
+    # also clamps sub-1-day values. Keep the 7-day default here in sync with that helper.
     {Oban.Plugins.Pruner,
      max_age: String.to_integer(System.get_env("OBAN_PRUNER_MAX_AGE_DAYS", "7")) * 24 * 60 * 60},
     {Oban.Plugins.Cron,

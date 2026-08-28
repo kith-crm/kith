@@ -222,6 +222,9 @@ if config_env() == :prod do
   # `:prod`. Test env is pinned to `testing: :manual` in `config/test.exs`.
   case System.get_env("KITH_MODE", "web") do
     "worker" ->
+      # `oban_pruner_max_age_seconds/0` keeps the same 7-day default as the
+      # compile-time `Oban` config in `config/config.exs` (the `Oban.Plugins.Pruner`
+      # entry there); keep the two in sync if the default ever changes.
       config :kith, Oban,
         plugins: [
           {Oban.Plugins.Pruner, max_age: Kith.ConfigHelpers.oban_pruner_max_age_seconds()},
