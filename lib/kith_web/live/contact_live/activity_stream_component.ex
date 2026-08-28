@@ -13,6 +13,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   alias Kith.Gifts
   alias Kith.Storage
   alias Kith.Tasks
+  alias KithWeb.ContactLive.PhotoThumbComponent
 
   @impl true
   def mount(socket) do
@@ -393,9 +394,14 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
           :for={entry <- @entries}
           class="aspect-square rounded-lg bg-[var(--color-surface)] border border-[var(--color-border-subtle)] overflow-hidden"
         >
-          <div class="w-full h-full bg-gradient-to-br from-stone-100 to-stone-200 flex items-center justify-center text-[var(--color-text-tertiary)]">
-            <.icon name="hero-photo" class="size-6" />
-          </div>
+          <.live_component
+            module={PhotoThumbComponent}
+            id={"photo-#{entry.id}"}
+            variant={:tile}
+            storage_key={entry.record.storage_key}
+            alt={entry.title}
+            pending_sync={Contacts.Photo.pending_sync?(entry.record)}
+          />
         </div>
       </div>
 
@@ -497,11 +503,15 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             {if entry.type == :note, do: strip_html(entry.body), else: entry.body}
           </div>
 
-          <div :if={entry.type == :photo} class="mt-2">
-            <div class="size-[72px] rounded-lg bg-gradient-to-br from-stone-100 to-stone-200 inline-flex items-center justify-center text-[var(--color-text-tertiary)]">
-              <.icon name="hero-photo" class="size-5" />
-            </div>
-          </div>
+          <.live_component
+            :if={entry.type == :photo}
+            module={PhotoThumbComponent}
+            id={"photo-#{entry.id}"}
+            variant={:timeline}
+            storage_key={entry.record.storage_key}
+            alt={entry.title}
+            pending_sync={Contacts.Photo.pending_sync?(entry.record)}
+          />
         </div>
       </div>
     </div>

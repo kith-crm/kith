@@ -112,6 +112,24 @@ defmodule Kith.Storage.S3 do
     end
   end
 
+  @doc """
+  Returns the `scheme://host[:port]` origin that presigned URLs point at, for
+  the CSP `img-src` directive. Presigned URLs are path-style, so the ExAws
+  config host is the exact origin the browser will request.
+  """
+  def csp_img_src do
+    config = ExAws.Config.new(:s3)
+    scheme = Map.get(config, :scheme) || "https://"
+    host = Map.get(config, :host) || "s3.amazonaws.com"
+
+    case Map.get(config, :port) do
+      port when port in [nil, 80, 443] -> "#{scheme}#{host}"
+      port -> "#{scheme}#{host}:#{port}"
+    end
+  rescue
+    _ -> ""
+  end
+
   defp bucket do
     Application.get_env(:kith, Kith.Storage, [])
     |> Keyword.fetch!(:bucket)
