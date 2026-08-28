@@ -1278,6 +1278,20 @@ defmodule Kith.Contacts do
   end
 
   @doc """
+  Returns the non-deleted contacts matching `ids` for an account.
+
+  One round trip regardless of list length. Ids naming a contact in another
+  account, a soft-deleted contact, or nothing at all are simply absent from
+  the result.
+  """
+  def list_contacts_by_ids(account_id, ids) when is_list(ids) do
+    Contact
+    |> scope_active(account_id)
+    |> where([c], c.id in ^ids)
+    |> Repo.all()
+  end
+
+  @doc """
   Counts all non-deleted contacts for an account.
   """
   def count_contacts(account_id) do

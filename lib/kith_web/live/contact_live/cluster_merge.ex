@@ -48,6 +48,20 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     deceased_at: "the earliest date among the deceased contacts"
   }
 
+  # Postgres `bigint` upper bound. `Integer.parse/1` returns integers wider
+  # than the column happily, and Postgrex then refuses to encode them —
+  # `DBConnection.EncodeError`, which takes the LiveView process down. Ids
+  # that arrive from the URL are the only ones that reach a query without
+  # first being matched against something already on screen, so they are the
+  # only ones that need this bound.
+  @max_bigint 9_223_372_036_854_775_807
+
+  # `?with=` is hand-editable. The legitimate producer is "Merge selected" on
+  # the contacts index, where a realistic selection is a handful of contacts;
+  # 50 is far above that and far below anything that would tie up a database
+  # connection.
+  @max_with_members 50
+
   @impl true
   def mount(_params, _session, socket), do: {:ok, assign(socket, :error, nil)}
 
@@ -57,10 +71,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
     # `id` comes straight from the URL and is not guaranteed numeric — a bad
     # value (e.g. "/contacts/duplicates/cluster/abc") must land on the same
-    # "not found" redirect as an unknown id rather than raising.
+    # "not found" redirect as an unknown id rather than raising. An id wider
+    # than `bigint` is refused for the same reason: it parses, but Postgrex
+    # then refuses to encode it.
     contact_id =
       case Integer.parse(id) do
-        {contact_id, ""} -> contact_id
+        {contact_id, ""} when contact_id in 0..@max_bigint -> contact_id
         _ -> nil
       end
 
@@ -72,12 +88,15 @@ defmodule KithWeb.ContactLive.ClusterMerge do
          |> push_navigate(to: ~p"/contacts")}
 
       cluster = contact_id && DuplicateDetection.get_cluster(scope.account.id, contact_id) ->
-        {:noreply, socket |> load_cluster(cluster, false) |> append_from_params(params)}
+        {:noreply,
+         socket |> load_cluster(cluster, false) |> append_from_params(params, contact_id)}
 
       contact = contact_id && Contacts.get_contact(scope.account.id, contact_id) ->
         # Not a detected duplicate — the user came here to merge by hand.
         {:noreply,
-         socket |> load_cluster(synthetic_cluster(contact), true) |> append_from_params(params)}
+         socket
+         |> load_cluster(synthetic_cluster(contact), true)
+         |> append_from_params(params, contact_id)}
 
       true ->
         {:noreply,
@@ -90,43 +109,56 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   # Extra members passed from the contacts list "Merge selected" action. Every
   # id is re-fetched through the account scope, so a hand-edited URL cannot
   # pull in another account's contact.
-  defp append_from_params(socket, %{"with" => with_param}) when is_binary(with_param) do
+  defp append_from_params(socket, %{"with" => with_param}, lead_id) when is_binary(with_param) do
     account_id = socket.assigns.current_scope.account.id
     existing = MapSet.new(socket.assigns.members, & &1.id)
 
-    extra =
+    requested =
       with_param
       |> String.split(",", trim: true)
       |> Enum.flat_map(fn raw ->
         case Integer.parse(raw) do
-          {id, ""} -> [id]
+          {id, ""} when id in 0..@max_bigint -> [id]
           _ -> []
         end
       end)
       |> Enum.uniq()
+      |> Enum.take(@max_with_members)
+
+    extra =
+      requested
       |> Enum.reject(&MapSet.member?(existing, &1))
-      |> Enum.map(&Contacts.get_contact(account_id, &1))
-      |> Enum.reject(&is_nil/1)
+      |> then(&Contacts.list_contacts_by_ids(account_id, &1))
 
-    if extra == [] do
-      socket
-    else
-      members = socket.assigns.members ++ extra
+    members = socket.assigns.members ++ extra
 
-      socket
-      |> assign(:members, members)
-      |> assign(:selected_ids, MapSet.new(members, & &1.id))
-      # The URL id leads only because `merge_selected_path/1` sorts the
-      # selection — the user expressed no preference — so the survivor has to
-      # be re-derived over every member, not just the one `load_cluster/3`
-      # saw. Safe only here: this runs immediately after `load_cluster/3`, so
-      # there is no "make primary" choice to clobber.
-      |> assign(:primary_id, DuplicateDetection.default_primary(members).id)
-      |> recompute()
-    end
+    # `members` and `selected_ids` part ways here. `load_cluster/3` seeds both
+    # from the detected cluster, which is right when the cluster IS the
+    # subject; but on this path the subject is the user's own selection, and
+    # the lead id may happen to sit in an unrelated pending cluster. Those
+    # cluster-mates stay on screen — they may well be duplicates — but
+    # checking them would merge contacts the user never picked.
+    selected =
+      [lead_id | requested]
+      |> MapSet.new()
+      |> MapSet.intersection(MapSet.new(members, & &1.id))
+
+    selected_members = Enum.filter(members, &MapSet.member?(selected, &1.id))
+
+    socket
+    |> assign(:members, members)
+    |> assign(:selected_ids, selected)
+    |> assign(:labels, Contacts.merge_association_labels(members))
+    # The URL id leads only because `merge_selected_path/1` sorts the
+    # selection — the user expressed no preference — so the survivor has to
+    # be re-derived over every selected member, not just the one
+    # `load_cluster/3` saw. Safe only here: this runs immediately after
+    # `load_cluster/3`, so there is no "make primary" choice to clobber.
+    |> assign(:primary_id, DuplicateDetection.default_primary(selected_members).id)
+    |> recompute()
   end
 
-  defp append_from_params(socket, _params), do: socket
+  defp append_from_params(socket, _params, _lead_id), do: socket
 
   defp synthetic_cluster(contact) do
     %Kith.DuplicateDetection.Cluster{

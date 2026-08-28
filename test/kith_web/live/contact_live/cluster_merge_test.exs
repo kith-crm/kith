@@ -1327,6 +1327,83 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
   end
 
+  describe "merge selected (?with=)" do
+    test "does not pre-select cluster members the user never picked", ctx do
+      alice =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          last_name: "Smith"
+        })
+
+      bob =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Bob", last_name: "Jones"})
+
+      # Dana is a pending duplicate of Alice, but the user did not tick her.
+      dana =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          last_name: "Smyth"
+        })
+
+      candidate!(ctx.account_id, alice, dana)
+
+      [lead, other] = Enum.sort([alice.id, bob.id])
+
+      {:ok, live, html} =
+        live(ctx.conn, "/contacts/duplicates/cluster/#{lead}?with=#{other}")
+
+      # Dana is visible — she may well be a duplicate — but unchecked.
+      assert html =~ dana.display_name
+      refute has_element?(live, "input[phx-value-id='#{dana.id}'][checked]")
+      assert has_element?(live, "input[phx-value-id='#{alice.id}'][checked]")
+      assert has_element?(live, "input[phx-value-id='#{bob.id}'][checked]")
+    end
+
+    test "a plain cluster URL still selects the whole cluster", ctx do
+      alice =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          last_name: "Smith"
+        })
+
+      dana =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          last_name: "Smyth"
+        })
+
+      candidate!(ctx.account_id, alice, dana)
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(alice, dana))
+
+      assert has_element?(live, "input[phx-value-id='#{alice.id}'][checked]")
+      assert has_element?(live, "input[phx-value-id='#{dana.id}'][checked]")
+    end
+
+    test "caps the ?with= list", ctx do
+      lead =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Lead",
+          last_name: "Contact"
+        })
+
+      others =
+        for i <- 1..60,
+            do:
+              ContactsFixtures.contact_fixture(ctx.account_id, %{
+                first_name: "Extra#{i}",
+                last_name: "X"
+              })
+
+      with_param = others |> Enum.map(& &1.id) |> Enum.join(",")
+
+      {:ok, _live, html} =
+        live(ctx.conn, "/contacts/duplicates/cluster/#{lead.id}?with=#{with_param}")
+
+      assert html =~ "51 contacts"
+    end
+  end
+
   describe "old routes" do
     test "the merge wizard route no longer exists", ctx do
       # This app's endpoint renders a 404 page for unmatched routes rather
