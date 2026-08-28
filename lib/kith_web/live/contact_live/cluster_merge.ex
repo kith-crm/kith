@@ -770,11 +770,11 @@ defmodule KithWeb.ContactLive.ClusterMerge do
             <div class="text-sm text-[var(--color-text-secondary)] capitalize">
               {humanize(field)}
             </div>
-            <!--
+            <%!--
               Spec B6: a resolved row is click-to-change too, opening in place as
               the same segmented control a contested row gets. The only rows
               without one are those no member holds a usable value for.
-            -->
+            --%>
             <div
               :if={candidates(assigns, field) != []}
               class="flex flex-wrap items-center gap-2"
@@ -831,11 +831,11 @@ defmodule KithWeb.ContactLive.ClusterMerge do
               </span>
             </div>
           </div>
-          <!--
+          <%!--
             Spec B1 requires every mergeable scalar on screen, the flags
             included. §3 resolves these by policy rather than by choice, so
             they state the outcome and the rule instead of offering a control.
-          -->
+          --%>
           <div
             :for={field <- MergeFields.policy_fields()}
             data-field={field}
