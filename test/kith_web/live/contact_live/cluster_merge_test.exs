@@ -1359,6 +1359,31 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert has_element?(live, "input[phx-value-id='#{bob.id}'][checked]")
     end
 
+    test "a ?with= id that is already in the lead's detected cluster is still selected",
+         ctx do
+      alice =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          last_name: "Smith"
+        })
+
+      # Dana is a pending duplicate of Alice, AND the user explicitly ticked
+      # her — she must end up selected even though she's already a member
+      # via the detected cluster (so absent from `extra`).
+      dana =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          last_name: "Smyth"
+        })
+
+      candidate!(ctx.account_id, alice, dana)
+
+      {:ok, live, _html} =
+        live(ctx.conn, "/contacts/duplicates/cluster/#{alice.id}?with=#{dana.id}")
+
+      assert has_element?(live, "input[phx-value-id='#{dana.id}'][checked]")
+    end
+
     test "a plain cluster URL still selects the whole cluster", ctx do
       alice =
         ContactsFixtures.contact_fixture(ctx.account_id, %{
