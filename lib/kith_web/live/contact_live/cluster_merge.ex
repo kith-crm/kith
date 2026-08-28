@@ -349,7 +349,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     end
   end
 
-  # `<details open>` is server-state here (see `load_cluster/2`): the summary
+  # `:open_sections` (see `load_cluster/3`) is what survives a morphdom patch;
+  # the browser toggles `<details>` on its own, so the client also
   # reports the toggle so the assign and the browser's own toggle agree.
   def handle_event("toggle-section", %{"section" => section}, socket) do
     case cast_section(section) do
