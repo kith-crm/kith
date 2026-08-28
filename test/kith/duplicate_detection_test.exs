@@ -628,4 +628,118 @@ defmodule Kith.DuplicateDetectionTest do
       assert count == 0
     end
   end
+
+  describe "scan_account/1" do
+    setup do
+      Kith.ContactsFixtures.seed_reference_data!()
+      {account, _user} = setup_account()
+
+      email_type_id =
+        Repo.one!(
+          from(t in "contact_field_types",
+            where: t.protocol == "mailto:",
+            select: t.id,
+            limit: 1
+          )
+        )
+
+      %{account: account, email_type_id: email_type_id}
+    end
+
+    defp pending_for(account_id) do
+      Kith.Contacts.DuplicateCandidate
+      |> where([d], d.account_id == ^account_id and d.status == "pending")
+      |> Repo.all()
+    end
+
+    test "writes a name_match candidate for near-identical display names", %{account: account} do
+      insert(:contact,
+        account: account,
+        display_name: "John Smith",
+        first_name: "John",
+        last_name: "Smith"
+      )
+
+      insert(:contact,
+        account: account,
+        display_name: "John Smithe",
+        first_name: "John",
+        last_name: "Smithe"
+      )
+
+      assert :ok = DuplicateDetection.scan_account(account.id)
+
+      assert [candidate] = pending_for(account.id)
+      assert "name_match" in candidate.reasons
+      assert candidate.score >= 0.5
+    end
+
+    test "scores an identical display_name pair at 1.0", %{account: account} do
+      insert(:contact,
+        account: account,
+        display_name: "Mary Jones",
+        first_name: "Mary",
+        last_name: "Jones"
+      )
+
+      insert(:contact,
+        account: account,
+        display_name: "Mary Jones",
+        first_name: "Mary",
+        last_name: "Jones"
+      )
+
+      assert :ok = DuplicateDetection.scan_account(account.id)
+
+      assert [candidate] = pending_for(account.id)
+      assert candidate.reasons == ["name_match"]
+      assert candidate.score == 1.0
+    end
+
+    test "writes an email_match candidate for a shared address", %{
+      account: account,
+      email_type_id: email_type_id
+    } do
+      c1 =
+        insert(:contact,
+          account: account,
+          display_name: "Aaa Bbb",
+          first_name: "Aaa",
+          last_name: "Bbb"
+        )
+
+      c2 =
+        insert(:contact,
+          account: account,
+          display_name: "Ccc Ddd",
+          first_name: "Ccc",
+          last_name: "Ddd"
+        )
+
+      Kith.ContactsFixtures.contact_field_fixture(c1, email_type_id, %{
+        "value" => "shared@example.com"
+      })
+
+      Kith.ContactsFixtures.contact_field_fixture(c2, email_type_id, %{
+        "value" => "shared@example.com"
+      })
+
+      assert :ok = DuplicateDetection.scan_account(account.id)
+
+      assert [candidate] = pending_for(account.id)
+      assert "email_match" in candidate.reasons
+    end
+
+    test "is a no-op below two contacts", %{account: account} do
+      insert(:contact,
+        account: account,
+        display_name: "Solo Person",
+        first_name: "Solo",
+        last_name: "Person"
+      )
+
+      assert :ok = DuplicateDetection.scan_account(account.id)
+      assert pending_for(account.id) == []
+    end
+  end
 end
