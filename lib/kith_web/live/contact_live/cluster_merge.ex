@@ -201,6 +201,10 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     |> assign(:page_title, "Merge duplicates")
     |> assign(:cluster, cluster)
     |> assign(:members, members)
+    # Derived from `:members`, which changes only here, in `add-member`, and
+    # in `append_from_params/3` — not on every toggle. Three queries, so it
+    # does not belong in `recompute/1`.
+    |> assign(:labels, Contacts.merge_association_labels(members))
     |> assign(:selected_ids, MapSet.new(members, & &1.id))
     |> assign(:primary_id, primary.id)
     |> assign(:overrides, %{})
@@ -227,7 +231,6 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     |> assign(:primary_id, primary_id)
     |> assign(:resolution, MergeResolution.resolve(selected, primary_id))
     |> assign(:summary, MergeSummary.build(selected))
-    |> assign(:labels, Contacts.merge_association_labels(socket.assigns.members))
     # A merge error describes the resolution that was submitted. Anything that
     # changes the resolution makes it stale, so it never outlives one.
     |> assign(:error, nil)
@@ -290,9 +293,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       # on; the engine does not care how it got into the strip. Discarding
       # overrides/dropped mirrors "toggle-member": the selection changed, so
       # every derived value is stale.
+      members = socket.assigns.members ++ [contact]
+
       {:noreply,
        socket
-       |> assign(:members, socket.assigns.members ++ [contact])
+       |> assign(:members, members)
+       |> assign(:labels, Contacts.merge_association_labels(members))
        |> assign(:selected_ids, MapSet.put(socket.assigns.selected_ids, contact.id))
        |> assign(:overrides, %{})
        |> assign(:dropped, MapSet.new())
