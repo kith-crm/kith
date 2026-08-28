@@ -1664,6 +1664,81 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
 
       assert length(active) == 1
     end
+
+    # Issue #2 review IMP-1: on a re-import, the importer writes a fresh
+    # ImportRecord for every *updated* contact too, so the second pass must
+    # scope to contacts genuinely created this run — not merely referenced by
+    # an ImportRecord from it — or it would auto-merge the whole prior corpus.
+    test "re-import does not auto-merge a pre-existing contact into a new namesake",
+         %{user: user, account_id: account_id} do
+      # First import: creates Monica contact 1 ("Nora Reed"), nothing to merge.
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(
+          conn,
+          contacts_page_json(
+            [contact_json(id: 1, first_name: "Nora", last_name: "Reed")],
+            1,
+            1,
+            1
+          )
+        )
+      end)
+
+      job1 = api_import_fixture(account_id, user.id)
+
+      assert {:ok, first} =
+               MonicaApi.crawl(account_id, user.id, credential(), job1, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert first.merged == 0
+      [existing] = Repo.all(from(c in Contacts.Contact, where: c.account_id == ^account_id))
+
+      Imports.update_import_status(job1, "completed", %{completed_at: DateTime.utc_now()})
+
+      # Second import: re-sends contact 1 (an UPDATE) plus a brand-new contact 2
+      # with an identical display_name and nothing else shared.
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(
+          conn,
+          contacts_page_json(
+            [
+              contact_json(id: 1, first_name: "Nora", last_name: "Reed"),
+              contact_json(id: 2, first_name: "Nora", last_name: "Reed")
+            ],
+            1,
+            1,
+            2
+          )
+        )
+      end)
+
+      job2 = api_import_fixture(account_id, user.id)
+
+      assert {:ok, second} =
+               MonicaApi.crawl(account_id, user.id, credential(), job2, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      # The pre-existing contact is left alone; only contact 2 was created.
+      assert second.merged == 0
+      assert second.merged_by_detection == 0
+
+      active =
+        Repo.all(
+          from(c in Contacts.Contact,
+            where:
+              c.first_name == "Nora" and c.last_name == "Reed" and
+                c.account_id == ^account_id and is_nil(c.deleted_at)
+          )
+        )
+
+      assert length(active) == 2
+      assert existing.id in Enum.map(active, & &1.id)
+
+      # The detector still flags the pair — it is deliberately not auto-merged.
+      assert Kith.DuplicateDetection.cluster_count(account_id) >= 1
+    end
   end
 
   describe "coverage_check_and_backfill" do

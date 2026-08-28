@@ -12,8 +12,13 @@ defmodule Kith.Imports.DuplicateAutomerge do
   duplicates UI at "100%".
 
   This pass runs a fresh scan, then works over the scoped `pending`
-  `DuplicateCandidate` graph (optionally restricted to a set of contact ids —
-  e.g. one import's records, so pre-existing contacts are never touched):
+  `DuplicateCandidate` graph. `:restrict_ids` narrows it to pairs whose *both*
+  endpoints are in a given contact-id set — the Monica importer passes the
+  contacts it genuinely inserted this run (not contacts merely re-touched on a
+  re-import), so pre-existing records are never merged. Omitting `:restrict_ids`
+  (the `kith.duplicates.automerge` mix task) scans the whole account.
+
+  Over that graph:
 
     * an **edge** is a candidate pair; a **strong edge** scores `>= min_score`
       (default `1.0`);

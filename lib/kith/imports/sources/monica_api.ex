@@ -99,9 +99,12 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
     # Phase 1.5: Auto-merge definite duplicates (optional).
     # Runs AFTER Phase 1.4 so backfilled contacts participate in auto-merge.
+    # Scoped to `acc.created_contact_ids` — contacts genuinely inserted by this
+    # run (main crawl + backfill), never contacts merely re-touched on a
+    # re-import — so pre-existing records are never merged.
     merge_result =
       if opts["auto_merge_duplicates"] do
-        auto_merge_duplicates(account_id, import_job, opts)
+        auto_merge_duplicates(account_id, import_job, opts, acc.created_contact_ids)
       else
         %{
           merged: 0,
@@ -181,7 +184,14 @@ defmodule Kith.Imports.Sources.MonicaApi do
     initial_state = %{
       page: 1,
       total: nil,
-      acc: %{contacts: 0, notes: 0, skipped: 0, error_count: 0, errors: []},
+      acc: %{
+        contacts: 0,
+        notes: 0,
+        skipped: 0,
+        error_count: 0,
+        errors: [],
+        created_contact_ids: []
+      },
       deferred: %{
         first_met_through: [],
         relationships: [],
@@ -537,6 +547,11 @@ defmodule Kith.Imports.Sources.MonicaApi do
           contact.id
         )
 
+        # Track genuinely-new contacts so the auto-merge second pass can scope
+        # itself to this run's own creations. An ImportRecord is written for
+        # updated contacts too, so it cannot stand in for "created here".
+        acc = %{acc | created_contact_ids: [contact.id | acc.created_contact_ids]}
+
         import_api_contact_children(ctx, contact, api_contact, source_id, ref_data, acc, deferred)
 
       {:error, changeset} ->
@@ -864,24 +879,19 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   # ── Phase 1.5: Auto-merge definite duplicates ───────────────────────
 
-  defp auto_merge_duplicates(account_id, import_job, opts) do
-    # Get all contact IDs imported in this batch
-    import_records =
-      Repo.all(
-        from(ir in Imports.ImportRecord,
-          where:
-            ir.import_id == ^import_job.id and
-              ir.source_entity_type == "contact",
-          select: ir.local_entity_id
-        )
-      )
+  defp auto_merge_duplicates(account_id, import_job, opts, created_ids) do
+    # `created_ids` are the contacts this run actually inserted (main crawl +
+    # backfill). A re-import writes a fresh ImportRecord for every *updated*
+    # contact too, so an ImportRecord from this run is NOT a reliable "created
+    # here" signal — both passes below scope to `created_ids` instead, which
+    # keeps pre-existing contacts out of the auto-merge entirely.
 
     # Load contacts with contact fields and addresses (addresses participate
     # in the broadened definite-duplicate predicate).
     contacts =
       Repo.all(
         from(c in Contacts.Contact,
-          where: c.id in ^import_records and is_nil(c.deleted_at),
+          where: c.id in ^created_ids and is_nil(c.deleted_at),
           preload: [:addresses, contact_fields: :contact_field_type]
         )
       )
@@ -901,13 +911,13 @@ defmodule Kith.Imports.Sources.MonicaApi do
     # name-group pass above only catches pairs that share an exact normalized
     # {first_name, last_name} and a concrete email/phone/address. The detector
     # also flags identical-`display_name` pairs and transitive chains at 100%;
-    # those are merged here, restricted to this import's own contacts so
-    # pre-existing records are never touched. `opts["auto_merge_score"]`, when
-    # present, overrides the default strong-edge floor of 1.0.
+    # those are merged here, restricted to `created_ids` so pre-existing
+    # records are never touched. `opts["auto_merge_score"]`, when present,
+    # overrides the default strong-edge floor of 1.0.
     detection_opts =
       case opts["auto_merge_score"] do
-        nil -> [restrict_ids: import_records]
-        score -> [restrict_ids: import_records, min_score: score]
+        nil -> [restrict_ids: created_ids]
+        score -> [restrict_ids: created_ids, min_score: score]
       end
 
     detection = DuplicateAutomerge.run(account_id, detection_opts)
