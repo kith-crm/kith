@@ -1400,7 +1400,12 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert length(active) == 2
     end
 
-    test "does not merge contacts with same name but different email/phone", %{
+    # Issue #2: the name-group pass leaves this pair alone (no shared
+    # email/phone/address), and the detector flags it only on `name_match`.
+    # A name-only match is never auto-merged — two different people routinely
+    # share an identical first+last name — so the pair stays a pending
+    # candidate for manual review.
+    test "does not auto-merge same-name contacts whose only shared signal is the name", %{
       user: user,
       account_id: account_id
     } do
@@ -1431,6 +1436,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                })
 
       assert summary.merged == 0
+      assert summary.merged_by_detection == 0
 
       active =
         Repo.all(
@@ -1442,6 +1448,178 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
         )
 
       assert length(active) == 2
+      # The detector still flags the pair — it is deliberately not auto-merged.
+      assert Kith.DuplicateDetection.cluster_count(account_id) >= 1
+    end
+
+    # Issue #2, pure divergence case (a): first/last names differ, so the
+    # name-group pass never groups them, and `display_name` collides exactly —
+    # a name-only match. It is never auto-merged and stays a pending candidate.
+    test "does not auto-merge contacts whose display_name collides but nothing else is shared", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(id: 1, first_name: "John Doe", last_name: ""),
+        contact_json(id: 2, first_name: "John", last_name: "Doe")
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert summary.merged == 0
+      assert summary.merged_by_detection == 0
+
+      active =
+        Repo.aggregate(
+          from(c in Contacts.Contact,
+            where: c.account_id == ^account_id and is_nil(c.deleted_at)
+          ),
+          :count
+        )
+
+      assert active == 2
+      # The detector still flags the pair — it is deliberately not auto-merged.
+      assert Kith.DuplicateDetection.cluster_count(account_id) >= 1
+    end
+
+    # A strong edge (identical display_name + a shared email) that the detector
+    # scores at 1.0, but whose members carry different non-empty birthdates:
+    # the second pass holds it back rather than merging. First/last names
+    # differ, so the name-group first pass never groups them.
+    test "does not merge a strong-edge pair whose members disagree on birthdate", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(
+          id: 1,
+          first_name: "Bob Smith",
+          last_name: "",
+          contact_fields: [contact_field_json(content: "bob@example.com", type_name: "Email")],
+          birthdate: %{"date" => "1985-06-15T00:00:00Z", "is_year_unknown" => false}
+        ),
+        contact_json(
+          id: 2,
+          first_name: "Bob",
+          last_name: "Smith",
+          contact_fields: [contact_field_json(content: "bob@example.com", type_name: "Email")],
+          birthdate: %{"date" => "1990-01-01T00:00:00Z", "is_year_unknown" => false}
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert summary.merged == 0
+      assert summary.automerge_skipped == 1
+
+      active =
+        Repo.all(
+          from(c in Contacts.Contact,
+            where: c.account_id == ^account_id and is_nil(c.deleted_at)
+          )
+        )
+
+      assert length(active) == 2
+    end
+
+    # Issue #2: the import option lowers the strong-edge floor for the second
+    # pass. These two share an email (~0.9) but no name_key, so nothing would
+    # merge at the default 1.0 floor (covered by the DuplicateAutomerge
+    # min_score test); with the override it does.
+    test "honours opts[\"auto_merge_score\"] override", %{user: user, account_id: account_id} do
+      contacts = [
+        contact_json(
+          id: 1,
+          first_name: "Sam",
+          last_name: "Bell",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        ),
+        contact_json(
+          id: 2,
+          first_name: "Sam",
+          last_name: "Bella",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true,
+                 "auto_merge_score" => 0.85
+               })
+
+      assert summary.merged == 1
+      assert summary.merged_by_detection == 1
+
+      active =
+        Repo.all(
+          from(c in Contacts.Contact,
+            where:
+              c.first_name in ["Sam"] and c.account_id == ^account_id and
+                is_nil(c.deleted_at)
+          )
+        )
+
+      assert length(active) == 1
+    end
+
+    test "coerces a string opts[\"auto_merge_score\"] from the form", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(
+          id: 1,
+          first_name: "Sam",
+          last_name: "Bell",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        ),
+        contact_json(
+          id: 2,
+          first_name: "Sam",
+          last_name: "Bella",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true,
+                 "auto_merge_score" => "0.85"
+               })
+
+      assert summary.merged == 1
+      assert summary.merged_by_detection == 1
     end
 
     test "merges contacts with same name and phone", %{user: user, account_id: account_id} do
@@ -1530,6 +1708,81 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
         )
 
       assert length(active) == 1
+    end
+
+    # Issue #2 review IMP-1: on a re-import, the importer writes a fresh
+    # ImportRecord for every *updated* contact too, so the second pass must
+    # scope to contacts genuinely created this run — not merely referenced by
+    # an ImportRecord from it — or it would auto-merge the whole prior corpus.
+    test "re-import does not auto-merge a pre-existing contact into a new namesake",
+         %{user: user, account_id: account_id} do
+      # First import: creates Monica contact 1 ("Nora Reed"), nothing to merge.
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(
+          conn,
+          contacts_page_json(
+            [contact_json(id: 1, first_name: "Nora", last_name: "Reed")],
+            1,
+            1,
+            1
+          )
+        )
+      end)
+
+      job1 = api_import_fixture(account_id, user.id)
+
+      assert {:ok, first} =
+               MonicaApi.crawl(account_id, user.id, credential(), job1, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert first.merged == 0
+      [existing] = Repo.all(from(c in Contacts.Contact, where: c.account_id == ^account_id))
+
+      Imports.update_import_status(job1, "completed", %{completed_at: DateTime.utc_now()})
+
+      # Second import: re-sends contact 1 (an UPDATE) plus a brand-new contact 2
+      # with an identical display_name and nothing else shared.
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(
+          conn,
+          contacts_page_json(
+            [
+              contact_json(id: 1, first_name: "Nora", last_name: "Reed"),
+              contact_json(id: 2, first_name: "Nora", last_name: "Reed")
+            ],
+            1,
+            1,
+            2
+          )
+        )
+      end)
+
+      job2 = api_import_fixture(account_id, user.id)
+
+      assert {:ok, second} =
+               MonicaApi.crawl(account_id, user.id, credential(), job2, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      # The pre-existing contact is left alone; only contact 2 was created.
+      assert second.merged == 0
+      assert second.merged_by_detection == 0
+
+      active =
+        Repo.all(
+          from(c in Contacts.Contact,
+            where:
+              c.first_name == "Nora" and c.last_name == "Reed" and
+                c.account_id == ^account_id and is_nil(c.deleted_at)
+          )
+        )
+
+      assert length(active) == 2
+      assert existing.id in Enum.map(active, & &1.id)
+
+      # The detector still flags the pair — it is deliberately not auto-merged.
+      assert Kith.DuplicateDetection.cluster_count(account_id) >= 1
     end
   end
 

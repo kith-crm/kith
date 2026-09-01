@@ -33,6 +33,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
   alias Kith.Contacts
   alias Kith.Contacts.PhoneFormatter
   alias Kith.Imports
+  alias Kith.Imports.DuplicateAutomerge
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
   alias Kith.Repo
   alias Kith.Workers.MonicaDocumentImportWorker
@@ -98,11 +99,21 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
     # Phase 1.5: Auto-merge definite duplicates (optional).
     # Runs AFTER Phase 1.4 so backfilled contacts participate in auto-merge.
+    # Scoped to `acc.created_contact_ids` — contacts genuinely inserted by this
+    # run (main crawl + backfill), never contacts merely re-touched on a
+    # re-import — so pre-existing records are never merged.
     merge_result =
       if opts["auto_merge_duplicates"] do
-        auto_merge_duplicates(account_id, import_job)
+        auto_merge_duplicates(account_id, import_job, opts, acc.created_contact_ids)
       else
-        %{merged: 0, errors: []}
+        %{
+          merged: 0,
+          merged_by_name_group: 0,
+          merged_by_detection: 0,
+          skipped: 0,
+          left_behind: 0,
+          errors: []
+        }
       end
 
     # Phase 2: Resolve cross-references
@@ -143,6 +154,8 @@ defmodule Kith.Imports.Sources.MonicaApi do
        notes: acc.notes,
        skipped: acc.skipped,
        merged: merge_result.merged,
+       merged_by_detection: merge_result.merged_by_detection,
+       automerge_skipped: merge_result.skipped + merge_result.left_behind,
        error_count: error_count,
        errors: Enum.take(all_errors, 50),
        misc_data_plan: Enum.reverse(deferred.misc_data),
@@ -157,6 +170,8 @@ defmodule Kith.Imports.Sources.MonicaApi do
          notes: 0,
          skipped: 0,
          merged: 0,
+         merged_by_detection: 0,
+         automerge_skipped: 0,
          error_count: 1,
          errors: ["Import cancelled"],
          coverage_backfill: empty_backfill_stats()
@@ -169,7 +184,14 @@ defmodule Kith.Imports.Sources.MonicaApi do
     initial_state = %{
       page: 1,
       total: nil,
-      acc: %{contacts: 0, notes: 0, skipped: 0, error_count: 0, errors: []},
+      acc: %{
+        contacts: 0,
+        notes: 0,
+        skipped: 0,
+        error_count: 0,
+        errors: [],
+        created_contact_ids: []
+      },
       deferred: %{
         first_met_through: [],
         relationships: [],
@@ -525,6 +547,11 @@ defmodule Kith.Imports.Sources.MonicaApi do
           contact.id
         )
 
+        # Track genuinely-new contacts so the auto-merge second pass can scope
+        # itself to this run's own creations. An ImportRecord is written for
+        # updated contacts too, so it cannot stand in for "created here".
+        acc = %{acc | created_contact_ids: [contact.id | acc.created_contact_ids]}
+
         import_api_contact_children(ctx, contact, api_contact, source_id, ref_data, acc, deferred)
 
       {:error, changeset} ->
@@ -852,24 +879,19 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   # ── Phase 1.5: Auto-merge definite duplicates ───────────────────────
 
-  defp auto_merge_duplicates(account_id, import_job) do
-    # Get all contact IDs imported in this batch
-    import_records =
-      Repo.all(
-        from(ir in Imports.ImportRecord,
-          where:
-            ir.import_id == ^import_job.id and
-              ir.source_entity_type == "contact",
-          select: ir.local_entity_id
-        )
-      )
+  defp auto_merge_duplicates(account_id, import_job, opts, created_ids) do
+    # `created_ids` are the contacts this run actually inserted (main crawl +
+    # backfill). A re-import writes a fresh ImportRecord for every *updated*
+    # contact too, so an ImportRecord from this run is NOT a reliable "created
+    # here" signal — both passes below scope to `created_ids` instead, which
+    # keeps pre-existing contacts out of the auto-merge entirely.
 
     # Load contacts with contact fields and addresses (addresses participate
     # in the broadened definite-duplicate predicate).
     contacts =
       Repo.all(
         from(c in Contacts.Contact,
-          where: c.id in ^import_records and is_nil(c.deleted_at),
+          where: c.id in ^created_ids and is_nil(c.deleted_at),
           preload: [:addresses, contact_fields: :contact_field_type]
         )
       )
@@ -885,9 +907,56 @@ defmodule Kith.Imports.Sources.MonicaApi do
     merged_ids = MapSet.new()
     {merged_count, errors, _} = merge_name_groups(name_groups, account_id, import_job, merged_ids)
 
-    Logger.info("[MonicaApi] Auto-merge: #{merged_count} contacts merged")
-    %{merged: merged_count, errors: errors}
+    # Second pass: reconcile with the duplicate detector (issue #2). The
+    # name-group pass above only catches pairs that share an exact normalized
+    # {first_name, last_name} AND a concrete email/phone/address. The detector
+    # also flags transitive chains where each link rests on a different concrete
+    # signal; those are merged here, restricted to `created_ids` so pre-existing
+    # records are never touched. Name-only matches (identical display_name,
+    # nothing else shared) are deliberately NOT merged at any score — they stay
+    # as pending candidates for manual review. `opts["auto_merge_score"]`, when
+    # present, overrides the default strong-edge score floor of 1.0.
+    detection_opts =
+      case parse_auto_merge_score(opts["auto_merge_score"]) do
+        nil -> [restrict_ids: created_ids]
+        score -> [restrict_ids: created_ids, min_score: score]
+      end
+
+    detection = DuplicateAutomerge.run(account_id, detection_opts)
+
+    total = merged_count + detection.merged
+
+    Logger.info(
+      "[MonicaApi] Auto-merge: #{merged_count} by name group + #{detection.merged} by detection " <>
+        "= #{total} contacts merged (#{detection.skipped} cluster(s) skipped, " <>
+        "#{detection.left_behind} contact(s) left behind by a sub-floor edge)"
+    )
+
+    %{
+      merged: total,
+      merged_by_name_group: merged_count,
+      merged_by_detection: detection.merged,
+      skipped: detection.skipped,
+      left_behind: detection.left_behind,
+      errors: errors ++ detection.errors
+    }
   end
+
+  # `auto_merge_score` reaches us straight from form/JSON opts, so it may be a
+  # string. `DuplicateAutomerge`'s `pair.score >= min_score` compares numbers,
+  # and `1.0 >= "0.85"` is always false under Elixir term ordering, so an
+  # un-coerced string would silently merge nothing. Drop anything unparseable.
+  defp parse_auto_merge_score(nil), do: nil
+  defp parse_auto_merge_score(n) when is_number(n), do: n / 1
+
+  defp parse_auto_merge_score(s) when is_binary(s) do
+    case Float.parse(s) do
+      {score, _rest} -> score
+      :error -> nil
+    end
+  end
+
+  defp parse_auto_merge_score(_), do: nil
 
   defp merge_name_groups(groups, account_id, import_job, merged_ids) do
     Enum.reduce(groups, {0, [], merged_ids}, fn {_name_key, group}, {count, errors, seen} ->
