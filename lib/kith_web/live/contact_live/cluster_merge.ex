@@ -762,6 +762,16 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     Enum.filter(assigns.members, &MapSet.member?(assigns.selected_ids, &1.id))
   end
 
+  # A contested value is held by one or more members; label its avatar with the
+  # first holder's display name for alt text and the initials fallback.
+  defp candidate_name(members, [member_id | _]) do
+    Enum.find_value(members, fn member ->
+      member.id == member_id && member.display_name
+    end)
+  end
+
+  defp candidate_name(_members, _member_ids), do: nil
+
   # True when the only first-met-through values on offer were members of this
   # merge, so the row renders as cleared with the reason rather than as an
   # attribution for a value nobody can pick.
@@ -1080,11 +1090,17 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                 ]}
               >
                 <%!--
-                  `avatar` holds a storage key, not a label: render the image it
-                  points at (initials fallback is `KithUI.avatar`'s own job when
-                  the URL is blank), mirroring the member chips above.
+                  `avatar` holds a storage key, not a label, and `candidate.value`
+                  is always a present key (blanks are dropped upstream). Pass the
+                  owning contact's name so `KithUI.avatar` has alt text and can
+                  show initials if the image itself fails to load.
                 --%>
-                <KithUI.avatar :if={field == :avatar} src={Storage.url(candidate.value)} size={:md} />
+                <KithUI.avatar
+                  :if={field == :avatar}
+                  name={candidate_name(@members, candidate.member_ids)}
+                  src={Storage.url(candidate.value)}
+                  size={:md}
+                />
                 <span :if={field != :avatar}>{display(assigns, field, candidate.value)}</span>
                 <span class="block text-[10px] opacity-70">{candidate.count} record(s)</span>
               </button>

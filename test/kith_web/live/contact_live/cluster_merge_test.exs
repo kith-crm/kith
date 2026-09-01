@@ -159,7 +159,8 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   end
 
   describe "avatar values (#3)" do
-    test "a contested avatar row renders an <img> with the storage URL", ctx do
+    test "a contested avatar row renders an <img> with the storage URL and the contact's name",
+         ctx do
       e =
         ContactsFixtures.contact_fixture(ctx.account_id, %{
           first_name: "Mona",
@@ -184,6 +185,11 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert row =~ ~s(src="/uploads/avatars/mona-e.jpg")
       assert row =~ ~s(src="/uploads/avatars/mona-f.jpg")
       refute row =~ ~s(>avatars/mona-e.jpg<)
+
+      # The avatar carries the holder's name, so a missing file degrades to
+      # initials and real alt text rather than a generic "Avatar".
+      assert row =~ ~s(alt="Mona Vale")
+      refute row =~ ~s(alt="Avatar")
     end
   end
 
