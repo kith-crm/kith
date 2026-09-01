@@ -70,6 +70,23 @@ defmodule Kith.Reminders.Reminder do
     |> validate_frequency()
   end
 
+  @doc """
+  Turns an existing reminder of any type into a birthday reminder, keeping its
+  id. Used by the Monica importer to reclaim a generic reminder it created on
+  an earlier run (before the contact had a birthdate) instead of adding a
+  second row.
+  """
+  def convert_to_birthday_changeset(reminder, %Date{} = next_reminder_date) do
+    reminder
+    |> change(
+      type: "birthday",
+      title: nil,
+      frequency: nil,
+      next_reminder_date: next_reminder_date
+    )
+    |> unique_constraint(:contact_id, name: :reminders_birthday_unique_idx)
+  end
+
   def job_ids_changeset(reminder, job_ids) when is_list(job_ids) do
     change(reminder, enqueued_oban_job_ids: job_ids)
   end

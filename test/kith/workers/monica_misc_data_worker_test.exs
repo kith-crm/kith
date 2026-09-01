@@ -200,11 +200,12 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert reminder.next_reminder_date == ~D[2024-07-15]
     end
 
-    test "falls back to initial_date when next_expected_date is absent", %{
+    test "falls back to a future initial_date when next_expected_date is absent", %{
       account_id: account_id,
       import_job: import_job
     } do
       contact = contact_fixture(account_id)
+      future = Date.utc_today() |> Date.add(30) |> Date.to_iso8601()
 
       assert :ok =
                import_reminders(import_job, contact, [
@@ -213,12 +214,78 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
                    "frequency_type" => "one_time",
                    "title" => "Renew passport",
                    "next_expected_date" => nil,
-                   "initial_date" => %{"date" => "2023-03-09 00:00:00"}
+                   "initial_date" => %{"date" => "#{future} 00:00:00"}
                  }
                ])
 
       assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.next_reminder_date == ~D[2023-03-09]
+      assert reminder.next_reminder_date == Date.from_iso8601!(future)
+    end
+
+    test "a past initial_date fallback is pulled forward to today with a warning", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id)
+
+      log =
+        capture_log(fn ->
+          assert :ok =
+                   import_reminders(import_job, contact, [
+                     %{
+                       "id" => 4,
+                       "frequency_type" => "one_time",
+                       "title" => "Renew passport",
+                       "next_expected_date" => nil,
+                       "initial_date" => %{"date" => "2015-03-09 00:00:00"}
+                     }
+                   ])
+        end)
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.next_reminder_date == Date.utc_today()
+      assert log =~ "reminder 4 initial_date 2015-03-09 is in the past"
+    end
+
+    test "an explicit past next_expected_date is kept, not clamped", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id)
+
+      assert :ok =
+               import_reminders(import_job, contact, [
+                 %{
+                   "id" => 5,
+                   "frequency_type" => "one_time",
+                   "title" => "Historical note",
+                   "next_expected_date" => "2020-01-01"
+                 }
+               ])
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.next_reminder_date == ~D[2020-01-01]
+    end
+
+    test "a blank title on a non-birthday reminder gets the default title", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id)
+
+      assert :ok =
+               import_reminders(import_job, contact, [
+                 %{
+                   "id" => 6,
+                   "frequency_type" => "year",
+                   "title" => "",
+                   "next_expected_date" => "2030-05-01"
+                 }
+               ])
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.type == "recurring"
+      assert reminder.title == "Imported reminder"
     end
 
     test "with no parseable date, uses today and logs a warning", %{
@@ -303,6 +370,59 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert reminder.type == "recurring"
       assert reminder.frequency == "annually"
       assert reminder.next_reminder_date == ~D[2024-09-20]
+    end
+
+    test "an untitled annual reminder on a non-birthday date stays generic", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id, %{birthdate: ~D[1990-06-15]})
+
+      assert :ok =
+               import_reminders(import_job, contact, [
+                 %{
+                   "id" => 11,
+                   "frequency_type" => "year",
+                   "title" => "",
+                   "next_expected_date" => %{"date" => "2030-09-20 00:00:00"}
+                 }
+               ])
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.type == "recurring"
+      assert reminder.next_reminder_date == ~D[2030-09-20]
+    end
+
+    test "re-importing after a birthdate is added converts the generic reminder in place", %{
+      account_id: account_id,
+      import_job: import_job
+    } do
+      contact = contact_fixture(account_id)
+
+      payload = [
+        %{
+          "id" => 9,
+          "frequency_type" => "year",
+          "title" => "",
+          "next_expected_date" => %{"date" => "2024-06-15 00:00:00"}
+        }
+      ]
+
+      assert :ok = import_reminders(import_job, contact, payload)
+      assert [generic] = contact_reminders(account_id, contact.id)
+      assert generic.type == "recurring"
+
+      {:ok, contact} = Kith.Contacts.update_contact(contact, %{birthdate: ~D[1990-06-15]})
+
+      assert :ok = import_reminders(import_job, contact, payload)
+
+      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert reminder.id == generic.id
+      assert reminder.type == "birthday"
+      assert reminder.next_reminder_date == TimeHelper.next_birthday_date(~D[1990-06-15])
+
+      assert Imports.find_import_record(account_id, "monica_api", "reminder", "9").local_entity_id ==
+               reminder.id
     end
   end
 
