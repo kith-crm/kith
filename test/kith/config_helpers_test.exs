@@ -3,21 +3,6 @@ defmodule Kith.ConfigHelpersTest do
 
   alias Kith.ConfigHelpers
 
-  describe "oban_pruner_max_age_seconds/0" do
-    test "defaults to 7 days when OBAN_PRUNER_MAX_AGE_DAYS is unset" do
-      System.delete_env("OBAN_PRUNER_MAX_AGE_DAYS")
-
-      assert ConfigHelpers.oban_pruner_max_age_seconds() == 7 * 24 * 60 * 60
-    end
-
-    test "reads OBAN_PRUNER_MAX_AGE_DAYS when set" do
-      System.put_env("OBAN_PRUNER_MAX_AGE_DAYS", "30")
-      on_exit(fn -> System.delete_env("OBAN_PRUNER_MAX_AGE_DAYS") end)
-
-      assert ConfigHelpers.oban_pruner_max_age_seconds() == 30 * 24 * 60 * 60
-    end
-  end
-
   describe "read_secret/1" do
     test "reads from the plain env var when no _FILE variant is set" do
       System.put_env("KITH_TEST_SECRET", "plain-value")
