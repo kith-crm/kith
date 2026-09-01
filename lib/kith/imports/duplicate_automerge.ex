@@ -242,12 +242,11 @@ defmodule Kith.Imports.DuplicateAutomerge do
     end
   end
 
-  # Contacts that a full-graph component contains but that no *merged* cluster
-  # pulled in — i.e. they were only ever attached through a non-strong edge
-  # (sub-floor score or name-only) to a component that did merge. A full
-  # component whose strong core never merged (no strong part, or the birthdate
-  # guard held it back) leaves nothing behind: its members simply stay as
-  # pending candidates.
+  # A contact is "left behind" only if it sits in a full-graph component
+  # alongside a cluster that actually merged, yet was itself attached to that
+  # cluster only by a non-strong edge (sub-floor score or name-only). If the
+  # component's strong core never merged — no strong part, or the birthdate
+  # guard held it back — nobody is left behind; they stay pending candidates.
   defp left_behind_ids(full_components, merged_union) do
     Enum.reduce(full_components, MapSet.new(), fn full, acc ->
       dropped = MapSet.difference(full, merged_union)
