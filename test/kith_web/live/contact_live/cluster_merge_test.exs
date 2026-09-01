@@ -186,8 +186,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert row =~ ~s(src="/uploads/avatars/mona-f.jpg")
       refute row =~ ~s(>avatars/mona-e.jpg<)
 
-      # The avatar carries the holder's name, so a missing file degrades to
-      # initials and real alt text rather than a generic "Avatar".
+      # With a name, a missing file degrades to initials, not a bare "Avatar".
       assert row =~ ~s(alt="Mona Vale")
       refute row =~ ~s(alt="Avatar")
     end
