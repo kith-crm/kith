@@ -917,7 +917,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
     # as pending candidates for manual review. `opts["auto_merge_score"]`, when
     # present, overrides the default strong-edge score floor of 1.0.
     detection_opts =
-      case opts["auto_merge_score"] do
+      case parse_auto_merge_score(opts["auto_merge_score"]) do
         nil -> [restrict_ids: created_ids]
         score -> [restrict_ids: created_ids, min_score: score]
       end
@@ -941,6 +941,22 @@ defmodule Kith.Imports.Sources.MonicaApi do
       errors: errors ++ detection.errors
     }
   end
+
+  # `auto_merge_score` reaches us straight from form/JSON opts, so it may be a
+  # string. `DuplicateAutomerge`'s `pair.score >= min_score` compares numbers,
+  # and `1.0 >= "0.85"` is always false under Elixir term ordering, so an
+  # un-coerced string would silently merge nothing. Drop anything unparseable.
+  defp parse_auto_merge_score(nil), do: nil
+  defp parse_auto_merge_score(n) when is_number(n), do: n / 1
+
+  defp parse_auto_merge_score(s) when is_binary(s) do
+    case Float.parse(s) do
+      {score, _rest} -> score
+      :error -> nil
+    end
+  end
+
+  defp parse_auto_merge_score(_), do: nil
 
   defp merge_name_groups(groups, account_id, import_job, merged_ids) do
     Enum.reduce(groups, {0, [], merged_ids}, fn {_name_key, group}, {count, errors, seen} ->

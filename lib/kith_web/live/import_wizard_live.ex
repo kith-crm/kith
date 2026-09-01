@@ -803,7 +803,7 @@ defmodule KithWeb.ImportWizardLive do
                 <span class="font-semibold">
                   {@results["automerge_skipped"] || @results[:automerge_skipped]}
                 </span>
-                likely duplicate group(s) left unmerged — review them on the duplicates page
+                possible duplicate(s) left for you to review — see the duplicates page
               </p>
             </div>
 

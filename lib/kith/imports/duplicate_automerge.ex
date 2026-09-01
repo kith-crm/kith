@@ -108,34 +108,51 @@ defmodule Kith.Imports.DuplicateAutomerge do
     dry_run = Keyword.get(opts, :dry_run, false)
     restrict_ids = opts[:restrict_ids]
 
-    DuplicateDetection.scan_account(account_id)
-
-    pairs = pending_pairs(account_id, restrict_ids)
-    strong_pairs = Enum.filter(pairs, &strong_edge?(&1, min_score))
-
-    strong_components = components(strong_pairs)
-    left_behind = left_behind_ids(components(pairs), strong_components)
-    log_left_behind(left_behind)
-
-    contacts_by_id = load_contacts(account_id, strong_components)
-
-    strong_components
-    |> Enum.filter(&(MapSet.size(&1) >= 2))
-    |> Enum.reduce(blank_result(left_behind), fn member_set, acc ->
-      members =
-        member_set
-        |> Enum.map(&Map.get(contacts_by_id, &1))
-        |> Enum.reject(&is_nil/1)
-
-      process_cluster(members, dry_run, acc)
-    end)
+    # `restrict_ids == []` means an import that created no contacts this run —
+    # there is nothing to merge, so skip the full-account detector scan
+    # entirely. `nil` (whole-account mix task) and a non-empty list both scan.
+    if restrict_ids == [] do
+      %{blank_result() | left_behind: 0}
+    else
+      DuplicateDetection.scan_account(account_id)
+      merge_pending(account_id, min_score, dry_run, restrict_ids)
+    end
   end
 
-  defp blank_result(left_behind) do
+  defp merge_pending(account_id, min_score, dry_run, restrict_ids) do
+    pairs = pending_pairs(account_id, restrict_ids)
+    strong_pairs = Enum.filter(pairs, &strong_edge?(&1, min_score))
+    strong_components = components(strong_pairs)
+    contacts_by_id = load_contacts(account_id, strong_components)
+
+    {result, merged_union} =
+      strong_components
+      |> Enum.filter(&(MapSet.size(&1) >= 2))
+      |> Enum.reduce({blank_result(), MapSet.new()}, fn member_set, {acc, merged} ->
+        members =
+          member_set
+          |> Enum.map(&Map.get(contacts_by_id, &1))
+          |> Enum.reject(&is_nil/1)
+
+        case process_cluster(members, dry_run, acc) do
+          {:merged, acc} -> {acc, MapSet.union(merged, member_set)}
+          {:not_merged, acc} -> {acc, merged}
+        end
+      end)
+
+    # Only count contacts left behind by a component that actually merged —
+    # a strong cluster held back by the birthdate guard leaves nothing behind.
+    left_behind = left_behind_ids(components(pairs), merged_union)
+    log_left_behind(left_behind)
+
+    %{result | left_behind: MapSet.size(left_behind)}
+  end
+
+  defp blank_result do
     %{
       merged: 0,
       skipped: 0,
-      left_behind: MapSet.size(left_behind),
+      left_behind: 0,
       clusters_merged: 0,
       errors: []
     }
@@ -144,7 +161,7 @@ defmodule Kith.Imports.DuplicateAutomerge do
   defp process_cluster(members, dry_run, acc) do
     cond do
       length(members) < 2 ->
-        acc
+        {:not_merged, acc}
 
       birthdate_conflict?(members) ->
         Logger.info(
@@ -152,14 +169,15 @@ defmodule Kith.Imports.DuplicateAutomerge do
             "on a non-empty birthdate"
         )
 
-        %{acc | skipped: acc.skipped + 1}
+        {:not_merged, %{acc | skipped: acc.skipped + 1}}
 
       dry_run ->
-        %{
-          acc
-          | merged: acc.merged + length(members) - 1,
-            clusters_merged: acc.clusters_merged + 1
-        }
+        {:merged,
+         %{
+           acc
+           | merged: acc.merged + length(members) - 1,
+             clusters_merged: acc.clusters_merged + 1
+         }}
 
       true ->
         merge_cluster(members, acc)
@@ -203,12 +221,14 @@ defmodule Kith.Imports.DuplicateAutomerge do
         end
       end)
 
-    %{
+    acc = %{
       acc
       | merged: acc.merged + merged,
         clusters_merged: acc.clusters_merged + if(merged > 0, do: 1, else: 0),
         errors: errors
     }
+
+    {if(merged > 0, do: :merged, else: :not_merged), acc}
   end
 
   defp ids(members), do: members |> Enum.map(& &1.id) |> Enum.sort()
@@ -222,18 +242,18 @@ defmodule Kith.Imports.DuplicateAutomerge do
     end
   end
 
-  # Contacts that a full-graph component contains but no strong component does —
-  # i.e. they were only ever attached through a non-strong edge (sub-floor score
-  # or name-only). Components with no strong part at all (a plain name-only or
-  # non-confident pair) are not "left behind": they simply never qualified and
-  # stay as pending candidates, so they are excluded.
-  defp left_behind_ids(full_components, strong_components) do
-    strong_union = Enum.reduce(strong_components, MapSet.new(), &MapSet.union(&2, &1))
-
+  # Contacts that a full-graph component contains but that no *merged* cluster
+  # pulled in — i.e. they were only ever attached through a non-strong edge
+  # (sub-floor score or name-only) to a component that did merge. A full
+  # component whose strong core never merged (no strong part, or the birthdate
+  # guard held it back) leaves nothing behind: its members simply stay as
+  # pending candidates.
+  defp left_behind_ids(full_components, merged_union) do
     Enum.reduce(full_components, MapSet.new(), fn full, acc ->
-      dropped = MapSet.difference(full, strong_union)
+      dropped = MapSet.difference(full, merged_union)
+      merged_here = MapSet.intersection(full, merged_union)
 
-      if MapSet.size(dropped) > 0 and MapSet.size(dropped) < MapSet.size(full) do
+      if MapSet.size(merged_here) >= 2 and MapSet.size(dropped) > 0 do
         MapSet.union(acc, dropped)
       else
         acc

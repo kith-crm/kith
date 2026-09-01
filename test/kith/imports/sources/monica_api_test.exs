@@ -1587,6 +1587,41 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert length(active) == 1
     end
 
+    test "coerces a string opts[\"auto_merge_score\"] from the form", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(
+          id: 1,
+          first_name: "Sam",
+          last_name: "Bell",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        ),
+        contact_json(
+          id: 2,
+          first_name: "Sam",
+          last_name: "Bella",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true,
+                 "auto_merge_score" => "0.85"
+               })
+
+      assert summary.merged == 1
+      assert summary.merged_by_detection == 1
+    end
+
     test "merges contacts with same name and phone", %{user: user, account_id: account_id} do
       contacts = [
         contact_json(

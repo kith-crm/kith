@@ -176,6 +176,39 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
     end
   end
 
+  describe "run/2 — restrict_ids: []" do
+    test "an empty id set skips the detector scan entirely", %{
+      account: account,
+      email_type_id: email_type_id
+    } do
+      a = contact(account, "Amy Poe", "Amy", "Poe")
+      b = contact(account, "Amy Poe", "Amy", "Poe")
+      contact_field_fixture(a, email_type_id, %{"value" => "amy@example.com"})
+      contact_field_fixture(b, email_type_id, %{"value" => "amy@example.com"})
+
+      assert %{merged: 0, skipped: 0, left_behind: 0, clusters_merged: 0, errors: []} =
+               DuplicateAutomerge.run(account.id, restrict_ids: [])
+
+      # scan_account/1 would have inserted a candidate for the shared email.
+      assert Repo.aggregate(DuplicateCandidate, :count) == 0
+      assert length(active_ids(account.id)) == 2
+    end
+  end
+
+  describe "run/2 — left_behind is reconciled against actual merges" do
+    test "a birthdate-skipped strong cluster leaves nothing behind", %{account: account} do
+      a = contact(account, "Evan Cole", "Evan", "Cole", %{birthdate: ~D[1980-01-01]})
+      b = contact(account, "Evan Cole", "Evan", "Cole", %{birthdate: ~D[1990-01-01]})
+      c = contact(account, "Ccc Three", "Ccc", "Three")
+
+      seed_pair(account.id, a, b, 1.0, ["name_match", "email_match"])
+      seed_pair(account.id, b, c, 1.0, ["name_match"])
+
+      assert %{merged: 0, skipped: 1, left_behind: 0} = DuplicateAutomerge.run(account.id)
+      assert length(active_ids(account.id)) == 3
+    end
+  end
+
   describe "run/2 — dry_run" do
     test "reports the merge and writes nothing at all", %{
       account: account,
