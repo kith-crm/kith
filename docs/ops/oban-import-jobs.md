@@ -11,8 +11,12 @@ same day they run.
 
 The defensive changes shipped so far:
 
-- `oban_pruner_max_age_seconds/0` clamps any `OBAN_PRUNER_MAX_AGE_DAYS < 1` up
-  to 1 day and logs a warning.
+- `oban_pruner_max_age_seconds/0` (the `:prod` worker path) clamps any
+  `OBAN_PRUNER_MAX_AGE_DAYS < 1` up to 1 day, and falls back to the 7-day
+  default when the value is empty or non-numeric — either way it logs a
+  warning and the worker still boots.
+- `config/config.exs` (the `:dev`/`:test` path) uses a fixed 7-day literal that
+  no env var can override, so a bad value cannot crash a local boot either.
 - `Kith.Application` logs `[Oban] pruner max_age = <s>s (<d>d)` at boot on nodes
   that run Oban plugins.
 

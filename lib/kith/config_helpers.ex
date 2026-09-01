@@ -17,30 +17,42 @@ defmodule Kith.ConfigHelpers do
   Effective `Oban.Plugins.Pruner` `:max_age`, in **seconds**.
 
   Driven by the `OBAN_PRUNER_MAX_AGE_DAYS` env var (whole days), defaulting to
-  #{@default_oban_pruner_max_age_days} days when unset. Values below one day are
-  clamped up to one day (with a warning) so a stray `0`/empty override cannot
-  make the pruner delete `oban_jobs` rows almost immediately.
+  #{@default_oban_pruner_max_age_days} days when unset, empty, or unparseable.
+  Values below one day are clamped up to one day (with a warning) so a stray
+  `0`/empty override cannot make the pruner delete `oban_jobs` rows almost
+  immediately.
 
   Read at call time, so `config/runtime.exs` picks up the container's env at
   boot rather than the value baked in at release-build time.
   """
   def oban_pruner_max_age_seconds do
-    days =
-      "OBAN_PRUNER_MAX_AGE_DAYS"
-      |> System.get_env(Integer.to_string(@default_oban_pruner_max_age_days))
-      |> String.to_integer()
+    "OBAN_PRUNER_MAX_AGE_DAYS"
+    |> System.get_env()
+    |> parse_pruner_max_age_days()
+    |> Kernel.*(@seconds_per_day)
+  end
 
-    clamped =
-      if days < 1 do
+  defp parse_pruner_max_age_days(nil), do: @default_oban_pruner_max_age_days
+
+  defp parse_pruner_max_age_days(raw) do
+    case raw |> String.trim() |> Integer.parse() do
+      {days, ""} when days >= 1 ->
+        days
+
+      {days, ""} ->
         Logger.warning(
           "OBAN_PRUNER_MAX_AGE_DAYS=#{days} is below the 1-day minimum; clamping to 1 day"
         )
 
         1
-      else
-        days
-      end
 
-    clamped * @seconds_per_day
+      _ ->
+        Logger.warning(
+          "OBAN_PRUNER_MAX_AGE_DAYS=#{inspect(raw)} is not a whole number of days; " <>
+            "using the #{@default_oban_pruner_max_age_days}-day default"
+        )
+
+        @default_oban_pruner_max_age_days
+    end
   end
 end
