@@ -51,13 +51,10 @@ config :kith, Oban,
     purge: 1
   ],
   plugins: [
-    # Terminal `oban_jobs` retention: a fixed 7 days. A literal on purpose —
-    # `Kith.ConfigHelpers` isn't loaded this early, and a bad
-    # `OBAN_PRUNER_MAX_AGE_DAYS` (`0`, empty, non-numeric) would crash the
-    # boot. `:prod` replaces this whole `plugins:` list at boot via
-    # `config/runtime.exs`, which reads the env through
-    # `Kith.ConfigHelpers.oban_pruner_max_age_seconds/0`; only `:dev`/`:test`
-    # use this line. Keep it in sync with `@default_oban_pruner_max_age_days`.
+    # Terminal `oban_jobs` retention: 7 days. `:prod` overrides this whole
+    # `plugins:` list at boot from `config/runtime.exs`, where the worker
+    # container reads `OBAN_PRUNER_MAX_AGE_DAYS`; only `:dev`/`:test` use this
+    # line, so a plain literal is enough. Keep the 7 in sync with runtime.exs.
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60},
     {Oban.Plugins.Cron,
      crontab: [

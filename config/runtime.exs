@@ -222,12 +222,21 @@ if config_env() == :prod do
   # `:prod`. Test env is pinned to `testing: :manual` in `config/test.exs`.
   case System.get_env("KITH_MODE", "web") do
     "worker" ->
-      # `oban_pruner_max_age_seconds/0` keeps the same 7-day default as the
-      # compile-time `Oban` config in `config/config.exs` (the `Oban.Plugins.Pruner`
-      # entry there); keep the two in sync if the default ever changes.
+      # `OBAN_PRUNER_MAX_AGE_DAYS` (whole days) is how long terminal `oban_jobs`
+      # rows are kept. Empty, non-numeric, or sub-1 values fall back to the
+      # 7-day default so a stray override can't near-instantly prune. The
+      # effective value is logged at boot by `Kith.Application`.
+      oban_pruner_max_age_days = System.get_env("OBAN_PRUNER_MAX_AGE_DAYS", "7")
+
+      oban_pruner_max_age_seconds =
+        case Integer.parse(String.trim(oban_pruner_max_age_days)) do
+          {days, ""} when days >= 1 -> days * 24 * 60 * 60
+          _ -> 7 * 24 * 60 * 60
+        end
+
       config :kith, Oban,
         plugins: [
-          {Oban.Plugins.Pruner, max_age: Kith.ConfigHelpers.oban_pruner_max_age_seconds()},
+          {Oban.Plugins.Pruner, max_age: oban_pruner_max_age_seconds},
           {Oban.Plugins.Cron,
            crontab: [
              {"0 2 * * *", Kith.Workers.ReminderSchedulerWorker},
