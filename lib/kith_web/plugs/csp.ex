@@ -1,7 +1,8 @@
 defmodule KithWeb.Plugs.CSP do
   @moduledoc """
   Plug that sets a Content-Security-Policy header with a per-request nonce
-  and dynamic `img-src` for Immich thumbnails when IMMICH_BASE_URL is configured.
+  and a dynamic `img-src` covering Immich thumbnails (when IMMICH_BASE_URL is
+  configured) and the storage backend origin (S3/S3-compatible presigned URLs).
 
   The nonce is assigned to `conn.assigns.csp_nonce` for use on inline
   `<script>` and `<style>` tags in templates.
@@ -35,6 +36,12 @@ defmodule KithWeb.Plugs.CSP do
   end
 
   defp build_img_src do
+    [immich_img_src(), Kith.Storage.csp_img_src()]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" ")
+  end
+
+  defp immich_img_src do
     case System.get_env("IMMICH_BASE_URL") do
       nil -> ""
       "" -> ""
