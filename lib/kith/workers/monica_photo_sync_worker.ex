@@ -27,20 +27,29 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
   @log_prefix "[MonicaPhotoSync]"
 
   @impl Oban.Worker
-  def perform(%Oban.Job{
-        args: %{
-          "import_id" => import_id,
-          "credential_url" => credential_url,
-          "credential_api_key" => credential_api_key
-        }
-      }) do
+  def perform(%Oban.Job{args: %{"import_id" => import_id, "credential_url" => credential_url}}) do
     import_job = Imports.get_import!(import_id)
     Logger.metadata(import_id: import_id, worker: "MonicaPhotoSync")
-    Logger.info("#{@log_prefix} Starting photo sync for import #{import_id}")
 
+    if is_nil(import_job.api_key_encrypted) do
+      Logger.error("#{@log_prefix} API key already wiped for import #{import_id}; cancelling")
+      {:cancel, :api_key_wiped}
+    else
+      sync_photos(import_job, credential_url)
+    end
+  end
+
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.minutes(30)
+
+  defp sync_photos(import_job, credential_url) do
+    Logger.info("#{@log_prefix} Starting photo sync for import #{import_job.id}")
+
+    # The key is read from the Import row (Cloak decrypts it on load) and is
+    # never carried in job args, which Oban stores and displays as plain JSON.
     credential = %{
       url: credential_url,
-      api_key: credential_api_key,
+      api_key: import_job.api_key_encrypted,
       req_options: Application.get_env(:kith, :monica_req_options, [])
     }
 
@@ -64,9 +73,6 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
         {:error, reason}
     end
   end
-
-  @impl Oban.Worker
-  def timeout(_job), do: :timer.minutes(30)
 
   # ── Page loop ───────────────────────────────────────────────────────────
 

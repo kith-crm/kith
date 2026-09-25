@@ -9,7 +9,7 @@ defmodule Kith.SentryEventHandler do
 
   require Logger
 
-  @scrub_keys ~w(password password_confirmation token api_key secret current_password new_password)
+  @scrub_keys ~w(password password_confirmation token api_key secret current_password new_password credential_api_key)
 
   @doc "Attaches telemetry handlers for Oban + Sentry integration."
   def attach do

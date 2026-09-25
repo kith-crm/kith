@@ -44,8 +44,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
   defp job_args(import_job),
     do: %{
       "import_id" => import_job.id,
-      "credential_url" => "https://monica.test",
-      "credential_api_key" => "test-key"
+      "credential_url" => "https://monica.test"
     }
 
   defp register_imported_contact!(import_job, contact, monica_id) do
@@ -242,6 +241,40 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       final = Imports.get_import!(import_job.id)
       assert final.sync_summary["total"] == 2
       assert final.sync_summary["synced"] == 2
+    end
+  end
+
+  describe "perform/1 — API key" do
+    test "authenticates with the key from the Import row, not job args",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+      test_pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        send(test_pid, {:auth, Plug.Conn.get_req_header(conn, "authorization")})
+        Req.Test.json(conn, photos_page_json([]))
+      end)
+
+      assert :ok = perform_job(MonicaPhotoSyncWorker, job_args(import_job))
+      assert_received {:auth, ["Bearer test-key"]}
+    end
+
+    test "cancels without calling Monica when the key has been wiped",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+      {:ok, _} = Imports.wipe_api_key(import_job)
+      test_pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        send(test_pid, {:request, conn.request_path})
+        Req.Test.json(conn, photos_page_json([]))
+      end)
+
+      assert {:cancel, :api_key_wiped} =
+               perform_job(MonicaPhotoSyncWorker, job_args(import_job))
+
+      refute_received {:request, _}
+      assert is_nil(Imports.get_import!(import_job.id).sync_summary)
     end
   end
 end

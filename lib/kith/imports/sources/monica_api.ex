@@ -1582,7 +1582,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
             "contact_id" => local_id,
             "import_id" => import_job.id,
             "credential_url" => credential.url,
-            "credential_api_key" => credential.api_key,
             "documents" => docs
           }
           |> MonicaDocumentImportWorker.new()

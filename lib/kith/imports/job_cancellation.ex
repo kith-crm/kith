@@ -11,17 +11,20 @@ defmodule Kith.Imports.JobCancellation do
   any currently-`executing` jobs to terminate via Oban's Notifier (`:pkill`).
   """
 
+  alias Kith.Imports
   alias Kith.Imports.Import
   alias Kith.Repo
 
   import Ecto.Query
   require Logger
 
-  # Workers whose args carry `import_id` — cancelled by import_id ∈ account's imports
+  # Workers whose args carry `import_id` — cancelled by import_id ∈ account's
+  # imports. Monica follow-up workers are added from
+  # `Imports.monica_followup_workers/0` (see `import_id_workers/0`) so a new
+  # follow-up worker can't be missed here.
   @import_id_workers ~w[
     Kith.Workers.MonicaApiCrawlWorker
-    Kith.Workers.MonicaPhotoSyncWorker
-    Kith.Workers.MonicaDocumentImportWorker
+    Kith.Workers.MonicaApiKeyReleaseWorker
     Kith.Workers.ImportSourceWorker
   ]
 
@@ -56,7 +59,7 @@ defmodule Kith.Imports.JobCancellation do
   defp cancel_jobs_by_import_id(import_ids) do
     {:ok, count} =
       from(j in Oban.Job,
-        where: j.worker in ^@import_id_workers,
+        where: j.worker in ^import_id_workers(),
         where: j.state in ^@cancellable_states,
         where: fragment("(?->>'import_id')::bigint", j.args) in ^import_ids
       )
@@ -64,6 +67,8 @@ defmodule Kith.Imports.JobCancellation do
 
     count
   end
+
+  defp import_id_workers, do: @import_id_workers ++ Imports.monica_followup_workers()
 
   defp cancel_jobs_by_account_id(account_id) do
     {:ok, count} =

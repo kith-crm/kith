@@ -40,8 +40,7 @@ defmodule Kith.Imports.JobCancellationTest do
       Oban.insert(
         MonicaPhotoSyncWorker.new(%{
           "import_id" => ctx.target_import.id,
-          "credential_url" => "x",
-          "credential_api_key" => "y"
+          "credential_url" => "x"
         })
       )
 
@@ -49,8 +48,7 @@ defmodule Kith.Imports.JobCancellationTest do
       Oban.insert(
         MonicaPhotoSyncWorker.new(%{
           "import_id" => ctx.other_import.id,
-          "credential_url" => "x",
-          "credential_api_key" => "y"
+          "credential_url" => "x"
         })
       )
 
@@ -58,6 +56,37 @@ defmodule Kith.Imports.JobCancellationTest do
 
     assert Repo.get!(Oban.Job, target_photo_job.id).state == "cancelled"
     assert Repo.get!(Oban.Job, other_photo_job.id).state == "available"
+  end
+
+  test "cancels every import_id-scoped Monica worker, including misc data and key release",
+       ctx do
+    workers = [
+      Kith.Workers.MonicaApiCrawlWorker,
+      Kith.Workers.MonicaPhotoSyncWorker,
+      Kith.Workers.MonicaMiscDataWorker,
+      Kith.Workers.MonicaDocumentImportWorker,
+      Kith.Workers.MonicaApiKeyReleaseWorker
+    ]
+
+    insert_all = fn import ->
+      for worker <- workers do
+        {:ok, job} = Oban.insert(worker.new(%{"import_id" => import.id}))
+        job
+      end
+    end
+
+    target_jobs = insert_all.(ctx.target_import)
+    other_jobs = insert_all.(ctx.other_import)
+
+    assert :ok = JobCancellation.wipe_for_account(ctx.target_account)
+
+    for job <- target_jobs do
+      assert Repo.get!(Oban.Job, job.id).state == "cancelled", "#{job.worker} not cancelled"
+    end
+
+    for job <- other_jobs do
+      assert Repo.get!(Oban.Job, job.id).state == "available"
+    end
   end
 
   test "cancels DuplicateDetectionWorker jobs by account_id", ctx do
@@ -107,8 +136,7 @@ defmodule Kith.Imports.JobCancellationTest do
       Oban.insert(
         MonicaPhotoSyncWorker.new(%{
           "import_id" => ctx.target_import.id,
-          "credential_url" => "x",
-          "credential_api_key" => "y"
+          "credential_url" => "x"
         })
       )
 

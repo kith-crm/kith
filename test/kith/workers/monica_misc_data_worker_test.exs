@@ -32,7 +32,6 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     %{
       "import_id" => import_job.id,
       "credential_url" => "https://monica.test",
-      "credential_api_key" => "test-key",
       "plan" => plan
     }
   end
@@ -148,6 +147,47 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       updated = Imports.get_import!(import_job.id)
       assert is_map(updated.summary["misc"])
       assert updated.summary["misc"]["calls"] >= 0
+    end
+  end
+
+  describe "API key" do
+    test "authenticates with the key from the Import row, not job args",
+         %{user: user, account_id: account_id} do
+      contact = contact_fixture(account_id)
+      import_job = api_import(account_id, user.id)
+      pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        send(pid, {:auth, Plug.Conn.get_req_header(conn, "authorization")})
+        Req.Test.json(conn, %{"data" => []})
+      end)
+
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["calls"]}]
+      args = build_args(import_job, plan)
+      refute Map.has_key?(args, "credential_api_key")
+
+      assert :ok = perform_job(MonicaMiscDataWorker, args)
+      assert_received {:auth, ["Bearer test-key"]}
+    end
+
+    test "cancels without calling Monica when the key has been wiped",
+         %{user: user, account_id: account_id} do
+      contact = contact_fixture(account_id)
+      import_job = api_import(account_id, user.id)
+      {:ok, _} = Imports.wipe_api_key(import_job)
+      pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        send(pid, {:request, conn.request_path})
+        Req.Test.json(conn, %{"data" => []})
+      end)
+
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["calls"]}]
+
+      assert {:cancel, :api_key_wiped} =
+               perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+
+      refute_received {:request, _}
     end
   end
 

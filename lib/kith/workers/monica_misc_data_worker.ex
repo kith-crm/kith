@@ -8,9 +8,10 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   carrying:
 
     * `"import_id"` — the Import row this job belongs to.
-    * `"credential_url"`, `"credential_api_key"` — the credential needed to
-      keep calling Monica after the main crawl wipes `api_key_encrypted`.
-      Same pattern as `MonicaPhotoSyncWorker`.
+    * `"credential_url"` — the Monica base URL. The API key is read from
+      the Import row's `api_key_encrypted`, which stays in place until the
+      last follow-up job finishes (see `MonicaApiKeyReleaseWorker`).
+      Cancels if the key has already been wiped.
     * `"plan"` — list of `%{"source_id", "local_id", "endpoints"}` maps
       pre-filtered during the main crawl using Monica's `statistics.*`
       fields, so we only fire the endpoints with data.
@@ -41,29 +42,44 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   def perform(%Oban.Job{args: args}) do
     import_job = Imports.get_import!(args["import_id"])
 
-    if import_job.status in ["cancelled", "failed"] do
-      :ok
-    else
-      credential = build_credential(args)
-      plan = args["plan"] || []
+    cond do
+      import_job.status in ["cancelled", "failed"] ->
+        :ok
 
-      counts = process_plan(plan, credential, import_job)
+      is_nil(import_job.api_key_encrypted) ->
+        Logger.error(
+          "[MonicaMiscData] API key already wiped for import #{import_job.id}; cancelling"
+        )
 
-      summary = Map.put(import_job.summary || %{}, "misc", counts)
+        {:cancel, :api_key_wiped}
 
-      Imports.update_import_status(import_job, import_job.status, %{summary: summary})
-
-      topic = "import:#{import_job.account_id}"
-      Phoenix.PubSub.broadcast(Kith.PubSub, topic, {:import_misc_complete, counts})
-
-      :ok
+      true ->
+        import_misc_data(import_job, args)
     end
   end
 
-  defp build_credential(args) do
+  defp import_misc_data(import_job, args) do
+    credential = build_credential(import_job, args)
+    plan = args["plan"] || []
+
+    counts = process_plan(plan, credential, import_job)
+
+    summary = Map.put(import_job.summary || %{}, "misc", counts)
+
+    Imports.update_import_status(import_job, import_job.status, %{summary: summary})
+
+    topic = "import:#{import_job.account_id}"
+    Phoenix.PubSub.broadcast(Kith.PubSub, topic, {:import_misc_complete, counts})
+
+    :ok
+  end
+
+  # The key comes from the Import row (Cloak decrypts it on load), never
+  # from job args.
+  defp build_credential(import_job, args) do
     %{
       url: args["credential_url"],
-      api_key: args["credential_api_key"],
+      api_key: import_job.api_key_encrypted,
       req_options: Application.get_env(:kith, :monica_req_options, [])
     }
   end
