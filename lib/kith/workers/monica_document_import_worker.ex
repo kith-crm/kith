@@ -5,7 +5,8 @@ defmodule Kith.Workers.MonicaDocumentImportWorker do
   Documents are imported asynchronously after the main import completes
   because downloading binary files is time-consuming and can fail independently.
 
-  Each job processes documents for a single contact.
+  Each job processes documents for a single contact. The API key is read from
+  the Import row, not from job args; the job cancels if it has been wiped.
   """
 
   use Oban.Worker, queue: :imports, max_attempts: 3
@@ -25,13 +26,28 @@ defmodule Kith.Workers.MonicaDocumentImportWorker do
           "contact_id" => contact_id,
           "import_id" => import_id,
           "credential_url" => credential_url,
-          "credential_api_key" => credential_api_key,
           "documents" => documents
         }
       }) do
-    credential = %{url: credential_url, api_key: Imports.decrypt_credential(credential_api_key)}
     import_job = Imports.get_import!(import_id)
 
+    if is_nil(import_job.api_key_encrypted) do
+      Logger.error("[MonicaDocImport] API key already wiped for import #{import_id}; cancelling")
+      {:cancel, :api_key_wiped}
+    else
+      # The key comes from the Import row (Cloak decrypts it on load), never
+      # from job args.
+      credential = %{
+        url: credential_url,
+        api_key: import_job.api_key_encrypted,
+        req_options: Application.get_env(:kith, :monica_req_options, [])
+      }
+
+      import_documents(credential, account_id, user_id, contact_id, documents, import_job)
+    end
+  end
+
+  defp import_documents(credential, account_id, user_id, contact_id, documents, import_job) do
     Enum.each(documents, fn doc_data ->
       import_single_document(
         credential,
@@ -79,14 +95,12 @@ defmodule Kith.Workers.MonicaDocumentImportWorker do
   defp download_document(credential, url) do
     headers = [{"Authorization", "Bearer #{credential.api_key}"}]
 
-    case Req.get(url, headers: headers) do
-      {:ok, %{status: 200, body: body, headers: headers}} ->
+    case Req.get(url, [headers: headers] ++ credential.req_options) do
+      {:ok, %Req.Response{status: 200, body: body} = resp} ->
+        # Req returns header values as lists.
         content_type =
-          headers
-          |> Enum.find_value(fn
-            {"content-type", ct} -> ct
-            _ -> nil
-          end) || "application/octet-stream"
+          List.first(Req.Response.get_header(resp, "content-type")) ||
+            "application/octet-stream"
 
         {:ok, body, content_type}
 

@@ -148,6 +148,25 @@ defmodule Kith.Imports do
     |> Repo.aggregate(:count)
   end
 
+  ## API key lifecycle
+  #
+  # The Monica API key lives only in `imports.api_key_encrypted` (Cloak-
+  # encrypted) — never in Oban job args. Follow-up workers read it from the
+  # Import row by `import_id`, so it must stay until the last follow-up job
+  # has finished. `Kith.Workers.MonicaApiKeyReleaseWorker` wipes it then;
+  # `Kith.Workers.ImportApiKeySweepWorker` is the time-based safety net.
+
+  # Oban worker names of the jobs that run after the crawl and read the key.
+  @monica_followup_workers ~w[
+    Kith.Workers.MonicaPhotoSyncWorker
+    Kith.Workers.MonicaMiscDataWorker
+    Kith.Workers.MonicaDocumentImportWorker
+  ]
+
+  @pending_job_states ~w[available scheduled executing retryable]
+
+  def monica_followup_workers, do: @monica_followup_workers
+
   def wipe_api_key(%Import{} = import) do
     import
     |> Ecto.Changeset.change(api_key_encrypted: nil)
@@ -155,22 +174,34 @@ defmodule Kith.Imports do
   end
 
   @doc """
-  Encrypts a credential secret (e.g. an API key) for safe placement in Oban
-  job args. Job args are stored as plaintext JSON in `oban_jobs` and rendered
-  as-is by the Oban Web dashboard, so raw secrets must never be put there.
+  Returns true while any Monica follow-up job (photo sync, misc data,
+  documents) for the import can still run — i.e. is available, scheduled,
+  executing, or waiting to retry. Completed, discarded, and cancelled jobs
+  don't count.
   """
-  def encrypt_credential(plaintext) when is_binary(plaintext) do
-    {:ok, ciphertext} = Kith.Vault.encrypt(plaintext)
-    Base.encode64(ciphertext)
+  def monica_followups_pending?(import_id) do
+    Oban.Job
+    |> where([j], j.worker in ^@monica_followup_workers)
+    |> where([j], j.state in ^@pending_job_states)
+    |> where([j], fragment("(?->>'import_id')::bigint", j.args) == ^import_id)
+    |> Repo.exists?()
   end
 
-  @doc "Reverses `encrypt_credential/1`."
-  def decrypt_credential(ciphertext) when is_binary(ciphertext) do
-    {:ok, plaintext} =
-      ciphertext
-      |> Base.decode64!()
-      |> Kith.Vault.decrypt()
+  @doc """
+  Safety net: wipes the API key of every import that finished (or, if it
+  never finished, was last updated) more than `max_age_seconds` ago.
+  System-wide by design — it runs from cron, not on behalf of an account.
+  Returns the number of imports wiped.
+  """
+  def wipe_stale_api_keys(max_age_seconds) do
+    cutoff = DateTime.utc_now() |> DateTime.add(-max_age_seconds, :second)
 
-    plaintext
+    {count, _} =
+      Import
+      |> where([i], not is_nil(i.api_key_encrypted))
+      |> where([i], coalesce(i.completed_at, i.updated_at) < ^cutoff)
+      |> Repo.update_all(set: [api_key_encrypted: nil])
+
+    count
   end
 end

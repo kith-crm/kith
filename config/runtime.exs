@@ -230,7 +230,8 @@ if config_env() == :prod do
              {"0 2 * * *", Kith.Workers.ReminderSchedulerWorker},
              {"0 3 * * *", Kith.Workers.ContactPurgeWorker},
              {"0 4 * * 0", Kith.Workers.DuplicateDetectionWorker},
-             {"0 5 * * 0", Kith.Workers.ImportFileCleanupWorker}
+             {"0 5 * * 0", Kith.Workers.ImportFileCleanupWorker},
+             {"15 * * * *", Kith.Workers.ImportApiKeySweepWorker}
            ]}
         ]
 

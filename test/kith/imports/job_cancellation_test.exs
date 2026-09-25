@@ -40,8 +40,7 @@ defmodule Kith.Imports.JobCancellationTest do
       Oban.insert(
         MonicaPhotoSyncWorker.new(%{
           "import_id" => ctx.target_import.id,
-          "credential_url" => "x",
-          "credential_api_key" => "y"
+          "credential_url" => "x"
         })
       )
 
@@ -49,8 +48,7 @@ defmodule Kith.Imports.JobCancellationTest do
       Oban.insert(
         MonicaPhotoSyncWorker.new(%{
           "import_id" => ctx.other_import.id,
-          "credential_url" => "x",
-          "credential_api_key" => "y"
+          "credential_url" => "x"
         })
       )
 
@@ -107,8 +105,7 @@ defmodule Kith.Imports.JobCancellationTest do
       Oban.insert(
         MonicaPhotoSyncWorker.new(%{
           "import_id" => ctx.target_import.id,
-          "credential_url" => "x",
-          "credential_api_key" => "y"
+          "credential_url" => "x"
         })
       )
 

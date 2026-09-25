@@ -18,12 +18,42 @@ defmodule Kith.Workers.MonicaApiCrawlWorker do
   alias Kith.Imports
   alias Kith.Imports.Sources.MonicaApi
   alias Kith.Workers.DuplicateDetectionWorker
+  alias Kith.Workers.MonicaApiKeyReleaseWorker
   alias Kith.Workers.MonicaMiscDataWorker
   alias Kith.Workers.MonicaPhotoSyncWorker
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"import_id" => import_id}}) do
+  def perform(%Oban.Job{args: %{"import_id" => import_id}} = job) do
     import_job = Imports.get_import!(import_id)
+
+    if is_nil(import_job.api_key_encrypted) do
+      cancel_without_api_key(import_job)
+    else
+      crawl(import_job, job)
+    end
+  end
+
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.minutes(30)
+
+  # The key is wiped after the final failed attempt, by the release worker,
+  # or by the stale-key sweep. Crawling with a nil key would only produce
+  # 401s, so stop for good instead of retrying.
+  defp cancel_without_api_key(import_job) do
+    Logger.error("MonicaApi import #{import_job.id} has no API key; cancelling crawl")
+
+    if import_job.status in ["pending", "processing"] do
+      Imports.update_import_status(import_job, "failed", %{
+        summary: %{error: "The Monica API key is no longer available. Start a new import."},
+        completed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+      })
+    end
+
+    {:cancel, :api_key_missing}
+  end
+
+  defp crawl(import_job, job) do
+    import_id = import_job.id
 
     with {:ok, _} <-
            Imports.update_import_status(import_job, "processing", %{
@@ -48,10 +78,14 @@ defmodule Kith.Workers.MonicaApiCrawlWorker do
         completed_at: now
       })
 
-      # Enqueue misc worker BEFORE wiping the API key — it needs the
-      # still-encrypted key in its job args (same pattern as photo sync).
+      # Nothing below may raise: the import is already marked completed, and
+      # a crash here would retry the whole crawl.
       maybe_enqueue_misc_data_worker(import_job, misc_plan)
-      Imports.wipe_api_key(import_job)
+      maybe_enqueue_photo_sync(import_job)
+
+      # Document jobs were enqueued during the crawl. Wipe the key now if no
+      # follow-up job was enqueued, else once the last one has finished.
+      MonicaApiKeyReleaseWorker.release(import_job)
 
       topic = "import:#{import_job.account_id}"
       Phoenix.PubSub.broadcast(Kith.PubSub, topic, {:import_complete, persisted_summary})
@@ -59,28 +93,33 @@ defmodule Kith.Workers.MonicaApiCrawlWorker do
       # Trigger duplicate detection for newly imported contacts
       Oban.insert(DuplicateDetectionWorker.new(%{account_id: import_job.account_id}))
 
-      # Enqueue photo sync (separate job) if the user opted in
-      maybe_enqueue_photo_sync(import_job)
-
       Logger.info("MonicaApi import #{import_id} completed: #{inspect(persisted_summary)}")
       :ok
     else
-      {:error, reason} ->
-        Logger.error("MonicaApi import #{import_id} failed: #{inspect(reason)}")
-
-        Imports.update_import_status(import_job, "failed", %{
-          summary: %{error: inspect(reason)},
-          completed_at: DateTime.utc_now() |> DateTime.truncate(:second)
-        })
-
-        Imports.wipe_api_key(import_job)
-
-        {:error, reason}
+      {:error, reason} -> fail_attempt(import_job, job, reason)
     end
   end
 
-  @impl Oban.Worker
-  def timeout(_job), do: :timer.minutes(30)
+  @doc false
+  # Public for testing: MonicaApi.crawl/5 degrades gracefully, so this branch
+  # is hard to reach end-to-end, but the key-retention rule is what the
+  # fail → retry → success regression depends on.
+  def fail_attempt(import_job, %Oban.Job{} = job, reason) do
+    Logger.error("MonicaApi import #{import_job.id} failed: #{inspect(reason)}")
+
+    Imports.update_import_status(import_job, "failed", %{
+      summary: %{error: inspect(reason)},
+      completed_at: DateTime.utc_now() |> DateTime.truncate(:second)
+    })
+
+    # Earlier attempts keep the key so Oban's retry can still crawl.
+    if final_attempt?(job), do: Imports.wipe_api_key(import_job)
+
+    {:error, reason}
+  end
+
+  defp final_attempt?(%Oban.Job{attempt: attempt, max_attempts: max_attempts}),
+    do: attempt >= max_attempts
 
   defp build_credential(import_job) do
     %{
@@ -107,14 +146,8 @@ defmodule Kith.Workers.MonicaApiCrawlWorker do
 
   defp maybe_enqueue_photo_sync(import_job) do
     if get_in(import_job.api_options || %{}, ["photos"]) do
-      # api_key is wiped from the DB immediately after this worker completes,
-      # so the photo sync worker receives its own copy via job args
-      # (same pattern as MonicaDocumentImportWorker).
-      %{
-        "import_id" => import_job.id,
-        "credential_url" => import_job.api_url,
-        "credential_api_key" => Imports.encrypt_credential(import_job.api_key_encrypted)
-      }
+      # No key in args — the worker reads it from the Import row.
+      %{"import_id" => import_job.id, "credential_url" => import_job.api_url}
       |> MonicaPhotoSyncWorker.new()
       |> Oban.insert()
     end
@@ -126,7 +159,6 @@ defmodule Kith.Workers.MonicaApiCrawlWorker do
     %{
       "import_id" => import_job.id,
       "credential_url" => import_job.api_url,
-      "credential_api_key" => Imports.encrypt_credential(import_job.api_key_encrypted),
       "plan" => plan
     }
     |> MonicaMiscDataWorker.new()
