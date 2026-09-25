@@ -18,6 +18,23 @@ defmodule Kith.ConfigHelpersTest do
     end
   end
 
+  describe "s3_endpoint_config/1" do
+    test "keeps the https scheme of the endpoint" do
+      assert ConfigHelpers.s3_endpoint_config("https://s3.example.com") ==
+               [scheme: "https://", host: "s3.example.com", port: 443]
+    end
+
+    test "keeps the http scheme and a custom port" do
+      assert ConfigHelpers.s3_endpoint_config("http://localhost:9000") ==
+               [scheme: "http://", host: "localhost", port: 9000]
+    end
+
+    test "keeps a custom port on an https endpoint" do
+      assert ConfigHelpers.s3_endpoint_config("https://minio.internal:9443") ==
+               [scheme: "https://", host: "minio.internal", port: 9443]
+    end
+  end
+
   describe "read_secret/1" do
     test "reads from the plain env var when no _FILE variant is set" do
       System.put_env("KITH_TEST_SECRET", "plain-value")
