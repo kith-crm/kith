@@ -174,8 +174,11 @@ defmodule KithWeb.API.ContactJSON do
       contact_id: r.contact_id,
       type: r.type,
       title: r.title,
+      anchor_date: r.anchor_date,
+      interval_unit: r.interval_unit,
+      interval_count: r.interval_count,
+      frequency: Reminder.frequency_preset(r),
       next_reminder_date: r.next_reminder_date,
-      frequency: r.frequency,
       inserted_at: r.inserted_at,
       updated_at: r.updated_at
     }

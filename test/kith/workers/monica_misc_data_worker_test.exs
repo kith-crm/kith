@@ -406,10 +406,11 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
                  }
                ])
 
-      assert [reminder] = contact_reminders(account_id, contact.id)
+      # The birthdate's own birthday reminder is derived alongside it.
+      assert [reminder] = generic_reminders(account_id, contact.id)
       assert reminder.type == "recurring"
-      assert reminder.frequency == "annually"
-      assert reminder.next_reminder_date == ~D[2024-09-20]
+      assert Reminder.frequency_preset(reminder) == "annually"
+      assert reminder.anchor_date == ~D[2024-09-20]
     end
 
     test "an untitled annual reminder on a non-birthday date stays generic", %{
@@ -428,15 +429,16 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
                  }
                ])
 
-      assert [reminder] = contact_reminders(account_id, contact.id)
+      assert [reminder] = generic_reminders(account_id, contact.id)
       assert reminder.type == "recurring"
       assert reminder.next_reminder_date == ~D[2030-09-20]
     end
 
-    test "re-importing after a birthdate is added converts the generic reminder in place", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
+    test "re-importing after a birthdate is added replaces the generic reminder with the birthday one",
+         %{
+           account_id: account_id,
+           import_job: import_job
+         } do
       contact = contact_fixture(account_id)
 
       payload = [
@@ -457,7 +459,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert :ok = import_reminders(import_job, contact, payload)
 
       assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.id == generic.id
+      refute reminder.id == generic.id
       assert reminder.type == "birthday"
       assert reminder.next_reminder_date == TimeHelper.next_birthday_date(~D[1990-06-15])
 
@@ -482,6 +484,10 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     Reminder
     |> where([r], r.account_id == ^account_id and r.contact_id == ^contact_id)
     |> Repo.all()
+  end
+
+  defp generic_reminders(account_id, contact_id) do
+    account_id |> contact_reminders(contact_id) |> Enum.reject(&(&1.type == "birthday"))
   end
 
   defp collect_requests(acc) do

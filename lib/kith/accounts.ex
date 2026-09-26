@@ -64,6 +64,10 @@ defmodule Kith.Accounts do
       |> Ecto.Changeset.put_change(:role, "admin")
       |> maybe_auto_confirm()
     end)
+    |> Ecto.Multi.run(:reminder_rules, fn _repo, %{account: account} ->
+      {count, _} = Kith.Reminders.seed_default_rules(account.id)
+      {:ok, count}
+    end)
     |> Repo.transaction()
     |> case do
       {:ok, %{user: user, account: account}} ->
@@ -714,6 +718,10 @@ defmodule Kith.Accounts do
         refresh_token: token_attrs[:refresh_token],
         expires_at: token_attrs[:expires_at]
       })
+    end)
+    |> Ecto.Multi.run(:reminder_rules, fn _repo, %{account: account} ->
+      {count, _} = Kith.Reminders.seed_default_rules(account.id)
+      {:ok, count}
     end)
     |> Repo.transaction()
     |> case do

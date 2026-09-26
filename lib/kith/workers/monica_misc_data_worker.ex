@@ -490,7 +490,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   defp import_single_reminder(account_id, user_id, contact, reminder_data, import_job) do
     if birthday_reminder?(reminder_data, contact) do
-      import_birthday_reminder(account_id, user_id, contact, reminder_data, import_job)
+      import_birthday_reminder(account_id, contact, reminder_data, import_job)
     else
       import_generic_reminder(account_id, user_id, contact, reminder_data, import_job)
     end
@@ -499,8 +499,8 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   # Monica has no explicit birthday flag on reminders, so match one only when
   # all three conservative signals hold: `frequency_type == "year"`, a blank
   # title, and a date (if Monica sends one) that lands on the birthday. A
-  # match routes through `Kith.Reminders.create_birthday_reminder/2` for a
-  # single birthday row; an untitled annual reminder on another date (a work
+  # match maps onto the contact's single birthday reminder (see
+  # `Kith.Reminders.sync_birthday/1`); an untitled annual reminder on another date (a work
   # anniversary, say) stays generic so its own date survives.
   defp birthday_reminder?(%{"frequency_type" => "year"} = reminder_data, %{
          birthdate: %Date{} = birthdate
@@ -522,7 +522,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp blank?(str) when is_binary(str), do: String.trim(str) == ""
   defp blank?(_), do: false
 
-  defp import_birthday_reminder(account_id, user_id, contact, reminder_data, import_job) do
+  defp import_birthday_reminder(account_id, contact, reminder_data, import_job) do
     case mapped_local_reminder(import_job, reminder_data["id"]) do
       %{type: "birthday"} = mapped ->
         # This Monica reminder already maps to the contact's birthday reminder.
@@ -531,22 +531,27 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
       %{} = mapped ->
         # Mapped to a generic reminder — an earlier import made it before the
-        # contact had a birthdate. Reclaim the row in place so there is one
-        # birthday reminder and the import mapping still resolves.
-        case Kith.Reminders.convert_to_birthday_reminder(mapped, contact) do
-          {:ok, _reminder} -> :ok
-          {:error, reason} -> log_reminder_error(reason)
+        # contact had a birthdate. The contact's birthday reminder is now
+        # derived from the birthdate (`Kith.Reminders.sync_birthday/1`), so
+        # the generic row is a stale duplicate: drop it and re-point the
+        # import mapping at the birthday reminder.
+        case Kith.Reminders.delete_reminder(mapped) do
+          {:ok, _} ->
+            create_or_map_birthday_reminder(account_id, contact, reminder_data, import_job)
+
+          {:error, reason} ->
+            log_reminder_error(reason)
         end
 
       nil ->
-        create_or_map_birthday_reminder(account_id, user_id, contact, reminder_data, import_job)
+        create_or_map_birthday_reminder(account_id, contact, reminder_data, import_job)
     end
   end
 
-  defp create_or_map_birthday_reminder(account_id, user_id, contact, reminder_data, import_job) do
+  defp create_or_map_birthday_reminder(account_id, contact, reminder_data, import_job) do
     case Kith.Reminders.get_birthday_reminder(contact.id, account_id) do
       nil ->
-        case Kith.Reminders.create_birthday_reminder(contact, user_id) do
+        case Kith.Reminders.sync_birthday(contact) do
           {:ok, reminder} ->
             maybe_record_entity(
               import_job,
