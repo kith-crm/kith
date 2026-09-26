@@ -218,6 +218,58 @@ defmodule Kith.Reminders.DispatcherTest do
     assert length(instances(r)) == 1
   end
 
+  describe "a schedule change on the day a reminder fired" do
+    test "a recurring reminder whose next date recomputes to today still advances", ctx do
+      r = create!(ctx, %{type: "recurring", frequency: "weekly", anchor_date: ctx.today})
+      assert :ok = Dispatcher.run(ctx.after_send)
+
+      {:ok, edited} =
+        Reminders.update_reminder(Repo.get!(Reminder, r.id), %{frequency: "biweekly"})
+
+      assert edited.next_reminder_date == ctx.today
+
+      assert :ok = Dispatcher.run(DateTime.add(ctx.after_send, 3600))
+
+      assert [%{occurrence_date: today}] = instances(r)
+      assert today == ctx.today
+      assert Repo.get!(Reminder, r.id).next_reminder_date == Date.add(ctx.today, 14)
+    end
+
+    test "a birthday whose birth year is corrected still advances to next year", ctx do
+      # Multiples of 4 years keep a Feb 29 test date valid.
+      birthdate = Date.new!(ctx.today.year - 28, ctx.today.month, ctx.today.day)
+      {:ok, contact} = Kith.Contacts.update_contact(ctx.contact, %{birthdate: birthdate})
+      r = Reminders.get_birthday_reminder(contact.id, ctx.account_id)
+      assert r.next_reminder_date == ctx.today
+
+      assert :ok = Dispatcher.run(ctx.after_send)
+
+      corrected = Date.new!(ctx.today.year - 32, ctx.today.month, ctx.today.day)
+      {:ok, _} = Kith.Contacts.update_contact(contact, %{birthdate: corrected})
+      assert Repo.get!(Reminder, r.id).next_reminder_date == ctx.today
+
+      assert :ok = Dispatcher.run(DateTime.add(ctx.after_send, 3600))
+
+      assert [_one] = instances(r)
+      assert Repo.get!(Reminder, r.id).next_reminder_date == Date.shift(ctx.today, year: 1)
+    end
+
+    test "a resolved stay-in-touch reminder whose next date recomputes to today re-arms",
+         ctx do
+      r = create!(ctx, %{type: "stay_in_touch", frequency: "monthly", anchor_date: ctx.today})
+      assert :ok = Dispatcher.run(ctx.after_send)
+      assert {:ok, :resolved} = Reminders.resolve_stay_in_touch_instance(ctx.contact.id)
+
+      {:ok, edited} = Reminders.update_reminder(Repo.get!(Reminder, r.id), %{frequency: "weekly"})
+      assert edited.next_reminder_date == ctx.today
+
+      assert :ok = Dispatcher.run(DateTime.add(ctx.after_send, 3600))
+
+      assert [_one] = instances(r)
+      assert Repo.get!(Reminder, r.id).next_reminder_date == Date.add(ctx.today, 7)
+    end
+  end
+
   describe "advance_days_before/3" do
     test "picks the rule whose window contains today" do
       next = ~D[2026-10-31]

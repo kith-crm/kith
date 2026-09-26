@@ -165,6 +165,21 @@ defmodule Kith.Reminders.Dispatcher do
     )
   end
 
+  # The on-day notice for this date already exists, yet the reminder still
+  # points at it: a schedule edit on the day it fired recomputed
+  # `next_reminder_date` back to today. Move it on anyway, or it is stuck
+  # there forever. Idempotent: every run computes the same date.
+  defp handle_insert_result(
+         {:ok, %ReminderInstance{id: nil}},
+         reminder,
+         today,
+         "on_day",
+         _deceased?
+       ) do
+    move_past_sent(reminder, today)
+    :already_sent
+  end
+
   defp handle_insert_result(
          {:ok, %ReminderInstance{id: nil}},
          _reminder,
@@ -191,6 +206,13 @@ defmodule Kith.Reminders.Dispatcher do
   end
 
   defp advance(_reminder, _today), do: :ok
+
+  # Stay-in-touch only reaches here with no pending instance, so nothing else
+  # will re-arm it.
+  defp move_past_sent(%Reminder{type: "stay_in_touch"} = reminder, today),
+    do: reminder |> Reminder.rearm_changeset(today) |> Repo.update!()
+
+  defp move_past_sent(reminder, today), do: advance(reminder, today)
 
   defp wake_snoozed(now) do
     from(i in ReminderInstance,
