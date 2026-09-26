@@ -1,6 +1,8 @@
 defmodule Kith.TimeHelperTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Kith.TimeHelper
 
   describe "to_utc_scheduled_at/3" do
@@ -129,6 +131,22 @@ defmodule Kith.TimeHelperTest do
                {~D[2026-09-26], 20}
 
       assert TimeHelper.local_date_hour(~U[2026-09-26 20:30:00Z], nil) == {~D[2026-09-26], 20}
+    end
+
+    test "logs a warning for invalid timezone but not for nil" do
+      log =
+        capture_log(fn ->
+          TimeHelper.local_date_hour(~U[2026-09-26 20:30:00Z], "Mars/Olympus")
+        end)
+
+      assert log =~ "invalid timezone"
+
+      log_nil =
+        capture_log(fn ->
+          TimeHelper.local_date_hour(~U[2026-09-26 20:30:00Z], nil)
+        end)
+
+      refute log_nil =~ "invalid timezone"
     end
   end
 

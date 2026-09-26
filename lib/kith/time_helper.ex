@@ -76,9 +76,9 @@ defmodule Kith.TimeHelper do
   def safe_date(year, month, day), do: Date.new!(year, month, day)
 
   @doc """
-  The local date and hour of `now` in `timezone`. An invalid or missing
-  timezone falls back to UTC (logged) so one bad account setting can't stop
-  reminder dispatch.
+  The local date and hour of `now` in `timezone`. A missing (nil) timezone
+  is treated as UTC; an invalid one also falls back to UTC and logs a warning,
+  so one bad account setting can't stop reminder dispatch.
   """
   @spec local_date_hour(DateTime.t(), String.t() | nil) :: {Date.t(), 0..23}
   def local_date_hour(%DateTime{} = now, timezone) do
@@ -95,7 +95,7 @@ defmodule Kith.TimeHelper do
     {DateTime.to_date(local), local.hour}
   end
 
-  @doc "Today's date in `timezone` (UTC fallback as in `local_date_hour/2`)."
+  @doc "Today's date in `timezone` (same fallback as `local_date_hour/2`)."
   @spec local_today(String.t() | nil) :: Date.t()
   def local_today(timezone) do
     {date, _hour} = local_date_hour(DateTime.utc_now(), timezone)
