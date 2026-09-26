@@ -218,6 +218,16 @@ defmodule Kith.Reminders.DispatcherTest do
     assert length(instances(r)) == 1
   end
 
+  test "a past one-time reminder already sent is no longer selected as due", ctx do
+    r = create!(ctx, %{type: "one_time", anchor_date: Date.add(ctx.today, -10)})
+    due_ids = fn -> ctx.account_id |> Dispatcher.due_reminders(ctx.today) |> Enum.map(& &1.id) end
+
+    assert r.id in due_ids.()
+    assert :ok = Dispatcher.run(ctx.after_send)
+
+    refute r.id in due_ids.()
+  end
+
   describe "a schedule change on the day a reminder fired" do
     test "a recurring reminder whose next date recomputes to today still advances", ctx do
       r = create!(ctx, %{type: "recurring", frequency: "weekly", anchor_date: ctx.today})

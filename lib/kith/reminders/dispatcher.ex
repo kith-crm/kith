@@ -92,12 +92,27 @@ defmodule Kith.Reminders.Dispatcher do
     |> Repo.all()
   end
 
-  defp due_reminders(account_id, horizon) do
+  # Public only for tests. A one-time reminder never advances, so once its
+  # on-day notice exists it is done; without the NOT EXISTS it would be
+  # re-selected (a transaction and a conflicting insert) every hour forever.
+  # Other types stay selectable so a conflicting on-day notice still moves
+  # them on (see `move_past_sent/2`).
+  @doc false
+  def due_reminders(account_id, horizon) do
+    sent_on_day =
+      from(i in ReminderInstance,
+        where: i.reminder_id == parent_as(:reminder).id,
+        where: i.occurrence_date == parent_as(:reminder).next_reminder_date,
+        where: i.days_before == 0
+      )
+
     from(r in Reminder,
+      as: :reminder,
       join: c in assoc(r, :contact),
       where: r.account_id == ^account_id and r.active == true,
       where: r.next_reminder_date <= ^horizon,
       where: is_nil(c.deleted_at) and c.is_archived == false,
+      where: r.type != "one_time" or not exists(sent_on_day),
       preload: [contact: c]
     )
     |> Repo.all()
