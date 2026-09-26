@@ -859,12 +859,18 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
-      rendered =
-        live |> element("button[phx-value-field='gender_id'][phx-value-index='0']") |> render()
+      label =
+        live
+        |> element("button[phx-value-field='gender_id'][phx-value-index='0']")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.text()
+        |> String.split()
+        |> Enum.join(" ")
 
-      assert rendered =~ "Woman" or rendered =~ "Man"
-      refute rendered =~ to_string(ctx.woman.id)
-      refute rendered =~ to_string(ctx.man.id)
+      # Match the whole visible label: a substring search for the id would also
+      # hit digits in the markup (`opacity-70`, `phx-value-index="0"`).
+      assert label in ["Woman 1 record(s)", "Man 1 record(s)"]
     end
 
     # The engine's `clear_member_self_reference/2` coerces a member id to
