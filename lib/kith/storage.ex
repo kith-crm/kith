@@ -9,6 +9,8 @@ defmodule Kith.Storage do
   All backends implement the `Kith.Storage.Backend` behaviour.
   """
 
+  alias Kith.Storage.S3
+
   require Logger
 
   @type storage_key :: String.t()
@@ -64,6 +66,18 @@ defmodule Kith.Storage do
   """
   def url(storage_key) do
     backend().url(storage_key)
+  end
+
+  @doc """
+  Returns the origin (`scheme://host[:port]`) that `url/1` serves files from,
+  for inclusion in the CSP `img-src` directive. Empty string for the `:local`
+  backend, which serves from the app's own origin (`'self'`).
+  """
+  def csp_img_src do
+    case backend() do
+      S3 -> S3.csp_img_src()
+      _ -> ""
+    end
   end
 
   @doc """
@@ -156,7 +170,7 @@ defmodule Kith.Storage do
   defp backend do
     case Application.get_env(:kith, Kith.Storage, []) |> Keyword.get(:backend, :local) do
       :local -> Kith.Storage.Local
-      :s3 -> Kith.Storage.S3
+      :s3 -> S3
       other -> raise "Invalid storage backend: #{inspect(other)}. Must be :local or :s3."
     end
   end

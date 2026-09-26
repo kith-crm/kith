@@ -35,6 +35,8 @@ defmodule Kith.Contacts do
   alias Kith.Activities.{Activity, Call}
   alias Kith.Storage
 
+  require Logger
+
   ## Contacts
 
   def list_contacts(account_id, opts \\ []) do
@@ -284,13 +286,34 @@ defmodule Kith.Contacts do
     %Contact{account_id: account_id}
     |> Contact.create_changeset(attrs)
     |> Repo.insert()
+    |> sync_birthday_if_changed(nil)
   end
 
   def update_contact(%Contact{} = contact, attrs) do
     contact
     |> Contact.update_changeset(attrs)
     |> Repo.update()
+    |> sync_birthday_if_changed(contact.birthdate)
   end
+
+  # Every path that sets or clears a birthdate (UI, REST API, CardDAV, the
+  # Monica importer) goes through create_contact/2 or update_contact/2.
+  defp sync_birthday_if_changed({:ok, %Contact{birthdate: new} = contact} = result, old)
+       when new != old do
+    case Kith.Reminders.sync_birthday(contact) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "[Contacts] birthday reminder sync failed for contact #{contact.id}: #{inspect(reason)}"
+        )
+    end
+
+    result
+  end
+
+  defp sync_birthday_if_changed(result, _old), do: result
 
   def soft_delete_contact(%Contact{} = contact) do
     contact
@@ -321,20 +344,13 @@ defmodule Kith.Contacts do
   end
 
   @doc """
-  Cancels reminder jobs for all trashed contacts in the given account, bulk-deletes them,
-  and returns `{:ok, count}` where `count` is the number of contacts permanently deleted.
+  Bulk-deletes all trashed contacts in the given account and returns `{:ok, count}`.
 
   The DB read and bulk-delete are wrapped in a transaction so concurrent purge workers
-  cannot interleave. Oban job cancellations inside are best-effort.
+  cannot interleave.
   """
   def empty_trash(account_id) do
     Repo.transaction(fn ->
-      trashed = list_trashed_contacts(account_id)
-
-      Enum.each(trashed, fn contact ->
-        Kith.Reminders.cancel_all_for_contact(contact.id, account_id)
-      end)
-
       {count, _} =
         from(c in Contact, where: c.account_id == ^account_id and not is_nil(c.deleted_at))
         |> Repo.delete_all()

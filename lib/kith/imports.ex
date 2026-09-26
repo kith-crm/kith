@@ -128,7 +128,9 @@ defmodule Kith.Imports do
       local_entity_id: local_entity_id
     })
     |> Repo.insert(
-      on_conflict: [set: [import_id: import.id, updated_at: now]],
+      on_conflict: [
+        set: [import_id: import.id, local_entity_id: local_entity_id, updated_at: now]
+      ],
       conflict_target:
         {:unsafe_fragment, ~s|("account_id", "source", "source_entity_type", "source_entity_id")|},
       returning: true

@@ -152,4 +152,60 @@ defmodule KithWeb.API.ReminderControllerTest do
       assert conn2.status == 204
     end
   end
+
+  describe "schedule fields" do
+    test "create accepts a preset and returns interval fields", %{conn: conn, contact: contact} do
+      conn =
+        post(conn, ~p"/api/contacts/#{contact.id}/reminders", %{
+          "reminder" => %{
+            "type" => "recurring",
+            "title" => "Rent",
+            "frequency" => "monthly",
+            "anchor_date" => "2024-02-01"
+          }
+        })
+
+      data = json_response(conn, 201)["data"]
+      assert data["frequency"] == "monthly"
+      assert data["interval_unit"] == "month"
+      assert data["interval_count"] == 1
+      assert data["anchor_date"] == "2024-02-01"
+      assert Date.compare(Date.from_iso8601!(data["next_reminder_date"]), Date.utc_today()) != :lt
+    end
+
+    test "create accepts unit + count outside the presets", %{conn: conn, contact: contact} do
+      conn =
+        post(conn, ~p"/api/contacts/#{contact.id}/reminders", %{
+          "reminder" => %{
+            "type" => "recurring",
+            "title" => "Every 3 weeks",
+            "interval_unit" => "week",
+            "interval_count" => 3,
+            "anchor_date" => Date.to_iso8601(Date.utc_today())
+          }
+        })
+
+      data = json_response(conn, 201)["data"]
+      assert data["frequency"] == nil
+      assert {data["interval_unit"], data["interval_count"]} == {"week", 3}
+    end
+
+    test "birthday reminders can't be created, edited or deleted", %{conn: conn, contact: contact} do
+      conn1 =
+        post(conn, ~p"/api/contacts/#{contact.id}/reminders", %{
+          "reminder" => %{"type" => "birthday", "anchor_date" => "1990-06-15"}
+        })
+
+      assert json_response(conn1, 422)
+
+      {:ok, contact} = Kith.Contacts.update_contact(contact, %{birthdate: ~D[1990-06-15]})
+      birthday = Kith.Reminders.get_birthday_reminder(contact.id, contact.account_id)
+
+      conn2 = patch(conn, ~p"/api/reminders/#{birthday.id}", %{"reminder" => %{"title" => "x"}})
+      assert json_response(conn2, 422)
+
+      conn3 = delete(conn, ~p"/api/reminders/#{birthday.id}")
+      assert json_response(conn3, 422)
+    end
+  end
 end

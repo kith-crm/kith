@@ -75,7 +75,8 @@ defmodule KithWeb.API.ReminderController do
     user = scope.user
     account_id = scope.account.id
 
-    with true <- Policy.can?(user, :create, :reminder),
+    with :ok <- reject_birthday(attrs["type"]),
+         true <- Policy.can?(user, :create, :reminder),
          contact when not is_nil(contact) <- Contacts.get_contact(account_id, contact_id) do
       reminder_attrs = Map.put(attrs, "contact_id", contact.id)
 
@@ -92,6 +93,7 @@ defmodule KithWeb.API.ReminderController do
     else
       false -> {:error, :forbidden}
       nil -> {:error, :not_found}
+      {:error, 422, detail} -> {:error, 422, detail}
     end
   end
 
@@ -107,12 +109,14 @@ defmodule KithWeb.API.ReminderController do
 
     with true <- Policy.can?(user, :update, :reminder),
          reminder when not is_nil(reminder) <- fetch_reminder(account_id, id),
+         :ok <- reject_birthday(reminder.type),
          {:ok, updated} <- Reminders.update_reminder(reminder, attrs) do
       json(conn, %{data: reminder_json(updated)})
     else
       false -> {:error, :forbidden}
       nil -> {:error, :not_found}
       {:error, %Ecto.Changeset{} = cs} -> {:error, cs}
+      {:error, 422, detail} -> {:error, 422, detail}
     end
   end
 
@@ -123,7 +127,8 @@ defmodule KithWeb.API.ReminderController do
     account_id = scope.account.id
 
     with true <- Policy.can?(user, :delete, :reminder),
-         reminder when not is_nil(reminder) <- fetch_reminder(account_id, id) do
+         reminder when not is_nil(reminder) <- fetch_reminder(account_id, id),
+         :ok <- reject_birthday(reminder.type) do
       case Reminders.delete_reminder(reminder) do
         {:ok, _} -> send_resp(conn, 204, "")
         {:error, reason} -> {:error, :bad_request, inspect(reason)}
@@ -131,6 +136,7 @@ defmodule KithWeb.API.ReminderController do
     else
       false -> {:error, :forbidden}
       nil -> {:error, :not_found}
+      {:error, 422, detail} -> {:error, 422, detail}
     end
   end
 
@@ -194,6 +200,12 @@ defmodule KithWeb.API.ReminderController do
     Reminder |> TenantScope.scope_to_account(account_id) |> Kith.Repo.get(id)
   end
 
+  # Birthday reminders are derived from the contact's birthdate.
+  defp reject_birthday("birthday"),
+    do: {:error, 422, "Birthday reminders are managed from the contact's birthdate."}
+
+  defp reject_birthday(_type), do: :ok
+
   defp get_instance(account_id, id) do
     ReminderInstance
     |> join(:inner, [ri], r in Reminder, on: ri.reminder_id == r.id)
@@ -208,8 +220,11 @@ defmodule KithWeb.API.ReminderController do
       contact_id: r.contact_id,
       type: r.type,
       title: r.title,
+      anchor_date: r.anchor_date,
+      interval_unit: r.interval_unit,
+      interval_count: r.interval_count,
+      frequency: Reminder.frequency_preset(r),
       next_reminder_date: r.next_reminder_date,
-      frequency: r.frequency,
       inserted_at: r.inserted_at,
       updated_at: r.updated_at
     }

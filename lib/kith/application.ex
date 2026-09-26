@@ -4,11 +4,29 @@ defmodule Kith.Application do
   use Application
   import Cachex.Spec
 
+  require Logger
+
   @impl true
   def start(_type, _args) do
+    log_oban_pruner_retention()
     children = base_children() ++ mode_children()
     opts = [strategy: :one_for_one, name: Kith.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  # Surface the effective `Oban.Plugins.Pruner` retention in the boot logs so an
+  # operator can confirm how long terminal `oban_jobs` rows (imports included)
+  # are kept. No-op when this node runs Oban without plugins (e.g. the prod web
+  # container sets `plugins: false`).
+  defp log_oban_pruner_retention do
+    with plugins when is_list(plugins) <-
+           Keyword.get(Application.get_env(:kith, Oban, []), :plugins, []),
+         {_, opts} <- List.keyfind(plugins, Oban.Plugins.Pruner, 0),
+         max_age when is_integer(max_age) <- Keyword.get(opts, :max_age) do
+      Logger.info("[Oban] pruner max_age = #{max_age}s (#{div(max_age, 86_400)}d)")
+    else
+      _ -> :ok
+    end
   end
 
   defp base_children do
