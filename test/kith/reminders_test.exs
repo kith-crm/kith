@@ -3,6 +3,7 @@ defmodule Kith.RemindersTest do
 
   alias Kith.Reminders
   alias Kith.Reminders.{Reminder, ReminderInstance}
+  alias Kith.TimeHelper
 
   import Kith.AccountsFixtures
   import Kith.ContactsFixtures
@@ -266,6 +267,44 @@ defmodule Kith.RemindersTest do
     } do
       assert {:ok, :no_birthday_reminder} =
                Reminders.delete_birthday_reminder(contact.id, account_id)
+    end
+
+    test "convert_to_birthday_reminder rewrites an existing reminder in place", %{
+      account_id: account_id,
+      user: user
+    } do
+      contact = contact_fixture(account_id, %{birthdate: ~D[1990-06-15]})
+
+      recurring =
+        reminder_fixture(account_id, contact.id, user.id, %{
+          type: "recurring",
+          frequency: "annually",
+          next_reminder_date: ~D[2024-01-01]
+        })
+
+      assert {:ok, converted} = Reminders.convert_to_birthday_reminder(recurring, contact)
+      assert converted.id == recurring.id
+      assert converted.type == "birthday"
+      assert converted.frequency == nil
+      assert converted.next_reminder_date == TimeHelper.next_birthday_date(~D[1990-06-15])
+    end
+
+    test "convert_to_birthday_reminder errors when a distinct birthday reminder exists", %{
+      account_id: account_id,
+      user: user
+    } do
+      contact = contact_fixture(account_id, %{birthdate: ~D[1990-06-15]})
+      birthday_reminder_fixture(account_id, contact.id, user.id)
+
+      recurring =
+        reminder_fixture(account_id, contact.id, user.id, %{
+          type: "recurring",
+          frequency: "annually",
+          next_reminder_date: ~D[2024-01-01]
+        })
+
+      assert {:error, %Ecto.Changeset{}} =
+               Reminders.convert_to_birthday_reminder(recurring, contact)
     end
   end
 

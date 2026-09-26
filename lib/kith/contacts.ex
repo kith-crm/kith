@@ -286,6 +286,11 @@ defmodule Kith.Contacts do
     |> Repo.insert()
   end
 
+  # Follow-up (issue #5): when `birthdate` is added/changed/removed here,
+  # sync the contact's birthday reminder via
+  # `Kith.Reminders.create_birthday_reminder/2` / `delete_birthday_reminder/2`
+  # so Kith auto-derives birthday reminders instead of relying on imports.
+  # Deliberately out of scope for the import-date fix.
   def update_contact(%Contact{} = contact, attrs) do
     contact
     |> Contact.update_changeset(attrs)

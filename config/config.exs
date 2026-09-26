@@ -51,8 +51,11 @@ config :kith, Oban,
     purge: 1
   ],
   plugins: [
-    {Oban.Plugins.Pruner,
-     max_age: String.to_integer(System.get_env("OBAN_PRUNER_MAX_AGE_DAYS", "7")) * 24 * 60 * 60},
+    # Terminal `oban_jobs` retention: 7 days. `:prod` overrides this whole
+    # `plugins:` list at boot from `config/runtime.exs`, where the worker
+    # container reads `OBAN_PRUNER_MAX_AGE_DAYS`; only `:dev`/`:test` use this
+    # line, so a plain literal is enough. Keep the 7 in sync with runtime.exs.
+    {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60},
     {Oban.Plugins.Cron,
      crontab: [
        {"0 2 * * *", Kith.Workers.ReminderSchedulerWorker},

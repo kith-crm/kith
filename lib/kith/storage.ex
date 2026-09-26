@@ -67,6 +67,18 @@ defmodule Kith.Storage do
   end
 
   @doc """
+  Returns the origin (`scheme://host[:port]`) that `url/1` serves files from,
+  for inclusion in the CSP `img-src` directive. Empty string for the `:local`
+  backend, which serves from the app's own origin (`'self'`).
+  """
+  def csp_img_src do
+    case backend() do
+      Kith.Storage.S3 -> Kith.Storage.S3.csp_img_src()
+      _ -> ""
+    end
+  end
+
+  @doc """
   Returns total storage usage in bytes for an account.
   Queries the sum of file_size across photos and documents tables.
   Results cached in Cachex with 5-minute TTL.

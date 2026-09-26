@@ -48,6 +48,15 @@ defmodule Kith.Reminders do
   end
 
   @doc """
+  Fetches a reminder by ID, scoped to account. Returns `nil` if not found.
+  """
+  def get_reminder(account_id, id) do
+    Reminder
+    |> scope_to_account(account_id)
+    |> Repo.get(id)
+  end
+
+  @doc """
   Creates a reminder with transactional Oban job enqueue.
   """
   def create_reminder(account_id, creator_id, attrs) do
@@ -131,6 +140,34 @@ defmodule Kith.Reminders do
       next_reminder_date: next_date,
       contact_id: contact_id
     })
+  end
+
+  @doc """
+  Converts an existing reminder into `contact`'s birthday reminder in place,
+  keeping its id (and any import mapping that points at it) while re-syncing
+  its Oban notification jobs. Returns `{:error, changeset}` if the contact
+  already has a distinct birthday reminder.
+  """
+  def convert_to_birthday_reminder(%Reminder{} = reminder, %{birthdate: %Date{} = birthdate}) do
+    account = Accounts.get_account!(reminder.account_id)
+    next_date = TimeHelper.next_birthday_date(birthdate)
+
+    Multi.new()
+    |> cancel_enqueued_jobs_step(reminder)
+    |> Multi.update(:reminder, Reminder.convert_to_birthday_changeset(reminder, next_date))
+    |> Multi.run(:enqueue_jobs, fn _repo, %{reminder: updated} ->
+      enqueue_jobs_for_reminder(updated, account)
+    end)
+    |> Multi.run(:store_job_ids, fn repo, %{reminder: updated, enqueue_jobs: job_ids} ->
+      updated
+      |> Reminder.job_ids_changeset(job_ids)
+      |> repo.update()
+    end)
+    |> Repo.transaction()
+    |> case do
+      {:ok, %{store_job_ids: reminder}} -> {:ok, reminder}
+      {:error, _step, changeset, _changes} -> {:error, changeset}
+    end
   end
 
   @doc """
