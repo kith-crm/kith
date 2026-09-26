@@ -99,24 +99,6 @@ defmodule Kith.TimeHelperTest do
     end
   end
 
-  describe "advance_by_frequency/2" do
-    test "weekly advances by 7 days" do
-      assert TimeHelper.advance_by_frequency(~D[2026-01-01], "weekly") == ~D[2026-01-08]
-    end
-
-    test "biweekly advances by 14 days" do
-      assert TimeHelper.advance_by_frequency(~D[2026-01-01], "biweekly") == ~D[2026-01-15]
-    end
-
-    test "monthly advances by 30 days" do
-      assert TimeHelper.advance_by_frequency(~D[2026-01-01], "monthly") == ~D[2026-01-31]
-    end
-
-    test "annually advances by 365 days" do
-      assert TimeHelper.advance_by_frequency(~D[2026-01-01], "annually") == ~D[2027-01-01]
-    end
-  end
-
   describe "local_date_hour/2" do
     test "converts UTC to the timezone's local date and hour" do
       assert TimeHelper.local_date_hour(~U[2026-09-26 20:30:00Z], "Asia/Tokyo") ==

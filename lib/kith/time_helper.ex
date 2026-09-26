@@ -7,7 +7,6 @@ defmodule Kith.TimeHelper do
   UTC offsets — always recomputes from IANA name at scheduling time.
   """
 
-  alias Kith.Reminders.Reminder
   require Logger
 
   @doc """
@@ -100,14 +99,5 @@ defmodule Kith.TimeHelper do
   def local_today(timezone) do
     {date, _hour} = local_date_hour(DateTime.utc_now(), timezone)
     date
-  end
-
-  @doc """
-  Advances a date by the given frequency interval.
-  """
-  @spec advance_by_frequency(Date.t(), String.t()) :: Date.t()
-  def advance_by_frequency(%Date{} = date, frequency) do
-    days = Reminder.frequency_days(frequency)
-    Date.add(date, days)
   end
 end

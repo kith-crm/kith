@@ -32,26 +32,6 @@ defmodule Kith.Contacts.MergeTest do
     %{user: user, account_id: account_id, contact_a: contact_a, contact_b: contact_b}
   end
 
-  # Enqueues a real notification job for `reminder` and records it the way
-  # Reminders.enqueue_jobs_for_reminder/2 would.
-  defp notification_job!(reminder) do
-    {:ok, job} =
-      Oban.insert(
-        Kith.Workers.ReminderNotificationWorker.new(%{
-          reminder_id: reminder.id,
-          type: "on_day",
-          days_before: 0
-        })
-      )
-
-    Repo.update_all(
-      from(r in Kith.Reminders.Reminder, where: r.id == ^reminder.id),
-      set: [enqueued_oban_job_ids: [job.id]]
-    )
-
-    job
-  end
-
   # The 3-arity call the wizard actually makes — `field_choices` starts empty
   # and gains one entry per click. apply_legacy_choices/4 resolves each field
   # independently (a per-field reduce over `choices`), so it cannot reproduce
@@ -1249,37 +1229,6 @@ defmodule Kith.Contacts.MergeTest do
              ) == 0
     end
 
-    test "cancels the Oban jobs of the birthday reminders it deletes", ctx do
-      birthday_a =
-        Kith.RemindersFixtures.birthday_reminder_fixture(
-          ctx.account_id,
-          ctx.contact_a.id,
-          ctx.user.id
-        )
-
-      birthday_b =
-        Kith.RemindersFixtures.birthday_reminder_fixture(
-          ctx.account_id,
-          ctx.contact_b.id,
-          ctx.user.id
-        )
-
-      kept_job = notification_job!(birthday_a)
-      doomed_job = notification_job!(birthday_b)
-
-      {:ok, _survivor} =
-        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
-          fields: %{},
-          drop: %{}
-        })
-
-      # birthday_b is the reminder the merge destroys, so its scheduled
-      # notification must go with it (design spec §2 step 7). Every other
-      # reminder just changes owner and keeps its job.
-      assert Repo.get!(Oban.Job, doomed_job.id).state == "cancelled"
-      assert Repo.get!(Oban.Job, kept_job.id).state == "available"
-    end
-
     test "when only losers have birthday reminders, keeps the lowest-id one", ctx do
       c = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Carol"})
 
@@ -2224,15 +2173,7 @@ defmodule Kith.Contacts.MergeTest do
         )
 
       assert kept.id == ctx.survivor_reminder.id
-      assert kept.frequency == "monthly"
-    end
-
-    test "cancels the Oban jobs of the reminder it discards", ctx do
-      job = notification_job!(ctx.loser_reminder)
-
-      {:ok, _survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
-
-      assert Repo.get(Oban.Job, job.id).state in ["cancelled", "discarded"]
+      assert Kith.Reminders.Reminder.frequency_preset(kept) == "monthly"
     end
 
     # The regression this whole task exists for: a second active reminder makes
@@ -2293,7 +2234,7 @@ defmodule Kith.Contacts.MergeTest do
 
       Repo.update_all(
         from(r in Kith.Reminders.Reminder, where: r.id == ^reminder.id),
-        set: [active: false, enqueued_oban_job_ids: []]
+        set: [active: false]
       )
 
       # A birthdate on the loser that the merge will gap-fill onto the
@@ -2306,13 +2247,12 @@ defmodule Kith.Contacts.MergeTest do
       Map.put(ctx, :reminder, reminder)
     end
 
-    test "does not enqueue jobs for a deactivated reminder", ctx do
+    test "keeps a deactivated birthday reminder inactive", ctx do
       {:ok, _survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
 
       kept = Repo.get!(Kith.Reminders.Reminder, ctx.reminder.id)
 
       assert kept.active == false
-      assert kept.enqueued_oban_job_ids == []
     end
 
     test "still tracks the merged birthdate on the date field", ctx do

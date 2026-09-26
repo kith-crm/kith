@@ -15,7 +15,6 @@ defmodule Kith.Workers.ContactPurgeWorker do
   require Logger
 
   alias Kith.Contacts.Contact
-  alias Kith.Reminders
   alias Kith.Repo
 
   import Ecto.Query
@@ -59,9 +58,6 @@ defmodule Kith.Workers.ContactPurgeWorker do
   end
 
   defp purge_contact(contact) do
-    # Cancel any remaining Oban jobs for the contact's reminders
-    Reminders.cancel_all_for_contact(contact.id, contact.account_id)
-
     # Create audit log entry synchronously (we're already in an Oban job, no need to double-enqueue).
     # Must insert before deletion since the contact will be cascade-deleted.
     Kith.AuditLogs.create_audit_log(contact.account_id, %{
