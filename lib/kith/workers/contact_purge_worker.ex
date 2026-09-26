@@ -5,7 +5,8 @@ defmodule Kith.Workers.ContactPurgeWorker do
 
   - Batches at 500 to avoid long-running transactions
   - Each contact deletion is its own transaction
-  - Cancels any remaining Oban jobs for the contact's reminders
+  - Reminders and their instances go with the contact (FK cascade); a
+    queued reminder email whose instance is gone discards itself
   - Creates audit log entries with contact name snapshot (survives deletion)
   - Idempotent: safe to run multiple times
   """

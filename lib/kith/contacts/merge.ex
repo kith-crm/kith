@@ -312,12 +312,11 @@ defmodule Kith.Contacts.Merge do
 
   # Stay-in-touch reminders have no unique index (only `reminders_birthday_
   # unique_idx` exists), so the blanket `:remap_owned` move happily lands two
-  # active rows on the survivor. Nothing raises at write time — the failure
-  # surfaces later and elsewhere, in `Reminders.resolve_stay_in_touch_instance/1`,
-  # whose `Repo.one/1` raises `Ecto.MultipleResultsError` the next time an
-  # interaction is logged. Collapse to one here, where the doomed ids are
-  # still known and their jobs can be cancelled. Same keep rule as birthdays:
-  # the survivor's own row wins, else the lowest id.
+  # active rows on the survivor. Nothing raises at write time; the duplicate
+  # would just fire its own stay-in-touch notices alongside the survivor's.
+  # Collapse to one here, where the doomed ids are still known; their
+  # instances cascade with them. Same keep rule as birthdays: the survivor's
+  # own row wins, else the lowest id.
   defp remap_stay_in_touch_reminders_step(repo, loser_ids, survivor_id) do
     %{rows: rows} =
       repo.query!(
