@@ -4,7 +4,9 @@ defmodule Kith.Workers.ReminderEmailWorker do
 
   Inserted by `Kith.Reminders.Dispatcher` in the same transaction that records
   the instance, so a retry only resends the email and never creates another
-  instance. After the final attempt fails, the instance is marked `failed`.
+  instance. After the final attempt fails, the instance is marked `failed`;
+  a stay-in-touch reminder is re-armed one interval from today in the same
+  transaction, since with no pending instance nothing else would re-arm it.
   """
 
   use Oban.Worker, queue: :reminders, max_attempts: 3
@@ -12,8 +14,8 @@ defmodule Kith.Workers.ReminderEmailWorker do
   require Logger
 
   alias Kith.Accounts.User
-  alias Kith.Reminders.ReminderInstance
-  alias Kith.Repo
+  alias Kith.Reminders.{Reminder, ReminderInstance}
+  alias Kith.{Repo, TimeHelper}
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"instance_id" => id}, attempt: attempt, max_attempts: max}) do
@@ -40,10 +42,24 @@ defmodule Kith.Workers.ReminderEmailWorker do
 
       {:error, reason} ->
         audit(instance, reason)
-        if last_attempt?, do: instance |> ReminderInstance.fail_changeset() |> Repo.update!()
+        if last_attempt?, do: mark_failed(instance)
         {:error, reason}
     end
   end
+
+  defp mark_failed(instance) do
+    Repo.transaction(fn ->
+      instance |> ReminderInstance.fail_changeset() |> Repo.update!()
+      rearm_stay_in_touch(instance.reminder)
+    end)
+  end
+
+  defp rearm_stay_in_touch(%Reminder{type: "stay_in_touch"} = reminder) do
+    today = Kith.Accounts.get_account!(reminder.account_id).timezone |> TimeHelper.local_today()
+    reminder |> Reminder.rearm_changeset(today) |> Repo.update!()
+  end
+
+  defp rearm_stay_in_touch(_reminder), do: :ok
 
   defp log_missing_creator(reminder) do
     Logger.warning("[ReminderEmailWorker] reminder #{reminder.id} has no creator; not emailing")
