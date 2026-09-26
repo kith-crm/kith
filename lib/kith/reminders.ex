@@ -72,32 +72,49 @@ defmodule Kith.Reminders do
   # ── Birthday Reminders ──────────────────────────────────────────────────
 
   @doc """
-  Creates a birthday reminder for a contact (yearly from the birthdate).
-  Replaced by `sync_birthday/1` in the next change.
+  Makes the contact's birthday reminder match its birthdate: creates it when a
+  birthdate is set, re-anchors it when the birthdate changes, deletes it when
+  the birthdate is removed. The reminder belongs to the account owner (design
+  spec §6). An existing reminder's `active` flag is left as it is.
   """
-  def create_birthday_reminder(
-        %{id: contact_id, account_id: account_id, birthdate: birthdate},
-        creator_id
-      )
-      when not is_nil(birthdate) do
-    create_reminder(account_id, creator_id, %{
-      type: "birthday",
-      title: nil,
-      anchor_date: birthdate,
-      interval_unit: "year",
-      interval_count: 1,
-      contact_id: contact_id
-    })
+  def sync_birthday(%Kith.Contacts.Contact{} = contact) do
+    case {contact.birthdate, get_birthday_reminder(contact.id, contact.account_id)} do
+      {nil, nil} ->
+        {:ok, :none}
+
+      {nil, %Reminder{} = reminder} ->
+        with {:ok, _} <- delete_reminder(reminder), do: {:ok, :none}
+
+      {%Date{} = birthdate, nil} ->
+        case account_owner_id(contact.account_id) do
+          nil ->
+            {:error, :no_account_owner}
+
+          owner_id ->
+            create_reminder(contact.account_id, owner_id, %{
+              type: "birthday",
+              title: nil,
+              anchor_date: birthdate,
+              interval_unit: "year",
+              interval_count: 1,
+              contact_id: contact.id
+            })
+        end
+
+      {%Date{} = birthdate, %Reminder{} = reminder} ->
+        update_reminder(reminder, %{anchor_date: birthdate})
+    end
   end
 
-  @doc """
-  Deletes the birthday reminder for a contact. Called when birthdate is removed.
-  """
-  def delete_birthday_reminder(contact_id, account_id) do
-    case get_birthday_reminder(contact_id, account_id) do
-      nil -> {:ok, :no_birthday_reminder}
-      reminder -> delete_reminder(reminder)
-    end
+  # The account's owner: its earliest admin user (today, the only user).
+  defp account_owner_id(account_id) do
+    from(u in Kith.Accounts.User,
+      where: u.account_id == ^account_id and u.role == "admin",
+      order_by: [asc: u.inserted_at, asc: u.id],
+      select: u.id,
+      limit: 1
+    )
+    |> Repo.one()
   end
 
   @doc """

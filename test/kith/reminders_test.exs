@@ -361,12 +361,8 @@ defmodule Kith.RemindersTest do
       assert %Reminder{type: "birthday"} = Reminders.get_birthday_reminder(contact.id, account_id)
     end
 
-    test "delete_birthday_reminder is safe when none exists", %{
-      account_id: account_id,
-      contact: contact
-    } do
-      assert {:ok, :no_birthday_reminder} =
-               Reminders.delete_birthday_reminder(contact.id, account_id)
+    test "sync_birthday is a no-op for a contact without a birthdate", %{contact: contact} do
+      assert {:ok, :none} = Reminders.sync_birthday(contact)
     end
   end
 
