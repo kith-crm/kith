@@ -114,4 +114,27 @@ defmodule Kith.TimeHelperTest do
       assert TimeHelper.advance_by_frequency(~D[2026-01-01], "annually") == ~D[2027-01-01]
     end
   end
+
+  describe "local_date_hour/2" do
+    test "converts UTC to the timezone's local date and hour" do
+      assert TimeHelper.local_date_hour(~U[2026-09-26 20:30:00Z], "Asia/Tokyo") ==
+               {~D[2026-09-27], 5}
+
+      assert TimeHelper.local_date_hour(~U[2026-01-15 03:00:00Z], "America/New_York") ==
+               {~D[2026-01-14], 22}
+    end
+
+    test "falls back to UTC for an invalid or missing timezone" do
+      assert TimeHelper.local_date_hour(~U[2026-09-26 20:30:00Z], "Mars/Olympus") ==
+               {~D[2026-09-26], 20}
+
+      assert TimeHelper.local_date_hour(~U[2026-09-26 20:30:00Z], nil) == {~D[2026-09-26], 20}
+    end
+  end
+
+  describe "local_today/1" do
+    test "returns a date" do
+      assert %Date{} = TimeHelper.local_today("Etc/UTC")
+    end
+  end
 end
