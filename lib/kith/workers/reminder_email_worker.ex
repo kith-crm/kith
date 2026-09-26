@@ -27,25 +27,27 @@ defmodule Kith.Workers.ReminderEmailWorker do
     reminder = instance.reminder
 
     case Repo.get(User, reminder.creator_id) do
-      %User{} = creator ->
-        case Kith.Mailer.deliver(build_email(creator, instance)) do
-          {:ok, _} ->
-            audit(instance, nil)
-            :ok
-
-          {:error, reason} ->
-            audit(instance, reason)
-            if last_attempt?, do: instance |> ReminderInstance.fail_changeset() |> Repo.update!()
-            {:error, reason}
-        end
-
-      nil ->
-        Logger.warning(
-          "[ReminderEmailWorker] reminder #{reminder.id} has no creator; not emailing"
-        )
-
-        :ok
+      %User{} = creator -> deliver_to(creator, instance, last_attempt?)
+      nil -> log_missing_creator(reminder)
     end
+  end
+
+  defp deliver_to(creator, instance, last_attempt?) do
+    case Kith.Mailer.deliver(build_email(creator, instance)) do
+      {:ok, _} ->
+        audit(instance, nil)
+        :ok
+
+      {:error, reason} ->
+        audit(instance, reason)
+        if last_attempt?, do: instance |> ReminderInstance.fail_changeset() |> Repo.update!()
+        {:error, reason}
+    end
+  end
+
+  defp log_missing_creator(reminder) do
+    Logger.warning("[ReminderEmailWorker] reminder #{reminder.id} has no creator; not emailing")
+    :ok
   end
 
   defp build_email(%User{} = creator, instance) do

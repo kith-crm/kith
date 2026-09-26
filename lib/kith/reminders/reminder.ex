@@ -19,6 +19,11 @@ defmodule Kith.Reminders.Reminder do
 
   alias Kith.Reminders.Occurrences
 
+  # The @spec below is intentionally broader than the literal clauses'
+  # success typing (dialyzer's inferred return is a handful of concrete
+  # binary shapes); the public contract is any label string or nil.
+  @dialyzer {:nowarn_function, interval_label: 1}
+
   @types ~w(birthday stay_in_touch one_time recurring)
   @units ~w(week month year)
   @frequencies ~w(weekly biweekly monthly 3months 6months annually)
@@ -66,7 +71,7 @@ defmodule Kith.Reminders.Reminder do
     Enum.find_value(@presets, fn {name, pair} -> if pair == {unit, count}, do: name end)
   end
 
-  @doc "Human label for the interval (\"Weekly\", \"Every 3 weeks\"), or nil for one-time."
+  @doc ~s[Human label for the interval ("Weekly", "Every 3 weeks"), or nil for one-time.]
   @spec interval_label(map()) :: String.t() | nil
   def interval_label(%{interval_unit: nil}), do: nil
   def interval_label(%{interval_unit: "week", interval_count: 1}), do: "Weekly"

@@ -65,19 +65,23 @@ defmodule Kith.Reminders.Dispatcher do
     {today, hour} = TimeHelper.local_date_hour(now, account.timezone)
 
     if hour >= account.send_hour do
-      rules = advance_rules(account.id)
-      rule_days = Enum.map(rules, &elem(&1, 0))
-      active_days = for {d, true} <- rules, into: MapSet.new(), do: d
-      horizon = Date.add(today, Enum.max(rule_days, fn -> 0 end))
-
-      account.id
-      |> due_reminders(horizon)
-      |> Enum.each(fn reminder ->
-        safely("reminder #{reminder.id}", fn ->
-          dispatch_reminder(reminder, today, rule_days, active_days, now)
-        end)
-      end)
+      dispatch_due_reminders(account, today, now)
     end
+  end
+
+  defp dispatch_due_reminders(account, today, now) do
+    rules = advance_rules(account.id)
+    rule_days = Enum.map(rules, &elem(&1, 0))
+    active_days = for {d, true} <- rules, into: MapSet.new(), do: d
+    horizon = Date.add(today, Enum.max(rule_days, fn -> 0 end))
+
+    account.id
+    |> due_reminders(horizon)
+    |> Enum.each(fn reminder ->
+      safely("reminder #{reminder.id}", fn ->
+        dispatch_reminder(reminder, today, rule_days, active_days, now)
+      end)
+    end)
   end
 
   defp advance_rules(account_id) do
@@ -105,18 +109,22 @@ defmodule Kith.Reminders.Dispatcher do
         send_on_day(reminder, today, now)
 
       reminder.type in @advance_types ->
-        case advance_days_before(reminder.next_reminder_date, today, rule_days) do
-          nil ->
-            :not_due
-
-          days ->
-            if MapSet.member?(active_days, days),
-              do: send_notice(reminder, "advance", days, today, now),
-              else: :not_due
-        end
+        dispatch_advance_notice(reminder, today, rule_days, active_days, now)
 
       true ->
         :not_due
+    end
+  end
+
+  defp dispatch_advance_notice(reminder, today, rule_days, active_days, now) do
+    case advance_days_before(reminder.next_reminder_date, today, rule_days) do
+      nil ->
+        :not_due
+
+      days ->
+        if MapSet.member?(active_days, days),
+          do: send_notice(reminder, "advance", days, today, now),
+          else: :not_due
     end
   end
 
@@ -144,26 +152,36 @@ defmodule Kith.Reminders.Dispatcher do
     }
 
     Repo.transaction(fn ->
-      %ReminderInstance{}
-      |> ReminderInstance.create_changeset(attrs)
-      |> Repo.insert(
-        on_conflict: :nothing,
-        conflict_target: [:reminder_id, :occurrence_date, :days_before]
-      )
-      |> case do
-        {:ok, %ReminderInstance{id: nil}} ->
-          :already_sent
-
-        {:ok, instance} ->
-          if kind == "on_day", do: advance(reminder, today)
-          unless deceased?, do: Oban.insert!(ReminderEmailWorker.new(%{instance_id: instance.id}))
-          :sent
-
-        {:error, changeset} ->
-          Repo.rollback(changeset)
-      end
+      handle_insert_result(insert_instance(attrs), reminder, today, kind, deceased?)
     end)
   end
+
+  defp insert_instance(attrs) do
+    %ReminderInstance{}
+    |> ReminderInstance.create_changeset(attrs)
+    |> Repo.insert(
+      on_conflict: :nothing,
+      conflict_target: [:reminder_id, :occurrence_date, :days_before]
+    )
+  end
+
+  defp handle_insert_result(
+         {:ok, %ReminderInstance{id: nil}},
+         _reminder,
+         _today,
+         _kind,
+         _deceased?
+       ),
+       do: :already_sent
+
+  defp handle_insert_result({:ok, instance}, reminder, today, kind, deceased?) do
+    if kind == "on_day", do: advance(reminder, today)
+    unless deceased?, do: Oban.insert!(ReminderEmailWorker.new(%{instance_id: instance.id}))
+    :sent
+  end
+
+  defp handle_insert_result({:error, changeset}, _reminder, _today, _kind, _deceased?),
+    do: Repo.rollback(changeset)
 
   # Advance past *today*, not just past the fired occurrence: after missed
   # periods this sends one notice and resumes at the next future date.

@@ -3,6 +3,8 @@ defmodule Kith.Workers.ReminderDispatcher do
 
   use Oban.Worker, queue: :reminders, unique: [period: 3_000]
 
+  alias Kith.Reminders.Dispatcher
+
   @impl Oban.Worker
-  def perform(_job), do: Kith.Reminders.Dispatcher.run(DateTime.utc_now())
+  def perform(_job), do: Dispatcher.run(DateTime.utc_now())
 end
