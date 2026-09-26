@@ -923,8 +923,9 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
         |> Enum.join(" ")
 
       # Match the whole visible label: a substring search for the id would also
-      # hit digits in the markup (`opacity-70`, `phx-value-index="0"`).
-      assert label in ["Woman 1 record(s)", "Man 1 record(s)"]
+      # hit digits in the markup (`opacity-70`, `phx-value-index="0"`). The
+      # count sits in its own block span, so no space may separate the two.
+      assert label =~ ~r/\A(Woman|Man) ?1 record\(s\)\z/
     end
 
     # The engine's `clear_member_self_reference/2` coerces a member id to
