@@ -182,10 +182,7 @@ if config_env() == :prod do
         region: System.get_env("AWS_REGION", "us-east-1")
 
       if endpoint = System.get_env("AWS_S3_ENDPOINT") do
-        config :ex_aws, :s3,
-          scheme: "http://",
-          host: URI.parse(endpoint).host,
-          port: URI.parse(endpoint).port
+        config :ex_aws, :s3, Kith.ConfigHelpers.s3_endpoint_config(endpoint)
       end
 
       config :kith, Kith.Storage,

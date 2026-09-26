@@ -7,4 +7,11 @@ defmodule Kith.ConfigHelpers do
       file_path -> file_path |> String.trim() |> File.read!() |> String.trim()
     end
   end
+
+  # `:ex_aws, :s3` endpoint options for AWS_S3_ENDPOINT. The scheme comes from
+  # the URL so https endpoints get https presigned URLs.
+  def s3_endpoint_config(endpoint) do
+    uri = URI.parse(endpoint)
+    [scheme: "#{uri.scheme || "http"}://", host: uri.host, port: uri.port]
+  end
 end
