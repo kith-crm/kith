@@ -89,15 +89,6 @@ defmodule KithWeb.ContactLive.RemindersComponent do
   defp type_label("recurring"), do: "Recurring"
   defp type_label(_), do: "Reminder"
 
-  defp frequency_label(nil), do: nil
-  defp frequency_label("weekly"), do: "Weekly"
-  defp frequency_label("biweekly"), do: "Every 2 weeks"
-  defp frequency_label("monthly"), do: "Monthly"
-  defp frequency_label("3months"), do: "Every 3 months"
-  defp frequency_label("6months"), do: "Every 6 months"
-  defp frequency_label("annually"), do: "Annually"
-  defp frequency_label(other), do: other
-
   defp format_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
       Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
@@ -176,11 +167,11 @@ defmodule KithWeb.ContactLive.RemindersComponent do
               </div>
               <div>
                 <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-0.5">
-                  Next reminder date
+                  First date
                 </label>
                 <input
                   type="date"
-                  name="reminder[next_reminder_date]"
+                  name="reminder[anchor_date]"
                   class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
                   required
                   min={Date.utc_today()}
@@ -230,8 +221,8 @@ defmodule KithWeb.ContactLive.RemindersComponent do
                 </div>
                 <div class="text-xs text-[var(--color-text-tertiary)]">
                   {type_label(reminder.type)}
-                  <span :if={reminder.frequency}>
-                    &middot; {frequency_label(reminder.frequency)}
+                  <span :if={Kith.Reminders.Reminder.interval_label(reminder)}>
+                    &middot; {Kith.Reminders.Reminder.interval_label(reminder)}
                   </span>
                 </div>
                 <div class="text-xs text-[var(--color-text-tertiary)]">

@@ -1,23 +1,20 @@
 defmodule Kith.Reminders do
   @moduledoc """
-  The Reminders context — manages reminders, reminder rules, and reminder instances.
+  The Reminders context — reminders, reminder rules, and reminder instances.
 
-  All reminder mutations use `Ecto.Multi` to transactionally manage both the
-  reminder record and associated Oban jobs. The standard cancellation pattern
-  cancels existing jobs FIRST (via `Oban.cancel_job/1`), then performs the DB
-  mutation. This ordering is intentional: a cancelled-but-orphaned job is harmless,
-  while an un-cancelled job firing on stale data would be worse.
+  A reminder stores its schedule (`anchor_date` + optional interval) and a
+  cached `next_reminder_date`. Nothing is scheduled per reminder: the hourly
+  `Kith.Reminders.Dispatcher` finds what is due and records each notice it
+  sends as a `ReminderInstance`, so writing a reminder is a plain row write.
   """
 
   import Ecto.Query, warn: false
   import Kith.Scope
 
   alias Ecto.Multi
+  alias Kith.Accounts
   alias Kith.Repo
   alias Kith.TimeHelper
-
-  alias Kith.Accounts
-  alias Kith.Workers.ReminderNotificationWorker
 
   alias Kith.Reminders.{
     Reminder,
@@ -48,99 +45,85 @@ defmodule Kith.Reminders do
   end
 
   @doc """
-  Creates a reminder with transactional Oban job enqueue.
+  Fetches a reminder by ID, scoped to account. Returns `nil` if not found.
+  """
+  def get_reminder(account_id, id) do
+    Reminder
+    |> scope_to_account(account_id)
+    |> Repo.get(id)
+  end
+
+  @doc """
+  Creates a reminder. `next_reminder_date` is computed from the schedule
+  using today's date in the account's timezone.
   """
   def create_reminder(account_id, creator_id, attrs) do
-    account = Accounts.get_account!(account_id)
-
-    Multi.new()
-    |> Multi.insert(:reminder, fn _changes ->
-      %Reminder{account_id: account_id, creator_id: creator_id}
-      |> Reminder.create_changeset(attrs)
-    end)
-    |> Multi.run(:enqueue_jobs, fn _repo, %{reminder: reminder} ->
-      enqueue_jobs_for_reminder(reminder, account)
-    end)
-    |> Multi.run(:store_job_ids, fn repo, %{reminder: reminder, enqueue_jobs: job_ids} ->
-      reminder
-      |> Reminder.job_ids_changeset(job_ids)
-      |> repo.update()
-    end)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{store_job_ids: reminder}} -> {:ok, reminder}
-      {:error, _step, changeset, _changes} -> {:error, changeset}
-    end
+    %Reminder{account_id: account_id, creator_id: creator_id}
+    |> Reminder.create_changeset(attrs, account_today(account_id))
+    |> Repo.insert()
   end
 
   @doc """
-  Updates a reminder: cancels old Oban jobs, updates record, enqueues new jobs.
+  Updates a reminder's title, schedule or active flag. A schedule change
+  recomputes `next_reminder_date`.
   """
   def update_reminder(%Reminder{} = reminder, attrs) do
-    account = Accounts.get_account!(reminder.account_id)
-
-    Multi.new()
-    |> cancel_enqueued_jobs_step(reminder)
-    |> Multi.update(:reminder, Reminder.update_changeset(reminder, attrs))
-    |> Multi.run(:enqueue_jobs, fn _repo, %{reminder: updated} ->
-      enqueue_jobs_for_reminder(updated, account)
-    end)
-    |> Multi.run(:store_job_ids, fn repo, %{reminder: updated, enqueue_jobs: job_ids} ->
-      updated
-      |> Reminder.job_ids_changeset(job_ids)
-      |> repo.update()
-    end)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{store_job_ids: reminder}} -> {:ok, reminder}
-      {:error, _step, changeset, _changes} -> {:error, changeset}
-    end
+    reminder
+    |> Reminder.update_changeset(attrs, account_today(reminder.account_id))
+    |> Repo.update()
   end
 
   @doc """
-  Deletes a reminder: cancels all enqueued Oban jobs first.
+  Deletes a reminder (its instances cascade).
   """
-  def delete_reminder(%Reminder{} = reminder) do
-    Multi.new()
-    |> cancel_enqueued_jobs_step(reminder)
-    |> Multi.delete(:reminder, reminder)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{reminder: reminder}} -> {:ok, reminder}
-      {:error, _step, changeset, _changes} -> {:error, changeset}
+  def delete_reminder(%Reminder{} = reminder), do: Repo.delete(reminder)
+
+  # ── Birthday Reminders ──────────────────────────────────────────────────
+
+  @doc """
+  Makes the contact's birthday reminder match its birthdate: creates it when a
+  birthdate is set, re-anchors it when the birthdate changes, deletes it when
+  the birthdate is removed. The reminder belongs to the account owner (design
+  spec §6). An existing reminder's `active` flag is left as it is.
+  """
+  def sync_birthday(%Kith.Contacts.Contact{} = contact) do
+    case {contact.birthdate, get_birthday_reminder(contact.id, contact.account_id)} do
+      {nil, nil} ->
+        {:ok, :none}
+
+      {nil, %Reminder{} = reminder} ->
+        with {:ok, _} <- delete_reminder(reminder), do: {:ok, :none}
+
+      {%Date{} = birthdate, nil} ->
+        case account_owner_id(contact.account_id) do
+          nil ->
+            {:error, :no_account_owner}
+
+          owner_id ->
+            create_reminder(contact.account_id, owner_id, %{
+              type: "birthday",
+              title: nil,
+              anchor_date: birthdate,
+              interval_unit: "year",
+              interval_count: 1,
+              contact_id: contact.id
+            })
+        end
+
+      {%Date{} = birthdate, %Reminder{} = reminder} ->
+        update_reminder(reminder, %{anchor_date: birthdate})
     end
   end
 
-  # ── Birthday Reminder Auto-Creation ─────────────────────────────────────
-
-  @doc """
-  Creates a birthday reminder for a contact. Called from the Contacts context
-  when a birthdate is set.
-  """
-  def create_birthday_reminder(
-        %{id: contact_id, account_id: account_id, birthdate: birthdate},
-        creator_id
-      )
-      when not is_nil(birthdate) do
-    next_date = TimeHelper.next_birthday_date(birthdate)
-
-    create_reminder(account_id, creator_id, %{
-      type: "birthday",
-      title: nil,
-      frequency: nil,
-      next_reminder_date: next_date,
-      contact_id: contact_id
-    })
-  end
-
-  @doc """
-  Deletes the birthday reminder for a contact. Called when birthdate is removed.
-  """
-  def delete_birthday_reminder(contact_id, account_id) do
-    case get_birthday_reminder(contact_id, account_id) do
-      nil -> {:ok, :no_birthday_reminder}
-      reminder -> delete_reminder(reminder)
-    end
+  # The account's owner: its earliest admin user (today, the only user).
+  defp account_owner_id(account_id) do
+    from(u in Kith.Accounts.User,
+      where: u.account_id == ^account_id and u.role == "admin",
+      order_by: [asc: u.inserted_at, asc: u.id],
+      select: u.id,
+      limit: 1
+    )
+    |> Repo.one()
   end
 
   @doc """
@@ -156,27 +139,19 @@ defmodule Kith.Reminders do
   # ── Stay-in-Touch Resolution ────────────────────────────────────────────
 
   @doc """
-  Resolves a pending stay-in-touch instance for a contact. Called from the
-  Activities/Calls context when an interaction is logged.
+  Resolves a pending stay-in-touch instance for a contact and re-arms the
+  reminder one interval from today.
 
   Safe to call even if no stay-in-touch reminder exists for the contact.
   """
   def resolve_stay_in_touch_instance(contact_id) do
     with %Reminder{} = reminder <- get_stay_in_touch_reminder(contact_id),
          %ReminderInstance{} = instance <- get_pending_instance(reminder.id) do
-      next_date = TimeHelper.advance_by_frequency(Date.utc_today(), reminder.frequency)
-
       Multi.new()
-      |> Multi.update(
-        :instance,
-        ReminderInstance.resolve_changeset(instance)
-      )
+      |> Multi.update(:instance, ReminderInstance.resolve_changeset(instance))
       |> Multi.update(
         :reminder,
-        Reminder.update_changeset(reminder, %{
-          next_reminder_date: next_date,
-          enqueued_oban_job_ids: []
-        })
+        Reminder.rearm_changeset(reminder, account_today(reminder.account_id))
       )
       |> Repo.transaction()
       |> case do
@@ -203,11 +178,11 @@ defmodule Kith.Reminders do
     |> Repo.one()
   end
 
-  # ── Contact Archival / Deletion Helpers ─────────────────────────────────
+  # ── Contact Archival ────────────────────────────────────────────────────
 
   @doc """
-  Handles stay-in-touch reminders when a contact is archived.
-  Cancels Oban jobs, dismisses pending instances, deactivates reminder.
+  Handles stay-in-touch reminders when a contact is archived:
+  dismisses pending instances and deactivates the reminder.
   """
   def archive_contact_reminders(contact_id, account_id) do
     reminders =
@@ -220,8 +195,6 @@ defmodule Kith.Reminders do
       |> Repo.all()
 
     Enum.each(reminders, fn reminder ->
-      cancel_jobs(reminder.enqueued_oban_job_ids)
-
       now = DateTime.utc_now() |> DateTime.truncate(:second)
 
       from(i in ReminderInstance,
@@ -230,39 +203,18 @@ defmodule Kith.Reminders do
       |> Repo.update_all(set: [status: "dismissed", resolved_at: now])
 
       reminder
-      |> Ecto.Changeset.change(%{active: false, enqueued_oban_job_ids: []})
+      |> Ecto.Changeset.change(%{active: false})
       |> Repo.update()
     end)
 
     :ok
   end
 
-  @doc """
-  Cancels all active Oban jobs for all reminders belonging to a contact.
-  Intended to be called from contact merge or hard-delete flows within
-  an `Ecto.Multi`.
-  """
-  def cancel_all_for_contact(contact_id, account_id) do
-    reminders =
-      Reminder
-      |> scope_to_account(account_id)
-      |> where([r], r.contact_id == ^contact_id)
-      |> select([r], r.enqueued_oban_job_ids)
-      |> Repo.all()
-
-    results =
-      reminders
-      |> List.flatten()
-      |> Enum.map(&Oban.cancel_job/1)
-
-    {:ok, results}
-  end
-
   # ── Reminder Instance Management ────────────────────────────────────────
 
   @doc """
   Resolves a pending ReminderInstance. For stay-in-touch reminders,
-  also updates next_reminder_date.
+  also re-arms next_reminder_date.
   """
   def resolve_instance(%ReminderInstance{} = instance) do
     instance = Repo.preload(instance, :reminder)
@@ -278,8 +230,8 @@ defmodule Kith.Reminders do
   end
 
   @doc """
-  Snoozes a pending ReminderInstance for the given duration.
-  Only works on instances with "pending" status.
+  Snoozes a pending ReminderInstance for the given duration. The dispatcher
+  sends it again once `snoozed_until` has passed.
   """
   def snooze_instance(%ReminderInstance{status: "pending"} = instance, duration) do
     instance
@@ -308,15 +260,10 @@ defmodule Kith.Reminders do
   end
 
   defp maybe_advance_stay_in_touch(multi, key, %Reminder{type: "stay_in_touch"} = reminder) do
-    next_date = TimeHelper.advance_by_frequency(Date.utc_today(), reminder.frequency)
-
     Multi.update(
       multi,
       key,
-      Reminder.update_changeset(reminder, %{
-        next_reminder_date: next_date,
-        enqueued_oban_job_ids: []
-      })
+      Reminder.rearm_changeset(reminder, account_today(reminder.account_id))
     )
   end
 
@@ -466,94 +413,6 @@ defmodule Kith.Reminders do
     Repo.insert_all(ReminderRule, entries, on_conflict: :nothing)
   end
 
-  # ── Oban Job Enqueue / Cancel Helpers ───────────────────────────────────
-
-  @doc """
-  Standard cancellation pattern: cancel all Oban jobs listed in
-  a reminder's `enqueued_oban_job_ids`. Idempotent — safe to call
-  on already-cancelled or completed jobs.
-  """
-  def cancel_jobs(job_ids) when is_list(job_ids) do
-    job_ids
-    |> Enum.reject(&is_nil/1)
-    |> Enum.each(&Oban.cancel_job/1)
-  end
-
-  defp cancel_enqueued_jobs_step(multi, reminder) do
-    Multi.run(multi, :cancel_jobs, fn _repo, _changes ->
-      cancel_jobs(reminder.enqueued_oban_job_ids)
-      {:ok, :cancelled}
-    end)
-  end
-
-  @doc """
-  Enqueues Oban notification jobs for a reminder based on account settings
-  and active reminder rules. Returns the list of Oban job IDs.
-  """
-  def enqueue_jobs_for_reminder(%Reminder{} = reminder, account) do
-    rules = active_rules(account.id)
-
-    on_day_at =
-      TimeHelper.to_utc_scheduled_at(
-        reminder.next_reminder_date,
-        account.send_hour,
-        account.timezone
-      )
-
-    on_day_args = %{
-      reminder_id: reminder.id,
-      type: "on_day",
-      days_before: 0
-    }
-
-    on_day_jobs =
-      if DateTime.compare(on_day_at, DateTime.utc_now()) == :gt do
-        [{on_day_args, on_day_at}]
-      else
-        []
-      end
-
-    # Pre-notification jobs only for birthday and one_time types
-    pre_jobs =
-      if reminder.type in ["birthday", "one_time"] do
-        rules
-        |> Enum.filter(fn rule -> rule.days_before > 0 end)
-        |> Enum.map(fn rule ->
-          pre_date = Date.add(reminder.next_reminder_date, -rule.days_before)
-
-          pre_at =
-            TimeHelper.to_utc_scheduled_at(pre_date, account.send_hour, account.timezone)
-
-          args = %{
-            reminder_id: reminder.id,
-            type: "pre_notification",
-            days_before: rule.days_before
-          }
-
-          {args, pre_at}
-        end)
-        |> Enum.filter(fn {_args, scheduled_at} ->
-          DateTime.compare(scheduled_at, DateTime.utc_now()) == :gt
-        end)
-      else
-        []
-      end
-
-    all_jobs = on_day_jobs ++ pre_jobs
-
-    job_ids =
-      Enum.map(all_jobs, fn {args, scheduled_at} ->
-        {:ok, job} =
-          args
-          |> ReminderNotificationWorker.new(scheduled_at: scheduled_at)
-          |> Oban.insert()
-
-        job.id
-      end)
-
-    {:ok, job_ids}
-  end
-
   # ── Internal Helpers ────────────────────────────────────────────────────
 
   @doc false
@@ -571,5 +430,9 @@ defmodule Kith.Reminders do
       where: i.reminder_id == ^reminder_id and i.status == "pending"
     )
     |> Repo.exists?()
+  end
+
+  defp account_today(account_id) do
+    account_id |> Accounts.get_account!() |> Map.get(:timezone) |> TimeHelper.local_today()
   end
 end

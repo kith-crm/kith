@@ -164,6 +164,107 @@ defmodule Kith.RemindersTest do
 
       refute cs.valid?
     end
+
+    test "a preset maps to interval unit and count and computes the next date", %{
+      account_id: account_id,
+      contact: contact,
+      user: user
+    } do
+      {:ok, r} =
+        Reminders.create_reminder(account_id, user.id, %{
+          type: "recurring",
+          title: "Pay rent",
+          frequency: "monthly",
+          anchor_date: ~D[2024-02-01],
+          contact_id: contact.id
+        })
+
+      assert {r.interval_unit, r.interval_count} == {"month", 1}
+
+      assert r.next_reminder_date ==
+               Kith.Reminders.Occurrences.next_on_or_after(Reminder.schedule(r), Date.utc_today())
+
+      assert Date.compare(r.next_reminder_date, Date.utc_today()) != :lt
+    end
+
+    test "explicit unit + count represents schedules no preset covers", %{
+      account_id: account_id,
+      contact: contact,
+      user: user
+    } do
+      {:ok, r} =
+        Reminders.create_reminder(account_id, user.id, %{
+          type: "recurring",
+          title: "Every three weeks",
+          interval_unit: "week",
+          interval_count: 3,
+          anchor_date: Date.utc_today(),
+          contact_id: contact.id
+        })
+
+      assert Reminder.frequency_preset(r) == nil
+      assert Reminder.interval_label(r) == "Every 3 weeks"
+      assert r.next_reminder_date == Date.utc_today()
+    end
+
+    test "next_reminder_date in a create request is treated as the anchor", %{
+      account_id: account_id,
+      contact: contact,
+      user: user
+    } do
+      date = Date.add(Date.utc_today(), 12)
+
+      {:ok, r} =
+        Reminders.create_reminder(account_id, user.id, %{
+          type: "one_time",
+          title: "Legacy client",
+          next_reminder_date: date,
+          contact_id: contact.id
+        })
+
+      assert r.anchor_date == date
+      assert r.next_reminder_date == date
+    end
+
+    test "a one-time reminder in the past keeps its own date", %{
+      account_id: account_id,
+      contact: contact,
+      user: user
+    } do
+      past = Date.add(Date.utc_today(), -30)
+
+      {:ok, r} =
+        Reminders.create_reminder(account_id, user.id, %{
+          type: "one_time",
+          title: "History",
+          anchor_date: past,
+          contact_id: contact.id
+        })
+
+      assert r.next_reminder_date == past
+    end
+
+    test "update recomputes next date only when the schedule changes", %{
+      account_id: account_id,
+      contact: contact,
+      user: user
+    } do
+      {:ok, r} =
+        Reminders.create_reminder(account_id, user.id, %{
+          type: "recurring",
+          title: "Weekly",
+          frequency: "weekly",
+          anchor_date: Date.utc_today(),
+          contact_id: contact.id
+        })
+
+      {:ok, renamed} = Reminders.update_reminder(r, %{title: "Renamed"})
+      assert renamed.next_reminder_date == r.next_reminder_date
+
+      later = Date.add(Date.utc_today(), 10)
+      {:ok, moved} = Reminders.update_reminder(r, %{anchor_date: later})
+      assert moved.next_reminder_date == later
+    end
   end
 
   ## ReminderInstance
@@ -260,12 +361,8 @@ defmodule Kith.RemindersTest do
       assert %Reminder{type: "birthday"} = Reminders.get_birthday_reminder(contact.id, account_id)
     end
 
-    test "delete_birthday_reminder is safe when none exists", %{
-      account_id: account_id,
-      contact: contact
-    } do
-      assert {:ok, :no_birthday_reminder} =
-               Reminders.delete_birthday_reminder(contact.id, account_id)
+    test "sync_birthday is a no-op for a contact without a birthdate", %{contact: contact} do
+      assert {:ok, :none} = Reminders.sync_birthday(contact)
     end
   end
 
@@ -283,9 +380,7 @@ defmodule Kith.RemindersTest do
       assert {:ok, :resolved} = Reminders.resolve_stay_in_touch_instance(contact.id)
 
       updated = Repo.get!(Reminder, r.id)
-      expected_date = Date.add(Date.utc_today(), 30)
-      assert updated.next_reminder_date == expected_date
-      assert updated.enqueued_oban_job_ids == []
+      assert updated.next_reminder_date == Date.shift(Date.utc_today(), month: 1)
     end
 
     test "returns :no_pending_instance when none exists", %{contact: contact} do
@@ -448,15 +543,6 @@ defmodule Kith.RemindersTest do
       updated_instance = Repo.get!(ReminderInstance, i.id)
       assert updated_instance.status == "dismissed"
       assert updated_instance.resolved_at
-    end
-  end
-
-  ## Cancel All For Contact
-
-  describe "cancel_all_for_contact/2" do
-    test "returns ok", %{account_id: account_id, contact: contact, user: user} do
-      _r = reminder_fixture(account_id, contact.id, user.id)
-      assert {:ok, _} = Reminders.cancel_all_for_contact(contact.id, account_id)
     end
   end
 end

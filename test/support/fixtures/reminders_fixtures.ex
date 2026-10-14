@@ -27,7 +27,8 @@ defmodule Kith.RemindersFixtures do
     reminder_fixture(account_id, contact_id, creator_id, %{
       type: "birthday",
       title: nil,
-      frequency: nil,
+      interval_unit: "year",
+      interval_count: 1,
       next_reminder_date: next_date || Date.add(Date.utc_today(), 30)
     })
   end
@@ -58,7 +59,13 @@ defmodule Kith.RemindersFixtures do
         contact_id: reminder.contact_id,
         scheduled_for: DateTime.utc_now() |> DateTime.truncate(:second),
         fired_at: DateTime.utc_now() |> DateTime.truncate(:second),
-        status: "pending"
+        status: "pending",
+        # Distinct per call so a test can insert several instances for one
+        # reminder without hitting the (reminder, occurrence, days_before) index.
+        occurrence_date:
+          Date.add(Date.utc_today(), -System.unique_integer([:positive, :monotonic])),
+        kind: "on_day",
+        days_before: 0
       })
 
     %ReminderInstance{}

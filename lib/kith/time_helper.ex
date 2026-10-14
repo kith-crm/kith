@@ -7,7 +7,7 @@ defmodule Kith.TimeHelper do
   UTC offsets — always recomputes from IANA name at scheduling time.
   """
 
-  alias Kith.Reminders.Reminder
+  require Logger
 
   @doc """
   Converts a date + hour + IANA timezone to a UTC DateTime for Oban scheduling.
@@ -75,11 +75,29 @@ defmodule Kith.TimeHelper do
   def safe_date(year, month, day), do: Date.new!(year, month, day)
 
   @doc """
-  Advances a date by the given frequency interval.
+  The local date and hour of `now` in `timezone`. A missing (nil) timezone
+  is treated as UTC; an invalid one also falls back to UTC and logs a warning,
+  so one bad account setting can't stop reminder dispatch.
   """
-  @spec advance_by_frequency(Date.t(), String.t()) :: Date.t()
-  def advance_by_frequency(%Date{} = date, frequency) do
-    days = Reminder.frequency_days(frequency)
-    Date.add(date, days)
+  @spec local_date_hour(DateTime.t(), String.t() | nil) :: {Date.t(), 0..23}
+  def local_date_hour(%DateTime{} = now, timezone) do
+    local =
+      case DateTime.shift_zone(now, timezone || "Etc/UTC") do
+        {:ok, shifted} ->
+          shifted
+
+        {:error, _reason} ->
+          Logger.warning("[TimeHelper] invalid timezone #{inspect(timezone)}; using UTC")
+          now
+      end
+
+    {DateTime.to_date(local), local.hour}
+  end
+
+  @doc "Today's date in `timezone` (same fallback as `local_date_hour/2`)."
+  @spec local_today(String.t() | nil) :: Date.t()
+  def local_today(timezone) do
+    {date, _hour} = local_date_hour(DateTime.utc_now(), timezone)
+    date
   end
 end

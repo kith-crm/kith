@@ -272,13 +272,9 @@ defmodule Kith.Contacts.Merge do
   # otherwise keep the lowest-id one among the losers. Delete the rest;
   # reminder_instances cascades (on_delete: :delete_all).
   #
-  # The kept reminder is then re-dated from the *merged* birthdate. `:survivor`
-  # runs before this step and may have just replaced the survivor's birthdate
-  # with a loser's — nothing else in the app re-syncs a birthday reminder from
-  # `contacts.birthdate`, so without this the survivor keeps a reminder firing
-  # on a date it no longer has, permanently, while the reminder that matched
-  # the surviving birthdate has just been deleted.
-  defp remap_birthday_reminders_step(repo, survivor, loser_ids, account_id) do
+  # The kept reminder is then synced to the *merged* birthdate via
+  # Reminders.sync_birthday/1 (deleted if the merge leaves no birthdate).
+  defp remap_birthday_reminders_step(repo, survivor, loser_ids, _account_id) do
     all_ids = [survivor.id | loser_ids]
 
     %{rows: rows} =
@@ -287,96 +283,24 @@ defmodule Kith.Contacts.Merge do
         [all_ids]
       )
 
-    case rows do
-      [] ->
-        {:ok, :done}
+    if rows != [] do
+      keep_id = reminder_keep_id(rows, survivor.id)
+      delete_ids = for [id, _contact_id] <- rows, id != keep_id, do: id
 
-      _ ->
-        {:ok, :done} = delete_extra_birthday_reminders(repo, rows, survivor.id)
-        resync_birthday_reminder(repo, rows, survivor, account_id)
-    end
-  end
+      if delete_ids != [],
+        do: repo.query!("DELETE FROM reminders WHERE id = ANY($1)", [delete_ids])
 
-  # No merged birthdate means there is no date to re-derive from, so the kept
-  # reminder is left exactly as it was. Deleting it here would be a different
-  # change than this one: a merge that clears a birthdate is not the same event
-  # as a user removing one (which routes through
-  # `Reminders.delete_birthday_reminder/2`), and the engine's contract is that
-  # a merge destroys birthday reminders only to resolve the unique-index
-  # collision.
-  defp resync_birthday_reminder(_repo, _rows, %Contact{birthdate: nil}, _account_id) do
-    {:ok, :done}
-  end
-
-  defp resync_birthday_reminder(repo, rows, survivor, account_id) do
-    keep_id = reminder_keep_id(rows, survivor.id)
-    next_date = Kith.TimeHelper.next_birthday_date(survivor.birthdate)
-    reminder = repo.get!(Kith.Reminders.Reminder, keep_id)
-
-    cond do
-      reminder.next_reminder_date == next_date ->
-        {:ok, :done}
-
-      # A deactivated reminder still tracks the merged birthdate — re-enabling
-      # it later must schedule from the right day — but it must not be put back
-      # on the queue. Deactivation deliberately empties `enqueued_oban_job_ids`,
-      # and enqueuing here would refill it while `active` stays false, leaving
-      # the row inconsistent with itself. `ReminderNotificationWorker.perform/1`
-      # discards an inactive reminder's job anyway, so the enqueue is pure noise.
-      not reminder.active ->
-        repo.update_all(
-          from(r in Kith.Reminders.Reminder, where: r.id == ^keep_id),
-          set: [next_reminder_date: next_date]
-        )
-
-        {:ok, :done}
-
-      true ->
-        cancel_reminder_jobs(repo, [keep_id])
-
-        reminder =
-          reminder
-          |> Ecto.Changeset.change(%{next_reminder_date: next_date, enqueued_oban_job_ids: []})
-          |> repo.update!()
-
-        account = repo.get!(Kith.Accounts.Account, account_id)
-        {:ok, job_ids} = Kith.Reminders.enqueue_jobs_for_reminder(reminder, account)
-
-        repo.update_all(
-          from(r in Kith.Reminders.Reminder, where: r.id == ^keep_id),
-          set: [enqueued_oban_job_ids: job_ids]
-        )
-
-        {:ok, :done}
-    end
-  end
-
-  defp delete_extra_birthday_reminders(repo, rows, survivor_id) do
-    keep_id = reminder_keep_id(rows, survivor_id)
-    delete_ids = for [id, _contact_id] <- rows, id != keep_id, do: id
-
-    if delete_ids != [] do
-      cancel_reminder_jobs(repo, delete_ids)
-      repo.query!("DELETE FROM reminders WHERE id = ANY($1)", [delete_ids])
+      # Move the kept reminder onto the survivor before syncing, so
+      # sync_birthday/1 finds it instead of creating a second one.
+      repo.update_all(from(r in Kith.Reminders.Reminder, where: r.id == ^keep_id),
+        set: [contact_id: survivor.id]
+      )
     end
 
-    {:ok, :done}
-  end
-
-  # Design spec §2 step 7: these duplicate birthday reminders, and the
-  # duplicate stay-in-touch reminders collapsed in
-  # `remap_stay_in_touch_reminders_step/3`, are the only reminders a merge
-  # destroys. Every other reminder a loser owns moves to the survivor at
-  # `:remap_owned` and must keep its scheduled job, so there is nothing to
-  # cancel per-contact — cancelling here, where the doomed ids are still
-  # known, is the correct scope. `ReminderNotificationWorker.perform/1` also
-  # discards a job whose reminder is gone, so this trims the queue rather
-  # than being the only guard.
-  defp cancel_reminder_jobs(repo, reminder_ids) do
-    %{rows: rows} =
-      repo.query!("SELECT enqueued_oban_job_ids FROM reminders WHERE id = ANY($1)", [reminder_ids])
-
-    rows |> List.flatten() |> Kith.Reminders.cancel_jobs()
+    case Kith.Reminders.sync_birthday(survivor) do
+      {:ok, _} -> {:ok, :done}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp reminder_keep_id(rows, survivor_id) do
@@ -388,12 +312,11 @@ defmodule Kith.Contacts.Merge do
 
   # Stay-in-touch reminders have no unique index (only `reminders_birthday_
   # unique_idx` exists), so the blanket `:remap_owned` move happily lands two
-  # active rows on the survivor. Nothing raises at write time — the failure
-  # surfaces later and elsewhere, in `Reminders.resolve_stay_in_touch_instance/1`,
-  # whose `Repo.one/1` raises `Ecto.MultipleResultsError` the next time an
-  # interaction is logged. Collapse to one here, where the doomed ids are
-  # still known and their jobs can be cancelled. Same keep rule as birthdays:
-  # the survivor's own row wins, else the lowest id.
+  # active rows on the survivor. Nothing raises at write time; the duplicate
+  # would just fire its own stay-in-touch notices alongside the survivor's.
+  # Collapse to one here, where the doomed ids are still known; their
+  # instances cascade with them. Same keep rule as birthdays: the survivor's
+  # own row wins, else the lowest id.
   defp remap_stay_in_touch_reminders_step(repo, loser_ids, survivor_id) do
     %{rows: rows} =
       repo.query!(
@@ -417,7 +340,6 @@ defmodule Kith.Contacts.Merge do
         keep_id = reminder_keep_id(rows, survivor_id)
         delete_ids = for [id, _contact_id] <- rows, id != keep_id, do: id
 
-        cancel_reminder_jobs(repo, delete_ids)
         repo.query!("DELETE FROM reminders WHERE id = ANY($1)", [delete_ids])
 
         {:ok, :done}

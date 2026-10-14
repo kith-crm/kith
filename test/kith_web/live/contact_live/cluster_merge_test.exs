@@ -138,6 +138,60 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
              live(ctx.conn, "/contacts/duplicates/cluster/#{other_contact.id}")
   end
 
+  describe "section nav and back link (#1)" do
+    test "a real cluster renders a back link to the duplicates list", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert live
+             |> element("a", "Back to duplicates")
+             |> render() =~ ~s(href="/contacts/duplicates")
+    end
+
+    test "a real cluster renders the section nav with Duplicates active", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert has_element?(live, ~s(nav a[href="/contacts/duplicates"]), "Duplicates")
+      assert has_element?(live, ~s(nav a[href="/contacts/trash"]), "Trash")
+
+      duplicates_tab = live |> element(~s(nav a[href="/contacts/duplicates"])) |> render()
+      assert duplicates_tab =~ "text-[var(--color-accent)]"
+    end
+  end
+
+  describe "avatar values (#3)" do
+    test "a contested avatar row renders an <img> with the storage URL and the contact's name",
+         ctx do
+      e =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Mona",
+          last_name: "Vale",
+          avatar: "avatars/mona-e.jpg"
+        })
+
+      f =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Mona",
+          last_name: "Vale",
+          avatar: "avatars/mona-f.jpg"
+        })
+
+      candidate!(ctx.account_id, e, f)
+
+      {:ok, live, _html} = live(ctx.conn, cluster_path(e, f))
+
+      row = live |> element(~s(div[data-field="avatar"])) |> render()
+
+      assert row =~ ~s(<img)
+      assert row =~ ~s(src="/uploads/avatars/mona-e.jpg")
+      assert row =~ ~s(src="/uploads/avatars/mona-f.jpg")
+      refute row =~ ~s(>avatars/mona-e.jpg<)
+
+      # With a name, a missing file degrades to initials, not a bare "Avatar".
+      assert row =~ ~s(alt="Mona Vale")
+      refute row =~ ~s(alt="Avatar")
+    end
+  end
+
   describe "interactions" do
     test "unchecking a member recomputes the result", ctx do
       {:ok, live, html0} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
@@ -859,12 +913,19 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
-      rendered =
-        live |> element("button[phx-value-field='gender_id'][phx-value-index='0']") |> render()
+      label =
+        live
+        |> element("button[phx-value-field='gender_id'][phx-value-index='0']")
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.text()
+        |> String.split()
+        |> Enum.join(" ")
 
-      assert rendered =~ "Woman" or rendered =~ "Man"
-      refute rendered =~ to_string(ctx.woman.id)
-      refute rendered =~ to_string(ctx.man.id)
+      # Match the whole visible label: a substring search for the id would also
+      # hit digits in the markup (`opacity-70`, `phx-value-index="0"`). The
+      # count sits in its own block span, so no space may separate the two.
+      assert label =~ ~r/\A(Woman|Man) ?1 record\(s\)\z/
     end
 
     # The engine's `clear_member_self_reference/2` coerces a member id to
