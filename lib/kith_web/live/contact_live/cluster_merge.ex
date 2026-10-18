@@ -803,16 +803,6 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     Enum.filter(assigns.members, &MapSet.member?(assigns.selected_ids, &1.id))
   end
 
-  # A contested value is held by one or more members; label its avatar with the
-  # first holder's display name for alt text and the initials fallback.
-  defp candidate_name(members, [member_id | _]) do
-    Enum.find_value(members, fn member ->
-      member.id == member_id && member.display_name
-    end)
-  end
-
-  defp candidate_name(_members, _member_ids), do: nil
-
   # True when the only first-met-through values on offer were members of this
   # merge, so the row renders as cleared with the reason rather than as an
   # attribution for a value nobody can pick.
@@ -851,6 +841,18 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       nil -> "unknown"
       contact -> contact.display_name
     end
+  end
+
+  # "Photo 2 of 3, from Mona Vale, M. Vale" — distinct names for otherwise
+  # identical avatar buttons (design B10).
+  defp avatar_choice_label(assigns, candidate, index) do
+    holders =
+      candidate.member_ids
+      |> Enum.map(&member_name(assigns, &1))
+      |> Enum.uniq()
+      |> Enum.join(", ")
+
+    "Photo #{index + 1} of #{length(candidates(assigns, :avatar))}, from #{holders}"
   end
 
   defp humanize(field) do
@@ -1014,7 +1016,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                   phx-click="toggle-member"
                   phx-value-id={member.id}
                 />
-                <KithUI.avatar name={member.display_name} src={avatar_url(member)} size={:sm} />
+                <KithUI.avatar
+                  id={"merge-member-avatar-#{member.id}"}
+                  name={member.display_name}
+                  src={avatar_url(member)}
+                  size={:sm}
+                />
                 <span class="text-sm">
                   {member.display_name}
                   <span :if={member.id == @primary_id} class="text-xs text-[var(--color-accent)] ms-1">
@@ -1122,6 +1129,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                 phx-click="choose-field"
                 phx-value-field={field}
                 phx-value-index={index}
+                aria-pressed={to_string(effective(assigns, field) == candidate.value)}
+                aria-label={field == :avatar && avatar_choice_label(assigns, candidate, index)}
                 class={[
                   "rounded-[var(--radius-md)] border px-3 py-1.5 text-sm text-start",
                   if(effective(assigns, field) == candidate.value,
@@ -1139,7 +1148,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                 --%>
                 <KithUI.avatar
                   :if={field == :avatar}
-                  name={candidate_name(@members, candidate.member_ids)}
+                  id={"merge-avatar-choice-#{index}"}
+                  name={member_name(assigns, hd(candidate.member_ids))}
                   src={Storage.url(candidate.value)}
                   size={:md}
                 />
@@ -1152,6 +1162,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                 phx-click="choose-field"
                 phx-value-field={field}
                 phx-value-index="clear"
+                aria-pressed={to_string(effective(assigns, field) == :clear)}
                 class={[
                   "rounded-[var(--radius-md)] border px-3 py-1.5 text-sm text-start italic",
                   if(effective(assigns, field) == :clear,

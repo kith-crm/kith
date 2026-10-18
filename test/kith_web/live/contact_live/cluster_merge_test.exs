@@ -252,8 +252,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   end
 
   describe "avatar values (#3)" do
-    test "a contested avatar row renders an <img> with the storage URL and the contact's name",
-         ctx do
+    defp mona_pair(ctx) do
       e =
         ContactsFixtures.contact_fixture(ctx.account_id, %{
           first_name: "Mona",
@@ -269,7 +268,12 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
         })
 
       candidate!(ctx.account_id, e, f)
+      {e, f}
+    end
 
+    test "a contested avatar row renders an <img> with the storage URL and the contact's name",
+         ctx do
+      {e, f} = mona_pair(ctx)
       {:ok, live, _html} = live(ctx.conn, cluster_path(e, f))
 
       row = live |> element(~s(div[data-field="avatar"])) |> render()
@@ -282,6 +286,37 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       # With a name, a missing file degrades to initials, not a bare "Avatar".
       assert row =~ ~s(alt="Mona Vale")
       refute row =~ ~s(alt="Avatar")
+    end
+
+    test "avatar choices have distinct accessible names and expose the selection", ctx do
+      {e, f} = mona_pair(ctx)
+      {:ok, live, _} = live(ctx.conn, cluster_path(e, f))
+      row = live |> element(~s(div[data-field="avatar"])) |> render()
+
+      assert row =~ ~s(aria-label="Photo 1 of 2, from Mona Vale")
+      assert row =~ ~s(aria-label="Photo 2 of 2, from Mona Vale")
+      assert length(Regex.scan(~r/aria-pressed="true"/, row)) == 1
+      assert row =~ ~s(aria-pressed="false")
+    end
+
+    test "chips and choices get unique avatar ids", ctx do
+      {e, f} = mona_pair(ctx)
+      {:ok, live, _} = live(ctx.conn, cluster_path(e, f))
+
+      assert has_element?(live, "#merge-member-avatar-#{e.id}")
+      assert has_element?(live, "#merge-member-avatar-#{f.id}")
+      assert has_element?(live, "#merge-avatar-choice-0")
+      assert has_element?(live, "#merge-avatar-choice-1")
+    end
+
+    test "the same avatar file as chip and choice renders without duplicate ids", ctx do
+      attrs = %{first_name: "Mona", last_name: "Vale", avatar: "avatars/same.jpg"}
+      e = ContactsFixtures.contact_fixture(ctx.account_id, attrs)
+      f = ContactsFixtures.contact_fixture(ctx.account_id, attrs)
+      candidate!(ctx.account_id, e, f)
+
+      # LiveViewTest raises on duplicate DOM ids.
+      assert {:ok, _live, _} = live(ctx.conn, cluster_path(e, f))
     end
   end
 
