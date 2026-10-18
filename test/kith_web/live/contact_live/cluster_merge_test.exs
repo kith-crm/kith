@@ -217,6 +217,22 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       end
     end
 
+    test "a soft-deleted contact of the viewer's own account as referer falls back", ctx do
+      {_c, path} = manual_pair(ctx)
+
+      gone =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Gale", last_name: "Out"})
+
+      gone
+      |> Ecto.Changeset.change(deleted_at: DateTime.utc_now() |> DateTime.truncate(:second))
+      |> Kith.Repo.update!()
+
+      {:ok, live, _} = live_from(ctx.conn, path, "#{@origin}/contacts/#{gone.id}")
+
+      assert live |> element("a", "Back to contacts") |> render() =~ ~s(href="/contacts")
+      refute render(live) =~ "Gale"
+    end
+
     test "Cancel goes where the back link goes", ctx do
       {c, path} = manual_pair(ctx)
       {:ok, live, _} = live_from(ctx.conn, path, "#{@origin}/contacts/#{c.id}")
