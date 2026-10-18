@@ -156,6 +156,83 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       duplicates_tab = live |> element(~s(nav a[href="/contacts/duplicates"])) |> render()
       assert duplicates_tab =~ "text-[var(--color-accent)]"
     end
+
+    @origin KithWeb.Endpoint.url()
+
+    defp live_from(conn, path, referer),
+      do:
+        conn
+        |> Phoenix.LiveViewTest.put_connect_params(%{"_live_referer" => referer})
+        |> live(path)
+
+    defp manual_pair(ctx) do
+      c = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Cleo", last_name: "Ng"})
+      d = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dov", last_name: "Ng"})
+      [lead, other] = Enum.sort([c.id, d.id])
+      {c, "/contacts/duplicates/cluster/#{lead}?with=#{other}"}
+    end
+
+    test "from a contact page the link goes back to that contact", ctx do
+      {:ok, live, _} =
+        live_from(ctx.conn, cluster_path(ctx.a, ctx.b), "#{@origin}/contacts/#{ctx.a.id}")
+
+      assert live |> element("a", "Back to #{ctx.a.display_name}") |> render() =~
+               ~s(href="/contacts/#{ctx.a.id}")
+    end
+
+    test "from the contact list the query string is kept", ctx do
+      {_c, path} = manual_pair(ctx)
+      {:ok, live, _} = live_from(ctx.conn, path, "#{@origin}/contacts?search=ng&sort=name")
+
+      assert live |> element("a", "Back to contacts") |> render() =~
+               ~s(href="/contacts?search=ng&amp;sort=name")
+    end
+
+    test "from the duplicates list the link goes back there", ctx do
+      {_c, path} = manual_pair(ctx)
+      {:ok, live, _} = live_from(ctx.conn, path, "#{@origin}/contacts/duplicates")
+
+      assert live |> element("a", "Back to duplicates") |> render() =~
+               ~s(href="/contacts/duplicates")
+    end
+
+    test "a foreign host, unknown path, other account's contact or missing id falls back", ctx do
+      {_c, path} = manual_pair(ctx)
+      other = AccountsFixtures.user_fixture()
+      stranger = ContactsFixtures.contact_fixture(other.account_id, %{first_name: "Zed"})
+
+      for referer <- [
+            "https://evil.example/contacts/#{ctx.a.id}",
+            "#{@origin}/settings",
+            "#{@origin}/contacts/#{stranger.id}",
+            "#{@origin}/contacts/999999999",
+            "not a url"
+          ] do
+        {:ok, live, _} = live_from(ctx.conn, path, referer)
+
+        assert live |> element("a", "Back to contacts") |> render() =~ ~s(href="/contacts"),
+               referer
+
+        refute render(live) =~ "Back to Zed"
+      end
+    end
+
+    test "Cancel goes where the back link goes", ctx do
+      {c, path} = manual_pair(ctx)
+      {:ok, live, _} = live_from(ctx.conn, path, "#{@origin}/contacts/#{c.id}")
+      assert has_element?(live, ~s(a[href="/contacts/#{c.id}"]), "Cancel")
+    end
+
+    test "a manual merge highlights Duplicates, not All", ctx do
+      {_c, path} = manual_pair(ctx)
+      {:ok, live, _} = live(ctx.conn, path)
+
+      assert live |> element(~s(nav.border-b a[href="/contacts/duplicates"])) |> render() =~
+               "text-[var(--color-accent)]"
+
+      refute live |> element(~s(nav.border-b a[href="/contacts"])) |> render() =~
+               "text-[var(--color-accent)]"
+    end
   end
 
   describe "avatar values (#3)" do

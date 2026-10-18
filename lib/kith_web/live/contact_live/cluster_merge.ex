@@ -65,7 +65,48 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   @max_with_members 50
 
   @impl true
-  def mount(_params, _session, socket), do: {:ok, assign(socket, :error, nil)}
+  def mount(_params, _session, socket) do
+    {:ok, socket |> assign(:error, nil) |> assign(:referer_back, referer_back(socket))}
+  end
+
+  # Where "Back" and Cancel go (design B8): the page the user live-navigated
+  # from, read once from LiveView's `_live_referer` connect param. Only our own
+  # host and three known paths count; a contact path is looked up through the
+  # account scope, so a foreign or missing id can never leak a name. Anything
+  # else (reload, direct URL, other pages) -> nil -> the `synthetic?` fallback.
+  defp referer_back(socket) do
+    with true <- connected?(socket),
+         ref when is_binary(ref) <- get_connect_params(socket)["_live_referer"],
+         %URI{host: host, path: path, query: query} when is_binary(path) <- URI.parse(ref),
+         true <- host == URI.parse(KithWeb.Endpoint.url()).host do
+      back_for_path(path, query, socket.assigns.current_scope.account.id)
+    else
+      _ -> nil
+    end
+  end
+
+  defp back_for_path("/contacts/duplicates", _query, _account_id),
+    do: %{path: ~p"/contacts/duplicates", label: "Back to duplicates"}
+
+  defp back_for_path("/contacts", query, _account_id) do
+    path = if query in [nil, ""], do: ~p"/contacts", else: "/contacts?" <> query
+    %{path: path, label: "Back to contacts"}
+  end
+
+  defp back_for_path("/contacts/" <> raw, _query, account_id) do
+    with id when is_integer(id) <- parse_contact_id(raw),
+         %Kith.Contacts.Contact{} = contact <- Kith.Contacts.get_contact(account_id, id) do
+      %{path: ~p"/contacts/#{contact.id}", label: "Back to #{contact.display_name}"}
+    else
+      _ -> nil
+    end
+  end
+
+  defp back_for_path(_path, _query, _account_id), do: nil
+
+  defp back_link(%{referer_back: %{} = back}), do: back
+  defp back_link(%{synthetic?: true}), do: %{path: ~p"/contacts", label: "Back to contacts"}
+  defp back_link(_assigns), do: %{path: ~p"/contacts/duplicates", label: "Back to duplicates"}
 
   # A contact id from the URL, or `nil` if it could never name a row: not an
   # integer, or outside what the column can hold.
@@ -906,25 +947,26 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       pending_duplicates_count={@pending_duplicates_count}
     >
       <%!--
-        Section header + sub-nav. The wizard is its own LiveView, so it does not
-        inherit the Contacts tab bar from `ContactLive.Index`; render the shared
-        one here and give the user a way back to where they came from. A
-        synthetic merge (manual / `?with=`) was not reached from the duplicates
-        list, so it points back at the contacts index instead.
+        Section header + sub-nav. The wizard is its own LiveView, so it renders
+        the shared Contacts tab bar itself, always with Duplicates active (the
+        page is "Merge duplicates"). The back link returns to the page the user
+        came from (`_live_referer`: a contact, the list with its query, or the
+        duplicates list); on a reload or direct URL it falls back to the
+        duplicates list for a detected cluster and the contact list otherwise.
       --%>
       <div class="max-w-4xl mx-auto space-y-4 mb-4">
         <.link
-          navigate={if @synthetic?, do: ~p"/contacts", else: ~p"/contacts/duplicates"}
+          navigate={back_link(assigns).path}
           class="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
         >
           <.icon name="hero-arrow-left" class="size-4" />
-          {if @synthetic?, do: "Back to contacts", else: "Back to duplicates"}
+          {back_link(assigns).label}
         </.link>
         <h1 class="text-2xl font-semibold text-[var(--color-text-primary)] tracking-tight">
           Merge duplicates
         </h1>
         <SectionNav.section_nav
-          active={if @synthetic?, do: :index, else: :duplicates}
+          active={:duplicates}
           pending_duplicates_count={@pending_duplicates_count}
           link_mode={:navigate}
         />
@@ -1311,7 +1353,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                     is nothing to dismiss — marking it would insert dismissed
                     candidate rows for pairs detection never suggested and
                     permanently suppress real future matches. --%>
-              <UI.button :if={@synthetic?} variant="secondary" navigate={~p"/contacts"}>
+              <UI.button :if={@synthetic?} variant="secondary" navigate={back_link(assigns).path}>
                 Cancel
               </UI.button>
               <UI.button :if={not @synthetic?} variant="secondary" phx-click="not-duplicates">
