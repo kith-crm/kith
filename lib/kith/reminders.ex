@@ -432,7 +432,9 @@ defmodule Kith.Reminders do
     |> Repo.exists?()
   end
 
-  defp account_today(account_id) do
+  @doc "Today's date in the account's timezone."
+  @spec account_today(integer()) :: Date.t()
+  def account_today(account_id) do
     account_id |> Accounts.get_account!() |> Map.get(:timezone) |> TimeHelper.local_today()
   end
 end
