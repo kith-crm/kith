@@ -78,7 +78,7 @@ defmodule Kith.Reminders do
   """
   def delete_reminder(%Reminder{} = reminder), do: Repo.delete(reminder)
 
-  # ── Birthday Reminders ──────────────────────────────────────────────────
+  # ── Derived Reminders (birthday, first_met) ─────────────────────────────
 
   @doc """
   Makes the contact's birthday reminder match its birthdate: creates it when a
@@ -86,32 +86,45 @@ defmodule Kith.Reminders do
   the birthdate is removed. The reminder belongs to the account owner (design
   spec §6). An existing reminder's `active` flag is left as it is.
   """
-  def sync_birthday(%Kith.Contacts.Contact{} = contact) do
-    case {contact.birthdate, get_birthday_reminder(contact.id, contact.account_id)} do
+  def sync_birthday(%Kith.Contacts.Contact{} = contact),
+    do: sync_derived(contact, "birthday", contact.birthdate)
+
+  @doc """
+  Makes the contact's first-met anniversary reminder match its first-met date,
+  when the contact has opted in (`first_met_reminder`). Same rules as
+  `sync_birthday/1`; opting out or clearing the date deletes the reminder.
+  """
+  def sync_first_met(%Kith.Contacts.Contact{} = contact) do
+    date = if contact.first_met_reminder, do: contact.first_met_at
+    sync_derived(contact, "first_met", date)
+  end
+
+  defp sync_derived(contact, type, date) do
+    case {date, get_derived_reminder(contact.id, contact.account_id, type)} do
       {nil, nil} ->
         {:ok, :none}
 
       {nil, %Reminder{} = reminder} ->
         with {:ok, _} <- delete_reminder(reminder), do: {:ok, :none}
 
-      {%Date{} = birthdate, nil} ->
+      {%Date{} = date, nil} ->
         case account_owner_id(contact.account_id) do
           nil ->
             {:error, :no_account_owner}
 
           owner_id ->
             create_reminder(contact.account_id, owner_id, %{
-              type: "birthday",
+              type: type,
               title: nil,
-              anchor_date: birthdate,
+              anchor_date: date,
               interval_unit: "year",
               interval_count: 1,
               contact_id: contact.id
             })
         end
 
-      {%Date{} = birthdate, %Reminder{} = reminder} ->
-        update_reminder(reminder, %{anchor_date: birthdate})
+      {%Date{} = date, %Reminder{} = reminder} ->
+        update_reminder(reminder, %{anchor_date: date})
     end
   end
 
@@ -126,13 +139,18 @@ defmodule Kith.Reminders do
     |> Repo.one()
   end
 
-  @doc """
-  Returns the birthday reminder for a contact, or nil.
-  """
-  def get_birthday_reminder(contact_id, account_id) do
+  @doc "Returns the birthday reminder for a contact, or nil."
+  def get_birthday_reminder(contact_id, account_id),
+    do: get_derived_reminder(contact_id, account_id, "birthday")
+
+  @doc "Returns the first-met anniversary reminder for a contact, or nil."
+  def get_first_met_reminder(contact_id, account_id),
+    do: get_derived_reminder(contact_id, account_id, "first_met")
+
+  defp get_derived_reminder(contact_id, account_id, type) do
     Reminder
     |> scope_to_account(account_id)
-    |> where([r], r.contact_id == ^contact_id and r.type == "birthday")
+    |> where([r], r.contact_id == ^contact_id and r.type == ^type)
     |> Repo.one()
   end
 
