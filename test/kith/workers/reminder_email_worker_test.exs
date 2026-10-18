@@ -107,4 +107,36 @@ defmodule Kith.Workers.ReminderEmailWorkerTest do
       assert Repo.get!(Reminder, reminder.id).next_reminder_date == Date.shift(today, month: 1)
     end
   end
+
+  describe "subjects and bodies" do
+    defp fire!(user, contact, attrs) do
+      {:ok, r} =
+        Reminders.create_reminder(
+          user.account_id,
+          user.id,
+          Map.merge(%{anchor_date: Date.utc_today(), contact_id: contact.id}, attrs)
+        )
+
+      :ok = Dispatcher.run(DateTime.new!(Date.utc_today(), ~T[10:00:00], "Etc/UTC"))
+      [i] = Repo.all(from i in ReminderInstance, where: i.reminder_id == ^r.id)
+      perform_job(ReminderEmailWorker, %{instance_id: i.id})
+    end
+
+    test "a first-met anniversary has its own subject", %{user: user, contact: contact} do
+      fire!(user, contact, %{
+        type: "first_met",
+        title: nil,
+        interval_unit: "year",
+        interval_count: 1
+      })
+
+      name = Repo.reload!(contact).display_name
+      assert_email_sent(subject: "Anniversary of meeting #{name}")
+    end
+
+    test "the description is included in the body", %{user: user, contact: contact} do
+      fire!(user, contact, %{type: "one_time", title: "Party", description: "Bring the cake"})
+      assert_email_sent(fn email -> email.text_body =~ "Bring the cake" end)
+    end
+  end
 end

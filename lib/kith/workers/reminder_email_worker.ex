@@ -78,13 +78,19 @@ defmodule Kith.Workers.ReminderEmailWorker do
       {"Kith", Application.get_env(:kith, Kith.Mailer)[:from] || "noreply@localhost"}
     )
     |> Swoosh.Email.subject(subject)
-    |> Swoosh.Email.text_body("#{subject}\n\nContact: #{name}")
+    |> Swoosh.Email.text_body(body(subject, name, reminder.description))
   end
+
+  defp body(subject, name, nil), do: "#{subject}\n\nContact: #{name}"
+  defp body(subject, name, ""), do: body(subject, name, nil)
+  defp body(subject, name, description), do: "#{subject}\n\n#{description}\n\nContact: #{name}"
 
   defp subject("birthday", "on_day", _days, name, _title), do: "#{name}'s birthday is today"
 
   defp subject("birthday", "advance", days, name, _title),
     do: "#{name}'s birthday is in #{days} days"
+
+  defp subject("first_met", _kind, _days, name, _title), do: "Anniversary of meeting #{name}"
 
   defp subject("stay_in_touch", _kind, _days, name, _title), do: "Time to reach out to #{name}"
 

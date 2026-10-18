@@ -292,4 +292,26 @@ defmodule Kith.Reminders.DispatcherTest do
       assert Dispatcher.advance_days_before(next, ~D[2026-10-26], []) == nil
     end
   end
+
+  test "a first-met anniversary sends on the day only and advances a year", ctx do
+    r =
+      create!(ctx, %{
+        type: "first_met",
+        title: nil,
+        interval_unit: "year",
+        interval_count: 1,
+        anchor_date: Date.shift(ctx.today, year: -5)
+      })
+
+    set_next!(r, Date.add(ctx.today, 5))
+    assert :ok = Dispatcher.run(ctx.after_send)
+    assert instances(r) == []
+
+    set_next!(r, ctx.today)
+    assert :ok = Dispatcher.run(ctx.after_send)
+    assert [%{kind: "on_day", days_before: 0}] = instances(r)
+
+    assert Repo.get!(Reminder, r.id).next_reminder_date ==
+             Kith.Reminders.Occurrences.advance_after(Reminder.schedule(r), ctx.today)
+  end
 end
