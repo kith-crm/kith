@@ -100,4 +100,11 @@ defmodule Kith.TimeHelper do
     {date, _hour} = local_date_hour(DateTime.utc_now(), timezone)
     date
   end
+
+  @doc """
+  The same month and day as `date` in `year`. 29 February becomes 28 February
+  in common years (the same clamping reminders use).
+  """
+  @spec anniversary_in_year(Date.t(), integer()) :: Date.t()
+  def anniversary_in_year(%Date{} = date, year), do: Date.shift(date, year: year - date.year)
 end

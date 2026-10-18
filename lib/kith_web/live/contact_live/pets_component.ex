@@ -90,7 +90,8 @@ defmodule KithWeb.ContactLive.PetsComponent do
     years = today.year - date_of_birth.year
 
     age =
-      if Date.compare(Date.new!(today.year, date_of_birth.month, date_of_birth.day), today) == :gt do
+      if Date.compare(Kith.TimeHelper.anniversary_in_year(date_of_birth, today.year), today) ==
+           :gt do
         years - 1
       else
         years

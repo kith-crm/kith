@@ -113,6 +113,15 @@ defmodule KithWeb.ContactLive.ShowTest do
   end
 
   describe "birthday badge" do
+    test "a 29 February birthday renders (no crash in common years)", %{
+      conn: conn,
+      account_id: account_id
+    } do
+      leap = contact_fixture(account_id, %{birthdate: ~D[1992-02-29]})
+      {:ok, _view, html} = live(conn, ~p"/contacts/#{leap.id}")
+      assert html =~ "Birthday"
+    end
+
     test "shows birthday badge when contact has birthdate", %{conn: conn, account_id: account_id} do
       birthday_contact =
         contact_fixture(account_id, %{birthdate: Date.add(Date.utc_today(), 5)})
