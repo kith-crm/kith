@@ -57,6 +57,21 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
       assert html =~ "group-data-[img-failed]:hidden"
     end
 
+    test "refresh_url re-signs and replies whether the URL changed", %{
+      conn: conn,
+      contact: contact
+    } do
+      photo = photo_fixture(contact, %{"file_name" => "retry.jpg"})
+
+      {:ok, view, _html} = live(conn, ~p"/contacts/#{contact.id}")
+
+      view |> with_target("#photo-#{photo.id}") |> render_hook("refresh_url", %{})
+
+      # Local storage: same key -> same URL -> nothing to retry.
+      assert_reply(view, %{changed: false})
+      assert has_element?(view, ~s(#photo-#{photo.id}[data-refreshable="true"]))
+    end
+
     test "pending-sync photo keeps the placeholder and renders no image for it", %{
       conn: conn,
       contact: contact

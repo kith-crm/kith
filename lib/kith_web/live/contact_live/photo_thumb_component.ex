@@ -9,10 +9,12 @@ defmodule KithWeb.ContactLive.PhotoThumbComponent do
   (potentially presigned, expiring) storage URL is resolved once in `update/2`
   and only recomputed when `storage_key` actually changes.
 
-  Three visual states:
+  Four visual states:
 
     * `:syncing`     — external photo still importing (neutral grey placeholder)
     * `:loaded`      — the `<img>` itself
+    * `:retrying`    — the first load failed; a fresh URL was requested once
+      (neutral placeholder, the broken `<img>` hidden)
     * `:unavailable` — the image 404'd / failed to load; a distinct amber
       "Image unavailable" badge swapped in by the `ImgFallback` JS hook, so the
       user can tell a missing file apart from a transient render glitch.
@@ -46,7 +48,7 @@ defmodule KithWeb.ContactLive.PhotoThumbComponent do
     assigns = assign(assigns, :c, variant_classes(assigns.variant))
 
     ~H"""
-    <div id={@id} phx-hook="ImgFallback" class={["group", @c.root]}>
+    <div id={@id} phx-hook="ImgFallback" data-refreshable="true" class={["group relative", @c.root]}>
       <div
         :if={@pending_sync}
         class={[
@@ -65,7 +67,18 @@ defmodule KithWeb.ContactLive.PhotoThumbComponent do
         src={@url}
         alt={@alt}
         loading="lazy"
-        class={[@c.box, "object-cover group-data-[img-failed]:hidden"]}
+        class={[
+          @c.box,
+          "object-cover group-data-[img-failed]:hidden group-data-[img-retrying]:invisible"
+        ]}
+      />
+      <div
+        :if={!@pending_sync}
+        class={[
+          "hidden group-data-[img-retrying]:flex absolute inset-0",
+          @c.box,
+          "bg-gradient-to-br from-stone-100 to-stone-200"
+        ]}
       />
       <div
         :if={!@pending_sync}
@@ -81,6 +94,15 @@ defmodule KithWeb.ContactLive.PhotoThumbComponent do
       </div>
     </div>
     """
+  end
+
+  # One-shot refresh from ImgFallback after a load error (design B2). The reply
+  # tells the hook whether a new URL is coming; with hourly-stable signing an
+  # unchanged URL means retrying is pointless, so the hook shows "unavailable".
+  @impl true
+  def handle_event("refresh_url", _params, socket) do
+    url = Storage.url(socket.assigns.storage_key)
+    {:reply, %{changed: url != socket.assigns.url}, assign(socket, :url, url)}
   end
 
   defp variant_classes(:tile),
