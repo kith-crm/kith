@@ -57,7 +57,10 @@ const ImgFallback = {
   handleError() {
     if (this.state === "ok" && this.el.dataset.refreshable === "true") {
       this.setState("retrying")
+      const img = this.img
       this.pushEventTo(this.el, "refresh_url", {}, (reply) => {
+        // A node swap since the push resets state; a late reply is stale.
+        if (this.img !== img || this.state !== "retrying") return
         if (!reply || !reply.changed) this.setState("failed")
       })
     } else {
