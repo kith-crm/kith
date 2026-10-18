@@ -75,7 +75,7 @@ defmodule KithWeb.API.ReminderController do
     user = scope.user
     account_id = scope.account.id
 
-    with :ok <- reject_birthday(attrs["type"]),
+    with :ok <- reject_derived(attrs["type"]),
          true <- Policy.can?(user, :create, :reminder),
          contact when not is_nil(contact) <- Contacts.get_contact(account_id, contact_id) do
       reminder_attrs = Map.put(attrs, "contact_id", contact.id)
@@ -109,7 +109,7 @@ defmodule KithWeb.API.ReminderController do
 
     with true <- Policy.can?(user, :update, :reminder),
          reminder when not is_nil(reminder) <- fetch_reminder(account_id, id),
-         :ok <- reject_birthday(reminder.type),
+         :ok <- reject_derived(reminder.type),
          {:ok, updated} <- Reminders.update_reminder(reminder, attrs) do
       json(conn, %{data: reminder_json(updated)})
     else
@@ -128,7 +128,7 @@ defmodule KithWeb.API.ReminderController do
 
     with true <- Policy.can?(user, :delete, :reminder),
          reminder when not is_nil(reminder) <- fetch_reminder(account_id, id),
-         :ok <- reject_birthday(reminder.type) do
+         :ok <- reject_derived(reminder.type) do
       case Reminders.delete_reminder(reminder) do
         {:ok, _} -> send_resp(conn, 204, "")
         {:error, reason} -> {:error, :bad_request, inspect(reason)}
@@ -200,11 +200,14 @@ defmodule KithWeb.API.ReminderController do
     Reminder |> TenantScope.scope_to_account(account_id) |> Kith.Repo.get(id)
   end
 
-  # Birthday reminders are derived from the contact's birthdate.
-  defp reject_birthday("birthday"),
+  # Birthday and first-met reminders are derived from the contact.
+  defp reject_derived("birthday"),
     do: {:error, 422, "Birthday reminders are managed from the contact's birthdate."}
 
-  defp reject_birthday(_type), do: :ok
+  defp reject_derived("first_met"),
+    do: {:error, 422, "First-met reminders are managed from the contact's first-met date."}
+
+  defp reject_derived(_type), do: :ok
 
   defp get_instance(account_id, id) do
     ReminderInstance
@@ -220,6 +223,7 @@ defmodule KithWeb.API.ReminderController do
       contact_id: r.contact_id,
       type: r.type,
       title: r.title,
+      description: r.description,
       anchor_date: r.anchor_date,
       interval_unit: r.interval_unit,
       interval_count: r.interval_count,

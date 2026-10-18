@@ -208,4 +208,54 @@ defmodule KithWeb.API.ReminderControllerTest do
       assert json_response(conn3, 422)
     end
   end
+
+  describe "first_met reminders are read-only" do
+    setup %{contact: contact} do
+      {:ok, contact} =
+        Kith.Contacts.update_contact(contact, %{
+          first_met_at: ~D[2012-09-01],
+          first_met_reminder: true
+        })
+
+      %{first_met: Kith.Reminders.get_first_met_reminder(contact.id, contact.account_id)}
+    end
+
+    test "create is rejected", %{conn: conn, contact: contact} do
+      conn =
+        post(conn, ~p"/api/contacts/#{contact.id}/reminders", %{
+          "reminder" => %{"type" => "first_met", "anchor_date" => "2012-09-01"}
+        })
+
+      assert json_response(conn, 422)["detail"] ==
+               "First-met reminders are managed from the contact's first-met date."
+    end
+
+    test "update is rejected", %{conn: conn, first_met: first_met} do
+      conn = patch(conn, ~p"/api/reminders/#{first_met.id}", %{"reminder" => %{"title" => "x"}})
+      assert json_response(conn, 422)
+    end
+
+    test "delete is rejected", %{conn: conn, first_met: first_met} do
+      conn = delete(conn, ~p"/api/reminders/#{first_met.id}")
+      assert json_response(conn, 422)
+    end
+  end
+
+  test "description and day intervals round-trip", %{conn: conn, contact: contact} do
+    conn =
+      post(conn, ~p"/api/contacts/#{contact.id}/reminders", %{
+        "reminder" => %{
+          "type" => "recurring",
+          "title" => "Water",
+          "anchor_date" => "2026-01-01",
+          "interval_unit" => "day",
+          "interval_count" => 10,
+          "description" => "Ferns"
+        }
+      })
+
+    data = json_response(conn, 201)["data"]
+    assert data["interval_unit"] == "day"
+    assert data["description"] == "Ferns"
+  end
 end
