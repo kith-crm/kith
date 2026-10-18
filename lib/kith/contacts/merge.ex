@@ -161,8 +161,13 @@ defmodule Kith.Contacts.Merge do
     |> build_multi(members, survivor, losers, resolution, dropped_records, dropped_ids)
     |> Repo.transaction()
     |> case do
-      {:ok, %{last_talked_to: survivor}} -> survivor
-      {:error, _step, reason, _changes} -> Repo.rollback(reason)
+      {:ok, %{last_talked_to: survivor, remap_first_met_reminders: first_met}} ->
+        # The first-met step may have carried the opt-in flag onto the
+        # survivor after `:survivor` was read, so fold it into the result.
+        %{survivor | first_met_reminder: first_met.first_met_reminder}
+
+      {:error, _step, reason, _changes} ->
+        Repo.rollback(reason)
     end
   end
 
@@ -340,7 +345,7 @@ defmodule Kith.Contacts.Merge do
         else: survivor
 
     case Kith.Reminders.sync_first_met(survivor) do
-      {:ok, _} -> {:ok, :done}
+      {:ok, _} -> {:ok, survivor}
       {:error, reason} -> {:error, reason}
     end
   end

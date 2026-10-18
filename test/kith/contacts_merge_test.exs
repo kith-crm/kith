@@ -2309,8 +2309,23 @@ defmodule Kith.Contacts.MergeTest do
 
       {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
 
+      assert survivor.first_met_reminder
       assert Repo.get!(Kith.Contacts.Contact, survivor.id).first_met_reminder
       assert Kith.Reminders.get_first_met_reminder(survivor.id, ctx.account_id)
+    end
+
+    test "moves a loser-only first_met reminder to the survivor", ctx do
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [first_met_at: ~D[2012-09-01]]
+      )
+
+      opt_in_first_met(ctx.contact_b.id, ~D[2012-09-01])
+      [loser_row] = first_met_reminders(ctx.contact_b.id)
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert [r] = first_met_reminders(survivor.id)
+      assert r.id == loser_row.id
     end
   end
 end
