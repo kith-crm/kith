@@ -137,4 +137,15 @@ defmodule Kith.TimeHelperTest do
       assert %Date{} = TimeHelper.local_today("Etc/UTC")
     end
   end
+
+  describe "anniversary_in_year/2" do
+    test "keeps month and day" do
+      assert TimeHelper.anniversary_in_year(~D[1990-06-15], 2027) == ~D[2027-06-15]
+    end
+
+    test "29 February falls back to 28 February in a common year" do
+      assert TimeHelper.anniversary_in_year(~D[1992-02-29], 2027) == ~D[2027-02-28]
+      assert TimeHelper.anniversary_in_year(~D[1992-02-29], 2028) == ~D[2028-02-29]
+    end
+  end
 end
