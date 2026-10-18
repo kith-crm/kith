@@ -10,7 +10,6 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
 
   alias Kith.Imports
   alias Kith.Reminders.Reminder
-  alias Kith.TimeHelper
   alias Kith.Workers.MonicaMiscDataWorker
 
   @stub_name MonicaMiscDataReqStub
@@ -194,278 +193,251 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     end
   end
 
-  describe "reminders import — date handling (issue #5)" do
+  describe "reminders import (Monica 4.1.2)" do
     setup %{user: user, account_id: account_id} do
-      %{import_job: api_import(account_id, user.id)}
+      %{
+        import_job: api_import(account_id, user.id),
+        today: Kith.Reminders.account_today(account_id)
+      }
     end
 
-    test "object-shaped next_expected_date is parsed to the underlying date", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id)
+    test "a titled Monica birthday reminder maps onto the derived birthday reminder", ctx do
+      contact = contact_fixture(ctx.account_id, %{birthdate: ~D[1990-06-15]})
 
       assert :ok =
-               import_reminders(import_job, contact, [
-                 %{
-                   "id" => 1,
-                   "frequency_type" => "one_time",
-                   "title" => "Call about the move",
-                   "next_expected_date" => %{"date" => "2024-06-01 00:00:00", "timezone" => "UTC"}
-                 }
+               import_reminders(ctx.import_job, contact, [
+                 monica(1, %{
+                   "title" => "Wish happy birthday to Mona",
+                   "frequency_type" => "year",
+                   "initial_date" => "1990-06-15T00:00:00Z",
+                   "delible" => false
+                 })
                ])
 
-      assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.next_reminder_date == ~D[2024-06-01]
-      assert reminder.type == "one_time"
+      assert [%{type: "birthday"} = r] = contact_reminders(ctx.account_id, contact.id)
+
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "reminder", "1").local_entity_id ==
+               r.id
     end
 
-    test "plain ISO string next_expected_date is parsed", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id)
+    test "an API-edited birthday reminder (delible: true, custom title) still maps", ctx do
+      contact = contact_fixture(ctx.account_id, %{birthdate: ~D[1990-06-15]})
 
-      assert :ok =
-               import_reminders(import_job, contact, [
-                 %{
-                   "id" => 2,
-                   "frequency_type" => "one_time",
-                   "title" => "Follow up",
-                   "next_expected_date" => "2024-07-15"
-                 }
-               ])
+      import_reminders(ctx.import_job, contact, [
+        monica(1, %{
+          "title" => "Wish happy birthday to Mona!",
+          "frequency_type" => "year",
+          "initial_date" => "1990-06-15T00:00:00Z"
+        })
+      ])
 
-      assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.next_reminder_date == ~D[2024-07-15]
+      assert [%{type: "birthday"}] = contact_reminders(ctx.account_id, contact.id)
     end
 
-    test "falls back to a future initial_date when next_expected_date is absent", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id)
-      future = Date.utc_today() |> Date.add(30) |> Date.to_iso8601()
+    test "a first-met anniversary opts the contact in and maps onto first_met", ctx do
+      contact = contact_fixture(ctx.account_id, %{first_met_at: ~D[2012-09-01]})
 
-      assert :ok =
-               import_reminders(import_job, contact, [
-                 %{
-                   "id" => 3,
-                   "frequency_type" => "one_time",
-                   "title" => "Renew passport",
-                   "next_expected_date" => nil,
-                   "initial_date" => %{"date" => "#{future} 00:00:00"}
-                 }
-               ])
+      import_reminders(ctx.import_job, contact, [
+        monica(12, %{
+          "title" => "Anniversary of the day you first met",
+          "frequency_type" => "year",
+          "initial_date" => "2012-09-01T00:00:00Z",
+          "delible" => false
+        })
+      ])
 
-      assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.next_reminder_date == Date.from_iso8601!(future)
+      assert Repo.get!(Kith.Contacts.Contact, contact.id).first_met_reminder
+
+      assert [%{type: "first_met", anchor_date: ~D[2012-09-01]} = r] =
+               contact_reminders(ctx.account_id, contact.id)
+
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "reminder", "12").local_entity_id ==
+               r.id
     end
 
-    test "a past initial_date fallback is pulled forward to today with a warning", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id)
+    test "a recurring reminder keeps Monica's anchor and interval", ctx do
+      contact = contact_fixture(ctx.account_id)
+
+      import_reminders(ctx.import_job, contact, [
+        monica(4, %{
+          "frequency_type" => "week",
+          "frequency_number" => 2,
+          "initial_date" => "2026-01-05T00:00:00Z"
+        })
+      ])
+
+      assert [r] = contact_reminders(ctx.account_id, contact.id)
+
+      assert %{
+               type: "recurring",
+               interval_unit: "week",
+               interval_count: 2,
+               anchor_date: ~D[2026-01-05],
+               active: true
+             } = r
+
+      assert r.next_reminder_date ==
+               Kith.Reminders.Occurrences.next_on_or_after(Reminder.schedule(r), ctx.today)
+    end
+
+    test "a past one-time reminder is imported inactive with its own date", ctx do
+      contact = contact_fixture(ctx.account_id)
+
+      import_reminders(ctx.import_job, contact, [
+        monica(6, %{"frequency_type" => "one_time", "initial_date" => "2020-01-01T00:00:00Z"})
+      ])
+
+      assert [%{type: "one_time", anchor_date: ~D[2020-01-01], active: false}] =
+               contact_reminders(ctx.account_id, contact.id)
+    end
+
+    test "frequency_number 0 imports as one-time and logs a warning", ctx do
+      contact = contact_fixture(ctx.account_id)
+      future = ctx.today |> Date.add(60) |> Date.to_iso8601()
 
       log =
         capture_log(fn ->
-          assert :ok =
-                   import_reminders(import_job, contact, [
-                     %{
-                       "id" => 4,
-                       "frequency_type" => "one_time",
-                       "title" => "Renew passport",
-                       "next_expected_date" => nil,
-                       "initial_date" => %{"date" => "2015-03-09 00:00:00"}
-                     }
-                   ])
+          import_reminders(ctx.import_job, contact, [
+            monica(21, %{
+              "frequency_type" => "month",
+              "frequency_number" => 0,
+              "initial_date" => "#{future}T00:00:00Z"
+            })
+          ])
         end)
 
-      assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.next_reminder_date == Date.utc_today()
-      assert log =~ "reminder 4 initial_date 2015-03-09 is in the past"
+      assert log =~ "non_positive_interval"
+      assert [%{type: "one_time", active: true}] = contact_reminders(ctx.account_id, contact.id)
     end
 
-    test "an explicit past next_expected_date is kept, not clamped", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id)
+    test "the description is imported", ctx do
+      contact = contact_fixture(ctx.account_id)
 
-      assert :ok =
-               import_reminders(import_job, contact, [
-                 %{
-                   "id" => 5,
-                   "frequency_type" => "one_time",
-                   "title" => "Historical note",
-                   "next_expected_date" => "2020-01-01"
-                 }
-               ])
+      import_reminders(ctx.import_job, contact, [
+        monica(20, %{
+          "frequency_type" => "one_time",
+          "initial_date" => "2099-02-14T00:00:00Z",
+          "description" => "Has a description"
+        })
+      ])
 
-      assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.next_reminder_date == ~D[2020-01-01]
+      assert [%{description: "Has a description"}] = contact_reminders(ctx.account_id, contact.id)
     end
 
-    test "a blank title on a non-birthday reminder gets the default title", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id)
+    test "re-importing updates the mapped reminder in place", ctx do
+      contact = contact_fixture(ctx.account_id)
 
-      assert :ok =
-               import_reminders(import_job, contact, [
-                 %{
-                   "id" => 6,
-                   "frequency_type" => "year",
-                   "title" => "",
-                   "next_expected_date" => "2030-05-01"
-                 }
-               ])
+      payload = fn title ->
+        [
+          monica(3, %{
+            "title" => title,
+            "frequency_type" => "year",
+            "initial_date" => "2015-03-09T00:00:00Z"
+          })
+        ]
+      end
 
-      assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.type == "recurring"
-      assert reminder.title == "Imported reminder"
+      import_reminders(ctx.import_job, contact, payload.("Wedding"))
+      [first] = contact_reminders(ctx.account_id, contact.id)
+
+      import_reminders(ctx.import_job, contact, payload.("Wedding anniversary"))
+      assert [again] = contact_reminders(ctx.account_id, contact.id)
+      assert again.id == first.id
+      assert again.title == "Wedding anniversary"
     end
 
-    test "with no parseable date, uses today and logs a warning", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id)
+    test "a changed frequency type replaces the row and re-points the mapping", ctx do
+      contact = contact_fixture(ctx.account_id)
+
+      import_reminders(ctx.import_job, contact, [
+        monica(5, %{"frequency_type" => "one_time", "initial_date" => "2099-01-01T00:00:00Z"})
+      ])
+
+      [old] = contact_reminders(ctx.account_id, contact.id)
+
+      import_reminders(ctx.import_job, contact, [
+        monica(5, %{"frequency_type" => "month", "initial_date" => "2099-01-01T00:00:00Z"})
+      ])
+
+      assert [%{type: "recurring"} = new] = contact_reminders(ctx.account_id, contact.id)
+      refute new.id == old.id
+
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "reminder", "5").local_entity_id ==
+               new.id
+    end
+
+    test "re-importing after the user deleted the mapped reminder recreates it", ctx do
+      contact = contact_fixture(ctx.account_id)
+
+      payload = [
+        monica(7, %{"frequency_type" => "one_time", "initial_date" => "2099-01-10T00:00:00Z"})
+      ]
+
+      import_reminders(ctx.import_job, contact, payload)
+      [r] = contact_reminders(ctx.account_id, contact.id)
+      {:ok, _} = Kith.Reminders.delete_reminder(r)
+
+      assert :ok = import_reminders(ctx.import_job, contact, payload)
+      assert [new] = contact_reminders(ctx.account_id, contact.id)
+
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "reminder", "7").local_entity_id ==
+               new.id
+    end
+
+    test "an unknown frequency type is skipped with a warning", ctx do
+      contact = contact_fixture(ctx.account_id)
 
       log =
         capture_log(fn ->
-          assert :ok =
-                   import_reminders(import_job, contact, [
-                     %{"id" => 42, "frequency_type" => "one_time", "title" => "Mystery"}
-                   ])
+          import_reminders(ctx.import_job, contact, [
+            monica(99, %{
+              "frequency_type" => "fortnight",
+              "initial_date" => "2026-01-01T00:00:00Z"
+            })
+          ])
         end)
 
-      assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.next_reminder_date == Date.utc_today()
-      assert log =~ "reminder 42 has no parseable date"
+      assert log =~ "unknown_frequency"
+      assert contact_reminders(ctx.account_id, contact.id) == []
     end
 
-    test "year frequency + blank title + contact birthdate creates a single birthday reminder", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id, %{birthdate: ~D[1990-06-15]})
-
-      assert :ok =
-               import_reminders(import_job, contact, [
-                 %{
-                   "id" => 9,
-                   "frequency_type" => "year",
-                   "title" => "",
-                   "next_expected_date" => %{"date" => "2024-06-15 00:00:00"}
-                 }
-               ])
-
-      assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.type == "birthday"
-      assert reminder.next_reminder_date == TimeHelper.next_birthday_date(~D[1990-06-15])
-    end
-
-    test "year frequency birthday reminder does not duplicate an existing one", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id, %{birthdate: ~D[1990-06-15]})
+    test "a generic row from an earlier import is replaced once the contact has a birthdate",
+         ctx do
+      contact = contact_fixture(ctx.account_id)
 
       payload = [
-        %{
-          "id" => 9,
+        monica(9, %{
+          "title" => "Wish happy birthday to Mona",
           "frequency_type" => "year",
-          "title" => "",
-          "next_expected_date" => %{"date" => "2024-06-15 00:00:00"}
-        }
+          "initial_date" => "1990-06-15T00:00:00Z"
+        })
       ]
 
-      assert :ok = import_reminders(import_job, contact, payload)
-      assert :ok = import_reminders(import_job, contact, payload)
-
-      assert [reminder] = contact_reminders(account_id, contact.id)
-      assert reminder.type == "birthday"
-    end
-
-    test "year frequency with a real title stays a generic recurring reminder", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id, %{birthdate: ~D[1990-06-15]})
-
-      assert :ok =
-               import_reminders(import_job, contact, [
-                 %{
-                   "id" => 10,
-                   "frequency_type" => "year",
-                   "title" => "Wedding anniversary",
-                   "next_expected_date" => %{"date" => "2024-09-20 00:00:00"}
-                 }
-               ])
-
-      # The birthdate's own birthday reminder is derived alongside it.
-      assert [reminder] = generic_reminders(account_id, contact.id)
-      assert reminder.type == "recurring"
-      assert Reminder.frequency_preset(reminder) == "annually"
-      assert reminder.anchor_date == ~D[2024-09-20]
-    end
-
-    test "an untitled annual reminder on a non-birthday date stays generic", %{
-      account_id: account_id,
-      import_job: import_job
-    } do
-      contact = contact_fixture(account_id, %{birthdate: ~D[1990-06-15]})
-
-      assert :ok =
-               import_reminders(import_job, contact, [
-                 %{
-                   "id" => 11,
-                   "frequency_type" => "year",
-                   "title" => "",
-                   "next_expected_date" => %{"date" => "2030-09-20 00:00:00"}
-                 }
-               ])
-
-      assert [reminder] = generic_reminders(account_id, contact.id)
-      assert reminder.type == "recurring"
-      assert reminder.next_reminder_date == ~D[2030-09-20]
-    end
-
-    test "re-importing after a birthdate is added replaces the generic reminder with the birthday one",
-         %{
-           account_id: account_id,
-           import_job: import_job
-         } do
-      contact = contact_fixture(account_id)
-
-      payload = [
-        %{
-          "id" => 9,
-          "frequency_type" => "year",
-          "title" => "",
-          "next_expected_date" => %{"date" => "2024-06-15 00:00:00"}
-        }
-      ]
-
-      assert :ok = import_reminders(import_job, contact, payload)
-      assert [generic] = contact_reminders(account_id, contact.id)
-      assert generic.type == "recurring"
+      import_reminders(ctx.import_job, contact, payload)
+      assert [%{type: "recurring"} = generic] = contact_reminders(ctx.account_id, contact.id)
 
       {:ok, contact} = Kith.Contacts.update_contact(contact, %{birthdate: ~D[1990-06-15]})
+      import_reminders(ctx.import_job, contact, payload)
 
-      assert :ok = import_reminders(import_job, contact, payload)
+      assert [%{type: "birthday"} = r] = contact_reminders(ctx.account_id, contact.id)
+      refute r.id == generic.id
 
-      assert [reminder] = contact_reminders(account_id, contact.id)
-      refute reminder.id == generic.id
-      assert reminder.type == "birthday"
-      assert reminder.next_reminder_date == TimeHelper.next_birthday_date(~D[1990-06-15])
-
-      assert Imports.find_import_record(account_id, "monica_api", "reminder", "9").local_entity_id ==
-               reminder.id
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "reminder", "9").local_entity_id ==
+               r.id
     end
+  end
+
+  defp monica(id, attrs) do
+    Map.merge(
+      %{
+        "id" => id,
+        "title" => "R#{id}",
+        "description" => nil,
+        "frequency_number" => 1,
+        "delible" => true
+      },
+      attrs
+    )
   end
 
   defp import_reminders(import_job, contact, reminders) do
@@ -484,10 +456,6 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     Reminder
     |> where([r], r.account_id == ^account_id and r.contact_id == ^contact_id)
     |> Repo.all()
-  end
-
-  defp generic_reminders(account_id, contact_id) do
-    account_id |> contact_reminders(contact_id) |> Enum.reject(&(&1.type == "birthday"))
   end
 
   defp collect_requests(acc) do

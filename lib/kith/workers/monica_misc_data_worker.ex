@@ -32,7 +32,9 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   alias Kith.Contacts
   alias Kith.Imports
+  alias Kith.Imports.Monica.ReminderMapper
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
+  alias Kith.Reminders
   alias Kith.Repo
 
   @impl Oban.Worker
@@ -469,11 +471,10 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
     case api_get_json(credential, url, []) do
       {:ok, %{"data" => reminders}} when is_list(reminders) ->
+        today = Reminders.account_today(contact.account_id)
+
         Enum.count(reminders, fn reminder ->
-          match?(
-            :ok,
-            import_single_reminder(contact.account_id, user_id, contact, reminder, import_job)
-          )
+          match?(:ok, import_single_reminder(user_id, contact, reminder, import_job, today))
         end)
 
       {:ok, _} ->
@@ -488,92 +489,90 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     end
   end
 
-  defp import_single_reminder(account_id, user_id, contact, reminder_data, import_job) do
-    if birthday_reminder?(reminder_data, contact) do
-      import_birthday_reminder(account_id, contact, reminder_data, import_job)
+  # Carries out `ReminderMapper`'s decision (design spec 2026-10-14 §4).
+  defp import_single_reminder(user_id, contact, data, import_job, today) do
+    case ReminderMapper.map(data, contact, today) do
+      :birthday ->
+        import_derived(contact, data, import_job, fn -> Reminders.sync_birthday(contact) end)
+
+      :first_met ->
+        import_derived(contact, data, import_job, fn -> opt_in_first_met(contact) end)
+
+      {:create, attrs, notes} ->
+        Enum.each(notes, fn note ->
+          Logger.warning("[MonicaMiscData] reminder #{data["id"]}: #{note}; imported as one-time")
+        end)
+
+        upsert_reminder(user_id, contact, data, attrs, import_job)
+
+      {:skip, reason} ->
+        Logger.warning("[MonicaMiscData] reminder #{data["id"]} skipped: #{reason}")
+        {:error, reason}
+    end
+  end
+
+  defp opt_in_first_met(contact) do
+    with {:ok, contact} <- Contacts.update_contact(contact, %{first_met_reminder: true}) do
+      Reminders.sync_first_met(contact)
+    end
+  end
+
+  # A derived reminder (birthday / first_met) is owned by the contact, not the
+  # import. A mapping left over from an earlier import that made a generic row
+  # (before the contact had the date) is dropped and re-pointed here.
+  defp import_derived(contact, data, import_job, sync) do
+    with :ok <- drop_stale_generic(mapped_local_reminder(import_job, data["id"])),
+         {:ok, %Reminders.Reminder{} = reminder} <- sync.() do
+      maybe_record_entity(import_job, "reminder", data["id"], "reminder", reminder.id)
+      :ok
     else
-      import_generic_reminder(account_id, user_id, contact, reminder_data, import_job)
+      {:ok, :none} -> log_reminder_error({:no_derived_reminder, contact.id})
+      {:error, reason} -> log_reminder_error(reason)
     end
   end
 
-  # Monica has no explicit birthday flag on reminders, so match one only when
-  # all three conservative signals hold: `frequency_type == "year"`, a blank
-  # title, and a date (if Monica sends one) that lands on the birthday. A
-  # match maps onto the contact's single birthday reminder (see
-  # `Kith.Reminders.sync_birthday/1`); an untitled annual reminder on another date (a work
-  # anniversary, say) stays generic so its own date survives.
-  defp birthday_reminder?(%{"frequency_type" => "year"} = reminder_data, %{
-         birthdate: %Date{} = birthdate
-       }) do
-    blank?(reminder_data["title"]) and birthday_dated?(reminder_data, birthdate)
-  end
-
-  defp birthday_reminder?(_reminder_data, _contact), do: false
-
-  defp birthday_dated?(reminder_data, birthdate) do
-    case reminder_next_date(reminder_data["next_expected_date"]) ||
-           reminder_next_date(reminder_data["initial_date"]) do
-      %Date{} = date -> {date.month, date.day} == {birthdate.month, birthdate.day}
-      nil -> true
+  defp drop_stale_generic(%Reminders.Reminder{type: type} = mapped)
+       when type not in ["birthday", "first_met"] do
+    case Reminders.delete_reminder(mapped) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp blank?(nil), do: true
-  defp blank?(str) when is_binary(str), do: String.trim(str) == ""
-  defp blank?(_), do: false
+  defp drop_stale_generic(_mapped), do: :ok
 
-  defp import_birthday_reminder(account_id, contact, reminder_data, import_job) do
-    case mapped_local_reminder(import_job, reminder_data["id"]) do
-      %{type: "birthday"} = mapped ->
-        # This Monica reminder already maps to the contact's birthday reminder.
-        maybe_record_entity(import_job, "reminder", reminder_data["id"], "reminder", mapped.id)
+  defp upsert_reminder(user_id, contact, data, attrs, import_job) do
+    new_type = attrs["type"]
+
+    result =
+      case mapped_local_reminder(import_job, data["id"]) do
+        %Reminders.Reminder{type: ^new_type} = mapped ->
+          Reminders.update_reminder(mapped, Map.delete(attrs, "type"))
+
+        %Reminders.Reminder{type: type} = mapped when type not in ["birthday", "first_met"] ->
+          with {:ok, _} <- Reminders.delete_reminder(mapped), do: create(user_id, contact, attrs)
+
+        _derived_or_missing ->
+          create(user_id, contact, attrs)
+      end
+
+    case result do
+      {:ok, reminder} ->
+        maybe_record_entity(import_job, "reminder", data["id"], "reminder", reminder.id)
         :ok
 
-      %{} = mapped ->
-        # Mapped to a generic reminder — an earlier import made it before the
-        # contact had a birthdate. The contact's birthday reminder is now
-        # derived from the birthdate (`Kith.Reminders.sync_birthday/1`), so
-        # the generic row is a stale duplicate: drop it and re-point the
-        # import mapping at the birthday reminder.
-        case Kith.Reminders.delete_reminder(mapped) do
-          {:ok, _} ->
-            create_or_map_birthday_reminder(account_id, contact, reminder_data, import_job)
-
-          {:error, reason} ->
-            log_reminder_error(reason)
-        end
-
-      nil ->
-        create_or_map_birthday_reminder(account_id, contact, reminder_data, import_job)
+      {:error, reason} ->
+        log_reminder_error(reason)
     end
   end
 
-  defp create_or_map_birthday_reminder(account_id, contact, reminder_data, import_job) do
-    case Kith.Reminders.get_birthday_reminder(contact.id, account_id) do
-      nil ->
-        case Kith.Reminders.sync_birthday(contact) do
-          {:ok, reminder} ->
-            maybe_record_entity(
-              import_job,
-              "reminder",
-              reminder_data["id"],
-              "reminder",
-              reminder.id
-            )
-
-            :ok
-
-          {:error, reason} ->
-            log_reminder_error(reason)
-        end
-
-      existing ->
-        # A birthday reminder already covers this contact — record the
-        # mapping to it and skip creating a duplicate generic reminder.
-        maybe_record_entity(import_job, "reminder", reminder_data["id"], "reminder", existing.id)
-        :ok
-    end
-  end
+  defp create(user_id, contact, attrs),
+    do:
+      Reminders.create_reminder(
+        contact.account_id,
+        user_id,
+        Map.put(attrs, "contact_id", contact.id)
+      )
 
   defp mapped_local_reminder(nil, _source_id), do: nil
   defp mapped_local_reminder(_import_job, nil), do: nil
@@ -586,7 +585,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
            to_string(source_id)
          ) do
       %{local_entity_id: id} when is_integer(id) ->
-        Kith.Reminders.get_reminder(import_job.account_id, id)
+        Reminders.get_reminder(import_job.account_id, id)
 
       _ ->
         nil
@@ -596,79 +595,6 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp log_reminder_error(reason) do
     Logger.warning("[MonicaMiscData] reminder error: #{inspect_errors(reason)}")
     {:error, reason}
-  end
-
-  defp import_generic_reminder(account_id, user_id, contact, reminder_data, import_job) do
-    {type, frequency} = map_monica_reminder_frequency(reminder_data["frequency_type"])
-
-    next_date =
-      reminder_next_date(reminder_data["next_expected_date"]) ||
-        initial_date_fallback(reminder_data) ||
-        fallback_today(reminder_data)
-
-    attrs = %{
-      "contact_id" => contact.id,
-      "type" => type,
-      "title" => reminder_title(reminder_data),
-      "frequency" => frequency,
-      "next_reminder_date" => next_date
-    }
-
-    case Kith.Reminders.create_reminder(account_id, user_id, attrs) do
-      {:ok, reminder} ->
-        maybe_record_entity(import_job, "reminder", reminder_data["id"], "reminder", reminder.id)
-        :ok
-
-      {:error, reason} ->
-        Logger.warning("[MonicaMiscData] reminder error: #{inspect_errors(reason)}")
-        {:error, reason}
-    end
-  end
-
-  # Monica serialises date fields as an object
-  # `%{"date" => "2024-06-01 00:00:00", "timezone" => "UTC", ...}`; newer
-  # versions may send a plain ISO string instead. Accept both shapes, plus
-  # nil. Mirrors `Kith.Imports.Sources.MonicaApi.parse_special_date/1`.
-  defp reminder_next_date(%{"date" => d}) when is_binary(d), do: parse_date_string(d)
-  defp reminder_next_date(d) when is_binary(d), do: parse_date_string(d)
-  defp reminder_next_date(_), do: nil
-
-  defp fallback_today(reminder_data) do
-    Logger.warning(
-      "[MonicaMiscData] reminder #{reminder_data["id"]} has no parseable date; using today"
-    )
-
-    Date.utc_today()
-  end
-
-  # `initial_date` (Monica's first-ever occurrence) is only consulted when
-  # `next_expected_date` is absent, and it is often years past. A past
-  # `next_reminder_date` shows in no upcoming list and schedules no
-  # notification, so clamp a past `initial_date` to today. An explicit
-  # `next_expected_date` is honoured as-is, past or not.
-  defp initial_date_fallback(reminder_data) do
-    case reminder_next_date(reminder_data["initial_date"]) do
-      %Date{} = date -> max_today(date, reminder_data)
-      nil -> nil
-    end
-  end
-
-  defp max_today(%Date{} = date, reminder_data) do
-    today = Date.utc_today()
-
-    if Date.before?(date, today) do
-      Logger.warning(
-        "[MonicaMiscData] reminder #{reminder_data["id"]} initial_date #{date} is in the past; using today"
-      )
-
-      today
-    else
-      date
-    end
-  end
-
-  defp reminder_title(reminder_data) do
-    if blank?(reminder_data["title"]), do: "Imported reminder", else: reminder_data["title"]
   end
 
   defp import_contact_conversations(credential, user_id, contact, source_id, import_job) do
@@ -783,12 +709,6 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
             p.species == ^species
     )
   end
-
-  defp map_monica_reminder_frequency("one_time"), do: {"one_time", nil}
-  defp map_monica_reminder_frequency("week"), do: {"recurring", "weekly"}
-  defp map_monica_reminder_frequency("month"), do: {"recurring", "monthly"}
-  defp map_monica_reminder_frequency("year"), do: {"recurring", "annually"}
-  defp map_monica_reminder_frequency(_), do: {"one_time", nil}
 
   @platform_keywords [
     {"sms", "sms"},
