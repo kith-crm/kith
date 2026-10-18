@@ -48,6 +48,17 @@ defmodule Kith.Reminders.OccurrencesTest do
       assert Occurrences.next_on_or_after(sched, ~D[2028-01-01]) == ~D[2028-02-29]
     end
 
+    test "day intervals count whole days from the anchor" do
+      assert Occurrences.next_on_or_after(s(~D[2026-10-28], "day", 14), ~D[2026-10-14]) ==
+               ~D[2026-10-28]
+
+      assert Occurrences.next_on_or_after(s(~D[2026-01-01], "day", 10), ~D[2026-01-15]) ==
+               ~D[2026-01-21]
+
+      assert Occurrences.next_on_or_after(s(~D[2026-01-01], "day", 1), ~D[2026-03-01]) ==
+               ~D[2026-03-01]
+    end
+
     test "an anchor far in the past resolves directly" do
       assert Occurrences.next_on_or_after(s(~D[1900-01-01], "week", 1), ~D[2026-09-26]) ==
                ~D[2026-09-28]
@@ -59,6 +70,11 @@ defmodule Kith.Reminders.OccurrencesTest do
       sched = s(~D[2026-01-05], "week", 1)
       assert Occurrences.advance_after(sched, ~D[2026-01-05]) == ~D[2026-01-12]
       assert Occurrences.advance_after(sched, ~D[2026-01-07]) == ~D[2026-01-12]
+    end
+
+    test "with a day interval moves strictly past the date" do
+      assert Occurrences.advance_after(s(~D[2026-01-01], "day", 10), ~D[2026-01-21]) ==
+               ~D[2026-01-31]
     end
 
     test "is nil for one-time schedules" do

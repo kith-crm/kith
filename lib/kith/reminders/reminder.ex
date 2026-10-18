@@ -9,6 +9,7 @@ defmodule Kith.Reminders.Reminder do
 
   Types:
   - `birthday` — derived from the contact's birthdate (`Kith.Reminders.sync_birthday/1`)
+  - `first_met` — derived from the contact's first-met date when the contact opts in (`Kith.Reminders.sync_first_met/1`)
   - `stay_in_touch` — re-armed one interval after it is resolved or dismissed
   - `one_time` — a single date, no interval
   - `recurring` — repeats every interval
@@ -24,8 +25,8 @@ defmodule Kith.Reminders.Reminder do
   # binary shapes); the public contract is any label string or nil.
   @dialyzer {:nowarn_function, interval_label: 1}
 
-  @types ~w(birthday stay_in_touch one_time recurring)
-  @units ~w(week month year)
+  @types ~w(birthday first_met stay_in_touch one_time recurring)
+  @units ~w(day week month year)
   @frequencies ~w(weekly biweekly monthly 3months 6months annually)
   @presets %{
     "weekly" => {"week", 1},
@@ -39,6 +40,7 @@ defmodule Kith.Reminders.Reminder do
   schema "reminders" do
     field :type, :string
     field :title, :string
+    field :description, :string
     field :anchor_date, :date
     field :interval_unit, :string
     field :interval_count, :integer
@@ -74,6 +76,7 @@ defmodule Kith.Reminders.Reminder do
   @doc ~s[Human label for the interval ("Weekly", "Every 3 weeks"), or nil for one-time.]
   @spec interval_label(map()) :: String.t() | nil
   def interval_label(%{interval_unit: nil}), do: nil
+  def interval_label(%{interval_unit: "day", interval_count: 1}), do: "Daily"
   def interval_label(%{interval_unit: "week", interval_count: 1}), do: "Weekly"
   def interval_label(%{interval_unit: "month", interval_count: 1}), do: "Monthly"
   def interval_label(%{interval_unit: "year", interval_count: 1}), do: "Annually"
@@ -84,6 +87,7 @@ defmodule Kith.Reminders.Reminder do
     |> cast(attrs, [
       :type,
       :title,
+      :description,
       :frequency,
       :anchor_date,
       :interval_unit,
@@ -104,12 +108,21 @@ defmodule Kith.Reminders.Reminder do
     |> foreign_key_constraint(:account_id)
     |> foreign_key_constraint(:creator_id)
     |> unique_constraint(:contact_id, name: :reminders_birthday_unique_idx)
+    |> unique_constraint(:contact_id, name: :reminders_first_met_unique_idx)
   end
 
   @doc "Updates title/schedule/active. `next_reminder_date` in attrs is ignored."
   def update_changeset(reminder, attrs, %Date{} = today \\ Date.utc_today()) do
     reminder
-    |> cast(attrs, [:title, :frequency, :anchor_date, :interval_unit, :interval_count, :active])
+    |> cast(attrs, [
+      :title,
+      :description,
+      :frequency,
+      :anchor_date,
+      :interval_unit,
+      :interval_count,
+      :active
+    ])
     |> apply_frequency_preset()
     |> validate_required([:anchor_date])
     |> validate_schedule()

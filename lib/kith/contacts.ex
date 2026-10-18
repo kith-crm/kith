@@ -286,34 +286,39 @@ defmodule Kith.Contacts do
     %Contact{account_id: account_id}
     |> Contact.create_changeset(attrs)
     |> Repo.insert()
-    |> sync_birthday_if_changed(nil)
+    |> sync_derived_reminders(%Contact{})
   end
 
   def update_contact(%Contact{} = contact, attrs) do
     contact
     |> Contact.update_changeset(attrs)
     |> Repo.update()
-    |> sync_birthday_if_changed(contact.birthdate)
+    |> sync_derived_reminders(contact)
   end
 
-  # Every path that sets or clears a birthdate (UI, REST API, CardDAV, the
-  # Monica importer) goes through create_contact/2 or update_contact/2.
-  defp sync_birthday_if_changed({:ok, %Contact{birthdate: new} = contact} = result, old)
-       when new != old do
-    case Kith.Reminders.sync_birthday(contact) do
-      {:ok, _} ->
-        :ok
+  # Every path that sets or clears a birthdate or first-met date (UI, REST API,
+  # CardDAV, the Monica importer) goes through create_contact/2 or
+  # update_contact/2. `old` is the contact before the write (`%Contact{}` on
+  # create, whose dates are nil and whose opt-in is false).
+  defp sync_derived_reminders({:ok, %Contact{} = new} = result, %Contact{} = old) do
+    if new.birthdate != old.birthdate,
+      do: log_sync_failure(:birthday, new, Kith.Reminders.sync_birthday(new))
 
-      {:error, reason} ->
-        Logger.warning(
-          "[Contacts] birthday reminder sync failed for contact #{contact.id}: #{inspect(reason)}"
-        )
-    end
+    if {new.first_met_at, new.first_met_reminder} != {old.first_met_at, old.first_met_reminder},
+      do: log_sync_failure(:first_met, new, Kith.Reminders.sync_first_met(new))
 
     result
   end
 
-  defp sync_birthday_if_changed(result, _old), do: result
+  defp sync_derived_reminders(result, _old), do: result
+
+  defp log_sync_failure(_kind, _contact, {:ok, _}), do: :ok
+
+  defp log_sync_failure(kind, contact, {:error, reason}) do
+    Logger.warning(
+      "[Contacts] #{kind} reminder sync failed for contact #{contact.id}: #{inspect(reason)}"
+    )
+  end
 
   def soft_delete_contact(%Contact{} = contact) do
     contact

@@ -37,6 +37,9 @@ defmodule Kith.Reminders.Occurrences do
 
   @doc "Occurrence number `n` (0 = the anchor)."
   @spec nth(schedule(), non_neg_integer()) :: Date.t()
+  def nth(%{anchor_date: anchor, interval_unit: "day", interval_count: count}, n),
+    do: Date.add(anchor, count * n)
+
   def nth(%{anchor_date: anchor, interval_unit: "week", interval_count: count}, n),
     do: Date.add(anchor, 7 * count * n)
 
@@ -48,6 +51,9 @@ defmodule Kith.Reminders.Occurrences do
 
   # An index whose occurrence is not after `date`; month/year clamping can
   # leave it a few days short, so `first_on_or_after/3` steps forward.
+  defp lower_bound_index(%{anchor_date: anchor, interval_unit: "day", interval_count: c}, date),
+    do: div(Date.diff(date, anchor), c)
+
   defp lower_bound_index(%{anchor_date: anchor, interval_unit: "week", interval_count: c}, date),
     do: div(Date.diff(date, anchor), 7 * c)
 

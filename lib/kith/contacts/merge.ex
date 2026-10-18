@@ -161,8 +161,13 @@ defmodule Kith.Contacts.Merge do
     |> build_multi(members, survivor, losers, resolution, dropped_records, dropped_ids)
     |> Repo.transaction()
     |> case do
-      {:ok, %{last_talked_to: survivor}} -> survivor
-      {:error, _step, reason, _changes} -> Repo.rollback(reason)
+      {:ok, %{last_talked_to: survivor, remap_first_met_reminders: first_met}} ->
+        # The first-met step may have carried the opt-in flag onto the
+        # survivor after `:survivor` was read, so fold it into the result.
+        %{survivor | first_met_reminder: first_met.first_met_reminder}
+
+      {:error, _step, reason, _changes} ->
+        Repo.rollback(reason)
     end
   end
 
@@ -204,6 +209,9 @@ defmodule Kith.Contacts.Merge do
     end)
     |> Multi.run(:remap_birthday_reminders, fn repo, %{survivor: survivor} ->
       remap_birthday_reminders_step(repo, survivor, loser_ids, account_id)
+    end)
+    |> Multi.run(:remap_first_met_reminders, fn repo, %{survivor: survivor} ->
+      remap_first_met_reminders_step(repo, survivor, loser_ids)
     end)
     |> Multi.run(:remap_stay_in_touch_reminders, fn repo, _changes ->
       remap_stay_in_touch_reminders_step(repo, loser_ids, survivor.id)
@@ -299,6 +307,45 @@ defmodule Kith.Contacts.Merge do
 
     case Kith.Reminders.sync_birthday(survivor) do
       {:ok, _} -> {:ok, :done}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Same collision as birthdays (`reminders_first_met_unique_idx`), plus the
+  # opt-in flag: the survivor keeps the anniversary reminder if any merged
+  # contact had asked for one. The kept row is then synced to the merged
+  # first-met date via Reminders.sync_first_met/1.
+  defp remap_first_met_reminders_step(repo, survivor, loser_ids) do
+    all_ids = [survivor.id | loser_ids]
+
+    %{rows: rows} =
+      repo.query!(
+        "SELECT id, contact_id FROM reminders WHERE type = 'first_met' AND contact_id = ANY($1)",
+        [all_ids]
+      )
+
+    if rows != [] do
+      keep_id = reminder_keep_id(rows, survivor.id)
+      delete_ids = for [id, _contact_id] <- rows, id != keep_id, do: id
+
+      if delete_ids != [],
+        do: repo.query!("DELETE FROM reminders WHERE id = ANY($1)", [delete_ids])
+
+      repo.update_all(from(r in Kith.Reminders.Reminder, where: r.id == ^keep_id),
+        set: [contact_id: survivor.id]
+      )
+    end
+
+    opted_in? =
+      repo.exists?(from c in Contact, where: c.id in ^all_ids and c.first_met_reminder == true)
+
+    survivor =
+      if opted_in? and not survivor.first_met_reminder,
+        do: survivor |> Ecto.Changeset.change(first_met_reminder: true) |> repo.update!(),
+        else: survivor
+
+    case Kith.Reminders.sync_first_met(survivor) do
+      {:ok, _} -> {:ok, survivor}
       {:error, reason} -> {:error, reason}
     end
   end

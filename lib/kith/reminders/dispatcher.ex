@@ -27,7 +27,7 @@ defmodule Kith.Reminders.Dispatcher do
   alias Kith.Workers.ReminderEmailWorker
 
   @advance_types ~w(birthday one_time)
-  @advancing_types ~w(birthday recurring)
+  @advancing_types ~w(birthday first_met recurring)
 
   @spec run(DateTime.t()) :: :ok
   def run(%DateTime{} = now) do

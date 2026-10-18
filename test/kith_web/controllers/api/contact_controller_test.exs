@@ -129,6 +129,17 @@ defmodule KithWeb.API.ContactControllerTest do
     end
   end
 
+  test "first_met_reminder is exposed and updatable", %{conn: conn} do
+    user = user_fixture()
+    conn = authed_conn(conn, user)
+    contact = contact_fixture(user.account_id, %{})
+
+    body = %{"contact" => %{"first_met_at" => "2012-09-01", "first_met_reminder" => true}}
+    resp = conn |> patch(~p"/api/contacts/#{contact.id}", body) |> json_response(200)
+
+    assert resp["data"]["first_met_reminder"] == true
+  end
+
   # ── Soft-delete (TEST-10-05) ────────────────────────────────────────
 
   describe "DELETE /api/contacts/:id (TEST-10-05)" do
