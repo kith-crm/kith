@@ -34,7 +34,9 @@ defmodule Kith.Imports.Sources.MonicaApi do
   alias Kith.Contacts.PhoneFormatter
   alias Kith.Imports
   alias Kith.Imports.DuplicateAutomerge
+  alias Kith.Imports.Monica.ReminderMapper
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
+  alias Kith.Reminders
   alias Kith.Repo
   alias Kith.Workers.MonicaDocumentImportWorker
 
@@ -639,11 +641,57 @@ defmodule Kith.Imports.Sources.MonicaApi do
     # Tags (embedded directly)
     import_api_tags(contact, api_contact, ref_data)
 
+    # Stay-in-touch (design spec 2026-10-14 §4), gated like the reminders endpoint.
+    if ctx.opts["reminders"] != false,
+      do: import_api_stay_in_touch(ctx, contact, api_contact, source_id)
+
     # Collect deferred data
     deferred = collect_deferred_data(api_contact, source_id, contact.id, deferred, ctx.opts)
 
     acc = %{acc | contacts: acc.contacts + 1, notes: acc.notes + n}
     {acc, deferred}
+  end
+
+  defp import_api_stay_in_touch(ctx, contact, api_contact, source_id) do
+    key = "stay_in_touch:#{source_id}"
+
+    case ReminderMapper.stay_in_touch(api_contact, Reminders.account_today(ctx.account_id)) do
+      :none ->
+        :ok
+
+      {:create, attrs, _notes} ->
+        existing =
+          case Imports.find_import_record(ctx.account_id, "monica_api", "reminder", key) do
+            %{local_entity_id: id} when is_integer(id) ->
+              Reminders.get_reminder(ctx.account_id, id)
+
+            _ ->
+              nil
+          end
+
+        result =
+          case existing do
+            %Reminders.Reminder{type: "stay_in_touch"} = r ->
+              Reminders.update_reminder(r, Map.delete(attrs, "type"))
+
+            _ ->
+              Reminders.create_reminder(
+                ctx.account_id,
+                ctx.user_id,
+                Map.put(attrs, "contact_id", contact.id)
+              )
+          end
+
+        case result do
+          {:ok, r} ->
+            Imports.record_imported_entity(ctx.import_job, "reminder", key, "reminder", r.id)
+
+          {:error, reason} ->
+            Logger.warning(
+              "[MonicaApi] stay-in-touch for #{source_id}: #{inspect_errors(reason)}"
+            )
+        end
+    end
   end
 
   defp import_api_contact_fields(contact, api_contact, ref_data, ctx) do

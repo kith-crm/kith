@@ -6,6 +6,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   alias Kith.Contacts
   alias Kith.Repo
 
+  import Ecto.Query
   import ExUnit.CaptureLog
   import Kith.AccountsFixtures
   import Kith.ContactsFixtures
@@ -217,6 +218,63 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   end
 
   # ── crawl/5 — pagination ──────────────────────────────────────────────
+
+  describe "crawl/5 — stay in touch" do
+    test "imports Monica's stay-in-touch days as a day-interval reminder, once", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(
+          id: 9,
+          first_name: "Gina",
+          stay_in_touch_frequency: 14,
+          stay_in_touch_trigger_date: "2026-10-28T19:28:39Z"
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 1))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      for _ <- 1..2 do
+        assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      end
+
+      assert [r] =
+               Repo.all(
+                 from r in Kith.Reminders.Reminder,
+                   where: r.account_id == ^account_id and r.type == "stay_in_touch"
+               )
+
+      assert %{interval_unit: "day", interval_count: 14, anchor_date: ~D[2026-10-28]} = r
+
+      assert Imports.find_import_record(account_id, "monica_api", "reminder", "stay_in_touch:9").local_entity_id ==
+               r.id
+    end
+
+    test "is skipped when the reminders option is off", %{user: user, account_id: account_id} do
+      contacts = [contact_json(id: 9, first_name: "Gina", stay_in_touch_frequency: 14)]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 1))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, _} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "reminders" => false
+               })
+
+      assert Repo.all(
+               from r in Kith.Reminders.Reminder,
+                 where: r.account_id == ^account_id and r.type == "stay_in_touch"
+             ) == []
+    end
+  end
 
   describe "crawl/5 — pagination" do
     test "crawls multiple pages until last_page", %{user: user, account_id: account_id} do
