@@ -36,6 +36,19 @@ defmodule Kith.Reminders do
   end
 
   @doc """
+  All of a contact's reminders for its page, inactive ones included (an
+  imported past one-time reminder is history, not noise): active first, then
+  by next date.
+  """
+  def list_contact_reminders(account_id, contact_id) do
+    Reminder
+    |> scope_to_account(account_id)
+    |> where([r], r.contact_id == ^contact_id)
+    |> order_by([r], desc: r.active, asc: r.next_reminder_date, asc: r.id)
+    |> Repo.all()
+  end
+
+  @doc """
   Fetches a reminder by ID, scoped to account. Raises if not found.
   """
   def get_reminder!(account_id, id) do
