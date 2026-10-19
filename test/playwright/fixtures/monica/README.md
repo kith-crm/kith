@@ -9,6 +9,7 @@ Monica 4.1.2 (`monica:4.1.2-apache`) + MySQL 8 on tmpfs (every `down -v` is a fu
 ```
 or step by step:
 ```bash
+cd test/playwright/fixtures/monica   # seed.py copies state.php relative to the working directory
 ./reset.sh        # down -v, up, create review@example.com / review-password-1 (verified) + token.txt
                   # (bootstrap.php does the registration and creates the Settings -> API personal token;
                   #  doing it by hand in the UI works too)
@@ -23,7 +24,12 @@ on any day. Yara's year-unknown birthday takes the container's current year. Exa
 
 ## Run the spec
 Kith must listen on 127.0.0.1:4000 and be able to reach Monica, and Mailpit must be up (the spec confirms the new
-user via `MAILPIT_URL`, default http://localhost:8025; `docker compose -f docker-compose.dev.yml up -d mailpit`).
+user via `MAILPIT_URL`, default http://localhost:8025). From the repo root:
+```bash
+docker compose -f docker-compose.dev.yml up -d mailpit
+DB_PORT=5444 mix phx.server        # leave running; listens on :4000 (omit DB_PORT for the default dev database)
+```
+Then, from the repo root in another terminal:
 ```bash
 MONICA_URL=http://localhost:8089 MONICA_URL_FROM_KITH=http://localhost:8089 \
 MONICA_API_KEY="$(cat token.txt)" \
