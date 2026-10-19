@@ -619,10 +619,24 @@ defmodule Kith.Contacts do
     note
   end
 
-  def create_note(%Contact{} = contact, user_id, attrs) do
+  @doc """
+  Creates a note. `opts` may carry `:inserted_at` / `:updated_at` (import-only
+  original timestamps). They are set on the struct, never cast from `attrs`.
+  """
+  def create_note(%Contact{} = contact, user_id, attrs, opts \\ []) do
     %Note{contact_id: contact.id, account_id: contact.account_id, author_id: user_id}
+    |> put_note_timestamps(opts)
     |> Note.changeset(attrs)
     |> Repo.insert()
+  end
+
+  defp put_note_timestamps(note, opts) do
+    Enum.reduce([:inserted_at, :updated_at], note, fn key, acc ->
+      case Keyword.get(opts, key) do
+        %DateTime{} = dt -> Map.put(acc, key, DateTime.truncate(dt, :second))
+        _ -> acc
+      end
+    end)
   end
 
   def update_note(%Note{} = note, attrs) do
