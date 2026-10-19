@@ -167,8 +167,7 @@ defmodule KithWeb.SettingsLive.Import do
               <span class="font-semibold">{@results.imported}</span> contacts imported successfully
             </p>
             <p :if={@results.skipped > 0} class="text-[var(--color-warning)]">
-              <span class="font-semibold">{@results.skipped}</span>
-              skipped (already imported from Monica, or deleted)
+              <span class="font-semibold">{@results.skipped}</span> entries skipped
             </p>
             <p :if={@results.skipped_duplicates > 0} class="text-[var(--color-warning)] text-sm">
               {@results.duplicate_message}
