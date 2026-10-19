@@ -302,6 +302,7 @@
                 <td class="px-4 py-3">
                   <.link navigate={~p"/contacts/#{contact.id}"}>
                     <KithUI.avatar
+                      id={"contact-row-avatar-#{contact.id}"}
                       name={contact.display_name}
                       src={avatar_url(contact)}
                       size={:sm}
@@ -409,7 +410,12 @@
                 :for={contact <- cluster.contacts}
                 class="inline-flex items-center gap-2 rounded-full border border-[var(--color-border-subtle)] ps-1 pe-3 py-1"
               >
-                <KithUI.avatar name={contact.display_name} src={avatar_url(contact)} size={:sm} />
+                <KithUI.avatar
+                  id={"dup-avatar-#{contact.id}"}
+                  name={contact.display_name}
+                  src={avatar_url(contact)}
+                  size={:sm}
+                />
                 <span class="text-sm text-[var(--color-text-primary)]">
                   {contact.display_name}
                 </span>

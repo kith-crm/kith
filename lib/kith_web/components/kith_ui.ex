@@ -130,15 +130,21 @@ defmodule KithWeb.KithUI do
   ## Examples
 
       <.avatar name="John Doe" />
-      <.avatar src="/images/avatar.jpg" name="John Doe" size={:lg} />
+      <.avatar id="avatar-1" src="/images/avatar.jpg" name="John Doe" size={:lg} />
   """
-  attr :id, :string, default: nil
+  attr :id, :string,
+    default: nil,
+    doc: "required when `src` is set: the ImgFallback hook needs a unique DOM id"
+
   attr :src, :string, default: nil
   attr :name, :string, default: nil
   attr :size, :atom, default: :md, values: [:sm, :md, :lg, :xl]
   attr :class, :string, default: nil
 
   def avatar(assigns) do
+    if assigns.src && is_nil(assigns.id),
+      do: raise(ArgumentError, "KithUI.avatar/1 needs an :id when :src is set")
+
     assigns =
       assigns
       |> assign(:initials_text, initials(assigns.name))
@@ -148,8 +154,9 @@ defmodule KithWeb.KithUI do
     ~H"""
     <div
       id={@id}
+      phx-hook={@src && "ImgFallback"}
       class={[
-        "inline-flex items-center justify-center rounded-full shrink-0 font-semibold text-white select-none ring-0 hover:ring-2 ring-[var(--color-accent)]/30 transition-shadow duration-200",
+        "group inline-flex items-center justify-center rounded-full shrink-0 font-semibold text-white select-none ring-0 hover:ring-2 ring-[var(--color-accent)]/30 transition-shadow duration-200",
         @size_classes,
         !@src && @bg_color,
         @class
@@ -157,10 +164,21 @@ defmodule KithWeb.KithUI do
     >
       <img
         :if={@src}
+        data-fallback-img
         src={@src}
         alt={@name || "Avatar"}
-        class={["rounded-full object-cover", @size_classes]}
+        class={["rounded-full object-cover group-data-[img-failed]:hidden", @size_classes]}
       />
+      <span
+        :if={@src}
+        class={[
+          "hidden group-data-[img-failed]:inline-flex items-center justify-center rounded-full",
+          @size_classes,
+          @bg_color
+        ]}
+      >
+        {@initials_text}
+      </span>
       <span :if={!@src}>{@initials_text}</span>
     </div>
     """
@@ -175,9 +193,9 @@ defmodule KithWeb.KithUI do
 
   ## Examples
 
-      <.contact_badge contact={%{id: 1, display_name: "John Doe", avatar_url: nil}} />
+      <.contact_badge id="badge-1" contact={%{id: 1, display_name: "John Doe", avatar_url: nil}} />
   """
-  attr :id, :string, default: nil
+  attr :id, :string, required: true
   attr :contact, :map, required: true
   attr :navigate, :string, default: nil
 
@@ -194,6 +212,7 @@ defmodule KithWeb.KithUI do
       class="inline-flex items-center gap-2 rounded-[var(--radius-full)] bg-[var(--color-surface-sunken)] pe-3 ps-1 py-1 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-border)] transition-colors duration-150"
     >
       <.avatar
+        id={"#{@id}-avatar"}
         src={avatar_url(@contact)}
         name={Map.get(@contact, :display_name, "")}
         size={:sm}
