@@ -14,6 +14,7 @@ defmodule Kith.DAV.XMLParser do
   where `props` is a list of atoms representing the requested properties.
 
   An empty body is treated as an allprop request per RFC 4918 Section 9.1.
+  A body that is not well-formed UTF-8 XML returns `{:error, :invalid_xml}`.
   """
   def parse_propfind(body) when body in [nil, ""] do
     {:ok, :allprop}
@@ -21,6 +22,12 @@ defmodule Kith.DAV.XMLParser do
 
   def parse_propfind(body) do
     cond do
+      String.trim(body) == "" ->
+        {:ok, :allprop}
+
+      parse_xml(body) == :error ->
+        {:error, :invalid_xml}
+
       String.contains?(body, "<d:allprop") or String.contains?(body, "<D:allprop") ->
         {:ok, :allprop}
 
@@ -117,6 +124,31 @@ defmodule Kith.DAV.XMLParser do
     "max-resource-size" => :max_resource_size,
     "supported-collation-set" => :supported_collation_set
   }
+
+  # Namespace-aware, non-validating parse with OTP's xmerl SAX parser.
+  # Returns `{:ok, elements}`, the start tags in document order as
+  # `{depth, namespace_uri, local_name}` (strings, so no atoms are created),
+  # or `:error` for anything that is not well-formed UTF-8 XML. Entity
+  # declarations are refused (no entity-expansion attacks).
+  defp parse_xml(body) do
+    opts = [event_fun: &sax_event/3, event_state: {0, []}, external_entities: :none]
+
+    case :xmerl_sax_parser.stream(body, [:disallow_entities | opts]) do
+      {:ok, {0, elements}, rest} ->
+        if String.trim(to_string(rest)) == "", do: {:ok, Enum.reverse(elements)}, else: :error
+
+      _ ->
+        :error
+    end
+  catch
+    _, _ -> :error
+  end
+
+  defp sax_event({:startElement, uri, local, _qname, _attrs}, _loc, {depth, acc}),
+    do: {depth + 1, [{depth + 1, to_string(uri), to_string(local)} | acc]}
+
+  defp sax_event({:endElement, _uri, _local, _qname}, _loc, {depth, acc}), do: {depth - 1, acc}
+  defp sax_event(_event, _loc, state), do: state
 
   defp extract_requested_props(body) do
     for {name, atom} <- @known_props,

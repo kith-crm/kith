@@ -65,15 +65,19 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   defp dispatch(conn, "OPTIONS", _), do: handle_options(conn)
-  defp dispatch(conn, "PROPFIND", ["dav"]), do: handle_root_propfind(conn)
-  defp dispatch(conn, "PROPFIND", ["dav", "principals"]), do: handle_principal_propfind(conn)
-  defp dispatch(conn, "PROPFIND", ["dav", "addressbooks"]), do: handle_home_propfind(conn)
+  defp dispatch(conn, "PROPFIND", ["dav"]), do: propfind(conn, &handle_root_propfind/2)
+
+  defp dispatch(conn, "PROPFIND", ["dav", "principals"]),
+    do: propfind(conn, &handle_principal_propfind/2)
+
+  defp dispatch(conn, "PROPFIND", ["dav", "addressbooks"]),
+    do: propfind(conn, &handle_home_propfind/2)
 
   defp dispatch(conn, "PROPFIND", ["dav", "addressbooks", "default"]),
-    do: handle_addressbook_propfind(conn)
+    do: propfind(conn, &handle_addressbook_propfind/2)
 
   defp dispatch(conn, "PROPFIND", ["dav", "addressbooks", "default", _uid]),
-    do: handle_contact_propfind(conn)
+    do: propfind(conn, &handle_contact_propfind/2)
 
   defp dispatch(conn, "REPORT", ["dav", "addressbooks", "default"]), do: handle_report(conn)
 
@@ -116,12 +120,22 @@ defmodule Kith.DAV.CardDAVPlug do
     |> send_resp(200, "")
   end
 
+  # ── PROPFIND body ──────────────────────────────────────────────────────
+
+  # Parses the PROPFIND body and hands the request type to `handler`.
+  # A body that is not well-formed XML is a 400 (RFC 4918 §8.7).
+  defp propfind(conn, handler) do
+    {:ok, body, conn} = read_body(conn)
+
+    case XMLParser.parse_propfind(body) do
+      {:ok, request_type} -> handler.(conn, request_type)
+      {:error, _} -> send_resp(conn, 400, "Bad Request")
+    end
+  end
+
   # ── Root PROPFIND ──────────────────────────────────────────────────────
 
-  defp handle_root_propfind(conn) do
-    {:ok, body, conn} = read_body(conn)
-    {:ok, request_type} = XMLParser.parse_propfind(body)
-
+  defp handle_root_propfind(conn, request_type) do
     props = [
       current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
       resourcetype: XMLBuilder.resourcetype("<d:collection/>")
@@ -134,10 +148,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── Principal PROPFIND ─────────────────────────────────────────────────
 
-  defp handle_principal_propfind(conn) do
-    {:ok, body, conn} = read_body(conn)
-    {:ok, request_type} = XMLParser.parse_propfind(body)
-
+  defp handle_principal_propfind(conn, request_type) do
     props = [
       current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
       principal_url: XMLBuilder.principal_url("/dav/principals/"),
@@ -153,10 +164,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── Home set PROPFIND ──────────────────────────────────────────────────
 
-  defp handle_home_propfind(conn) do
-    {:ok, body, conn} = read_body(conn)
-    {:ok, request_type} = XMLParser.parse_propfind(body)
-
+  defp handle_home_propfind(conn, request_type) do
     home_props = [
       current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
       resourcetype: XMLBuilder.resourcetype("<d:collection/>"),
@@ -192,9 +200,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── Address book PROPFIND ──────────────────────────────────────────────
 
-  defp handle_addressbook_propfind(conn) do
-    {:ok, body, conn} = read_body(conn)
-    {:ok, request_type} = XMLParser.parse_propfind(body)
+  defp handle_addressbook_propfind(conn, request_type) do
     depth = get_req_header(conn, "depth") |> List.first("0")
 
     # RFC 4918 §9.1.4: Reject Depth: infinity
@@ -243,9 +249,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── Contact PROPFIND ───────────────────────────────────────────────────
 
-  defp handle_contact_propfind(conn) do
-    {:ok, body, conn} = read_body(conn)
-    {:ok, request_type} = XMLParser.parse_propfind(body)
+  defp handle_contact_propfind(conn, request_type) do
     uid = List.last(path_segments(conn.request_path))
 
     case find_contact_by_uid(conn, uid) do

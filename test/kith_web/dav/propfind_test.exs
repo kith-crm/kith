@@ -725,5 +725,37 @@ defmodule KithWeb.DAV.PropfindTest do
       assert [_, token] = Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, conn.resp_body)
       assert token =~ ~r/^[a-z][a-z0-9+.-]*:\S+$/i
     end
+
+    test "CDV-04: malformed or non-UTF-8 PROPFIND and PROPPATCH bodies return 400", context do
+      malformed = ~s(<d:propfind xmlns:d="DAV:"><d:prop><d:getetag></d:prop>)
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+
+      for path <- [
+            "/dav/",
+            "/dav/principals/",
+            "/dav/addressbooks/",
+            "/dav/addressbooks/default/",
+            contact_path(contact)
+          ] do
+        conn = authed_dav(context, "PROPFIND", path, malformed)
+        assert conn.status == 400, path
+      end
+
+      latin1 =
+        <<"<?xml version=\"1.0\" encoding=\"UTF-8\"?><d:propfind xmlns:d=\"DAV:\"><d:prop>",
+          "<d:displayname>", 0xE9, "</d:displayname></d:prop></d:propfind>">>
+
+      assert authed_dav(context, "PROPFIND", "/dav/addressbooks/default/", latin1).status == 400
+
+      conn =
+        authed_dav(
+          context,
+          "PROPPATCH",
+          "/dav/addressbooks/default/",
+          "<d:propertyupdate xmlns:d="
+        )
+
+      assert conn.status == 400
+    end
   end
 end
