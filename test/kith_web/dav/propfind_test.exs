@@ -675,4 +675,17 @@ defmodule KithWeb.DAV.PropfindTest do
       refute conn.resp_body =~ "<d:current-user-principal><d:href>"
     end
   end
+
+  # ── CardDAV e2e regressions (docs/carddav-e2e.md) ─────────────────────
+
+  describe "CardDAV e2e regressions" do
+    test "CDV-01: OPTIONS Allow lists PROPPATCH", context do
+      for path <- ["/dav/", "/dav/addressbooks/default/"] do
+        conn = authed_dav(context, "OPTIONS", path)
+        [allow] = get_resp_header(conn, "allow")
+        methods = allow |> String.split(",") |> Enum.map(&String.trim/1)
+        assert "PROPPATCH" in methods
+      end
+    end
+  end
 end

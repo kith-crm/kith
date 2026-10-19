@@ -112,7 +112,7 @@ defmodule Kith.DAV.CardDAVPlug do
   defp handle_options(conn) do
     conn
     |> put_resp_header("dav", "1, 2, 3, addressbook")
-    |> put_resp_header("allow", "OPTIONS, GET, PUT, DELETE, PROPFIND, REPORT")
+    |> put_resp_header("allow", "OPTIONS, GET, PUT, DELETE, PROPFIND, PROPPATCH, REPORT")
     |> send_resp(200, "")
   end
 
