@@ -232,12 +232,22 @@ defmodule KithWeb.API.ReminderControllerTest do
 
     test "update is rejected", %{conn: conn, first_met: first_met} do
       conn = patch(conn, ~p"/api/reminders/#{first_met.id}", %{"reminder" => %{"title" => "x"}})
-      assert json_response(conn, 422)
+
+      assert json_response(conn, 422)["detail"] ==
+               "First-met reminders are managed from the contact's first-met date."
+
+      unchanged = Kith.Repo.get!(Kith.Reminders.Reminder, first_met.id)
+      assert unchanged.title == first_met.title
+      assert unchanged.updated_at == first_met.updated_at
     end
 
     test "delete is rejected", %{conn: conn, first_met: first_met} do
       conn = delete(conn, ~p"/api/reminders/#{first_met.id}")
-      assert json_response(conn, 422)
+
+      assert json_response(conn, 422)["detail"] ==
+               "First-met reminders are managed from the contact's first-met date."
+
+      assert Kith.Repo.get(Kith.Reminders.Reminder, first_met.id)
     end
   end
 

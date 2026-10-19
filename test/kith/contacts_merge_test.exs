@@ -51,6 +51,26 @@ defmodule Kith.Contacts.MergeTest do
     ContactsFixtures.contact_fixture(other_account_id, %{first_name: "Stranger"})
   end
 
+  defp resolution(fields \\ %{}), do: %{fields: fields, drop: %{}}
+
+  defp first_met_reminders(contact_id) do
+    Repo.all(
+      from(r in Kith.Reminders.Reminder,
+        where: r.type == "first_met" and r.contact_id == ^contact_id
+      )
+    )
+  end
+
+  defp opt_in_first_met(contact_id, date) do
+    Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^contact_id),
+      set: [first_met_at: date, first_met_reminder: true]
+    )
+
+    contact = Repo.get!(Kith.Contacts.Contact, contact_id)
+    {:ok, _} = Kith.Reminders.sync_first_met(contact)
+    contact
+  end
+
   describe "merge_contacts/3" do
     test "merges contacts with default field choices (keep survivor)", ctx do
       {:ok, _result} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
@@ -530,8 +550,6 @@ defmodule Kith.Contacts.MergeTest do
       scope = Kith.Accounts.Scope.for_user(ctx.user)
       %{scope: scope}
     end
-
-    defp resolution(fields \\ %{}), do: %{fields: fields, drop: %{}}
 
     test "merges three contacts into one survivor", ctx do
       c =
@@ -2272,24 +2290,6 @@ defmodule Kith.Contacts.MergeTest do
   end
 
   describe "first-met reminders" do
-    defp first_met_reminders(contact_id) do
-      Repo.all(
-        from(r in Kith.Reminders.Reminder,
-          where: r.type == "first_met" and r.contact_id == ^contact_id
-        )
-      )
-    end
-
-    defp opt_in_first_met(contact_id, date) do
-      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^contact_id),
-        set: [first_met_at: date, first_met_reminder: true]
-      )
-
-      contact = Repo.get!(Kith.Contacts.Contact, contact_id)
-      {:ok, _} = Kith.Reminders.sync_first_met(contact)
-      contact
-    end
-
     test "two opted-in contacts merge into one first_met reminder", ctx do
       opt_in_first_met(ctx.contact_a.id, ~D[2012-09-01])
       opt_in_first_met(ctx.contact_b.id, ~D[2014-02-02])

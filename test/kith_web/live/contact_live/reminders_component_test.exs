@@ -117,10 +117,24 @@ defmodule KithWeb.ContactLive.RemindersComponentTest do
         }
       })
 
-      # The error path keeps the form open (flash is shown by the layout).
+      assert view |> element("#reminder-form-error-#{contact.id}") |> render() =~
+               "Repeat every must be a whole number of 1 or more"
+
+      assert has_element?(
+               view,
+               ~s(#reminders-#{contact.id} input[name="reminder[interval_count]"][aria-invalid="true"][aria-describedby="reminder-form-error-#{contact.id}"])
+             )
+
+      assert has_element?(view, "#reminder-form-error-#{contact.id}")
       assert has_element?(view, "#reminders-#{contact.id} form")
     end
 
+    # Editing the form clears the stale error.
+    view
+    |> rem_form(contact)
+    |> render_change(%{reminder: %{type: "recurring", frequency: "custom"}})
+
+    refute has_element?(view, "#reminder-form-error-#{contact.id}")
     assert Kith.Reminders.list_contact_reminders(account_id, contact.id) == []
   end
 
@@ -172,7 +186,9 @@ defmodule KithWeb.ContactLive.RemindersComponentTest do
     |> with_target("#reminders-#{contact.id}")
     |> render_hook("delete", %{"id" => to_string(first_met.id)})
 
-    render(view)
+    assert view |> element("#reminder-list-error-#{contact.id}") |> render() =~
+             "Birthday and first-met reminders are managed from the contact."
+
     assert Kith.Reminders.get_first_met_reminder(contact.id, contact.account_id)
   end
 end

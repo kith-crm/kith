@@ -29,6 +29,8 @@ defmodule KithWeb.ContactLive.RemindersComponent do
      socket
      |> assign(:reminders, [])
      |> assign(:show_form, false)
+     |> assign(:form_error, nil)
+     |> assign(:list_error, nil)
      |> assign(:form_type, "one_time")
      |> assign(:form_frequency, "weekly")}
   end
@@ -48,6 +50,8 @@ defmodule KithWeb.ContactLive.RemindersComponent do
     {:noreply,
      socket
      |> assign(:show_form, true)
+     |> assign(:form_error, nil)
+     |> assign(:list_error, nil)
      |> assign(:form_type, "one_time")
      |> assign(:form_frequency, "weekly")}
   end
@@ -59,6 +63,7 @@ defmodule KithWeb.ContactLive.RemindersComponent do
   def handle_event("type-changed", %{"reminder" => params}, socket) do
     {:noreply,
      socket
+     |> assign(:form_error, nil)
      |> assign(:form_type, params["type"] || socket.assigns.form_type)
      |> assign(:form_frequency, params["frequency"] || socket.assigns.form_frequency)}
   end
@@ -80,10 +85,13 @@ defmodule KithWeb.ContactLive.RemindersComponent do
          socket
          |> assign(:reminders, reminders)
          |> assign(:show_form, false)
+         |> assign(:form_error, nil)
          |> put_flash(:info, "Reminder added.")}
 
       {:error, changeset} ->
-        {:noreply, put_flash(socket, :error, format_errors(changeset))}
+        # A component's put_flash is not rendered by the parent LiveView, so
+        # the error is shown inline and the form stays open.
+        {:noreply, assign(socket, :form_error, format_errors(changeset))}
     end
   end
 
@@ -91,8 +99,13 @@ defmodule KithWeb.ContactLive.RemindersComponent do
     reminder = Reminders.get_reminder!(socket.assigns.account_id, String.to_integer(id))
 
     if derived?(reminder) do
+      # Inline: a component's put_flash is not rendered by the parent LiveView.
       {:noreply,
-       put_flash(socket, :error, "Birthday and first-met reminders are managed from the contact.")}
+       assign(
+         socket,
+         :list_error,
+         "Birthday and first-met reminders are managed from the contact."
+       )}
     else
       delete_reminder(reminder, socket)
     end
@@ -109,6 +122,7 @@ defmodule KithWeb.ContactLive.RemindersComponent do
     {:noreply,
      socket
      |> assign(:reminders, reminders)
+     |> assign(:list_error, nil)
      |> put_flash(:info, "Reminder deleted.")}
   end
 
@@ -131,8 +145,14 @@ defmodule KithWeb.ContactLive.RemindersComponent do
         opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
       end)
     end)
-    |> Enum.map_join(", ", fn {field, msgs} -> "#{field} #{Enum.join(msgs, ", ")}" end)
+    |> Enum.map_join(", ", &format_field_error/1)
   end
+
+  defp format_field_error({:interval_count, _msgs}),
+    do: "Repeat every must be a whole number of 1 or more"
+
+  defp format_field_error({field, msgs}),
+    do: "#{Phoenix.Naming.humanize(field)} #{Enum.join(msgs, ", ")}"
 
   defp needs_frequency?(type) when type in ["recurring", "stay_in_touch"], do: true
   defp needs_frequency?(_), do: false
@@ -162,6 +182,14 @@ defmodule KithWeb.ContactLive.RemindersComponent do
         <div class="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5 mb-2">
           <.form for={%{}} phx-submit="save" phx-change="type-changed" phx-target={@myself}>
             <div class="space-y-2">
+              <p
+                :if={@form_error}
+                id={"reminder-form-error-#{@contact_id}"}
+                role="alert"
+                class="text-xs text-[var(--color-error)]"
+              >
+                {@form_error}
+              </p>
               <div>
                 <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-0.5">
                   Type
@@ -211,6 +239,8 @@ defmodule KithWeb.ContactLive.RemindersComponent do
                   name="reminder[interval_count]"
                   min="1"
                   required
+                  aria-invalid={@form_error && "true"}
+                  aria-describedby={@form_error && "reminder-form-error-#{@contact_id}"}
                   class="w-16 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-2 py-1.5 text-xs"
                 />
                 <select
@@ -272,6 +302,14 @@ defmodule KithWeb.ContactLive.RemindersComponent do
           No reminders set.
         </p>
       <% else %>
+        <p
+          :if={@list_error}
+          id={"reminder-list-error-#{@contact_id}"}
+          role="alert"
+          class="text-xs text-[var(--color-error)] mb-1"
+        >
+          {@list_error}
+        </p>
         <div class="space-y-2">
           <%= for reminder <- @reminders do %>
             <div class="flex items-start gap-2 text-sm group">
