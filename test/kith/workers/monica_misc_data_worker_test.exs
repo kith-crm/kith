@@ -308,6 +308,9 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
 
       assert log =~ "non_positive_interval"
       assert [%{type: "one_time", active: true}] = contact_reminders(ctx.account_id, contact.id)
+
+      assert %{"reminders" => 1, "reminders_skipped" => 0, "reminders_warnings" => 1} =
+               misc_summary(ctx.import_job)
     end
 
     test "the description is imported", ctx do
@@ -399,6 +402,22 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
 
       assert log =~ "unknown_frequency"
       assert contact_reminders(ctx.account_id, contact.id) == []
+
+      assert %{"reminders" => 0, "reminders_skipped" => 1, "reminders_warnings" => 0} =
+               misc_summary(ctx.import_job)
+    end
+
+    test "an unparseable date is counted as skipped in the import summary", ctx do
+      contact = contact_fixture(ctx.account_id)
+
+      capture_log(fn ->
+        import_reminders(ctx.import_job, contact, [
+          monica(98, %{"frequency_type" => "year", "initial_date" => "not-a-date"}),
+          monica(97, %{"frequency_type" => "fortnight", "initial_date" => "2026-01-01T00:00:00Z"})
+        ])
+      end)
+
+      assert %{"reminders" => 0, "reminders_skipped" => 2} = misc_summary(ctx.import_job)
     end
 
     test "a generic row from an earlier import is replaced once the contact has a birthdate",
@@ -451,6 +470,9 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     plan = [%{"source_id" => "7", "local_id" => contact.id, "endpoints" => ["reminders"]}]
     perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
   end
+
+  defp misc_summary(import_job),
+    do: Repo.get!(Kith.Imports.Import, import_job.id).summary["misc"]
 
   defp contact_reminders(account_id, contact_id) do
     Reminder

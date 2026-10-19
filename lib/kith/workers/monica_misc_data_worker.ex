@@ -95,6 +95,8 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       "debts" => 0,
       "tasks" => 0,
       "reminders" => 0,
+      "reminders_skipped" => 0,
+      "reminders_warnings" => 0,
       "conversations" => 0
     }
 
@@ -112,11 +114,20 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       counts
     else
       Enum.reduce(entry["endpoints"] || [], counts, fn endpoint, counts ->
-        n = fire_endpoint(endpoint, credential, user_id, contact, entry["source_id"], import_job)
-        Map.update(counts, endpoint, n, &(&1 + n))
+        endpoint
+        |> fire_endpoint(credential, user_id, contact, entry["source_id"], import_job)
+        |> add_counts(endpoint, counts)
       end)
     end
   end
+
+  # An endpoint returns its imported count, or a map of count keys when it
+  # reports more than that (reminders also count skips and warnings).
+  defp add_counts(extra, _endpoint, counts) when is_map(extra) do
+    Enum.reduce(extra, counts, fn {key, n}, acc -> Map.update(acc, key, n, &(&1 + n)) end)
+  end
+
+  defp add_counts(n, endpoint, counts), do: Map.update(counts, endpoint, n, &(&1 + n))
 
   defp fire_endpoint("pets", c, _u, contact, src, ij),
     do: import_contact_pets(c, contact, src, ij)
@@ -473,43 +484,69 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       {:ok, %{"data" => reminders}} when is_list(reminders) ->
         today = Reminders.account_today(contact.account_id)
 
-        Enum.count(reminders, fn reminder ->
-          match?(:ok, import_single_reminder(user_id, contact, reminder, import_job, today))
+        Enum.reduce(reminders, no_reminder_counts(), fn reminder, acc ->
+          outcome = import_single_reminder(user_id, contact, reminder, import_job, today)
+          tally_reminder(acc, outcome)
         end)
 
       {:ok, _} ->
-        0
+        no_reminder_counts()
 
       {:error, reason} ->
         Logger.warning(
           "[MonicaMiscData] failed to fetch reminders for contact #{source_id}: #{inspect(reason)}"
         )
 
-        0
+        no_reminder_counts()
     end
   end
+
+  defp no_reminder_counts,
+    do: %{"reminders" => 0, "reminders_skipped" => 0, "reminders_warnings" => 0}
+
+  defp tally_reminder(acc, {:ok, warnings}) do
+    %{
+      acc
+      | "reminders" => acc["reminders"] + 1,
+        "reminders_warnings" => acc["reminders_warnings"] + warnings
+    }
+  end
+
+  defp tally_reminder(acc, :skipped),
+    do: %{acc | "reminders_skipped" => acc["reminders_skipped"] + 1}
+
+  defp tally_reminder(acc, {:error, _}), do: acc
 
   # Carries out `ReminderMapper`'s decision (design spec 2026-10-14 §4).
   defp import_single_reminder(user_id, contact, data, import_job, today) do
     case ReminderMapper.map(data, contact, today) do
       :birthday ->
-        import_derived(contact, data, import_job, fn -> Reminders.sync_birthday(contact) end)
+        contact
+        |> import_derived(data, import_job, fn -> Reminders.sync_birthday(contact) end)
+        |> with_warnings(0)
 
       :first_met ->
-        import_derived(contact, data, import_job, fn -> opt_in_first_met(contact) end)
+        contact
+        |> import_derived(data, import_job, fn -> opt_in_first_met(contact) end)
+        |> with_warnings(0)
 
       {:create, attrs, notes} ->
         Enum.each(notes, fn note ->
           Logger.warning("[MonicaMiscData] reminder #{data["id"]}: #{note}; imported as one-time")
         end)
 
-        upsert_reminder(user_id, contact, data, attrs, import_job)
+        user_id
+        |> upsert_reminder(contact, data, attrs, import_job)
+        |> with_warnings(length(notes))
 
       {:skip, reason} ->
         Logger.warning("[MonicaMiscData] reminder #{data["id"]} skipped: #{reason}")
-        {:error, reason}
+        :skipped
     end
   end
+
+  defp with_warnings(:ok, warnings), do: {:ok, warnings}
+  defp with_warnings(other, _warnings), do: other
 
   defp opt_in_first_met(contact) do
     with {:ok, contact} <- Contacts.update_contact(contact, %{first_met_reminder: true}) do
