@@ -32,7 +32,7 @@ DB_PORT=5444 mix phx.server        # leave running; listens on :4000 (omit DB_PO
 Then, from the repo root in another terminal:
 ```bash
 MONICA_URL=http://localhost:8089 MONICA_URL_FROM_KITH=http://localhost:8089 \
-MONICA_API_KEY="$(cat token.txt)" \
+MONICA_API_KEY="$(cat test/playwright/fixtures/monica/token.txt)" \
   npx playwright test --project=e2e test/playwright/monica-reminders.spec.ts
 ```
 Use `MONICA_URL_FROM_KITH=http://host.docker.internal:8089` when Kith itself runs in Docker.
