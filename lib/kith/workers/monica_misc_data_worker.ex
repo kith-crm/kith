@@ -31,6 +31,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   import Ecto.Query, warn: false
 
   alias Kith.Contacts
+  alias Kith.Conversations.{Conversation, Message}
   alias Kith.Imports
   alias Kith.Imports.Monica.ReminderMapper
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
@@ -691,7 +692,15 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       "subject" => non_empty_string(convo_data["subject"])
     }
 
-    case Kith.Conversations.create_conversation(account_id, user_id, attrs) do
+    # Upsert by mapping so an Oban retry of this job reuses the conversation
+    # (and skips the messages) it already imported.
+    result =
+      case mapped_entity(import_job, "conversation", convo_data["id"], Conversation) do
+        %Conversation{} = existing -> {:ok, existing}
+        nil -> Kith.Conversations.create_conversation(account_id, user_id, attrs)
+      end
+
+    case result do
       {:ok, conversation} ->
         maybe_record_entity(
           import_job,
@@ -714,20 +723,43 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     messages = convo_data["messages"] || []
 
     Enum.each(messages, fn msg ->
-      attrs = %{
-        "body" => msg["content"] || msg["written_by_me_body"] || "",
-        "direction" => if(msg["written_by_me"], do: "sent", else: "received"),
-        "sent_at" => parse_datetime(msg["written_at"]) || DateTime.utc_now()
-      }
-
-      case Kith.Conversations.add_message(conversation, attrs) do
-        {:ok, message} ->
-          maybe_record_entity(import_job, "message", msg["id"], "message", message.id)
-
-        {:error, reason} ->
-          Logger.warning("[MonicaMiscData] message error: #{inspect_errors(reason)}")
+      if is_nil(mapped_entity(import_job, "message", msg["id"], Message)) do
+        add_conversation_message(conversation, msg, import_job)
       end
     end)
+  end
+
+  defp add_conversation_message(conversation, msg, import_job) do
+    attrs = %{
+      "body" => msg["content"] || msg["written_by_me_body"] || "",
+      "direction" => if(msg["written_by_me"], do: "sent", else: "received"),
+      "sent_at" => parse_datetime(msg["written_at"]) || DateTime.utc_now()
+    }
+
+    case Kith.Conversations.add_message(conversation, attrs) do
+      {:ok, message} ->
+        maybe_record_entity(import_job, "message", msg["id"], "message", message.id)
+
+      {:error, reason} ->
+        Logger.warning("[MonicaMiscData] message error: #{inspect_errors(reason)}")
+    end
+  end
+
+  # The local row an earlier attempt of this import mapped `source_id` to, if it
+  # still exists.
+  defp mapped_entity(nil, _type, _source_id, _schema), do: nil
+  defp mapped_entity(_import_job, _type, nil, _schema), do: nil
+
+  defp mapped_entity(import_job, type, source_id, schema) do
+    case Imports.find_import_record(
+           import_job.account_id,
+           import_job.source,
+           type,
+           to_string(source_id)
+         ) do
+      %{local_entity_id: id} when is_integer(id) -> Repo.get(schema, id)
+      _ -> nil
+    end
   end
 
   # ── Local helpers (copied from MonicaApi) ────────────────────────────

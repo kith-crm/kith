@@ -2019,6 +2019,81 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
     end
   end
 
+  describe "coverage backfill on a second import" do
+    # Stubs the listing with `contacts` and records every per-contact fetch.
+    defp stub_listing_recording_fetches(contacts, total) do
+      pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case conn.request_path do
+          "/api/contacts" ->
+            Req.Test.json(conn, contacts_page_json(contacts, 1, 1, total))
+
+          "/api/contacts/" <> id ->
+            send(pid, {:single_fetch, id})
+            Req.Test.json(conn, %{"data" => Enum.find(contacts, &(to_string(&1["id"]) == id))})
+        end
+      end)
+    end
+
+    defp complete(job),
+      do: Imports.update_import_status(job, "completed", %{completed_at: DateTime.utc_now()})
+
+    test "all contacts skipped: no unresolved gap, no per-contact fetches", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = for i <- 1..3, do: contact_json(id: i, first_name: "C#{i}")
+      stub_listing_recording_fetches(contacts, 3)
+
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      complete(job1)
+      flush_fetches()
+
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+
+      assert summary.skipped == 3
+      assert summary.contacts == 0
+      assert summary.coverage_backfill.unresolved_gap == 0
+      assert summary.coverage_backfill.gap_detected == 0
+      refute_received {:single_fetch, _}
+    end
+
+    test "mixed new and skipped: skipped contacts are counted once and never re-fetched", %{
+      user: user,
+      account_id: account_id
+    } do
+      first = [contact_json(id: 1, first_name: "C1"), contact_json(id: 3, first_name: "C3")]
+      stub_listing_recording_fetches(first, 2)
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      complete(job1)
+      flush_fetches()
+
+      all = for i <- 1..3, do: contact_json(id: i, first_name: "C#{i}")
+      stub_listing_recording_fetches(all, 3)
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+
+      assert summary.contacts == 1
+      assert summary.skipped == 2
+      assert summary.coverage_backfill.gap_detected == 0
+      assert summary.coverage_backfill.imported_full == 0
+      assert summary.coverage_backfill.unresolved_gap == 0
+      refute_received {:single_fetch, _}
+    end
+
+    defp flush_fetches do
+      receive do
+        {:single_fetch, _} -> flush_fetches()
+      after
+        0 -> :ok
+      end
+    end
+  end
+
   describe "coverage_check_and_backfill" do
     test "closes a single-ID gap via direct fetch", %{user: user, account_id: account_id} do
       import_job = api_import_fixture(account_id, user.id)

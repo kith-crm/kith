@@ -414,6 +414,48 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     end
   end
 
+  describe "conversations" do
+    test "a retry of the same import does not duplicate conversations or messages",
+         %{user: user, account_id: account_id} do
+      contact = contact_fixture(account_id)
+      import_job = api_import(account_id, user.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case conn.request_path do
+          "/api/contacts/1/conversations" ->
+            Req.Test.json(conn, %{
+              "data" => [
+                %{
+                  "id" => 10,
+                  "contact_field_type" => %{"name" => "Email"},
+                  "messages" => [
+                    %{"id" => 100, "content" => "hi", "written_at" => "2025-01-01T10:00:00Z"},
+                    %{
+                      "id" => 101,
+                      "content" => "yo",
+                      "written_by_me" => true,
+                      "written_at" => "2025-01-01T11:00:00Z"
+                    }
+                  ]
+                }
+              ]
+            })
+
+          _ ->
+            Req.Test.json(conn, %{"data" => []})
+        end
+      end)
+
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["conversations"]}]
+
+      for _ <- 1..2,
+          do: assert(:ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan)))
+
+      assert Repo.aggregate(Kith.Conversations.Conversation, :count) == 1
+      assert Repo.aggregate(Kith.Conversations.Message, :count) == 2
+    end
+  end
+
   defp monica(id, attrs) do
     Map.merge(
       %{

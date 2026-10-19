@@ -192,7 +192,10 @@ defmodule Kith.Imports.Sources.MonicaApi do
         skipped: 0,
         error_count: 0,
         errors: [],
-        created_contact_ids: []
+        created_contact_ids: [],
+        # Monica ids skipped as already imported / soft-deleted: they were
+        # handled this run, so the coverage backfill must count them as seen.
+        skipped_source_ids: []
       },
       deferred: %{
         first_met_through: [],
@@ -333,7 +336,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
   end
 
   defp do_backfill(ctx, acc, ref_data, monica_total) do
-    seen_ids = seen_source_ids(ctx.import_job.id)
+    seen_ids = seen_source_ids(ctx.import_job.id, acc.skipped_source_ids)
 
     if Enum.empty?(seen_ids) do
       # Nothing imported by listing; refuse to scan an unbounded range.
@@ -362,7 +365,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
     end
   end
 
-  defp seen_source_ids(import_id) do
+  defp seen_source_ids(import_id, skipped_source_ids) do
     from(ir in Imports.ImportRecord,
       where:
         ir.import_id == ^import_id and
@@ -377,6 +380,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
       end
     end)
     |> MapSet.new()
+    |> MapSet.union(MapSet.new(skipped_source_ids))
   end
 
   defp scan_gap_range(ctx, acc, ref_data, seen_ids, min_id, max_id, monica_total, stats) do
@@ -436,6 +440,11 @@ defmodule Kith.Imports.Sources.MonicaApi do
                 imported_partial: stats.imported_partial + 1
             }, MapSet.put(seen, id)}}
 
+        {:skipped_existing, new_acc, new_ref_data} ->
+          {:cont,
+           {new_acc, new_ref_data, %{stats | range_scanned: stats.range_scanned + 1},
+            MapSet.put(seen, id)}}
+
         :skipped_deleted ->
           {:cont,
            {acc, ref_data,
@@ -486,9 +495,15 @@ defmodule Kith.Imports.Sources.MonicaApi do
             misc_data: []
           })
 
-        case verdict do
-          :import_full -> {:imported_full, new_acc, new_ref_data}
-          :import_partial -> {:imported_partial, new_acc, new_ref_data}
+        cond do
+          length(new_acc.skipped_source_ids) > length(acc.skipped_source_ids) ->
+            {:skipped_existing, new_acc, new_ref_data}
+
+          verdict == :import_full ->
+            {:imported_full, new_acc, new_ref_data}
+
+          true ->
+            {:imported_partial, new_acc, new_ref_data}
         end
     end
   end
@@ -541,7 +556,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
       %{deleted_at: deleted_at} when not is_nil(deleted_at) ->
         Logger.info("[MonicaApi] Skipping #{api_contact_display_name(api_contact)}: soft-deleted")
 
-        {%{acc | skipped: acc.skipped + 1}, deferred}
+        {add_skipped(acc, source_id), deferred}
 
       contact when import_id == ctx.import_job.id ->
         import_api_contact_children(ctx, contact, api_contact, source_id, ref_data, acc, deferred)
@@ -551,8 +566,18 @@ defmodule Kith.Imports.Sources.MonicaApi do
           "[MonicaApi] Skipping #{api_contact_display_name(api_contact)}: already imported by an earlier import"
         )
 
-        {%{acc | skipped: acc.skipped + 1}, deferred}
+        {add_skipped(acc, source_id), deferred}
     end
+  end
+
+  defp add_skipped(acc, source_id) do
+    ids =
+      case Integer.parse(source_id) do
+        {n, ""} -> [n | acc.skipped_source_ids]
+        _ -> acc.skipped_source_ids
+      end
+
+    %{acc | skipped: acc.skipped + 1, skipped_source_ids: ids}
   end
 
   defp do_create_api_contact(ctx, api_contact, source_id, ref_data, acc, deferred) do
