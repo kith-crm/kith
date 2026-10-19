@@ -250,6 +250,123 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
       refute has_element?(view, ~s|textarea[name="entry[body]"]|, "Met at the conference")
     end
 
+    test "life event prefills and saves", %{conn: conn, contact: contact, account_id: account_id} do
+      type = Kith.Repo.all(Kith.Contacts.LifeEventType) |> hd()
+
+      {:ok, le} =
+        Kith.Activities.create_life_event(contact, %{
+          "life_event_type_id" => type.id,
+          "occurred_on" => "2020-08-09",
+          "note" => "Graduated"
+        })
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_edit(view, "life_event", le.id)
+
+      assert has_element?(view, ~s|input[name="entry[occurred_on]"][value="2020-08-09"]|)
+
+      assert has_element?(
+               view,
+               ~s|select[name="entry[life_event_type_id]"] option[value="#{type.id}"][selected]|
+             )
+
+      assert has_element?(view, ~s|textarea[name="entry[note]"]|, "Graduated")
+
+      html =
+        view
+        |> form("#entry-modal form", %{})
+        |> render_submit(%{
+          "entry" => %{
+            "life_event_type_id" => to_string(type.id),
+            "occurred_on" => "2020-08-09",
+            "note" => "Graduated with honors"
+          }
+        })
+
+      refute html =~ "text-red"
+      assert Kith.Activities.get_life_event!(account_id, le.id).note == "Graduated with honors"
+    end
+
+    test "conversation prefills and saves", %{
+      conn: conn,
+      contact: contact,
+      user: user,
+      account_id: account_id
+    } do
+      {:ok, conv} =
+        Kith.Conversations.create_conversation(account_id, user.id, %{
+          "subject" => "Catch-up",
+          "platform" => "signal",
+          "contact_id" => contact.id
+        })
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_edit(view, "conversation", conv.id)
+
+      assert has_element?(view, ~s|input[name="entry[subject]"][value="Catch-up"]|)
+
+      assert has_element?(
+               view,
+               ~s|select[name="entry[platform]"] option[value="signal"][selected]|
+             )
+
+      view
+      |> form("#entry-modal form", %{})
+      |> render_submit(%{"entry" => %{"subject" => "Catch-up 2", "platform" => "signal"}})
+
+      assert Kith.Conversations.get_conversation!(account_id, conv.id).subject == "Catch-up 2"
+    end
+
+    test "activity prefills and saves, keeping contacts", %{
+      conn: conn,
+      contact: contact,
+      account_id: account_id
+    } do
+      {:ok, act} =
+        Kith.Activities.create_activity(
+          account_id,
+          %{
+            "title" => "Hike",
+            "occurred_at" => ~U[2022-02-02 02:02:00Z],
+            "description" => "Up the hill"
+          },
+          [contact.id]
+        )
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_edit(view, "activity", act.id)
+
+      assert has_element?(view, ~s|input[name="entry[title]"][value="Hike"]|)
+      assert has_element?(view, ~s|input[name="entry[occurred_at]"][value="2022-02-02T02:02"]|)
+      assert has_element?(view, ~s|textarea[name="entry[description]"]|, "Up the hill")
+
+      view
+      |> form("#entry-modal form", %{})
+      |> render_submit(%{
+        "entry" => %{
+          "title" => "Long hike",
+          "occurred_at" => "2022-02-02T02:02",
+          "description" => "Up the hill"
+        }
+      })
+
+      updated = Kith.Activities.get_activity!(account_id, act.id)
+      assert updated.title == "Long hike"
+      assert contact.id in Enum.map(updated.contacts, & &1.id)
+    end
+
+    test "photo entries have no Edit action", %{conn: conn, contact: contact} do
+      photo = photo_fixture(contact, %{"file_name" => "beach.jpg"})
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+
+      refute has_element?(view, ~s|button[phx-click="edit-entry"][phx-value-type="photo"]|)
+
+      assert has_element?(
+               view,
+               ~s|button[phx-click="delete-entry"][phx-value-type="photo"][phx-value-id="#{photo.id}"]|
+             )
+    end
+
     defp call_for(contact, _account_id) do
       {:ok, call} =
         Kith.Activities.create_call(contact, %{

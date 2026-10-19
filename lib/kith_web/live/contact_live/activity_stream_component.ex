@@ -182,6 +182,9 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   defp load_record(:call, id, a), do: Activities.get_call!(a.account_id, id)
   defp load_record(:task, id, a), do: Tasks.get_task!(a.account_id, id)
   defp load_record(:gift, id, a), do: Gifts.get_gift!(a.account_id, id)
+  defp load_record(:life_event, id, a), do: Activities.get_life_event!(a.account_id, id)
+  defp load_record(:conversation, id, a), do: Conversations.get_conversation!(a.account_id, id)
+  defp load_record(:activity, id, a), do: Activities.get_activity!(a.account_id, id)
   defp load_record(_type, _id, _assigns), do: nil
 
   defp create_entry(:note, %{"entry" => params}, assigns) do
@@ -243,6 +246,21 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   defp update_entry(:gift, id, %{"entry" => params}, assigns) do
     gift = Gifts.get_gift!(assigns.account_id, id)
     Gifts.update_gift(gift, params) |> normalize_result()
+  end
+
+  defp update_entry(:life_event, id, %{"entry" => params}, assigns) do
+    life_event = Activities.get_life_event!(assigns.account_id, id)
+    Activities.update_life_event(life_event, params) |> normalize_result()
+  end
+
+  defp update_entry(:conversation, id, %{"entry" => params}, assigns) do
+    conversation = Conversations.get_conversation!(assigns.account_id, id)
+    Conversations.update_conversation(conversation, params) |> normalize_result()
+  end
+
+  defp update_entry(:activity, id, %{"entry" => params}, assigns) do
+    activity = Activities.get_activity!(assigns.account_id, id)
+    Activities.update_activity(activity, params) |> normalize_result()
   end
 
   defp update_entry(_, _, _, _), do: {:error, "Update not supported for this type"}
@@ -470,6 +488,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
                 class="absolute end-0 top-full mt-1 z-10 w-32 rounded-lg bg-[var(--color-surface-overlay)] border border-[var(--color-border)] shadow-[var(--shadow-dropdown)] p-1"
               >
                 <button
+                  :if={entry.type != :photo}
                   phx-click="edit-entry"
                   phx-value-type={entry.type}
                   phx-value-id={entry.id}
@@ -640,7 +659,13 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
             >
               <option value="">Select type...</option>
-              <option :for={t <- @life_event_types} value={t.id}>{t.name}</option>
+              <option
+                :for={t <- @life_event_types}
+                value={t.id}
+                selected={@record && @record.life_event_type_id == t.id}
+              >
+                {t.name}
+              </option>
             </select>
           </div>
           <div>
@@ -650,7 +675,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             <input
               type="date"
               name="entry[occurred_on]"
-              value={Date.to_iso8601(Date.utc_today())}
+              value={Date.to_iso8601((@record && @record.occurred_on) || Date.utc_today())}
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
             />
           </div>
@@ -663,7 +688,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               rows="3"
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
               placeholder="Any details..."
-            />
+            >{@record && @record.note}</textarea>
           </div>
         </div>
         <.modal_actions myself={@myself} entry_id={@entry_id} type={:life_event} />
@@ -789,6 +814,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             <input
               type="text"
               name="entry[subject]"
+              value={@record && @record.subject}
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
               placeholder="What was the conversation about?"
             />
@@ -801,14 +827,30 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               name="entry[platform]"
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
             >
-              <option value="sms">SMS</option>
-              <option value="whatsapp">WhatsApp</option>
-              <option value="telegram">Telegram</option>
-              <option value="email">Email</option>
-              <option value="instagram">Instagram</option>
-              <option value="messenger">Messenger</option>
-              <option value="signal">Signal</option>
-              <option value="other">Other</option>
+              <option value="sms" selected={@record && @record.platform == "sms"}>
+                SMS
+              </option>
+              <option value="whatsapp" selected={@record && @record.platform == "whatsapp"}>
+                WhatsApp
+              </option>
+              <option value="telegram" selected={@record && @record.platform == "telegram"}>
+                Telegram
+              </option>
+              <option value="email" selected={@record && @record.platform == "email"}>
+                Email
+              </option>
+              <option value="instagram" selected={@record && @record.platform == "instagram"}>
+                Instagram
+              </option>
+              <option value="messenger" selected={@record && @record.platform == "messenger"}>
+                Messenger
+              </option>
+              <option value="signal" selected={@record && @record.platform == "signal"}>
+                Signal
+              </option>
+              <option value="other" selected={@record && @record.platform == "other"}>
+                Other
+              </option>
             </select>
           </div>
         </div>
@@ -834,6 +876,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             <input
               type="text"
               name="entry[title]"
+              value={@record && @record.title}
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
               placeholder="What happened?"
             />
@@ -845,7 +888,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             <input
               type="datetime-local"
               name="entry[occurred_at]"
-              value={Calendar.strftime(DateTime.utc_now(), "%Y-%m-%dT%H:%M")}
+              value={datetime_local_value(@record && @record.occurred_at)}
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
             />
           </div>
@@ -858,7 +901,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               rows="3"
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
               placeholder="Details..."
-            />
+            >{@record && @record.description}</textarea>
           </div>
         </div>
         <.modal_actions myself={@myself} entry_id={@entry_id} type={:activity} />
