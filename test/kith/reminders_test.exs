@@ -17,46 +17,6 @@ defmodule Kith.RemindersTest do
     %{user: user, account_id: account_id, contact: contact}
   end
 
-  describe "day interval and description" do
-    test "a recurring reminder accepts a day interval and stores a description", ctx do
-      {:ok, r} =
-        Reminders.create_reminder(ctx.account_id, ctx.user.id, %{
-          "type" => "recurring",
-          "title" => "Water plants",
-          "anchor_date" => ~D[2026-01-01],
-          "interval_unit" => "day",
-          "interval_count" => 10,
-          "description" => "The ferns too",
-          "contact_id" => ctx.contact.id
-        })
-
-      assert r.interval_unit == "day"
-      assert r.description == "The ferns too"
-      assert Reminder.interval_label(r) == "Every 10 days"
-    end
-
-    test "interval_label/1 says Daily for one day" do
-      assert Reminder.interval_label(%{interval_unit: "day", interval_count: 1}) == "Daily"
-    end
-
-    test "first_met is a valid type" do
-      assert "first_met" in Reminder.types()
-    end
-
-    test "update_changeset casts description", ctx do
-      {:ok, r} =
-        Reminders.create_reminder(ctx.account_id, ctx.user.id, %{
-          "type" => "one_time",
-          "title" => "X",
-          "anchor_date" => Date.add(Date.utc_today(), 3),
-          "contact_id" => ctx.contact.id
-        })
-
-      {:ok, r} = Reminders.update_reminder(r, %{"description" => "Bring the cake"})
-      assert r.description == "Bring the cake"
-    end
-  end
-
   ## Reminder CRUD
 
   describe "list_reminders/2" do
@@ -94,6 +54,46 @@ defmodule Kith.RemindersTest do
       assert_raise Ecto.NoResultsError, fn ->
         Reminders.get_reminder!(other_user.account_id, r.id)
       end
+    end
+  end
+
+  describe "day interval and description" do
+    test "a recurring reminder accepts a day interval and stores a description", ctx do
+      {:ok, r} =
+        Reminders.create_reminder(ctx.account_id, ctx.user.id, %{
+          "type" => "recurring",
+          "title" => "Water plants",
+          "anchor_date" => ~D[2026-01-01],
+          "interval_unit" => "day",
+          "interval_count" => 10,
+          "description" => "The ferns too",
+          "contact_id" => ctx.contact.id
+        })
+
+      assert r.interval_unit == "day"
+      assert r.description == "The ferns too"
+      assert Reminder.interval_label(r) == "Every 10 days"
+    end
+
+    test "interval_label/1 says Daily for one day" do
+      assert Reminder.interval_label(%{interval_unit: "day", interval_count: 1}) == "Daily"
+    end
+
+    test "first_met is a valid type" do
+      assert "first_met" in Reminder.types()
+    end
+
+    test "update_changeset casts description", ctx do
+      {:ok, r} =
+        Reminders.create_reminder(ctx.account_id, ctx.user.id, %{
+          "type" => "one_time",
+          "title" => "X",
+          "anchor_date" => Date.add(Date.utc_today(), 3),
+          "contact_id" => ctx.contact.id
+        })
+
+      {:ok, r} = Reminders.update_reminder(r, %{"description" => "Bring the cake"})
+      assert r.description == "Bring the cake"
     end
   end
 
