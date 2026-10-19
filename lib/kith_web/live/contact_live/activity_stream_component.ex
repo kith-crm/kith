@@ -24,6 +24,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
      |> assign(:all_types, ActivityStream.all_types())
      |> assign(:modal_type, nil)
      |> assign(:modal_entry_id, nil)
+     |> assign(:modal_record, nil)
      |> assign(:modal_error, nil)
      |> allow_upload(:photo,
        accept: ~w(.jpg .jpeg .png .gif .webp),
@@ -66,6 +67,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
      socket
      |> assign(:modal_type, type)
      |> assign(:modal_entry_id, nil)
+     |> assign(:modal_record, nil)
      |> assign(:modal_error, nil)}
   end
 
@@ -77,6 +79,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
      socket
      |> assign(:modal_type, type)
      |> assign(:modal_entry_id, id)
+     |> assign(:modal_record, load_record(type, id, socket.assigns))
      |> assign(:modal_error, nil)}
   end
 
@@ -85,6 +88,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
      socket
      |> assign(:modal_type, nil)
      |> assign(:modal_entry_id, nil)
+     |> assign(:modal_record, nil)
      |> assign(:modal_error, nil)}
   end
 
@@ -102,6 +106,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
          socket
          |> assign(:modal_type, nil)
          |> assign(:modal_entry_id, nil)
+         |> assign(:modal_record, nil)
          |> assign(:modal_error, nil)
          |> load_entries()}
 
@@ -120,6 +125,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
          socket
          |> assign(:modal_type, nil)
          |> assign(:modal_entry_id, nil)
+         |> assign(:modal_record, nil)
          |> load_entries()}
 
       {:error, _} ->
@@ -171,6 +177,12 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   end
 
   # --- CRUD helpers ---
+
+  defp load_record(:note, id, a), do: Contacts.get_note!(a.account_id, id, a.current_user_id)
+  defp load_record(:call, id, a), do: Activities.get_call!(a.account_id, id)
+  defp load_record(:task, id, a), do: Tasks.get_task!(a.account_id, id)
+  defp load_record(:gift, id, a), do: Gifts.get_gift!(a.account_id, id)
+  defp load_record(_type, _id, _assigns), do: nil
 
   defp create_entry(:note, %{"entry" => params}, assigns) do
     contact = Contacts.get_contact!(assigns.account_id, assigns.contact_id)
@@ -377,6 +389,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
         <.entry_modal_content
           type={@modal_type}
           entry_id={@modal_entry_id}
+          record={@modal_record}
           error={@modal_error}
           myself={@myself}
           account_id={@account_id}
@@ -536,13 +549,14 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               rows="5"
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
               placeholder="Write a note..."
-            />
+            >{@record && @record.body}</textarea>
           </div>
           <label class="flex items-center gap-2 cursor-pointer">
             <input
               type="checkbox"
               name="entry[is_private]"
               value="true"
+              checked={!!(@record && @record.is_private)}
               class="size-4 rounded border border-[var(--color-border)] accent-[var(--color-accent)]"
             />
             <span class="text-sm text-[var(--color-text-secondary)]">
@@ -570,7 +584,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             <input
               type="datetime-local"
               name="entry[occurred_at]"
-              value={Calendar.strftime(DateTime.utc_now(), "%Y-%m-%dT%H:%M")}
+              value={datetime_local_value(@record && @record.occurred_at)}
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
             />
           </div>
@@ -582,6 +596,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               type="number"
               name="entry[duration_mins]"
               min="0"
+              value={@record && @record.duration_mins}
               placeholder="30"
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
             />
@@ -595,7 +610,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               rows="3"
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
               placeholder="What did you talk about?"
-            />
+            >{@record && @record.notes}</textarea>
           </div>
         </div>
         <.modal_actions myself={@myself} entry_id={@entry_id} type={:call} />
@@ -671,6 +686,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             <input
               type="text"
               name="entry[title]"
+              value={@record && @record.title}
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
               placeholder="What needs to be done?"
             />
@@ -684,7 +700,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               rows="2"
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
               placeholder="Optional details..."
-            />
+            >{@record && @record.description}</textarea>
           </div>
           <div>
             <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
@@ -693,6 +709,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             <input
               type="date"
               name="entry[due_date]"
+              value={@record && @record.due_date && Date.to_iso8601(@record.due_date)}
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
             />
           </div>
@@ -717,6 +734,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             <input
               type="text"
               name="entry[name]"
+              value={@record && @record.name}
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
               placeholder="What was the gift?"
             />
@@ -729,8 +747,12 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               name="entry[direction]"
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
             >
-              <option value="given">Given</option>
-              <option value="received">Received</option>
+              <option value="given" selected={@record && @record.direction == "given"}>
+                Given
+              </option>
+              <option value="received" selected={@record && @record.direction == "received"}>
+                Received
+              </option>
             </select>
           </div>
           <div>
@@ -742,7 +764,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               rows="2"
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
               placeholder="Optional details..."
-            />
+            >{@record && @record.description}</textarea>
           </div>
         </div>
         <.modal_actions myself={@myself} entry_id={@entry_id} type={:gift} />
@@ -982,6 +1004,10 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   end
 
   # --- Helpers ---
+
+  defp datetime_local_value(dt) do
+    Calendar.strftime(dt || DateTime.utc_now(), "%Y-%m-%dT%H:%M")
+  end
 
   defp relative_time_or_date(assigns) do
     today = Date.utc_today()

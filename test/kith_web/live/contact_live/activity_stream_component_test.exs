@@ -138,4 +138,127 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
     |> element(~s|button[phx-click="filter-toggle"][phx-value-type="photo"]|)
     |> render_click()
   end
+
+  describe "edit modal prefill" do
+    defp click_edit(view, type, id) do
+      view
+      |> element(
+        ~s|button[phx-click="edit-entry"][phx-value-type="#{type}"][phx-value-id="#{id}"]|
+      )
+      |> render_click()
+    end
+
+    test "note", %{conn: conn, contact: contact, user: user} do
+      note =
+        note_fixture(contact, user.id, %{"body" => "Met at the conference", "is_private" => true})
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+
+      html = click_edit(view, "note", note.id)
+
+      assert html =~ "Edit Note"
+      assert has_element?(view, ~s|textarea[name="entry[body]"]|, "Met at the conference")
+      assert has_element?(view, ~s|input[name="entry[is_private]"][checked]|)
+    end
+
+    test "call", %{conn: conn, contact: contact, account_id: account_id} do
+      call = call_for(contact, account_id)
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+
+      click_edit(view, "call", call.id)
+
+      assert has_element?(view, ~s|input[name="entry[occurred_at]"][value="2023-04-05T06:07"]|)
+      assert has_element?(view, ~s|input[name="entry[duration_mins]"][value="42"]|)
+      assert has_element?(view, ~s|textarea[name="entry[notes]"]|, "Talked about trip")
+    end
+
+    test "task", %{conn: conn, contact: contact, user: user, account_id: account_id} do
+      {:ok, task} =
+        Kith.Tasks.create_task(account_id, user.id, %{
+          "title" => "Send photos",
+          "description" => "From the trip",
+          "due_date" => "2025-01-02",
+          "contact_id" => contact.id
+        })
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_edit(view, "task", task.id)
+
+      assert has_element?(view, ~s|input[name="entry[title]"][value="Send photos"]|)
+      assert has_element?(view, ~s|input[name="entry[due_date]"][value="2025-01-02"]|)
+      assert has_element?(view, ~s|textarea[name="entry[description]"]|, "From the trip")
+    end
+
+    test "gift", %{conn: conn, contact: contact, user: user, account_id: account_id} do
+      {:ok, gift} =
+        Kith.Gifts.create_gift(account_id, user.id, %{
+          "name" => "Book",
+          "direction" => "received",
+          "description" => "Signed copy",
+          "contact_id" => contact.id
+        })
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_edit(view, "gift", gift.id)
+
+      assert has_element?(view, ~s|input[name="entry[name]"][value="Book"]|)
+
+      assert has_element?(
+               view,
+               ~s|select[name="entry[direction]"] option[value="received"][selected]|
+             )
+
+      assert has_element?(view, ~s|textarea[name="entry[description]"]|, "Signed copy")
+    end
+
+    test "save without changes keeps the call unchanged", %{
+      conn: conn,
+      contact: contact,
+      account_id: account_id
+    } do
+      call = call_for(contact, account_id)
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_edit(view, "call", call.id)
+
+      view
+      |> form("#entry-modal form", %{})
+      |> render_submit(%{
+        "entry" => %{
+          "occurred_at" => "2023-04-05T06:07",
+          "duration_mins" => "42",
+          "notes" => "Talked about trip"
+        }
+      })
+
+      assert Kith.Activities.get_call!(account_id, call.id).occurred_at ==
+               ~U[2023-04-05 06:07:00Z]
+    end
+
+    test "new note after editing opens empty", %{conn: conn, contact: contact, user: user} do
+      note = note_fixture(contact, user.id, %{"body" => "Met at the conference"})
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_edit(view, "note", note.id)
+
+      view |> element(~s|button[phx-click="close-modal"]|, "Cancel") |> render_click()
+
+      html =
+        view
+        |> element(~s|button[phx-click="open-entry-modal"][phx-value-type="note"]|)
+        |> render_click()
+
+      assert html =~ "New Note"
+      refute has_element?(view, ~s|textarea[name="entry[body]"]|, "Met at the conference")
+    end
+
+    defp call_for(contact, _account_id) do
+      {:ok, call} =
+        Kith.Activities.create_call(contact, %{
+          "occurred_at" => ~U[2023-04-05 06:07:00Z],
+          "duration_mins" => 42,
+          "notes" => "Talked about trip"
+        })
+
+      call
+    end
+  end
 end
