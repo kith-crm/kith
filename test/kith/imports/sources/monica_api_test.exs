@@ -594,36 +594,24 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   # ── crawl/5 — extra notes ─────────────────────────────────────────────
 
   describe "crawl/5 — extra notes" do
-    test "fetches extra notes for contacts with more than 3", %{
+    test "plans an extra-notes fetch for contacts with more notes than embedded", %{
       user: user,
       account_id: account_id
     } do
-      embedded_notes = for i <- 1..3, do: note_json(body: "Embedded note #{i}")
-
-      all_notes =
-        for i <- 1..7, do: note_json(body: "Note #{i}")
-
       contacts = [
         contact_json(
           id: 1,
           first_name: "Verbose",
           number_of_notes: 7,
-          notes: embedded_notes
+          notes: for(i <- 1..3, do: note_json(body: "Embedded note #{i}"))
         )
       ]
 
       {:ok, agent} = Agent.start_link(fn -> 0 end)
 
       Req.Test.stub(@stub_name, fn conn ->
-        call = Agent.get_and_update(agent, fn n -> {n + 1, n + 1} end)
-
-        if call == 1 do
-          # Contacts page
-          Req.Test.json(conn, contacts_page_json(contacts))
-        else
-          # Notes page
-          Req.Test.json(conn, notes_page_json(all_notes, 1, 1, 7))
-        end
+        Agent.update(agent, &(&1 + 1))
+        Req.Test.json(conn, contacts_page_json(contacts))
       end)
 
       import_job =
@@ -634,11 +622,33 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                  "extra_notes" => true
                })
 
-      # 3 embedded + 4 extra = 7 total notes
-      # (first 3 skipped from the full notes list, so 4 extra imported)
-      assert summary.notes >= 3
+      # The crawl imports only the embedded notes and makes no notes request;
+      # MonicaMiscDataWorker fetches the rest.
+      assert summary.notes == 3
+      assert Agent.get(agent, & &1) == 2
 
+      assert [%{source_id: "1", embedded_notes: 3, endpoints: endpoints}] =
+               summary.misc_data_plan
+
+      assert "notes" in endpoints
       Agent.stop(agent)
+    end
+
+    test "does not plan extra notes when the wizard opts out", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [contact_json(id: 1, first_name: "Verbose", number_of_notes: 7, notes: [])]
+      Req.Test.stub(@stub_name, fn conn -> Req.Test.json(conn, contacts_page_json(contacts)) end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "extra_notes" => false
+               })
+
+      assert Enum.all?(summary.misc_data_plan, &("notes" not in &1.endpoints))
     end
 
     test "does not fetch extra notes for contacts with 3 or fewer", %{
@@ -1494,69 +1504,6 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
 
       notes = Repo.all(from(n in Contacts.Note, where: n.contact_id == ^contact.id))
       assert length(notes) == 2
-    end
-
-    test "skips duplicate notes in extra_notes phase", %{user: user, account_id: account_id} do
-      # Contact has 5 notes total — 3 embedded + 2 extra
-      # One extra note duplicates an embedded one
-      contacts = [
-        contact_json(
-          id: 1,
-          first_name: "Extra",
-          last_name: "Notes",
-          number_of_notes: 5,
-          notes: [
-            note_json(id: 1, body: "Note A"),
-            note_json(id: 2, body: "Note B"),
-            note_json(id: 3, body: "Note C")
-          ]
-        )
-      ]
-
-      request_count = :counters.new(1, [:atomics])
-
-      Req.Test.stub(@stub_name, fn conn ->
-        :counters.add(request_count, 1, 1)
-        count = :counters.get(request_count, 1)
-
-        if count == 1 do
-          # First request: contacts page
-          Req.Test.json(conn, contacts_page_json(contacts))
-        else
-          # Notes request: includes a duplicate of "Note A" and a new "Note D"
-          Req.Test.json(
-            conn,
-            notes_page_json([
-              note_json(id: 1, body: "Note A"),
-              note_json(id: 2, body: "Note B"),
-              note_json(id: 3, body: "Note C"),
-              note_json(id: 4, body: "Note A"),
-              note_json(id: 5, body: "Note D")
-            ])
-          )
-        end
-      end)
-
-      import_job =
-        api_import_fixture(account_id, user.id, %{
-          api_options: %{"photos" => false, "extra_notes" => true}
-        })
-
-      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
-
-      contact =
-        Repo.one!(
-          from(c in Contacts.Contact,
-            where: c.first_name == "Extra" and c.account_id == ^account_id
-          )
-        )
-
-      notes = Repo.all(from(n in Contacts.Note, where: n.contact_id == ^contact.id))
-      # Should have A, B, C, D — not a second A
-      assert length(notes) == 4
-
-      bodies = Enum.map(notes, & &1.body) |> Enum.sort()
-      assert bodies == ["Note A", "Note B", "Note C", "Note D"]
     end
   end
 

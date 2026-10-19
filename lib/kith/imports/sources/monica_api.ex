@@ -122,20 +122,13 @@ defmodule Kith.Imports.Sources.MonicaApi do
     # Phase 2: Resolve cross-references
     ref_errors = resolve_cross_references(account_id, deferred, import_job)
 
-    # Phase 3: Extra notes
-    notes_errors =
-      if opts["extra_notes"] != false do
-        fetch_all_extra_notes(credential, account_id, user_id, deferred.extra_notes, import_job)
-      else
-        []
-      end
-
-    # Phase 4: Per-contact "misc" data (pets, calls, activities, gifts, debts,
-    # tasks, reminders, conversations) is now planned during the main crawl
+    # Phase 3: Per-contact "misc" data (pets, calls, activities, gifts, debts,
+    # tasks, reminders, conversations, and notes beyond the ones embedded in
+    # the contact payload) is planned during the main crawl
     # and dispatched as a separate `MonicaMiscDataWorker` Oban job by
     # `MonicaApiCrawlWorker`. The plan is carried in `summary.misc_data_plan`.
 
-    # Phase 5: Enqueue document import jobs (async, runs after main import)
+    # Phase 4: Enqueue document import jobs (async, runs after main import)
     if opts["documents"] do
       enqueue_document_imports(credential, account_id, user_id, import_job)
     end
@@ -143,12 +136,10 @@ defmodule Kith.Imports.Sources.MonicaApi do
     all_errors =
       acc.errors ++
         ref_errors ++
-        notes_errors ++
         merge_result.errors
 
     error_count =
-      acc.error_count + length(ref_errors) + length(notes_errors) +
-        length(merge_result.errors)
+      acc.error_count + length(ref_errors) + length(merge_result.errors)
 
     {:ok,
      %{
@@ -201,7 +192,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
       deferred: %{
         first_met_through: [],
         relationships: [],
-        extra_notes: [],
         misc_data: []
       },
       ref_data: nil,
@@ -492,7 +482,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
           safe_import_api_contact(ctx, api_contact, new_ref_data, acc, %{
             first_met_through: [],
             relationships: [],
-            extra_notes: [],
             misc_data: []
           })
 
@@ -847,7 +836,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
     deferred
     |> collect_first_met_through(api_contact, source_id)
     |> collect_relationships(api_contact, source_id)
-    |> collect_extra_notes(api_contact, source_id)
     |> collect_misc_data(api_contact, source_id, local_id, opts)
   end
 
@@ -882,17 +870,29 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
     endpoints = if opts["pets"] != false, do: [:pets | endpoints], else: endpoints
 
+    embedded_notes = length(api_contact["notes"] || [])
+    endpoints = maybe_add_notes_endpoint(endpoints, stats, embedded_notes, opts)
+
     if endpoints == [] do
       deferred
     else
       entry = %{
         source_id: to_string(source_id),
         local_id: local_id,
+        embedded_notes: embedded_notes,
         endpoints: Enum.map(endpoints, &Atom.to_string/1)
       }
 
       %{deferred | misc_data: [entry | deferred.misc_data]}
     end
+  end
+
+  # Notes past the ones embedded in the contact payload. `embedded_notes` goes
+  # in the plan entry so the worker skips those leading notes on page 1.
+  defp maybe_add_notes_endpoint(endpoints, stats, embedded_notes, opts) do
+    if opts["extra_notes"] != false and (stats["number_of_notes"] || 0) > embedded_notes,
+      do: endpoints ++ [:notes],
+      else: endpoints
   end
 
   defp collect_first_met_through(deferred, api_contact, source_id) do
@@ -929,24 +929,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
       end)
 
     %{deferred | relationships: deferred.relationships ++ rel_entries}
-  end
-
-  defp collect_extra_notes(deferred, api_contact, source_id) do
-    stats = api_contact["statistics"] || %{}
-    note_count = stats["number_of_notes"] || 0
-    embedded_notes = length(api_contact["notes"] || [])
-
-    if note_count > embedded_notes do
-      entry = %{
-        source_id: source_id,
-        monica_id: api_contact["id"],
-        embedded_count: embedded_notes
-      }
-
-      %{deferred | extra_notes: [entry | deferred.extra_notes]}
-    else
-      deferred
-    end
   end
 
   # ── Phase 1.5: Auto-merge definite duplicates ───────────────────────
@@ -1264,80 +1246,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
     e in Ecto.ConstraintError ->
       Logger.info("[MonicaApi] Relationship already exists: #{Exception.message(e)}")
       errors
-  end
-
-  # ── Phase 3: Extra notes ─────────────────────────────────────────────
-
-  defp fetch_all_extra_notes(credential, account_id, user_id, entries, import_job) do
-    Enum.reduce(entries, [], fn entry, errors ->
-      fetch_extra_notes_for_contact(credential, account_id, user_id, entry, import_job, errors)
-    end)
-  end
-
-  defp fetch_extra_notes_for_contact(credential, account_id, user_id, entry, import_job, errors) do
-    contact_rec =
-      Imports.find_import_record(account_id, "monica_api", "contact", entry.source_id)
-
-    if contact_rec do
-      contact = Repo.get(Contacts.Contact, contact_rec.local_entity_id)
-
-      if contact do
-        fetch_notes_pages(credential, contact, user_id, entry, import_job, errors)
-      else
-        errors
-      end
-    else
-      errors
-    end
-  end
-
-  defp fetch_notes_pages(credential, contact, user_id, entry, import_job, errors) do
-    fetch_notes_loop(
-      credential,
-      contact,
-      user_id,
-      entry,
-      import_job,
-      errors,
-      _page = 1,
-      _skip = entry.embedded_count
-    )
-  end
-
-  defp fetch_notes_loop(credential, contact, user_id, entry, import_job, errors, page, skip) do
-    url = "#{credential.url}/api/contacts/#{entry.monica_id}/notes"
-
-    case api_get_json(credential, url, limit: @page_limit, page: page) do
-      {:ok, %{"data" => notes, "meta" => meta}} when is_list(notes) ->
-        last_page = meta["last_page"] || 1
-
-        # Skip already-imported notes (first N were embedded in contact response)
-        notes_to_import = if skip > 0, do: Enum.drop(notes, skip), else: notes
-        import_extra_notes_batch(contact, user_id, notes_to_import, import_job)
-
-        if page < last_page do
-          fetch_notes_loop(credential, contact, user_id, entry, import_job, errors, page + 1, 0)
-        else
-          errors
-        end
-
-      {:error, :rate_limited} ->
-        errors ++ ["Rate limited fetching notes for contact #{entry.source_id}"]
-
-      {:error, reason} ->
-        errors ++ ["Failed to fetch notes for contact #{entry.source_id}: #{inspect(reason)}"]
-
-      _ ->
-        errors
-    end
-  end
-
-  defp import_extra_notes_batch(contact, user_id, notes, import_job) do
-    Enum.each(notes, fn note ->
-      unless note_duplicate?(contact.id, note["body"]) do
-        create_imported_note(contact, user_id, note, import_job)
-      end
-    end)
   end
 
   # ── Reference data building ──────────────────────────────────────────

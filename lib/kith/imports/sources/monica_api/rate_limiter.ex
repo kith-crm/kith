@@ -10,7 +10,8 @@ defmodule Kith.Imports.Sources.MonicaApi.RateLimiter do
 
       config :kith, :monica_rate_limit, <integer>
 
-  per-test overrides via `Application.put_env/3`.
+  which `config/runtime.exs` sets from `MONICA_RATE_LIMIT_PER_MINUTE`.
+  Per-test overrides go through `Application.put_env/3`.
 
   Hammer (already a dep) supplies the underlying token bucket; we use a
   bucket key per Monica host so independent Monica instances do not share

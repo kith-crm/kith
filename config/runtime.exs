@@ -11,6 +11,19 @@ end
 
 config :kith, KithWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Outbound request budget for the Monica API importer, per minute. Set it a
+# call or two below Monica's own RATE_LIMIT_PER_MINUTE_API. Unset keeps the
+# config.exs default (55), so test.exs is preserved.
+if monica_limit = System.get_env("MONICA_RATE_LIMIT_PER_MINUTE") do
+  case Integer.parse(monica_limit) do
+    {n, ""} when n > 0 ->
+      config :kith, :monica_rate_limit, n
+
+    _ ->
+      raise "MONICA_RATE_LIMIT_PER_MINUTE must be a positive integer, got: #{inspect(monica_limit)}"
+  end
+end
+
 # Feature flags
 config :kith,
   disable_signup: System.get_env("DISABLE_SIGNUP") == "true",

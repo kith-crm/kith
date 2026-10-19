@@ -46,6 +46,92 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     })
   end
 
+  describe "perform/1 — extra notes" do
+    defp notes_plan(contact, embedded) do
+      [
+        %{
+          "source_id" => "42",
+          "local_id" => contact.id,
+          "embedded_notes" => embedded,
+          "endpoints" => ["notes"]
+        }
+      ]
+    end
+
+    defp note_body(i), do: %{"uuid" => "n#{i}", "body" => "Note #{i}"}
+
+    test "imports notes past the embedded ones, across pages, without duplicates",
+         %{user: user, account_id: account_id} do
+      contact = contact_fixture(account_id)
+      import_job = api_import(account_id, user.id)
+
+      Imports.record_imported_entity(import_job, "contact", "42", "contact", contact.id)
+      {:ok, _} = Kith.Contacts.create_note(contact, user.id, %{"body" => "Note 1"})
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case conn.query_params["page"] do
+          "1" ->
+            Req.Test.json(conn, %{
+              "data" => Enum.map(1..3, &note_body/1),
+              "meta" => %{"last_page" => 2}
+            })
+
+          "2" ->
+            Req.Test.json(conn, %{
+              "data" => Enum.map(4..5, &note_body/1),
+              "meta" => %{"last_page" => 2}
+            })
+        end
+      end)
+
+      assert :ok =
+               perform_job(MonicaMiscDataWorker, build_args(import_job, notes_plan(contact, 1)))
+
+      bodies =
+        Repo.all(
+          from(n in Kith.Contacts.Note, where: n.contact_id == ^contact.id, select: n.body)
+        )
+
+      # Note 1 was embedded (skipped); Notes 2–5 are new.
+      assert Enum.sort(bodies) == ["Note 1", "Note 2", "Note 3", "Note 4", "Note 5"]
+
+      assert Imports.get_import!(import_job.id).summary["misc"]["notes"] == 4
+
+      # A retry creates nothing new.
+      assert :ok =
+               perform_job(MonicaMiscDataWorker, build_args(import_job, notes_plan(contact, 1)))
+
+      assert Repo.aggregate(
+               from(n in Kith.Contacts.Note, where: n.contact_id == ^contact.id),
+               :count
+             ) == 5
+    end
+
+    test "attaches notes to the surviving contact when the planned one was merged away",
+         %{user: user, account_id: account_id} do
+      loser = contact_fixture(account_id)
+      survivor = contact_fixture(account_id)
+      import_job = api_import(account_id, user.id)
+
+      Imports.record_imported_entity(import_job, "contact", "42", "contact", survivor.id)
+
+      loser
+      |> Ecto.Changeset.change(deleted_at: DateTime.utc_now() |> DateTime.truncate(:second))
+      |> Repo.update!()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, %{"data" => [note_body(1)], "meta" => %{"last_page" => 1}})
+      end)
+
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, notes_plan(loser, 0)))
+
+      assert Repo.aggregate(
+               from(n in Kith.Contacts.Note, where: n.contact_id == ^survivor.id),
+               :count
+             ) == 1
+    end
+  end
+
   describe "perform/1" do
     test "fires only the endpoints listed in the plan",
          %{user: user, account_id: account_id} do

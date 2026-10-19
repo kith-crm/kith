@@ -16,6 +16,7 @@ config :ex_cldr, default_backend: Kith.Cldr
 
 # Outbound rate limit for Monica API calls. One below the documented
 # default of 60 req/min leaves a one-call safety margin.
+# Override with the MONICA_RATE_LIMIT_PER_MINUTE env var (config/runtime.exs).
 config :kith, :monica_rate_limit, 55
 
 config :kith, :scopes,

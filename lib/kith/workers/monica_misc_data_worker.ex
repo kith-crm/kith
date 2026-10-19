@@ -1,7 +1,8 @@
 defmodule Kith.Workers.MonicaMiscDataWorker do
   @moduledoc """
   Oban worker that imports the per-contact "miscellaneous" data types
-  (pets, calls, activities, gifts, debts, tasks, reminders, conversations)
+  (pets, calls, activities, gifts, debts, tasks, reminders, conversations,
+  and notes beyond the ones embedded in the contact payload)
   for an already-completed Monica API crawl.
 
   Enqueued by `Kith.Workers.MonicaApiCrawlWorker` on successful completion,
@@ -101,7 +102,8 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       "reminders" => 0,
       "reminders_skipped" => 0,
       "reminders_warnings" => 0,
-      "conversations" => 0
+      "conversations" => 0,
+      "notes" => 0
     }
 
     user_id = import_job.user_id
@@ -114,16 +116,29 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp process_entry(entry, credential, user_id, import_job, counts) do
     contact = Contacts.get_contact_for_misc(entry["local_id"])
 
-    if contact == nil or not is_nil(contact.deleted_at) do
-      counts
-    else
-      Enum.reduce(entry["endpoints"] || [], counts, fn endpoint, counts ->
+    # Notes follow the contact's import record, which auto-merge remaps to the
+    # surviving contact, so they are still imported when the contact itself
+    # was merged away. Every other endpoint needs the planned contact.
+    endpoints =
+      if live?(contact),
+        do: entry["endpoints"] || [],
+        else: Enum.filter(entry["endpoints"] || [], &(&1 == "notes"))
+
+    Enum.reduce(endpoints, counts, fn
+      "notes", counts ->
+        credential
+        |> import_contact_notes(user_id, entry, import_job)
+        |> add_counts("notes", counts)
+
+      endpoint, counts ->
         endpoint
         |> fire_endpoint(credential, user_id, contact, entry["source_id"], import_job)
         |> add_counts(endpoint, counts)
-      end)
-    end
+    end)
   end
+
+  defp live?(nil), do: false
+  defp live?(contact), do: is_nil(contact.deleted_at)
 
   # An endpoint returns its imported count, or a map of count keys when it
   # reports more than that (reminders also count skips and warnings).
@@ -186,6 +201,88 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       {:ok, %{status: status}} -> {:error, "Unexpected status: #{status}"}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  # ── Extra notes ──────────────────────────────────────────────────────
+
+  @notes_page_limit 100
+
+  defp import_contact_notes(credential, user_id, entry, import_job) do
+    with %{local_entity_id: local_id} <-
+           Imports.find_import_record(
+             import_job.account_id,
+             "monica_api",
+             "contact",
+             entry["source_id"]
+           ),
+         %{deleted_at: nil} = contact <- Contacts.get_contact_for_misc(local_id) do
+      fetch_notes_pages(credential, contact, user_id, entry, import_job, 1)
+    else
+      _ -> 0
+    end
+  end
+
+  defp fetch_notes_pages(credential, contact, user_id, entry, import_job, page) do
+    source_id = entry["source_id"]
+    url = "#{credential.url}/api/contacts/#{source_id}/notes"
+
+    case api_get_json(credential, url, limit: @notes_page_limit, page: page) do
+      {:ok, %{"data" => notes, "meta" => meta}} when is_list(notes) ->
+        # The first embedded_notes of page 1 were imported with the contact.
+        skip = if page == 1, do: entry["embedded_notes"] || 0, else: 0
+        imported = import_notes_batch(contact, user_id, Enum.drop(notes, skip), import_job)
+
+        if page < (meta["last_page"] || 1),
+          do:
+            imported +
+              fetch_notes_pages(credential, contact, user_id, entry, import_job, page + 1),
+          else: imported
+
+      {:ok, _} ->
+        0
+
+      {:error, reason} ->
+        Logger.warning(
+          "[MonicaMiscData] failed to fetch notes for contact #{source_id}: #{inspect(reason)}"
+        )
+
+        0
+    end
+  end
+
+  # Matching on body keeps an Oban retry from duplicating notes.
+  defp import_notes_batch(contact, user_id, notes, import_job) do
+    Enum.count(notes, fn note ->
+      not note_duplicate?(contact.id, note["body"]) and
+        match?({:ok, _}, create_imported_note(contact, user_id, note, import_job))
+    end)
+  end
+
+  defp create_imported_note(contact, user_id, note, import_job) do
+    case Contacts.create_note(contact, user_id, %{"body" => note["body"]}) do
+      {:ok, n} = ok ->
+        maybe_record_entity(import_job, "note", note["uuid"], "note", n.id)
+        ok
+
+      {:error, reason} = error ->
+        Logger.warning(
+          "[MonicaMiscData] note for contact #{contact.id}: #{inspect_errors(reason)}"
+        )
+
+        error
+    end
+  end
+
+  defp note_duplicate?(_contact_id, body) when body in [nil, ""], do: false
+
+  defp note_duplicate?(contact_id, body) when is_binary(body) do
+    trimmed = String.trim(body)
+
+    Repo.exists?(
+      from(n in Contacts.Note,
+        where: n.contact_id == ^contact_id and fragment("trim(?)", n.body) == ^trimmed
+      )
+    )
   end
 
   # ── Per-contact endpoint helpers ─────────────────────────────────────
