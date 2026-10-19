@@ -30,10 +30,13 @@ defmodule KithWeb.ContactLive.AboutComponentTest do
 
     view = edit(conn, contact)
 
-    # Unchecked: only the hidden input's "false" is sent.
+    # form/3 unchecks the (checked) checkbox with `false`; the value submitted
+    # is then the hidden input's "false" taken from the markup.
     view
-    |> element("#about-#{contact.id} form")
-    |> render_submit(%{contact: %{first_met_at: "2012-09-01", first_met_reminder: "false"}})
+    |> form("#about-#{contact.id} form", %{
+      contact: %{first_met_at: "2012-09-01", first_met_reminder: false}
+    })
+    |> render_submit()
 
     refute Kith.Reminders.get_first_met_reminder(contact.id, contact.account_id)
   end
