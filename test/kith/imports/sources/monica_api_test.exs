@@ -255,6 +255,147 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                r.id
     end
 
+    test "a re-import under a second import job re-points the import record", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_stay_in_touch_contact()
+
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+
+      Repo.update_all(from(i in Kith.Imports.Import, where: i.id == ^job1.id),
+        set: [status: "completed"]
+      )
+
+      job2 = api_import_fixture(account_id, user.id)
+      reminder = stay_in_touch_reminder(account_id)
+      assert stay_in_touch_record(account_id).import_id == job1.id
+
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+
+      assert [^reminder] = [stay_in_touch_reminder(account_id)]
+      record = stay_in_touch_record(account_id)
+      assert record.import_id == job2.id
+      assert record.local_entity_id == reminder.id
+    end
+
+    test "a failing stay-in-touch create is logged and the crawl continues", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(id: 9, first_name: "Gina", stay_in_touch_frequency: 14),
+        contact_json(id: 10, first_name: "Hank")
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      # A nil creator makes Reminders.create_reminder fail validation.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, summary} = MonicaApi.crawl(account_id, nil, credential(), import_job, %{})
+          assert summary.contacts == 2
+        end)
+
+      assert log =~ "stay-in-touch for 9"
+      assert stay_in_touch_reminders(account_id) == []
+    end
+
+    test "a re-import keeps a locally paused reminder", %{user: user, account_id: account_id} do
+      stub_stay_in_touch_contact()
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      reminder = stay_in_touch_reminder(account_id)
+      simulate_local_edit(reminder, %{"active" => false})
+
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      refute stay_in_touch_reminder(account_id).active
+    end
+
+    test "a re-import keeps a locally changed anchor date", %{user: user, account_id: account_id} do
+      stub_stay_in_touch_contact()
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      reminder = stay_in_touch_reminder(account_id)
+      simulate_local_edit(reminder, %{"anchor_date" => ~D[2030-01-01]})
+
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      assert stay_in_touch_reminder(account_id).anchor_date == ~D[2030-01-01]
+    end
+
+    test "a re-import without local edits still updates from Monica", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_stay_in_touch_contact(14)
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      assert stay_in_touch_reminder(account_id).interval_count == 14
+
+      stub_stay_in_touch_contact(21)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      assert stay_in_touch_reminder(account_id).interval_count == 21
+
+      # The importer's own write must not look like a local edit next time.
+      stub_stay_in_touch_contact(30)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      assert stay_in_touch_reminder(account_id).interval_count == 30
+    end
+
+    test "a stay-in-touch cleared in Monica leaves the Kith reminder as it is", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_stay_in_touch_contact(14)
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      before = stay_in_touch_reminder(account_id)
+
+      stub_stay_in_touch_contact(nil)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert stay_in_touch_reminder(account_id) == before
+    end
+
+    defp stub_stay_in_touch_contact(days \\ 14) do
+      contacts = [contact_json(id: 9, first_name: "Gina", stay_in_touch_frequency: days)]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 1))
+      end)
+    end
+
+    defp stay_in_touch_reminders(account_id) do
+      Repo.all(
+        from r in Kith.Reminders.Reminder,
+          where: r.account_id == ^account_id and r.type == "stay_in_touch"
+      )
+    end
+
+    defp stay_in_touch_reminder(account_id), do: account_id |> stay_in_touch_reminders() |> hd()
+
+    defp stay_in_touch_record(account_id),
+      do: Imports.find_import_record(account_id, "monica_api", "reminder", "stay_in_touch:9")
+
+    # Edits the reminder as a user would, and backdates the import record so the
+    # edit is later than the import even within the same clock second.
+    defp simulate_local_edit(reminder, attrs) do
+      {:ok, _} = Kith.Reminders.update_reminder(reminder, attrs)
+      record = stay_in_touch_record(reminder.account_id)
+      past = DateTime.add(DateTime.utc_now(), -3600, :second) |> DateTime.truncate(:second)
+
+      Repo.update_all(from(r in Kith.Imports.ImportRecord, where: r.id == ^record.id),
+        set: [updated_at: past]
+      )
+    end
+
     test "is skipped when the reminders option is off", %{user: user, account_id: account_id} do
       contacts = [contact_json(id: 9, first_name: "Gina", stay_in_touch_frequency: 14)]
 

@@ -660,38 +660,49 @@ defmodule Kith.Imports.Sources.MonicaApi do
         :ok
 
       {:create, attrs, _notes} ->
-        existing =
-          case Imports.find_import_record(ctx.account_id, "monica_api", "reminder", key) do
-            %{local_entity_id: id} when is_integer(id) ->
-              Reminders.get_reminder(ctx.account_id, id)
-
-            _ ->
-              nil
-          end
-
-        result =
-          case existing do
-            %Reminders.Reminder{type: "stay_in_touch"} = r ->
-              Reminders.update_reminder(r, Map.delete(attrs, "type"))
-
-            _ ->
-              Reminders.create_reminder(
-                ctx.account_id,
-                ctx.user_id,
-                Map.put(attrs, "contact_id", contact.id)
-              )
-          end
-
-        case result do
-          {:ok, r} ->
-            Imports.record_imported_entity(ctx.import_job, "reminder", key, "reminder", r.id)
-
-          {:error, reason} ->
-            Logger.warning(
-              "[MonicaApi] stay-in-touch for #{source_id}: #{inspect_errors(reason)}"
-            )
-        end
+        record = Imports.find_import_record(ctx.account_id, "monica_api", "reminder", key)
+        upsert_stay_in_touch(ctx, contact, attrs, record, key, source_id)
     end
+  end
+
+  defp upsert_stay_in_touch(ctx, contact, attrs, record, key, source_id) do
+    existing =
+      case record do
+        %{local_entity_id: id} when is_integer(id) -> Reminders.get_reminder(ctx.account_id, id)
+        _ -> nil
+      end
+
+    case existing do
+      %Reminders.Reminder{type: "stay_in_touch"} = r ->
+        if locally_edited?(r, record) do
+          Logger.debug(
+            "[MonicaApi] stay-in-touch for #{source_id} edited in Kith since the last import; keeping local version"
+          )
+        else
+          r
+          |> Reminders.update_reminder(Map.delete(attrs, "type"))
+          |> record_stay_in_touch(ctx, key, source_id)
+        end
+
+      _ ->
+        ctx.account_id
+        |> Reminders.create_reminder(ctx.user_id, Map.put(attrs, "contact_id", contact.id))
+        |> record_stay_in_touch(ctx, key, source_id)
+    end
+  end
+
+  # The import record is re-stamped on every importer write (see
+  # `Imports.record_imported_entity/5`), so a reminder `updated_at` later than
+  # the record's means someone edited it in Kith since. Timestamps have
+  # one-second resolution: an edit in the same second as an import is not seen.
+  defp locally_edited?(%Reminders.Reminder{updated_at: edited}, %{updated_at: imported}),
+    do: DateTime.compare(edited, imported) == :gt
+
+  defp record_stay_in_touch({:ok, r}, ctx, key, _source_id),
+    do: Imports.record_imported_entity(ctx.import_job, "reminder", key, "reminder", r.id)
+
+  defp record_stay_in_touch({:error, reason}, _ctx, _key, source_id) do
+    Logger.warning("[MonicaApi] stay-in-touch for #{source_id}: #{inspect_errors(reason)}")
   end
 
   defp import_api_contact_fields(contact, api_contact, ref_data, ctx) do
@@ -1488,7 +1499,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
         headers: headers,
         params: params,
         max_retries: 5,
-        retry_log_level: :warn
+        retry_log_level: :warning
       ] ++ req_options
 
     Req.get(url, options)
