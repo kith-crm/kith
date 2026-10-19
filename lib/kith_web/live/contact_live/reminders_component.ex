@@ -29,6 +29,7 @@ defmodule KithWeb.ContactLive.RemindersComponent do
      socket
      |> assign(:reminders, [])
      |> assign(:show_form, false)
+     |> assign(:form_error, nil)
      |> assign(:form_type, "one_time")
      |> assign(:form_frequency, "weekly")}
   end
@@ -48,6 +49,7 @@ defmodule KithWeb.ContactLive.RemindersComponent do
     {:noreply,
      socket
      |> assign(:show_form, true)
+     |> assign(:form_error, nil)
      |> assign(:form_type, "one_time")
      |> assign(:form_frequency, "weekly")}
   end
@@ -80,10 +82,13 @@ defmodule KithWeb.ContactLive.RemindersComponent do
          socket
          |> assign(:reminders, reminders)
          |> assign(:show_form, false)
+         |> assign(:form_error, nil)
          |> put_flash(:info, "Reminder added.")}
 
       {:error, changeset} ->
-        {:noreply, put_flash(socket, :error, format_errors(changeset))}
+        # A component's put_flash is not rendered by the parent LiveView, so
+        # the error is shown inline and the form stays open.
+        {:noreply, assign(socket, :form_error, format_errors(changeset))}
     end
   end
 
@@ -162,6 +167,14 @@ defmodule KithWeb.ContactLive.RemindersComponent do
         <div class="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5 mb-2">
           <.form for={%{}} phx-submit="save" phx-change="type-changed" phx-target={@myself}>
             <div class="space-y-2">
+              <p
+                :if={@form_error}
+                id={"reminder-form-error-#{@contact_id}"}
+                role="alert"
+                class="text-xs text-[var(--color-error)]"
+              >
+                {@form_error}
+              </p>
               <div>
                 <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-0.5">
                   Type

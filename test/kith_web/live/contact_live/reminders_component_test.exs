@@ -103,7 +103,7 @@ defmodule KithWeb.ContactLive.RemindersComponentTest do
     |> rem_form(contact)
     |> render_change(%{reminder: %{type: "recurring", frequency: "custom"}})
 
-    for bad <- ["0", "abc"] do
+    for {bad, message} <- [{"0", "must be greater than or equal to 1"}, {"abc", "is invalid"}] do
       view
       |> rem_form(contact)
       |> render_submit(%{
@@ -117,7 +117,10 @@ defmodule KithWeb.ContactLive.RemindersComponentTest do
         }
       })
 
-      # The error path keeps the form open (flash is shown by the layout).
+      assert view |> element("#reminder-form-error-#{contact.id}") |> render() =~
+               "interval_count #{message}"
+
+      assert has_element?(view, "#reminder-form-error-#{contact.id}")
       assert has_element?(view, "#reminders-#{contact.id} form")
     end
 
