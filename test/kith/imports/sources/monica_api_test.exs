@@ -1800,6 +1800,38 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
     # pass. These two share an email (~0.9) but no name_key, so nothing would
     # merge at the default 1.0 floor (covered by the DuplicateAutomerge
     # min_score test); with the override it does.
+    test "a same-job retry still auto-merges the duplicates attempt 1 created", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts =
+        for id <- [1, 2] do
+          contact_json(
+            id: id,
+            first_name: "Retry",
+            last_name: "Dupe",
+            contact_fields: [contact_field_json(content: "retry@example.com", type_name: "Email")]
+          )
+        end
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      # Attempt 1 created the contacts but never reached the merge phase.
+      assert {:ok, first} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      assert first.merged == 0
+
+      assert {:ok, retry} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert retry.merged == 1
+    end
+
     test "honours opts[\"auto_merge_score\"] override", %{user: user, account_id: account_id} do
       contacts = [
         contact_json(
@@ -2105,6 +2137,41 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert summary.coverage_backfill.imported_full == 0
       assert summary.coverage_backfill.unresolved_gap == 0
       refute_received {:single_fetch, _}
+    end
+
+    test "a skipped contact first found by the gap scan is not counted as imported", %{
+      user: user,
+      account_id: account_id
+    } do
+      all = for i <- 1..5, do: contact_json(id: i, first_name: "C#{i}")
+      stub_listing_recording_fetches(all, 5)
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      complete(job1)
+      flush_fetches()
+
+      # Contact 4 is absent from the listing pages but still counted in meta.total,
+      # so only the gap scan can find it; it belongs to the earlier import.
+      listed = Enum.reject(all, &(&1["id"] == 4))
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case conn.request_path do
+          "/api/contacts" -> Req.Test.json(conn, contacts_page_json(listed, 1, 1, 5))
+          "/api/contacts/4" -> Req.Test.json(conn, %{"data" => Enum.at(all, 3)})
+        end
+      end)
+
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+
+      assert summary.coverage_backfill.gap_detected == 1
+      assert summary.coverage_backfill.range_scanned == 1
+      assert summary.coverage_backfill.imported_full == 0
+      assert summary.coverage_backfill.imported_partial == 0
+      assert summary.coverage_backfill.unresolved_gap == 0
+      assert summary.contacts == 0
+      assert summary.imported == 0
+      assert summary.skipped == 5
     end
 
     defp flush_fetches do

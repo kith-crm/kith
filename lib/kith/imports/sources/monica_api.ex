@@ -101,9 +101,10 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
     # Phase 1.5: Auto-merge definite duplicates (optional).
     # Runs AFTER Phase 1.4 so backfilled contacts participate in auto-merge.
-    # Scoped to `acc.created_contact_ids` — contacts genuinely inserted by this
-    # run (main crawl + backfill), never contacts merely re-touched on a
-    # re-import — so pre-existing records are never merged.
+    # Scoped to `acc.created_contact_ids` — contacts created by this import job
+    # (main crawl + backfill, plus those an earlier attempt of the same job
+    # created) — never contacts from earlier imports, which are skipped, so
+    # pre-existing records are never merged.
     merge_result =
       if opts["auto_merge_duplicates"] do
         auto_merge_duplicates(account_id, import_job, opts, acc.created_contact_ids)
@@ -559,6 +560,9 @@ defmodule Kith.Imports.Sources.MonicaApi do
         {add_skipped(acc, source_id), deferred}
 
       contact when import_id == ctx.import_job.id ->
+        # An Oban retry: this job created the contact in an earlier attempt, so
+        # it stays in scope for auto-merge (its record is only written on create).
+        acc = %{acc | created_contact_ids: [contact.id | acc.created_contact_ids]}
         import_api_contact_children(ctx, contact, api_contact, source_id, ref_data, acc, deferred)
 
       _contact ->
@@ -948,11 +952,10 @@ defmodule Kith.Imports.Sources.MonicaApi do
   # ── Phase 1.5: Auto-merge definite duplicates ───────────────────────
 
   defp auto_merge_duplicates(account_id, import_job, opts, created_ids) do
-    # `created_ids` are the contacts this run actually inserted (main crawl +
-    # backfill). A re-import writes a fresh ImportRecord for every *updated*
-    # contact too, so an ImportRecord from this run is NOT a reliable "created
-    # here" signal — both passes below scope to `created_ids` instead, which
-    # keeps pre-existing contacts out of the auto-merge entirely.
+    # `created_ids` are the contacts this import job created (main crawl +
+    # backfill), including ones an earlier attempt of the same job created
+    # (an Oban retry). Contacts from earlier import jobs are skipped entirely
+    # and never appear here, so pre-existing contacts stay out of the auto-merge.
 
     # Load contacts with contact fields and addresses (addresses participate
     # in the broadened definite-duplicate predicate).
