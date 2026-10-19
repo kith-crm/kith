@@ -5,6 +5,9 @@
 - **Status:** approved in conversation, section by section; this document is awaiting review
 - **Origin:** PR #44's deferred follow-up "rework the Monica reminder import for Monica 4.1.2". Every rule
   below was checked against a real Monica 4.1.2 and a real import through Kith's UI (see §2).
+- **Decision 2026-10-19:** re-importing previously imported contacts is not supported; such contacts are
+  skipped (counted in the summary's `skipped`) along with their children. A purged contact is re-created.
+  Only a retry of the *same* import job is idempotent.
 - **Related:** [reminder dispatcher design](2026-09-26-reminder-dispatcher-design.md) (the schedule model this
   importer targets).
 
@@ -85,12 +88,11 @@ All decisions that create a reminder copy `title` (`"Imported reminder"` if it's
 create a `stay_in_touch` reminder with `interval_unit: "day"`, `interval_count = frequency`, and `anchor_date` =
 the date part of `stay_in_touch_trigger_date`. If the trigger date is missing, use today + frequency days.
 
-**Re-import:**
+**Retries (not re-imports):** contacts from an earlier import are skipped (2026-10-19 decision), so the rules
+below only matter when Oban retries the *same* import job:
 - **Mapped Monica reminder id:**
-  - If the mapped Kith row is a `birthday` or `first_met` reminder, re-run its sync and keep the mapping.
-  - If the decision is now R2/R3 but the mapped row is a generic reminder, delete that row and re-point the
-    mapping (the existing path in PR #44).
-  - Otherwise, update the mapped row in place (title, description, schedule, active). Never create a second one.
+  - A `birthday` or `first_met` mapped row: re-run its sync and keep the mapping.
+  - A generic mapped row of the same type: update it in place. Never create a second one.
 - **Stay-in-touch:** the import record key is `stay_in_touch:<monica contact id>`.
 
 ## 5. Kith changes
@@ -146,7 +148,7 @@ the date part of `stay_in_touch_trigger_date`. If the trigger date is missing, u
   helpers are deleted.
 - `MonicaMiscDataWorker.import_single_reminder/5` carries out the mapper's decision (§4) and counts skips and
   warnings in the import summary.
-- `Imports.Sources.MonicaApi` creates or updates the stay-in-touch reminder after saving each contact, when
+- `Imports.Sources.MonicaApi` creates the stay-in-touch reminder after saving each contact (a same-job retry updates it), when
   the `reminders` import option is on.
 
 ## 6. Error handling
@@ -166,7 +168,8 @@ the date part of `stay_in_touch_trigger_date`. If the trigger date is missing, u
 - `sync_first_met/1`: flag on/off, date set/cleared, merge OR, unique index.
 - API: 422 for create/update/delete of `first_met`; `first_met_reminder` on the contact API.
 - Dispatcher: `first_met` gets no advance notice and advances yearly; the email subject for `first_met`.
-- `MonicaMiscDataWorker`: re-import updates in place (no duplicates); a mapped generic row is replaced by the birthday mapping.
+- `MonicaMiscDataWorker`: a retry of the same import updates the mapped reminder in place (no duplicates).
+- `MonicaApi.crawl/5`: contacts from an earlier import are skipped and untouched; a purged contact is re-created; a same-job retry is idempotent; relationships to skipped contacts still link.
 - LiveView: the contact page renders a 29 Feb birthday in a non-leap year.
 - LiveView (`RemindersComponent`):
   - Choosing `Custom…` shows the count and unit fields; choosing a preset hides them.
