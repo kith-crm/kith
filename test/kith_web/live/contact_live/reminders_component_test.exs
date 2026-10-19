@@ -156,4 +156,23 @@ defmodule KithWeb.ContactLive.RemindersComponentTest do
              "#reminders-#{contact.id} button[phx-click='delete'][phx-value-id='#{first_met.id}']"
            )
   end
+
+  test "a crafted delete event cannot remove a derived reminder", %{conn: conn, contact: contact} do
+    {:ok, contact} =
+      Kith.Contacts.update_contact(contact, %{
+        first_met_at: ~D[2012-09-01],
+        first_met_reminder: true
+      })
+
+    first_met = Kith.Reminders.get_first_met_reminder(contact.id, contact.account_id)
+    {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+    view |> element("button[phx-click='toggle-more-drawer']") |> render_click()
+
+    view
+    |> with_target("#reminders-#{contact.id}")
+    |> render_hook("delete", %{"id" => to_string(first_met.id)})
+
+    render(view)
+    assert Kith.Reminders.get_first_met_reminder(contact.id, contact.account_id)
+  end
 end

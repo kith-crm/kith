@@ -3,6 +3,10 @@ defmodule KithWeb.ContactLive.RemindersComponent do
 
   alias Kith.Reminders
 
+  # Owned by the contact's dates; never edited or deleted directly (the API
+  # refuses them the same way).
+  @derived_types ["birthday", "first_met"]
+
   @type_options [
     {"One-time", "one_time"},
     {"Recurring", "recurring"},
@@ -85,6 +89,18 @@ defmodule KithWeb.ContactLive.RemindersComponent do
 
   def handle_event("delete", %{"id" => id}, socket) do
     reminder = Reminders.get_reminder!(socket.assigns.account_id, String.to_integer(id))
+
+    if derived?(reminder) do
+      {:noreply,
+       put_flash(socket, :error, "Birthday and first-met reminders are managed from the contact.")}
+    else
+      delete_reminder(reminder, socket)
+    end
+  end
+
+  defp derived?(reminder), do: reminder.type in @derived_types
+
+  defp delete_reminder(reminder, socket) do
     {:ok, _} = Reminders.delete_reminder(reminder)
 
     reminders =
@@ -288,7 +304,7 @@ defmodule KithWeb.ContactLive.RemindersComponent do
                 </div>
               </div>
               <button
-                :if={@can_edit && reminder.type not in ["birthday", "first_met"]}
+                :if={@can_edit && not derived?(reminder)}
                 phx-click="delete"
                 phx-value-id={reminder.id}
                 phx-target={@myself}
