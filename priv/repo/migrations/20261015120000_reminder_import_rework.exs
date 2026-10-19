@@ -29,7 +29,9 @@ defmodule Kith.Repo.Migrations.ReminderImportRework do
       remove :first_met_reminder
     end
 
-    # Day-interval rows cannot satisfy the old constraint.
+    # Neither can first-met rows (the old type check and dispatcher don't know
+    # them), nor day-interval rows the old interval constraint.
+    execute "DELETE FROM reminders WHERE type = 'first_met'"
     execute "DELETE FROM reminders WHERE interval_unit = 'day'"
     drop constraint(:reminders, :reminders_interval_unit_values)
 
