@@ -34,6 +34,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
   alias Kith.Contacts.PhoneFormatter
   alias Kith.Imports
   alias Kith.Imports.DuplicateAutomerge
+  alias Kith.Imports.Monica.NoteTimestamps
   alias Kith.Imports.Monica.ReminderMapper
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
   alias Kith.Reminders
@@ -806,7 +807,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
   defp create_imported_note(contact, user_id, note, import_job) do
     attrs = %{"body" => note["body"]}
 
-    case Contacts.create_note(contact, user_id, attrs) do
+    case Contacts.create_note(contact, user_id, attrs, NoteTimestamps.from_note(note)) do
       {:ok, n} ->
         maybe_record_entity(import_job, "note", note["uuid"], "note", n.id)
 

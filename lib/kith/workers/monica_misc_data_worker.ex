@@ -36,6 +36,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   alias Kith.Contacts.{Debt, Gift}
   alias Kith.Conversations.{Conversation, Message}
   alias Kith.Imports
+  alias Kith.Imports.Monica.NoteTimestamps
   alias Kith.Imports.Monica.ReminderMapper
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
   alias Kith.Reminders
@@ -259,7 +260,9 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   end
 
   defp create_imported_note(contact, user_id, note, import_job) do
-    case Contacts.create_note(contact, user_id, %{"body" => note["body"]}) do
+    attrs = %{"body" => note["body"]}
+
+    case Contacts.create_note(contact, user_id, attrs, NoteTimestamps.from_note(note)) do
       {:ok, n} = ok ->
         maybe_record_entity(import_job, "note", note["uuid"], "note", n.id)
         ok
