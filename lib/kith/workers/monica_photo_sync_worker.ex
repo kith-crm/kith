@@ -123,7 +123,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
     uuid = photo["uuid"]
     monica_contact_id = get_in(photo, ["contact", "id"])
 
-    case resolve_contact(import_job.account_id, monica_contact_id) do
+    case resolve_contact(import_job, monica_contact_id) do
       {:ok, contact} ->
         handle_decode(contact, photo, import_job, summary, uuid)
 
@@ -141,15 +141,20 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
     end
   end
 
-  defp resolve_contact(_account_id, nil),
+  defp resolve_contact(_import_job, nil),
     do: {:not_found, "missing contact id in /api/photos response"}
 
-  defp resolve_contact(account_id, monica_contact_id) do
+  defp resolve_contact(import_job, monica_contact_id) do
     source_id = to_string(monica_contact_id)
 
-    case Imports.find_import_record(account_id, "monica_api", "contact", source_id) do
+    case Imports.find_import_record(import_job.account_id, "monica_api", "contact", source_id) do
       nil ->
         {:not_found, "contact #{source_id} not in import_records"}
+
+      # Re-importing is unsupported: contacts from an earlier import job were
+      # skipped by the crawl, so they must not gain photos or an avatar here.
+      %{import_id: import_id} when import_id != import_job.id ->
+        {:not_found, "contact #{source_id} skipped (imported by an earlier import)"}
 
       %{local_entity_id: local_id} ->
         case Repo.get(Contacts.Contact, local_id) do
