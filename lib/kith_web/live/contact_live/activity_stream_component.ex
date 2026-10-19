@@ -285,6 +285,29 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
     Gifts.delete_gift(gift) |> normalize_result()
   end
 
+  defp delete_entry(:life_event, id, assigns) do
+    life_event = Activities.get_life_event!(assigns.account_id, id)
+    Activities.delete_life_event(life_event) |> normalize_result()
+  end
+
+  defp delete_entry(:conversation, id, assigns) do
+    conversation = Conversations.get_conversation!(assigns.account_id, id)
+    Conversations.delete_conversation(conversation) |> normalize_result()
+  end
+
+  defp delete_entry(:activity, id, assigns) do
+    activity = Activities.get_activity!(assigns.account_id, id)
+    Activities.delete_activity(activity) |> normalize_result()
+  end
+
+  # Same cleanup as PhotosGalleryComponent: drop the stored file, then the row
+  # (delete_photo also clears the contact's avatar if it pointed here).
+  defp delete_entry(:photo, id, assigns) do
+    photo = Contacts.get_photo!(assigns.account_id, id)
+    Storage.delete(photo.storage_key)
+    Contacts.delete_photo(photo) |> normalize_result()
+  end
+
   defp delete_entry(_, _, _), do: {:error, "Delete not supported for this type"}
 
   defp normalize_result({:ok, result}), do: {:ok, result}

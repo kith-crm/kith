@@ -395,4 +395,98 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
       call
     end
   end
+
+  describe "delete entry" do
+    defp click_delete(view, type, id) do
+      view
+      |> element(
+        ~s|button[phx-click="delete-entry"][phx-value-type="#{type}"][phx-value-id="#{id}"]|
+      )
+      |> render_click()
+    end
+
+    test "deletes a life event", %{conn: conn, contact: contact, account_id: account_id} do
+      type = Kith.Repo.all(Kith.Contacts.LifeEventType) |> hd()
+
+      {:ok, le} =
+        Kith.Activities.create_life_event(contact, %{
+          "life_event_type_id" => type.id,
+          "occurred_on" => "2020-08-09",
+          "note" => "Graduated"
+        })
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_delete(view, "life_event", le.id)
+
+      refute has_element?(view, ~s|button[phx-value-type="life_event"][phx-value-id="#{le.id}"]|)
+
+      assert_raise Ecto.NoResultsError, fn ->
+        Kith.Activities.get_life_event!(account_id, le.id)
+      end
+    end
+
+    test "deletes a conversation", %{
+      conn: conn,
+      contact: contact,
+      user: user,
+      account_id: account_id
+    } do
+      {:ok, conv} =
+        Kith.Conversations.create_conversation(account_id, user.id, %{
+          "subject" => "Catch-up",
+          "platform" => "signal",
+          "contact_id" => contact.id
+        })
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_delete(view, "conversation", conv.id)
+
+      refute has_element?(
+               view,
+               ~s|button[phx-value-type="conversation"][phx-value-id="#{conv.id}"]|
+             )
+
+      assert_raise Ecto.NoResultsError, fn ->
+        Kith.Conversations.get_conversation!(account_id, conv.id)
+      end
+    end
+
+    test "deletes an activity", %{conn: conn, contact: contact, account_id: account_id} do
+      {:ok, act} =
+        Kith.Activities.create_activity(
+          account_id,
+          %{"title" => "Hike", "occurred_at" => ~U[2022-02-02 02:02:00Z]},
+          [contact.id]
+        )
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_delete(view, "activity", act.id)
+
+      refute has_element?(view, ~s|button[phx-value-type="activity"][phx-value-id="#{act.id}"]|)
+
+      assert_raise Ecto.NoResultsError, fn ->
+        Kith.Activities.get_activity!(account_id, act.id)
+      end
+    end
+
+    test "deletes a photo and clears it as avatar", %{
+      conn: conn,
+      contact: contact,
+      account_id: account_id
+    } do
+      photo = photo_fixture(contact, %{"file_name" => "beach.jpg"})
+      {:ok, _} = Kith.Contacts.set_avatar(contact, photo)
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_delete(view, "photo", photo.id)
+
+      refute has_element?(view, ~s|button[phx-value-type="photo"][phx-value-id="#{photo.id}"]|)
+
+      assert_raise Ecto.NoResultsError, fn ->
+        Kith.Contacts.get_photo!(account_id, photo.id)
+      end
+
+      assert Kith.Contacts.get_contact!(account_id, contact.id).avatar == nil
+    end
+  end
 end
