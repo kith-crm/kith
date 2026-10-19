@@ -109,13 +109,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   defp back_for_path(_path, _query, _account_id), do: nil
 
-  # Round-trips the referer's query through decode/encode so only well-formed
-  # `key=value` pairs survive; a malformed one is dropped rather than passed on.
+  # Round-trips the referer's query through decode/encode so whatever reaches
+  # the link is re-encoded `key=value` pairs. `URI.query_decoder/1` is lenient
+  # (a bad `%` sequence is kept literally and re-encoded), so it does not raise.
   # Pair order is kept (a map would sort it).
   defp normalize_query(query) when is_binary(query) do
     query |> URI.query_decoder() |> Enum.to_list() |> URI.encode_query()
-  rescue
-    ArgumentError -> ""
   end
 
   defp normalize_query(_query), do: ""
@@ -852,7 +851,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   defp sections, do: @sections
 
-  defp member_name(assigns, id) do
+  @doc false
+  def member_name(assigns, id) do
     case Enum.find(assigns.members, &(&1.id == id)) do
       nil -> nil
       contact -> contact.display_name
@@ -860,7 +860,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   # For running text, where a missing member still has to read as something.
-  defp member_label(assigns, id), do: member_name(assigns, id) || "unknown"
+  @doc false
+  def member_label(assigns, id), do: member_name(assigns, id) || "unknown"
 
   # "Photo 2 of 3, from Mona Vale, M. Vale" — distinct names for otherwise
   # identical avatar buttons (design B10).

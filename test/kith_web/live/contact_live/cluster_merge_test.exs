@@ -259,6 +259,15 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
   end
 
+  test "member_name/2 is nil for a missing member and member_label/2 falls back to unknown",
+       ctx do
+    assigns = %{members: [ctx.a]}
+
+    assert KithWeb.ContactLive.ClusterMerge.member_name(assigns, ctx.a.id) == ctx.a.display_name
+    assert KithWeb.ContactLive.ClusterMerge.member_name(assigns, -1) == nil
+    assert KithWeb.ContactLive.ClusterMerge.member_label(assigns, -1) == "unknown"
+  end
+
   describe "avatar values (#3)" do
     defp mona_pair(ctx) do
       e =

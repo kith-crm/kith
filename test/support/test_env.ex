@@ -8,6 +8,8 @@ defmodule Kith.TestEnv do
   @doc """
   Sets `Application` env `app`/`key` to `value` and restores the previous value
   (or deletes the key) when the test exits. Call it from `setup`.
+
+  Application env is global: only use it in `async: false` tests.
   """
   def put_env_restoring(app, key, value) do
     previous = Application.fetch_env(app, key)
