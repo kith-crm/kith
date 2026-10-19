@@ -687,5 +687,25 @@ defmodule KithWeb.DAV.PropfindTest do
         assert "PROPPATCH" in methods
       end
     end
+
+    test "CDV-02: PROPFIND on the home set honours Depth 0", context do
+      conn =
+        context.conn
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("depth", "0")
+        |> dav_request("PROPFIND", "/dav/addressbooks/", propfind_body())
+
+      assert conn.status == 207
+      assert count_responses(conn.resp_body) == 1
+      assert conn.resp_body =~ "<d:href>/dav/addressbooks/</d:href>"
+
+      conn =
+        context.conn
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("depth", "1")
+        |> dav_request("PROPFIND", "/dav/addressbooks/", propfind_body())
+
+      assert count_responses(conn.resp_body) == 2
+    end
   end
 end

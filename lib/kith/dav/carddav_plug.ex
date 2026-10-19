@@ -170,16 +170,24 @@ defmodule Kith.DAV.CardDAVPlug do
       supported_address_data: XMLBuilder.supported_address_data()
     ]
 
-    xml =
-      XMLBuilder.multistatus([
-        XMLBuilder.response("/dav/addressbooks/", build_propstats(request_type, home_props)),
-        XMLBuilder.response(
-          "/dav/addressbooks/default/",
-          build_propstats(request_type, default_props)
-        )
-      ])
+    home = XMLBuilder.response("/dav/addressbooks/", build_propstats(request_type, home_props))
 
-    send_dav_response(conn, 207, xml)
+    # RFC 4918 §9.1: Depth 0 is the home set alone. A missing Depth header keeps
+    # the historical behaviour of listing the child address book.
+    responses =
+      if get_req_header(conn, "depth") == ["0"] do
+        [home]
+      else
+        [
+          home,
+          XMLBuilder.response(
+            "/dav/addressbooks/default/",
+            build_propstats(request_type, default_props)
+          )
+        ]
+      end
+
+    send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
   end
 
   # ── Address book PROPFIND ──────────────────────────────────────────────
