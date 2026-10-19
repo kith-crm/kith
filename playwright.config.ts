@@ -2,12 +2,13 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   timeout: 30_000,
+  outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? "test-results",
   expect: { timeout: 5_000 },
   fullyParallel: true,
   retries: 0,
   reporter: "list",
   use: {
-    baseURL: "http://127.0.0.1:4000",
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:4000",
     trace: "on-first-retry",
   },
   projects: [

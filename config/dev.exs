@@ -6,10 +6,15 @@ config :kith, Kith.Repo,
   password: "postgres",
   hostname: System.get_env("DB_HOST", "localhost"),
   port: String.to_integer(System.get_env("DB_PORT", "5434")),
-  database: "kith_dev",
+  database: System.get_env("DB_NAME", "kith_dev"),
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
+
+# Local file storage (override with STORAGE_PATH for isolated runs)
+config :kith, Kith.Storage,
+  backend: :local,
+  path: System.get_env("STORAGE_PATH", "priv/uploads")
 
 # For development, we disable any cache and enable
 # debugging and code reloading.
