@@ -89,7 +89,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     do: %{path: ~p"/contacts/duplicates", label: "Back to duplicates"}
 
   defp back_for_path("/contacts", query, _account_id) do
-    path = if query in [nil, ""], do: ~p"/contacts", else: "/contacts?" <> query
+    path =
+      case normalize_query(query) do
+        "" -> ~p"/contacts"
+        normalized -> "/contacts?" <> normalized
+      end
+
     %{path: path, label: "Back to contacts"}
   end
 
@@ -103,6 +108,17 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   defp back_for_path(_path, _query, _account_id), do: nil
+
+  # Round-trips the referer's query through decode/encode so only well-formed
+  # `key=value` pairs survive; a malformed one is dropped rather than passed on.
+  # Pair order is kept (a map would sort it).
+  defp normalize_query(query) when is_binary(query) do
+    query |> URI.query_decoder() |> Enum.to_list() |> URI.encode_query()
+  rescue
+    ArgumentError -> ""
+  end
+
+  defp normalize_query(_query), do: ""
 
   defp back_link(%{referer_back: %{} = back}), do: back
   defp back_link(%{synthetic?: true}), do: %{path: ~p"/contacts", label: "Back to contacts"}
@@ -826,7 +842,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
     case Map.get(assigns.resolution.attributions, field) do
       :all_agree -> "all #{total} agree"
-      {:only, id} -> "only #{member_name(assigns, id)} has this"
+      {:only, id} -> "only #{member_label(assigns, id)} has this"
       {:some, n} -> "#{n} of #{total}"
       _ -> nil
     end
@@ -838,10 +854,13 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   defp member_name(assigns, id) do
     case Enum.find(assigns.members, &(&1.id == id)) do
-      nil -> "unknown"
+      nil -> nil
       contact -> contact.display_name
     end
   end
+
+  # For running text, where a missing member still has to read as something.
+  defp member_label(assigns, id), do: member_name(assigns, id) || "unknown"
 
   # "Photo 2 of 3, from Mona Vale, M. Vale" — distinct names for otherwise
   # identical avatar buttons (design B10).
@@ -849,10 +868,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     holders =
       candidate.member_ids
       |> Enum.map(&member_name(assigns, &1))
+      |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
       |> Enum.join(", ")
 
-    "Photo #{index + 1} of #{length(candidates(assigns, :avatar))}, from #{holders}"
+    label = "Photo #{index + 1} of #{length(candidates(assigns, :avatar))}"
+    if holders == "", do: label, else: "#{label}, from #{holders}"
   end
 
   defp humanize(field) do
@@ -941,6 +962,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :back, back_link(assigns))
+
     ~H"""
     <Layouts.app
       flash={@flash}
@@ -958,11 +981,11 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       --%>
       <div class="max-w-4xl mx-auto space-y-4 mb-4">
         <.link
-          navigate={back_link(assigns).path}
+          navigate={@back.path}
           class="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
         >
           <.icon name="hero-arrow-left" class="size-4" />
-          {back_link(assigns).label}
+          {@back.label}
         </.link>
         <h1 class="text-2xl font-semibold text-[var(--color-text-primary)] tracking-tight">
           Merge duplicates
@@ -1311,7 +1334,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
               <span class="text-xs text-[var(--color-text-tertiary)]">
                 {if entry.duplicate?,
                   do: "duplicate · dropped",
-                  else: member_name(assigns, entry.owner_id)}
+                  else: member_label(assigns, entry.owner_id)}
               </span>
             </label>
             <p
@@ -1364,7 +1387,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                     is nothing to dismiss — marking it would insert dismissed
                     candidate rows for pairs detection never suggested and
                     permanently suppress real future matches. --%>
-              <UI.button :if={@synthetic?} variant="secondary" navigate={back_link(assigns).path}>
+              <UI.button :if={@synthetic?} variant="secondary" navigate={@back.path}>
                 Cancel
               </UI.button>
               <UI.button :if={not @synthetic?} variant="secondary" phx-click="not-duplicates">

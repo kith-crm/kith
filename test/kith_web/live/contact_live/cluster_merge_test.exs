@@ -188,6 +188,14 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
                ~s(href="/contacts?search=ng&amp;sort=name")
     end
 
+    test "the referer's query string is re-encoded, so junk cannot pass through raw", ctx do
+      {_c, path} = manual_pair(ctx)
+      {:ok, live, _} = live_from(ctx.conn, path, "#{@origin}/contacts?search=100%&sort=a<b")
+
+      assert live |> element("a", "Back to contacts") |> render() =~
+               ~s(href="/contacts?search=100%25&amp;sort=a%3Cb")
+    end
+
     test "from the duplicates list the link goes back there", ctx do
       {_c, path} = manual_pair(ctx)
       {:ok, live, _} = live_from(ctx.conn, path, "#{@origin}/contacts/duplicates")
@@ -295,8 +303,12 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
       assert row =~ ~s(aria-label="Photo 1 of 2, from Mona Vale")
       assert row =~ ~s(aria-label="Photo 2 of 2, from Mona Vale")
-      assert length(Regex.scan(~r/aria-pressed="true"/, row)) == 1
-      assert row =~ ~s(aria-pressed="false")
+      # Scoped to the candidate (photo) buttons: "Leave empty" has its own
+      # aria-pressed and is not a candidate.
+      photo_buttons = Regex.scan(~r/<button[^>]*aria-label="Photo [^>]*>/, row) |> List.flatten()
+      assert length(photo_buttons) == 2
+      assert Enum.count(photo_buttons, &(&1 =~ ~s(aria-pressed="true"))) == 1
+      assert Enum.count(photo_buttons, &(&1 =~ ~s(aria-pressed="false"))) == 1
     end
 
     test "chips and choices get unique avatar ids", ctx do
@@ -309,14 +321,34 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert has_element?(live, "#merge-avatar-choice-1")
     end
 
-    test "the same avatar file as chip and choice renders without duplicate ids", ctx do
-      attrs = %{first_name: "Mona", last_name: "Vale", avatar: "avatars/same.jpg"}
-      e = ContactsFixtures.contact_fixture(ctx.account_id, attrs)
-      f = ContactsFixtures.contact_fixture(ctx.account_id, attrs)
-      candidate!(ctx.account_id, e, f)
+    test "the same avatar file as a chip and as a choice renders with distinct ids", ctx do
+      same = %{first_name: "Mona", last_name: "Vale", avatar: "avatars/same.jpg"}
+      e = ContactsFixtures.contact_fixture(ctx.account_id, same)
+      f = ContactsFixtures.contact_fixture(ctx.account_id, same)
 
-      # LiveViewTest raises on duplicate DOM ids.
-      assert {:ok, _live, _} = live(ctx.conn, cluster_path(e, f))
+      g =
+        ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Mona",
+          last_name: "Vale",
+          avatar: "avatars/other.jpg"
+        })
+
+      candidate!(ctx.account_id, e, f)
+      candidate!(ctx.account_id, f, g)
+
+      {:ok, live, _} = live(ctx.conn, cluster_path(e, f))
+      html = render(live)
+
+      # same.jpg is rendered by two member chips and by one (merged) choice;
+      # other.jpg by one chip and one choice: two choices in all.
+      assert length(Regex.scan(~r/src="\/uploads\/avatars\/same\.jpg"/, html)) == 3
+      assert has_element?(live, "#merge-avatar-choice-0")
+      assert has_element?(live, "#merge-avatar-choice-1")
+      refute has_element?(live, "#merge-avatar-choice-2")
+
+      ids = Regex.scan(~r/id="(merge-(?:member|avatar)[^"]*)"/, html) |> Enum.map(&List.last/1)
+      assert length(ids) == 5
+      assert ids == Enum.uniq(ids)
     end
   end
 
