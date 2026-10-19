@@ -647,6 +647,8 @@ defmodule Kith.DAV.CardDAVPlug do
       resourcetype: XMLBuilder.resourcetype("<d:collection/><card:addressbook/>"),
       displayname: XMLBuilder.displayname("Kith Contacts"),
       getctag: XMLBuilder.getctag(ctag),
+      # RFC 6578 §4: a collection supporting sync-collection exposes DAV:sync-token
+      sync_token: XMLBuilder.sync_token(generate_sync_token()),
       supported_address_data: XMLBuilder.supported_address_data(),
       max_resource_size: XMLBuilder.max_resource_size(1_048_576),
       supported_collation_set: XMLBuilder.supported_collation_set(),

@@ -707,5 +707,23 @@ defmodule KithWeb.DAV.PropfindTest do
 
       assert count_responses(conn.resp_body) == 2
     end
+
+    test "CDV-03: address book offers a URI sync-token property", context do
+      body = """
+      <?xml version="1.0" encoding="UTF-8"?>
+      <d:propfind xmlns:d="DAV:"><d:prop><d:sync-token/></d:prop></d:propfind>
+      """
+
+      conn =
+        context.conn
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("depth", "0")
+        |> dav_request("PROPFIND", "/dav/addressbooks/default/", body)
+
+      assert conn.status == 207
+      refute conn.resp_body =~ "404 Not Found"
+      assert [_, token] = Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, conn.resp_body)
+      assert token =~ ~r/^[a-z][a-z0-9+.-]*:\S+$/i
+    end
   end
 end
