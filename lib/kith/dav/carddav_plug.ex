@@ -549,8 +549,8 @@ defmodule Kith.DAV.CardDAVPlug do
   defp handle_proppatch(conn) do
     {:ok, body, conn} = read_body(conn)
 
-    case XMLParser.parse_propfind(body) do
-      {:ok, {:prop, props}} ->
+    case XMLParser.parse_proppatch(body) do
+      {:ok, props} ->
         # All properties are live (server-managed) — cannot be modified (RFC 4918 §9.2)
         prop_names =
           Enum.map(props, &Atom.to_string/1) |> Enum.map(&String.replace(&1, "_", "-"))

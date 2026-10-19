@@ -757,5 +757,33 @@ defmodule KithWeb.DAV.PropfindTest do
 
       assert conn.status == 400
     end
+
+    test "CDV-05: Apple A: prefix and default xmlns give the same result as d:", context do
+      d =
+        authed_dav(
+          context,
+          "PROPFIND",
+          "/dav/",
+          ~s(<d:propfind xmlns:d="DAV:"><d:allprop/></d:propfind>)
+        )
+
+      assert d.resp_body =~ "<d:current-user-principal><d:href>/dav/principals/</d:href>"
+
+      for body <- [
+            ~s(<A:propfind xmlns:A="DAV:"><A:allprop/></A:propfind>),
+            ~s(<propfind xmlns="DAV:"><allprop/></propfind>)
+          ] do
+        assert authed_dav(context, "PROPFIND", "/dav/", body).resp_body == d.resp_body
+      end
+
+      body = """
+      <propfind xmlns="DAV:"><prop><resourcetype/>
+        <getctag xmlns="http://calendarserver.org/ns/"/></prop></propfind>
+      """
+
+      conn = authed_dav(context, "PROPFIND", "/dav/addressbooks/default/", body)
+      assert conn.resp_body =~ "<cs:getctag>"
+      refute conn.resp_body =~ "404 Not Found"
+    end
   end
 end
