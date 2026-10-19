@@ -244,9 +244,23 @@ if config_env() == :prod do
           _ -> 7 * 24 * 60 * 60
         end
 
+      # `OBAN_LIFELINE_RESCUE_AFTER_MINUTES` is how long a job may sit `executing`
+      # before Lifeline treats it as orphaned by a restart and re-queues it. Keep
+      # it above the longest worker timeout (30 min); smaller or invalid values
+      # fall back to 60 so a stray override can't re-run jobs that are still live.
+      oban_lifeline_rescue_after_minutes =
+        case Integer.parse(
+               String.trim(System.get_env("OBAN_LIFELINE_RESCUE_AFTER_MINUTES", "60"))
+             ) do
+          {minutes, ""} when minutes > 30 -> minutes
+          _ -> 60
+        end
+
       config :kith, Oban,
         plugins: [
           {Oban.Plugins.Pruner, max_age: oban_pruner_max_age_seconds},
+          {Oban.Plugins.Lifeline,
+           rescue_after: :timer.minutes(oban_lifeline_rescue_after_minutes)},
           {Oban.Plugins.Cron,
            crontab: [
              {"0 * * * *", Kith.Workers.ReminderDispatcher},
@@ -331,8 +345,21 @@ if config_env() == :prod do
 
   config :kith, metrics_token: metrics_token
 
-  # Structured JSON logging in production
+  # `LOG_LEVEL=debug` turns on the importer workers' per-request and per-contact
+  # debug lines (see `MonicaMiscDataWorker`) without a rebuild. Anything other
+  # than debug/info/warning/error keeps the `:info` set in config/prod.exs.
+  case System.get_env("LOG_LEVEL") do
+    level when level in ~w(debug info warning error) ->
+      config :logger, level: String.to_existing_atom(level)
+
+    _ ->
+      :ok
+  end
+
+  # Structured JSON logging in production. `import_id` and `worker` are set by
+  # the Monica import workers, so a log line says which import it belongs to.
   config :logger, :default_handler,
     formatter:
-      {LoggerJSON.Formatters.Basic, metadata: [:request_id, :user_id, :account_id, :reason]}
+      {LoggerJSON.Formatters.Basic,
+       metadata: [:request_id, :user_id, :account_id, :reason, :import_id, :worker]}
 end

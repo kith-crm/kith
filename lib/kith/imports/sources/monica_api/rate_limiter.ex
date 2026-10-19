@@ -23,10 +23,14 @@ defmodule Kith.Imports.Sources.MonicaApi.RateLimiter do
   @default_limit 55
   @default_retry_sleep_ms 1_100
 
+  @doc "The configured request budget per `scale_ms` window (per minute by default)."
+  @spec limit() :: pos_integer()
+  def limit, do: Application.get_env(:kith, :monica_rate_limit) || @default_limit
+
   @spec wait!(String.t()) :: :ok
   def wait!(url_or_host) when is_binary(url_or_host) do
     bucket = bucket_key(url_or_host)
-    limit = Application.get_env(:kith, :monica_rate_limit) || @default_limit
+    limit = limit()
     scale_ms = Application.get_env(:kith, :monica_rate_limit_scale_ms) || @default_scale_ms
 
     retry_sleep_ms =

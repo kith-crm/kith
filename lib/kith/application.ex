@@ -35,6 +35,11 @@ defmodule Kith.Application do
     Kith.Weather.install_fuse()
     # Attach Sentry telemetry handler for Oban job failures
     Kith.SentryEventHandler.attach()
+    # One log line per slow query (timing split db vs pool queue) and per Oban
+    # job start/stop/exception with its duration, so a stalled or dead job shows
+    # up as a missing "stop" line instead of silence.
+    Kith.SlowQueryLogger.attach()
+    Kith.ObanJobLogger.attach()
     # Capture crashes via Erlang logger handler (Sentry v10+, replaces PlugCapture)
     :logger.add_handler(:sentry_handler, Sentry.LoggerHandler, %{})
 

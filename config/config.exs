@@ -57,6 +57,15 @@ config :kith, Oban,
     # container reads `OBAN_PRUNER_MAX_AGE_DAYS`; only `:dev`/`:test` use this
     # line, so a plain literal is enough. Keep the 7 in sync with runtime.exs.
     {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60},
+    # Re-queues jobs whose process died without finishing (a container restart
+    # or deploy mid-job leaves the row `executing` forever otherwise). Must stay
+    # above the longest worker `timeout/1` (30 min) or it re-runs live jobs.
+    # `:prod` re-declares this list in config/runtime.exs, keep both in sync.
+    {Oban.Plugins.Lifeline,
+     rescue_after:
+       :timer.minutes(
+         String.to_integer(System.get_env("OBAN_LIFELINE_RESCUE_AFTER_MINUTES", "60"))
+       )},
     {Oban.Plugins.Cron,
      crontab: [
        {"0 * * * *", Kith.Workers.ReminderDispatcher},

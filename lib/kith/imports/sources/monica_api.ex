@@ -1419,7 +1419,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
         headers: headers,
         params: params,
         max_retries: 5,
-        retry_log_level: :warn
+        retry_log_level: :warning
       ] ++ req_options
 
     Req.get(url, options)

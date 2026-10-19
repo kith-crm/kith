@@ -23,6 +23,24 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   Exits early if the import has been cancelled. Contacts that were
   soft-deleted between main-crawl completion and this job's dispatch are
   silently skipped.
+
+  ## Time budget
+
+  A run stops taking new contacts once it has used `@default_budget_ms` (5
+  minutes short of the 30-minute job timeout) and enqueues a follow-up job
+  carrying the remaining plan and the counts so far (`"carried"`). A big plan
+  at a low rate limit therefore finishes across several short jobs instead of
+  being killed at the timeout and restarting from the top. Every run completes
+  at least one contact, so each one makes progress.
+
+  ## Logging
+
+  Everything is logged under `[MonicaMiscData] import <id>:` — a start line
+  (plan size, projected duration), a progress line every
+  `@progress_every_entries` contacts or `@progress_every_ms`, warnings for slow
+  requests and long rate-limit waits, and a completion line. A job that dies
+  without logging (a restart or a kill) is therefore visible as a missing
+  completion line, and `Oban.Plugins.Lifeline` re-runs it.
   """
 
   use Oban.Worker, queue: :imports, max_attempts: 3
@@ -42,12 +60,21 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   alias Kith.Repo
   alias Kith.Tasks.Task
 
-  @impl Oban.Worker
-  def timeout(_job), do: :timer.minutes(30)
+  @timeout_ms :timer.minutes(30)
+  @default_budget_ms :timer.minutes(25)
+  @progress_every_entries 25
+  @progress_every_ms :timer.seconds(30)
+  @slow_request_ms :timer.seconds(5)
+  @slow_wait_ms :timer.seconds(10)
+  @request_timeout_ms :timer.seconds(30)
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: args}) do
+  def timeout(_job), do: @timeout_ms
+
+  @impl Oban.Worker
+  def perform(%Oban.Job{args: args} = job) do
     import_job = Imports.get_import!(args["import_id"])
+    Logger.metadata(import_id: import_job.id, worker: "MonicaMiscData")
 
     cond do
       import_job.status in ["cancelled", "failed"] ->
@@ -61,24 +88,151 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
         {:cancel, :api_key_wiped}
 
       true ->
-        import_misc_data(import_job, args)
+        import_misc_data(import_job, args, job)
     end
   end
 
-  defp import_misc_data(import_job, args) do
+  defp import_misc_data(import_job, args, job) do
     credential = build_credential(import_job, args)
     plan = args["plan"] || []
+    carried = args["carried"] || %{}
 
-    counts = process_plan(plan, credential, import_job)
+    run = start_run()
+    log_start(import_job, job, plan, carried)
 
-    summary = Map.put(import_job.summary || %{}, "misc", counts)
+    {counts, remaining} = process_plan(plan, credential, import_job, run)
+    total_counts = merge_counts(counts, carried)
 
+    summary = Map.put(import_job.summary || %{}, "misc", total_counts)
     Imports.update_import_status(import_job, import_job.status, %{summary: summary})
 
-    topic = "import:#{import_job.account_id}"
-    Phoenix.PubSub.broadcast(Kith.PubSub, topic, {:import_misc_complete, counts})
+    if remaining == [] do
+      topic = "import:#{import_job.account_id}"
+      Phoenix.PubSub.broadcast(Kith.PubSub, topic, {:import_misc_complete, total_counts})
+
+      log(
+        import_job,
+        "complete in #{fmt_ms(elapsed_ms(run))}: #{request_stats()} | #{fmt_counts(total_counts)}"
+      )
+    else
+      # Raise on a failed insert: the retry re-runs this slice, which is idempotent.
+      {:ok, _} =
+        args
+        |> Map.merge(%{"plan" => remaining, "carried" => total_counts})
+        |> new()
+        |> Oban.insert()
+
+      log(
+        import_job,
+        "time budget reached after #{fmt_ms(elapsed_ms(run))}; #{length(remaining)} contacts left, " <>
+          "continuing in a follow-up job | #{request_stats()} | #{fmt_counts(total_counts)}"
+      )
+    end
 
     :ok
+  end
+
+  @doc false
+  # Projects how long `plan` takes at `rate_per_minute`. `requests` is an upper
+  # bound: merged-away contacts only fetch notes, and notes can need several pages.
+  def estimate_plan(plan, rate_per_minute) do
+    requests = plan |> Enum.map(&length(&1["endpoints"] || [])) |> Enum.sum()
+    %{requests: requests, minutes: requests / rate_per_minute}
+  end
+
+  defp budget_ms, do: Application.get_env(:kith, :monica_misc_budget_ms, @default_budget_ms)
+
+  defp merge_counts(counts, carried) do
+    Map.merge(carried, counts, fn _key, before, now -> before + now end)
+  end
+
+  # ── Logging ───────────────────────────────────────────────────────────
+
+  defp log(import_job, message),
+    do: Logger.info("[MonicaMiscData] import #{import_job.id}: #{message}")
+
+  defp log_start(import_job, job, plan, carried) do
+    rate = RateLimiter.limit()
+    %{requests: requests, minutes: minutes} = estimate_plan(plan, rate)
+    estimate_ms = round(minutes * 60_000)
+
+    log(
+      import_job,
+      "starting (attempt #{job.attempt}/#{job.max_attempts}, job #{job.id}): #{length(plan)} contacts, " <>
+        "up to #{requests} requests (~#{fmt_ms(estimate_ms)} at #{rate} req/min), " <>
+        "budget #{fmt_ms(budget_ms())} per run, job timeout #{fmt_ms(@timeout_ms)}"
+    )
+
+    if job.attempt > 1 do
+      Logger.warning(
+        "[MonicaMiscData] import #{import_job.id}: retrying after an earlier attempt " <>
+          "(attempt #{job.attempt}/#{job.max_attempts}); the previous attempt died or was rescued without finishing"
+      )
+    end
+
+    if carried != %{} do
+      log(import_job, "continuing an earlier run; counts carried so far: #{fmt_counts(carried)}")
+    end
+
+    if estimate_ms > budget_ms() do
+      Logger.warning(
+        "[MonicaMiscData] import #{import_job.id}: estimated #{fmt_ms(estimate_ms)} at #{rate} req/min " <>
+          "exceeds the #{fmt_ms(budget_ms())} time budget; the rest continues in follow-up jobs. " <>
+          "Raise MONICA_RATE_LIMIT_PER_MINUTE (below Monica's own limit) to finish sooner."
+      )
+    end
+  end
+
+  defp start_run do
+    Process.put(:misc_requests, 0)
+    Process.put(:misc_throttled_ms, 0)
+    now = System.monotonic_time(:millisecond)
+    %{started_ms: now, last_logged_ms: now}
+  end
+
+  defp elapsed_ms(%{started_ms: started}), do: System.monotonic_time(:millisecond) - started
+
+  defp request_stats do
+    "#{Process.get(:misc_requests, 0)} requests, throttled #{fmt_ms(Process.get(:misc_throttled_ms, 0))}"
+  end
+
+  defp maybe_log_progress(run, import_job, done, total, counts) do
+    now = System.monotonic_time(:millisecond)
+
+    if done == total or rem(done, @progress_every_entries) == 0 or
+         now - run.last_logged_ms >= @progress_every_ms do
+      elapsed = elapsed_ms(run)
+      eta = if done > 0, do: round(elapsed / done * (total - done)), else: 0
+
+      log(
+        import_job,
+        "progress #{done}/#{total} contacts (#{div(done * 100, max(total, 1))}%) | #{request_stats()} | " <>
+          "elapsed #{fmt_ms(elapsed)}, eta ~#{fmt_ms(eta)} | #{fmt_counts(counts)}"
+      )
+
+      %{run | last_logged_ms: now}
+    else
+      run
+    end
+  end
+
+  defp fmt_counts(counts) do
+    case counts |> Enum.reject(fn {_k, v} -> v == 0 end) |> Enum.sort() do
+      [] -> "nothing imported yet"
+      pairs -> Enum.map_join(pairs, " ", fn {k, v} -> "#{k}=#{v}" end)
+    end
+  end
+
+  defp fmt_ms(ms) when ms < 1_000, do: "#{ms}ms"
+
+  defp fmt_ms(ms) do
+    s = div(ms, 1_000)
+
+    cond do
+      s < 60 -> "#{s}s"
+      s < 3_600 -> "#{div(s, 60)}m#{rem(s, 60)}s"
+      true -> "#{div(s, 3_600)}h#{div(rem(s, 3_600), 60)}m"
+    end
   end
 
   # The key comes from the Import row (Cloak decrypts it on load), never
@@ -91,7 +245,10 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     }
   end
 
-  defp process_plan(plan, credential, import_job) do
+  # Returns `{counts, remaining_plan}`; `remaining_plan` is non-empty only when
+  # the time budget ran out. The first contact is always processed so a run
+  # can't stall on a zero budget.
+  defp process_plan(plan, credential, import_job, run) do
     initial = %{
       "pets" => 0,
       "calls" => 0,
@@ -102,23 +259,55 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       "reminders" => 0,
       "reminders_skipped" => 0,
       "reminders_warnings" => 0,
+      "reminders_duplicate" => 0,
       "conversations" => 0,
       "notes" => 0
     }
 
     user_id = import_job.user_id
 
-    Enum.reduce(plan, initial, fn entry, counts ->
-      process_entry(entry, credential, user_id, import_job, counts)
+    total = length(plan)
+    budget = budget_ms()
+
+    plan
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({initial, run}, fn {entry, n}, {counts, run} ->
+      if n > 1 and elapsed_ms(run) >= budget do
+        {:halt, {:out_of_budget, counts, Enum.drop(plan, n - 1)}}
+      else
+        counts = process_entry_logged(entry, n, total, credential, user_id, import_job, counts)
+        {:cont, {counts, maybe_log_progress(run, import_job, n, total, counts)}}
+      end
     end)
+    |> case do
+      {:out_of_budget, counts, remaining} -> {counts, remaining}
+      {counts, _run} -> {counts, []}
+    end
+  end
+
+  # Debug line per contact: what it cost, so a slow stretch can be pinned to the
+  # contact (and endpoints) responsible.
+  defp process_entry_logged(entry, n, total, credential, user_id, import_job, counts) do
+    requests_before = Process.get(:misc_requests, 0)
+
+    {entry_ms, counts} =
+      timed(fn -> process_entry(entry, credential, user_id, import_job, counts) end)
+
+    Logger.debug(
+      "[MonicaMiscData] import #{import_job.id}: contact #{n}/#{total} (monica #{entry["source_id"]}) " <>
+        "#{inspect(entry["endpoints"])} took #{fmt_ms(entry_ms)}, " <>
+        "#{Process.get(:misc_requests, 0) - requests_before} requests"
+    )
+
+    counts
   end
 
   defp process_entry(entry, credential, user_id, import_job, counts) do
-    contact = Contacts.get_contact_for_misc(entry["local_id"])
+    contact = planned_or_surviving_contact(entry, import_job)
 
-    # Notes follow the contact's import record, which auto-merge remaps to the
-    # surviving contact, so they are still imported when the contact itself
-    # was merged away. Every other endpoint needs the planned contact.
+    # With no live contact at all (soft-deleted, or merged away without a
+    # surviving record) only notes are attempted, and they resolve their own
+    # target through the import record.
     endpoints =
       if live?(contact),
         do: entry["endpoints"] || [],
@@ -135,6 +324,30 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
         |> fire_endpoint(credential, user_id, contact, entry["source_id"], import_job)
         |> add_counts(endpoint, counts)
     end)
+  end
+
+  # Auto-merge folds duplicate contacts into a survivor and remaps each merged
+  # contact's import record onto it. A planned contact that is no longer live is
+  # therefore resolved through that record, so everything Monica holds for the
+  # duplicate (reminders, pets, calls, ...) is merged into the survivor instead
+  # of being dropped. Each importer skips what the survivor already has.
+  defp planned_or_surviving_contact(entry, import_job) do
+    planned = Contacts.get_contact_for_misc(entry["local_id"])
+
+    with false <- live?(planned),
+         %{local_entity_id: local_id} <-
+           Imports.find_import_record(
+             import_job.account_id,
+             "monica_api",
+             "contact",
+             entry["source_id"]
+           ),
+         %{deleted_at: nil, account_id: account_id} = survivor
+         when account_id == import_job.account_id <- Contacts.get_contact_for_misc(local_id) do
+      survivor
+    else
+      _ -> planned
+    end
   end
 
   defp live?(nil), do: false
@@ -180,28 +393,76 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   # ── HTTP wrapper ──────────────────────────────────────────────────────
 
   defp api_get_json(credential, url, params) do
-    RateLimiter.wait!(credential.url)
+    {wait_ms, :ok} = timed(fn -> RateLimiter.wait!(credential.url) end)
 
     headers = [
       {"Authorization", "Bearer #{credential.api_key}"},
       {"Accept", "application/json"}
     ]
 
+    # Bounded on purpose: each attempt gets `@request_timeout_ms`, and Req's
+    # backoff between the (at most 3) retries adds a few seconds, so one request
+    # can't hold the job for more than about two and a half minutes.
     options =
       [
         headers: headers,
         params: params,
-        max_retries: 5,
-        retry_log_level: :warn
+        receive_timeout: @request_timeout_ms,
+        max_retries: 3,
+        retry_log_level: :warning
       ] ++ Map.get(credential, :req_options, [])
 
-    case Req.get(url, options) do
+    # Logged before the call: if the worker hangs inside Monica, the last "->"
+    # line without a matching "<-" is the request it is stuck on.
+    Logger.debug(
+      "[MonicaMiscData] -> GET #{URI.parse(url).path} (request ##{Process.get(:misc_requests, 0) + 1})"
+    )
+
+    {request_ms, result} = timed(fn -> Req.get(url, options) end)
+    track_request(url, wait_ms, request_ms, result)
+
+    case result do
       {:ok, %{status: 200, body: body}} when is_map(body) -> {:ok, body}
       {:ok, %{status: 429}} -> {:error, :rate_limited}
       {:ok, %{status: status}} -> {:error, "Unexpected status: #{status}"}
       {:error, reason} -> {:error, reason}
     end
   end
+
+  defp timed(fun) do
+    started = System.monotonic_time(:millisecond)
+    result = fun.()
+    {System.monotonic_time(:millisecond) - started, result}
+  end
+
+  # The counters live in the job process's dictionary: a job is one process, and
+  # threading them through every per-endpoint helper would touch all of them.
+  defp track_request(url, wait_ms, request_ms, result) do
+    Process.put(:misc_requests, Process.get(:misc_requests, 0) + 1)
+    Process.put(:misc_throttled_ms, Process.get(:misc_throttled_ms, 0) + wait_ms)
+
+    path = URI.parse(url).path
+
+    Logger.debug(
+      "[MonicaMiscData] <- #{path} #{outcome(result)} in #{fmt_ms(request_ms)} (waited #{fmt_ms(wait_ms)} for a rate-limit slot)"
+    )
+
+    if wait_ms >= @slow_wait_ms do
+      Logger.warning(
+        "[MonicaMiscData] waited #{fmt_ms(wait_ms)} for a rate-limit slot before GET #{path} " <>
+          "(limit #{RateLimiter.limit()} req/min)"
+      )
+    end
+
+    if request_ms >= @slow_request_ms do
+      Logger.warning(
+        "[MonicaMiscData] slow Monica request: GET #{path} took #{fmt_ms(request_ms)} (#{outcome(result)})"
+      )
+    end
+  end
+
+  defp outcome({:ok, %{status: status}}), do: "HTTP #{status}"
+  defp outcome({:error, reason}), do: "error: #{inspect(reason)}"
 
   # ── Extra notes ──────────────────────────────────────────────────────
 
@@ -228,9 +489,11 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
     case api_get_json(credential, url, limit: @notes_page_limit, page: page) do
       {:ok, %{"data" => notes, "meta" => meta}} when is_list(notes) ->
-        # The first embedded_notes of page 1 were imported with the contact.
-        skip = if page == 1, do: entry["embedded_notes"] || 0, else: 0
-        imported = import_notes_batch(contact, user_id, Enum.drop(notes, skip), import_job)
+        # No positional skip: the notes embedded in the contact payload are the
+        # newest three, while this endpoint lists oldest first, so dropping the
+        # first N dropped the wrong notes. Already-imported ones are recognised
+        # by uuid (or content) in import_notes_batch/4 instead.
+        imported = import_notes_batch(contact, user_id, notes, import_job)
 
         if page < (meta["last_page"] || 1),
           do:
@@ -250,13 +513,25 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     end
   end
 
-  # Matching on body keeps an Oban retry from duplicating notes.
+  # A note is skipped when its uuid is already mapped (the crawl's embedded notes,
+  # an earlier attempt, or a merged duplicate's copy) or when the contact already
+  # has the same text. The uuid check is what covers blank bodies, which can't be
+  # matched by content. Together they keep a retry from duplicating notes.
   defp import_notes_batch(contact, user_id, notes, import_job) do
     Enum.count(notes, fn note ->
-      not note_duplicate?(contact.id, note["body"]) and
+      not note_already_imported?(import_job, note) and
+        not note_duplicate?(contact.id, note["body"]) and
         match?({:ok, _}, create_imported_note(contact, user_id, note, import_job))
     end)
   end
+
+  defp note_already_imported?(_import_job, %{"uuid" => nil}), do: false
+
+  defp note_already_imported?(import_job, %{"uuid" => uuid}) do
+    not is_nil(Imports.find_import_record(import_job.account_id, import_job.source, "note", uuid))
+  end
+
+  defp note_already_imported?(_import_job, _note), do: false
 
   defp create_imported_note(contact, user_id, note, import_job) do
     case Contacts.create_note(contact, user_id, %{"body" => note["body"]}) do
@@ -362,10 +637,10 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   # An Oban retry of this import must not recreate what an earlier attempt mapped.
   defp import_single_call(account_id, contact, call_data, import_job) do
-    if mapped_entity(import_job, "call", call_data["id"], Call) do
-      :ok
-    else
-      create_imported_call(account_id, contact, call_data, import_job)
+    cond do
+      mapped_entity(import_job, "call", call_data["id"], Call) -> :ok
+      call_duplicate?(contact.id, call_data) -> {:error, :duplicate}
+      true -> create_imported_call(account_id, contact, call_data, import_job)
     end
   end
 
@@ -416,10 +691,10 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   # An Oban retry of this import must not recreate what an earlier attempt mapped.
   defp import_single_activity(account_id, contact, activity_data, import_job) do
-    if mapped_entity(import_job, "activity", activity_data["id"], Activity) do
-      :ok
-    else
-      create_imported_activity(account_id, contact, activity_data, import_job)
+    cond do
+      mapped_entity(import_job, "activity", activity_data["id"], Activity) -> :ok
+      activity_duplicate?(contact.id, activity_data) -> {:error, :duplicate}
+      true -> create_imported_activity(account_id, contact, activity_data, import_job)
     end
   end
 
@@ -470,19 +745,15 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   # An Oban retry of this import must not recreate what an earlier attempt mapped.
   defp import_single_gift(account_id, user_id, contact, gift_data, import_job) do
-    if mapped_entity(import_job, "gift", gift_data["id"], Gift) do
-      :ok
-    else
-      create_imported_gift(account_id, user_id, contact, gift_data, import_job)
+    cond do
+      mapped_entity(import_job, "gift", gift_data["id"], Gift) -> :ok
+      gift_duplicate?(contact.id, gift_data) -> {:error, :duplicate}
+      true -> create_imported_gift(account_id, user_id, contact, gift_data, import_job)
     end
   end
 
   defp create_imported_gift(account_id, user_id, contact, gift_data, import_job) do
-    direction =
-      case gift_data["is_for"] do
-        "contact" -> "given"
-        _ -> "received"
-      end
+    direction = gift_direction(gift_data)
 
     attrs = %{
       "contact_id" => contact.id,
@@ -536,19 +807,15 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   # An Oban retry of this import must not recreate what an earlier attempt mapped.
   defp import_single_debt(account_id, user_id, contact, debt_data, import_job) do
-    if mapped_entity(import_job, "debt", debt_data["id"], Debt) do
-      :ok
-    else
-      create_imported_debt(account_id, user_id, contact, debt_data, import_job)
+    cond do
+      mapped_entity(import_job, "debt", debt_data["id"], Debt) -> :ok
+      debt_duplicate?(contact.id, debt_data) -> {:error, :duplicate}
+      true -> create_imported_debt(account_id, user_id, contact, debt_data, import_job)
     end
   end
 
   defp create_imported_debt(account_id, user_id, contact, debt_data, import_job) do
-    direction =
-      case debt_data["in_debt"] do
-        "yes" -> "owed_by_me"
-        _ -> "owed_to_me"
-      end
+    direction = debt_direction(debt_data)
 
     attrs = %{
       "contact_id" => contact.id,
@@ -595,10 +862,10 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   # An Oban retry of this import must not recreate what an earlier attempt mapped.
   defp import_single_task(account_id, user_id, contact, task_data, import_job) do
-    if mapped_entity(import_job, "task", task_data["id"], Task) do
-      :ok
-    else
-      create_imported_task(account_id, user_id, contact, task_data, import_job)
+    cond do
+      mapped_entity(import_job, "task", task_data["id"], Task) -> :ok
+      task_duplicate?(contact.id, task_data) -> {:error, :duplicate}
+      true -> create_imported_task(account_id, user_id, contact, task_data, import_job)
     end
   end
 
@@ -655,7 +922,12 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   end
 
   defp no_reminder_counts,
-    do: %{"reminders" => 0, "reminders_skipped" => 0, "reminders_warnings" => 0}
+    do: %{
+      "reminders" => 0,
+      "reminders_skipped" => 0,
+      "reminders_warnings" => 0,
+      "reminders_duplicate" => 0
+    }
 
   defp tally_reminder(acc, {:ok, warnings}) do
     %{
@@ -667,6 +939,9 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   defp tally_reminder(acc, :skipped),
     do: %{acc | "reminders_skipped" => acc["reminders_skipped"] + 1}
+
+  defp tally_reminder(acc, :duplicate),
+    do: %{acc | "reminders_duplicate" => acc["reminders_duplicate"] + 1}
 
   defp tally_reminder(acc, {:error, _}), do: acc
 
@@ -749,7 +1024,10 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
           Reminders.update_reminder(mapped, Map.delete(attrs, "type"))
 
         _missing_or_other ->
-          create(user_id, contact, attrs)
+          case find_duplicate_reminder(contact, attrs) do
+            nil -> create(user_id, contact, attrs)
+            existing -> {:duplicate, existing}
+          end
       end
 
     case result do
@@ -757,9 +1035,41 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
         maybe_record_entity(import_job, "reminder", data["id"], "reminder", reminder.id)
         :ok
 
+      # The survivor of an auto-merge already has this reminder (its own, or one
+      # imported from another merged duplicate). Map to it so a retry is stable.
+      {:duplicate, existing} ->
+        maybe_record_entity(import_job, "reminder", data["id"], "reminder", existing.id)
+        :duplicate
+
       {:error, reason} ->
         log_reminder_error(reason)
     end
+  end
+
+  # Same contact, type, anchor date, interval and (case/space-insensitive) title.
+  defp find_duplicate_reminder(contact, attrs) do
+    title = attrs["title"] |> to_string() |> String.trim() |> String.downcase()
+
+    Repo.one(
+      from(r in Reminders.Reminder,
+        where:
+          r.contact_id == ^contact.id and r.type == ^attrs["type"] and
+            r.anchor_date == ^attrs["anchor_date"] and
+            fragment("lower(trim(coalesce(?, '')))", r.title) == ^title and
+            fragment(
+              "? IS NOT DISTINCT FROM ?",
+              r.interval_unit,
+              type(^attrs["interval_unit"], :string)
+            ) and
+            fragment(
+              "? IS NOT DISTINCT FROM ?",
+              r.interval_count,
+              type(^attrs["interval_count"], :integer)
+            ),
+        order_by: [asc: r.id],
+        limit: 1
+      )
+    )
   end
 
   defp create(user_id, contact, attrs),
@@ -842,7 +1152,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     result =
       case mapped_entity(import_job, "conversation", convo_data["id"], Conversation) do
         %Conversation{} = existing -> {:ok, existing}
-        nil -> Kith.Conversations.create_conversation(account_id, user_id, attrs)
+        nil -> reuse_or_create_conversation(account_id, user_id, contact, attrs)
       end
 
     case result do
@@ -868,7 +1178,8 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     messages = convo_data["messages"] || []
 
     Enum.each(messages, fn msg ->
-      if is_nil(mapped_entity(import_job, "message", msg["id"], Message)) do
+      if is_nil(mapped_entity(import_job, "message", msg["id"], Message)) and
+           not message_duplicate?(conversation.id, msg) do
         add_conversation_message(conversation, msg, import_job)
       end
     end)
@@ -928,6 +1239,137 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   end
 
   defp normalize_pet_species(_), do: "other"
+
+  # ── Content duplicates ───────────────────────────────────────────────
+  #
+  # After an auto-merge the survivor may already hold what a merged duplicate
+  # carries (its own copy, or one imported from another duplicate). These match
+  # on content, ignoring case and surrounding space in text, so the merge adds
+  # only what is new.
+
+  defp gift_direction(gift_data),
+    do: if(gift_data["is_for"] == "contact", do: "given", else: "received")
+
+  defp debt_direction(debt_data),
+    do: if(debt_data["in_debt"] == "yes", do: "owed_by_me", else: "owed_to_me")
+
+  defp norm(text), do: (text || "") |> to_string() |> String.trim() |> String.downcase()
+
+  defp call_duplicate?(contact_id, call_data) do
+    occurred_at = parse_datetime(call_data["called_at"])
+    notes = non_empty_string(call_data["content"])
+
+    not is_nil(occurred_at) and
+      Repo.exists?(
+        from(c in Kith.Activities.Call,
+          where:
+            c.contact_id == ^contact_id and c.occurred_at == ^occurred_at and
+              fragment("? IS NOT DISTINCT FROM ?", c.notes, type(^notes, :string))
+        )
+      )
+  end
+
+  defp activity_duplicate?(contact_id, activity_data) do
+    title = activity_data["summary"] || activity_data["title"] || "Imported activity"
+
+    occurred_at =
+      parse_datetime(activity_data["happened_at"] || activity_data["date_it_happened"])
+
+    # Without a date the importer stamps "now", so there is nothing stable to match.
+    not is_nil(occurred_at) and
+      Repo.exists?(
+        from(a in Activity,
+          join: ac in "activity_contacts",
+          on: ac.activity_id == a.id,
+          where:
+            ac.contact_id == ^contact_id and a.title == ^title and a.occurred_at == ^occurred_at
+        )
+      )
+  end
+
+  defp gift_duplicate?(contact_id, gift_data) do
+    name = norm(gift_data["name"] || "Imported gift")
+    direction = gift_direction(gift_data)
+    date = parse_date_string(gift_data["date"])
+
+    Repo.exists?(
+      from(g in Gift,
+        where:
+          g.contact_id == ^contact_id and fragment("lower(trim(?))", g.name) == ^name and
+            g.direction == ^direction and
+            fragment("? IS NOT DISTINCT FROM ?", g.date, type(^date, :date))
+      )
+    )
+  end
+
+  defp debt_duplicate?(contact_id, debt_data) do
+    title = norm(debt_data["reason"] || "Imported debt")
+    direction = debt_direction(debt_data)
+
+    case Decimal.parse(to_string(debt_data["amount"] || "0")) do
+      {amount, ""} ->
+        Repo.exists?(
+          from(d in Debt,
+            where:
+              d.contact_id == ^contact_id and fragment("lower(trim(?))", d.title) == ^title and
+                d.direction == ^direction and d.amount == ^amount
+          )
+        )
+
+      _ ->
+        false
+    end
+  end
+
+  # A merged duplicate's conversation joins the survivor's matching one (same
+  # platform and subject) rather than making a twin; its messages are then
+  # added only where the same message isn't already there.
+  defp reuse_or_create_conversation(account_id, user_id, contact, attrs) do
+    subject = attrs["subject"]
+
+    existing =
+      Repo.one(
+        from(c in Conversation,
+          where:
+            c.contact_id == ^contact.id and c.platform == ^attrs["platform"] and
+              fragment("? IS NOT DISTINCT FROM ?", c.subject, type(^subject, :string)),
+          order_by: [asc: c.id],
+          limit: 1
+        )
+      )
+
+    case existing do
+      nil -> Kith.Conversations.create_conversation(account_id, user_id, attrs)
+      conversation -> {:ok, conversation}
+    end
+  end
+
+  defp message_duplicate?(conversation_id, msg) do
+    body = norm(msg["content"] || msg["written_by_me_body"] || "")
+    sent_at = parse_datetime(msg["written_at"])
+
+    not is_nil(sent_at) and
+      Repo.exists?(
+        from(m in Message,
+          where:
+            m.conversation_id == ^conversation_id and m.sent_at == ^sent_at and
+              fragment("lower(trim(?))", m.body) == ^body
+        )
+      )
+  end
+
+  defp task_duplicate?(contact_id, task_data) do
+    title = norm(task_data["title"] || "Imported task")
+    status = if task_data["completed"], do: "completed", else: "pending"
+
+    Repo.exists?(
+      from(t in Task,
+        where:
+          t.contact_id == ^contact_id and fragment("lower(trim(?))", t.title) == ^title and
+            t.status == ^status
+      )
+    )
+  end
 
   defp pet_duplicate?(contact_id, name, species) do
     Repo.exists?(

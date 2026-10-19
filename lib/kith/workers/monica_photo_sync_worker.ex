@@ -79,21 +79,27 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
   defp crawl_pages(credential, import_job, page, summary) do
     url = "#{credential.url}/api/photos"
 
-    case api_get_json(credential, url, limit: @page_limit, page: page) do
+    # Logged before the call: a page carries every photo inline as base64, so the
+    # request itself can be the slow part. A "->" with no "<-" means it is still
+    # waiting on Monica.
+    Logger.debug("#{@log_prefix} -> GET /api/photos page #{page} (limit #{@page_limit})")
+
+    {fetch_ms, response} =
+      timed(fn -> api_get_json(credential, url, limit: @page_limit, page: page) end)
+
+    case response do
       {:ok, %{"data" => photos, "meta" => meta}} when is_list(photos) ->
         last_page = meta["last_page"] || 1
 
         Logger.info(
-          "#{@log_prefix} page #{page}: #{length(photos)} photos (#{last_page} pages total)"
+          "#{@log_prefix} page #{page}: #{length(photos)} photos (#{last_page} pages total), " <>
+            "fetched in #{fetch_ms}ms"
         )
 
-        page_summary =
-          Enum.reduce(photos, summary, fn photo, acc ->
-            import_one_photo(photo, import_job, acc)
-          end)
+        {process_ms, page_summary} = timed(fn -> import_page(photos, import_job, summary) end)
 
         Logger.info(
-          "#{@log_prefix} page #{page} done (running: " <>
+          "#{@log_prefix} page #{page} done in #{process_ms}ms (running: " <>
             "#{page_summary["synced"]}/#{page_summary["total"]} synced, " <>
             "#{page_summary["failed"]} failed, #{page_summary["not_found"]} not_found)"
         )
@@ -117,6 +123,10 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
   end
 
   # ── Per-photo flow ─────────────────────────────────────────────────────
+
+  defp import_page(photos, import_job, summary) do
+    Enum.reduce(photos, summary, fn photo, acc -> import_one_photo(photo, import_job, acc) end)
+  end
 
   defp import_one_photo(photo, import_job, summary) do
     summary = bump(summary, "total")
@@ -306,6 +316,12 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
   defp decode_photo_data(_), do: {:error, :no_data_url}
 
   # ── HTTP helpers ───────────────────────────────────────────────────────
+
+  defp timed(fun) do
+    started = System.monotonic_time(:millisecond)
+    result = fun.()
+    {System.monotonic_time(:millisecond) - started, result}
+  end
 
   defp api_get_json(credential, url, params),
     do: api_get_json_with_retry(credential, url, params, 0)
