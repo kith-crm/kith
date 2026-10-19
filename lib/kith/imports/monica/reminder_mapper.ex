@@ -36,10 +36,10 @@ defmodule Kith.Imports.Monica.ReminderMapper do
       is_nil(date) ->
         {:skip, :unparseable_date}
 
-      yearly_on?(type, count, date, contact[:birthdate]) ->
+      yearly_on?(type, count, date, Map.get(contact, :birthdate)) ->
         :birthday
 
-      yearly_on?(type, count, date, contact[:first_met_at]) ->
+      yearly_on?(type, count, date, Map.get(contact, :first_met_at)) ->
         :first_met
 
       type != "one_time" and is_integer(count) and count >= 1 ->
