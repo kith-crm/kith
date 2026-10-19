@@ -18,12 +18,20 @@ test("a missing photo retries once, never shows the broken image, then says unav
   const refreshes: string[] = [];
   page.on("websocket", (ws) => ws.on("framesent", (f) => { if (String(f.payload).includes("refresh_url")) refreshes.push("x"); }));
 
-  // Record whether the broken <img> is ever visible while the root is retrying.
+  // Record whether the broken <img> is visible while the root is retrying. It is checked in the
+  // first mutation callback after the attribute appears; __sawRetrying is the positive control
+  // proving the retrying state was actually observed (otherwise __brokenVisible=false is vacuous).
   await page.addInitScript(() => {
     (window as any).__brokenVisible = false;
+    (window as any).__sawRetrying = false;
     new MutationObserver(() => {
-      document.querySelectorAll("[data-img-retrying] img[data-fallback-img]").forEach((img) => {
-        if (getComputedStyle(img).visibility !== "hidden") (window as any).__brokenVisible = true;
+      document.querySelectorAll("[data-img-retrying]").forEach((root) => {
+        (window as any).__sawRetrying = true;
+        root.querySelectorAll("img[data-fallback-img]").forEach((img) => {
+          if (getComputedStyle(img).visibility !== "hidden" && getComputedStyle(img).display !== "none") {
+            (window as any).__brokenVisible = true;
+          }
+        });
       });
     }).observe(document, { subtree: true, attributes: true, childList: true });
   });
@@ -34,7 +42,40 @@ test("a missing photo retries once, never shows the broken image, then says unav
   await expect(root.getByText("Image unavailable")).toBeVisible();
   await page.waitForTimeout(1500);
   expect(refreshes.length).toBe(1);
+  expect(await page.evaluate(() => (window as any).__sawRetrying)).toBe(true);
   expect(await page.evaluate(() => (window as any).__brokenVisible)).toBe(false);
+});
+
+test("an img that already failed before the hook mounts still retries once, then fails", async ({ page }) => {
+  await login(page);
+  const refreshes: string[] = [];
+  page.on("websocket", (ws) => ws.on("framesent", (f) => { if (String(f.payload).includes("refresh_url")) refreshes.push("x"); }));
+
+  // Record the <img> error event (non-bubbling, so capture on document) before any script runs.
+  await page.addInitScript(() => {
+    (window as any).__imgErrored = false;
+    document.addEventListener("error", (e) => {
+      if ((e.target as Element).tagName === "IMG") (window as any).__imgErrored = true;
+    }, true);
+  });
+
+  // Hold app.js (which defines the hook and connects the socket) until the img has errored.
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  await page.route("**/assets/js/app.js**", async (route) => { await gate; await route.continue(); });
+
+  await page.goto(`/contacts/${seed.photo_contact}`, { waitUntil: "commit" });
+  await page.waitForFunction(() => (window as any).__imgErrored === true);
+  // The hook cannot have run: nothing has marked the root yet and no socket exists.
+  expect(await page.locator("[data-img-retrying], [data-img-failed]").count()).toBe(0);
+  expect(refreshes.length).toBe(0);
+  release();
+
+  const root = page.locator(`[id^="photo-"][data-refreshable="true"]`).first();
+  await expect(root).toHaveAttribute("data-img-failed", "", { timeout: 10_000 });
+  await expect(root.getByText("Image unavailable")).toBeVisible();
+  await page.waitForTimeout(1500);
+  expect(refreshes.length).toBe(1);
 });
 
 test("a missing avatar shows initials as chip and as choice, with no duplicate-id errors", async ({ page }) => {
@@ -152,36 +193,60 @@ test("(b) hook-set failed state survives a LiveView patch of the component (upda
 });
 
 // Proxies the LiveView websocket so the reply to the hook's refresh_url push can be held and/or rewritten.
+// A wire shape that is not what we expect is recorded in st.error and fails the test loudly via waitHeld().
+type Held = { ref: string | null; held: string | null; error: string | null; ws: WebSocketRoute | null };
+
+function replyPayload(frame: any): { changed: boolean } {
+  const r = frame?.[4]?.response?.diff?.r;
+  if (!r || typeof r.changed !== "boolean") {
+    throw new Error(`unexpected refresh_url phx_reply wire shape: ${JSON.stringify(frame)}`);
+  }
+  return r;
+}
+
+async function waitHeld(st: Held): Promise<{ changed: boolean }> {
+  await expect.poll(() => { if (st.error) throw new Error(st.error); return st.held; }).not.toBeNull();
+  return replyPayload(JSON.parse(st.held!));
+}
+
 async function interceptRefreshReply(page: Page, rewriteChanged: boolean | null) {
-  const st: { ref: string | null; held: string | null; ws: WebSocketRoute | null } = { ref: null, held: null, ws: null };
+  const st: Held = { ref: null, held: null, error: null, ws: null };
   await page.routeWebSocket(/\/live\/websocket/, (ws) => {
     const server = ws.connectToServer();
     st.ws = ws;
     ws.onMessage((m) => {
-      try {
-        const a = JSON.parse(String(m));
-        if (a[3] === "event" && a[4]?.event === "refresh_url") st.ref = a[1];
-      } catch {}
+      const a = parseFrame(m);
+      if (a && a[3] === "event" && a[4]?.event === "refresh_url") st.ref = a[1];
       server.send(m);
     });
     server.onMessage((m) => {
-      try {
-        const a = JSON.parse(String(m));
-        if (st.ref && a[1] === st.ref && a[3] === "phx_reply") {
-          if (rewriteChanged !== null) {
-            a[4].response.diff.r.changed = rewriteChanged; // the {:reply, map} payload
-          }
+      const a = parseFrame(m);
+      if (a && st.ref && a[1] === st.ref && a[3] === "phx_reply") {
+        try {
+          if (rewriteChanged !== null) replyPayload(a).changed = rewriteChanged;
+          replyPayload(a);
           st.held = JSON.stringify(a);
-          return; // hold until released
+        } catch (e) {
+          st.error = String(e);
         }
-      } catch {}
+        return; // hold until released
+      }
       ws.send(m);
     });
   });
   return st;
 }
 
-test("(c) refresh_url changed:true keeps retrying until the new URL loads", async ({ page }) => {
+function parseFrame(m: string | Buffer): any[] | null {
+  try {
+    const a = JSON.parse(String(m));
+    return Array.isArray(a) ? a : null;
+  } catch {
+    return null; // not a JSON text frame: forward untouched
+  }
+}
+
+test("(c) [server reply simulated, hook real] refresh_url changed:true keeps retrying until the new URL loads", async ({ page }) => {
   // The fake S3 / hourly-stable signing cannot make the server answer changed:true within one
   // hour for an unchanged key, so the reply is rewritten to changed:true in the websocket proxy;
   // the follow-up (new key -> new src on the same node -> real load) is genuine.
@@ -190,8 +255,7 @@ test("(c) refresh_url changed:true keeps retrying until the new URL loads", asyn
   await page.goto(`/contacts/${seed.changed_contact}`);
   await page.waitForSelector("[data-phx-main].phx-connected");
   const root = page.locator(`#photo-${seed.changed_photo}`);
-  await expect.poll(() => st.held).not.toBeNull();
-  expect(JSON.parse(st.held!)[4].response.diff.r.changed).toBe(true);
+  expect((await waitHeld(st)).changed).toBe(true);
   await expect(root).toHaveAttribute("data-img-retrying", "");
 
   st.ws!.send(st.held!); // deliver changed:true
@@ -214,8 +278,7 @@ test("(d) a late changed:false reply after a node swap does not fail the new img
   await page.goto(`/contacts/${seed.stale_contact}`);
   await page.waitForSelector("[data-phx-main].phx-connected");
   const root = page.locator(`#photo-${seed.stale_photo}`);
-  await expect.poll(() => st.held).not.toBeNull();
-  expect(JSON.parse(st.held!)[4].response.diff.r.changed).toBe(false);
+  expect((await waitHeld(st)).changed).toBe(false);
   await expect(root).toHaveAttribute("data-img-retrying", "");
 
   // Swap the node: img -> syncing placeholder -> a new, good img.
