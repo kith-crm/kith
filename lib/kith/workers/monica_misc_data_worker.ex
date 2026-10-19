@@ -578,12 +578,16 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   # A derived reminder (birthday / first_met) is owned by the contact, not the
   # import; the import only records the mapping.
   defp import_derived(contact, data, import_job, sync) do
-    with {:ok, %Reminders.Reminder{} = reminder} <- sync.() do
-      maybe_record_entity(import_job, "reminder", data["id"], "reminder", reminder.id)
-      :ok
-    else
-      {:ok, :none} -> log_reminder_error({:no_derived_reminder, contact.id})
-      {:error, reason} -> log_reminder_error(reason)
+    case sync.() do
+      {:ok, %Reminders.Reminder{} = reminder} ->
+        maybe_record_entity(import_job, "reminder", data["id"], "reminder", reminder.id)
+        :ok
+
+      {:ok, :none} ->
+        log_reminder_error({:no_derived_reminder, contact.id})
+
+      {:error, reason} ->
+        log_reminder_error(reason)
     end
   end
 
