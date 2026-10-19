@@ -25,7 +25,7 @@ async function confirmEmail(page: Page, email: string) {
         const msg = await (
           await page.request.get(`${MAILPIT_URL}/api/v1/message/${messages[0].ID}`)
         ).json();
-        path = (msg.Text as string).match(/\/users\/confirm\/[\w-]+/)?.[0];
+        path = msg.Text.match(/\/users\/confirm\/[\w-]+/)?.[0];
         return path;
       },
       { timeout: 30_000 },
@@ -90,7 +90,7 @@ test("Monica 4.1.2 reminders import faithfully", async ({ page }) => {
 
   // Birthdays: exactly one Birthday line, no generic duplicate (spec §8).
   for (const name of ["Mona Vale", "Yara E2E", "Dora E2E", "Fiona E2E"]) {
-    const lines = await reminderLines(page, id(name) as string);
+    const lines = await reminderLines(page, id(name));
     expect(lines.filter((l) => /Birthday · Annually/.test(l))).toHaveLength(1);
     expect(lines.some((l) => /Wish happy birthday|would have celebrated/.test(l))).toBe(false);
   }
@@ -99,7 +99,7 @@ test("Monica 4.1.2 reminders import faithfully", async ({ page }) => {
   await page.goto(`/contacts/${id("Paul Stone")}`);
   await expect(page.getByText(/Birthday in/)).toBeVisible();
 
-  const gina = await reminderLines(page, id("Gina E2E") as string);
+  const gina = await reminderLines(page, id("Gina E2E"));
   expect(gina.some((l) => /Water plants .*Every 2 weeks/.test(l))).toBe(true);
   expect(gina.some((l) => /Quarterly review .*Every 3 months/.test(l))).toBe(true);
   expect(gina.some((l) => /Leap-day thing .*Every 2 years/.test(l))).toBe(true);
@@ -107,13 +107,13 @@ test("Monica 4.1.2 reminders import faithfully", async ({ page }) => {
   expect(gina.some((l) => /Stay in touch .*Every 14 days/.test(l))).toBe(true);
   expect(gina.some((l) => /One-time future .*Has a description/.test(l))).toBe(true);
 
-  const fiona = await reminderLines(page, id("Fiona E2E") as string);
+  const fiona = await reminderLines(page, id("Fiona E2E"));
   expect(fiona.some((l) => /First met/.test(l))).toBe(true);
   expect(fiona.some((l) => /Fiona birthday party/.test(l))).toBe(false);
 
   // Exact next dates are pinned by ExUnit with a fixed `today` (Task A6/A7);
   // here only the "no date clamped to today" invariant is checked.
-  const solo = await reminderLines(page, id("Solo One") as string);
+  const solo = await reminderLines(page, id("Solo One"));
   const wedding = solo.find((l) => /Wedding anniversary/.test(l))!;
   expect(wedding).toMatch(/Next: Mar 9, \d{4}/);
 });

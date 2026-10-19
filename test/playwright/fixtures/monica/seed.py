@@ -1,13 +1,14 @@
-"""Seed a freshly reset Monica 4.1.2. Reminder ids come out 1..23 in a fixed order (see README).
-Dates for the one-time reminders are relative to the day the seed runs."""
+"""Seed a freshly reset Monica 4.1.2. Nothing depends on reminder ids.
+Dates for the one-time reminders are relative to the (UTC) day the seed runs."""
 import re
 import subprocess
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 
 from mon import get, post, put
 
 CONTAINER = "kith-monica-e2e-monica-1"
-TODAY = date.today()
+# Monica runs in UTC, so "today" must too (a host-clock date can be off by a day).
+TODAY = datetime.now(timezone.utc).date()
 
 
 def php(*args):
@@ -56,7 +57,7 @@ reminder(solo, "Wedding anniversary", "year", 1, "2015-03-09")         # 3
 reminder(solo, "Call mum", "week", 2, "2026-01-05")                    # 4
 reminder(solo, "Pay rent", "month", 1, "2024-02-01")                   # 5
 reminder(solo, "Renew passport", "one_time", 1, "2020-01-01")          # 6
-reminder(solo, "Dentist", "one_time", 1, "2027-01-10")                 # 7
+reminder(solo, "Dentist", "one_time", 1, (TODAY + timedelta(days=83)).isoformat())  # 7
 yara = contact("Yara", "E2E", (None, 7, 4))                            # 8 (year unknown, M6)
 dora = contact("Dora", "E2E", (1950, 4, 20), deceased=(2020, 8, 1))    # 9 birthday, 10 death anniversary
 fiona = contact("Fiona", "E2E", (1985, 1, 15))                         # 11
@@ -80,7 +81,7 @@ post("/lifeevents", {"contact_id": liam, "life_event_type_id": tid, "happened_at
                      "happened_at_day_unknown": False})                # 23
 
 # M3: editing Mona's birthday reminder through the API (delible omitted) makes it delible: true.
-r = get("/reminders/1")["data"]
-put("/reminders/1", {"contact_id": mona, "title": r["title"], "frequency_type": r["frequency_type"],
+r = next(x for x in get(f"/contacts/{mona}/reminders")["data"] if "birthday" in x["title"])
+put(f"/reminders/{r['id']}", {"contact_id": mona, "title": r["title"], "frequency_type": r["frequency_type"],
                      "frequency_number": r["frequency_number"], "initial_date": r["initial_date"][:10]})
 print("seeded; run: docker exec", CONTAINER, "php /tmp/state.php (as -u www-data)")
