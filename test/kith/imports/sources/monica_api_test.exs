@@ -968,6 +968,28 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   # ── crawl/5 — error handling ─────────────────────────────────────────
 
   describe "crawl/5 — error handling" do
+    test "a contact that fails to create counts as an error, not as skipped", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(id: 1, first_name: "", last_name: nil),
+        contact_json(id: 2, first_name: "Fine")
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      assert summary.error_count >= 1
+      assert summary.errors != []
+      assert summary.skipped == 0
+      assert summary.contacts == 1
+    end
+
+    @tag :capture_log
     test "handles malformed API response", %{user: user, account_id: account_id} do
       Req.Test.stub(@stub_name, fn conn ->
         Req.Test.json(conn, %{"unexpected" => "format"})

@@ -195,6 +195,15 @@ defmodule KithWeb.ImportWizardLive do
 
   # ── Private helpers ─────────────────────────────────────────────────────────
 
+  defp skipped_label("monica_api"), do: "skipped (already imported from Monica, or deleted)"
+  defp skipped_label(_source), do: "skipped"
+
+  # `errors` is capped at 50 entries; `error_count` is the true total when present.
+  defp error_count(results) do
+    listed = results["errors"] || results[:errors] || []
+    results["error_count"] || results[:error_count] || length(listed)
+  end
+
   defp validate_step(socket) do
     case socket.assigns.source do
       "vcard" -> validate_vcard_step(socket)
@@ -768,10 +777,20 @@ defmodule KithWeb.ImportWizardLive do
               </p>
               <p
                 :if={(@results["skipped"] || @results[:skipped] || 0) > 0}
+                id="import-skipped"
                 class="text-[var(--color-warning)]"
               >
                 <span class="font-semibold">{@results["skipped"] || @results[:skipped]}</span>
-                skipped (already imported from Monica, or deleted)
+                {skipped_label(@source)}
+              </p>
+              <%!-- vCard already folds its errors into `skipped`; only Monica reports them separately. --%>
+              <p
+                :if={@source == "monica_api" && error_count(@results) > 0}
+                id="import-errors"
+                class="text-[var(--color-error)]"
+              >
+                <span class="font-semibold">{error_count(@results)}</span>
+                {if error_count(@results) == 1, do: "error", else: "errors"} (see details below)
               </p>
               <p
                 :if={(@results["skipped_duplicates"] || @results[:skipped_duplicates] || 0) > 0}
@@ -813,7 +832,7 @@ defmodule KithWeb.ImportWizardLive do
             >
               <details class="text-sm">
                 <summary class="cursor-pointer text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]">
-                  Show error details ({length(@results["errors"] || @results[:errors] || [])} errors)
+                  Show error details ({error_count(@results)} errors)
                 </summary>
                 <ul class="mt-2 space-y-1 text-[var(--color-error)]">
                   <li :for={error <- @results["errors"] || @results[:errors] || []}>{error}</li>

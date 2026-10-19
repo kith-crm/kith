@@ -1605,7 +1605,9 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   defp add_error(acc, msg) do
     errors = if length(acc.errors) < 50, do: acc.errors ++ [msg], else: acc.errors
-    %{acc | skipped: acc.skipped + 1, error_count: acc.error_count + 1, errors: errors}
+    # Errors are not "skipped": `skipped` counts only contacts from earlier
+    # imports (or soft-deleted ones) that this run deliberately left alone.
+    %{acc | error_count: acc.error_count + 1, errors: errors}
   end
 
   defp api_contact_display_name(api_contact) do
