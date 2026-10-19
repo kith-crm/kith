@@ -18,14 +18,12 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     seed_reference_data!()
     user = user_fixture()
 
-    Application.put_env(
+    Kith.TestEnv.put_env_restoring(
       :kith,
       :monica_req_options,
       plug: {Req.Test, @stub_name},
       retry: false
     )
-
-    on_exit(fn -> Application.delete_env(:kith, :monica_req_options) end)
 
     %{user: user, account_id: user.account_id}
   end
@@ -453,6 +451,41 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
 
       assert Repo.aggregate(Kith.Conversations.Conversation, :count) == 1
       assert Repo.aggregate(Kith.Conversations.Message, :count) == 2
+    end
+  end
+
+  describe "retry idempotence" do
+    @retry_cases [
+      {"calls", Kith.Activities.Call,
+       %{"id" => 20, "called_at" => "2025-01-01T10:00:00Z", "content" => "hello", "duration" => 5}},
+      {"activities", Kith.Activities.Activity,
+       %{"id" => 21, "summary" => "Lunch", "happened_at" => "2025-01-01T10:00:00Z"}},
+      {"gifts", Kith.Contacts.Gift, %{"id" => 22, "name" => "Book", "is_for" => "contact"}},
+      {"debts", Kith.Contacts.Debt,
+       %{"id" => 23, "reason" => "Dinner", "amount" => "10", "in_debt" => "yes"}},
+      {"tasks", Kith.Tasks.Task, %{"id" => 24, "title" => "Call back", "completed" => false}}
+    ]
+
+    for {endpoint, schema, item} <- @retry_cases do
+      test "a retry of the same import does not duplicate #{endpoint}",
+           %{user: user, account_id: account_id} do
+        contact = contact_fixture(account_id)
+        import_job = api_import(account_id, user.id)
+        endpoint = unquote(endpoint)
+
+        Req.Test.stub(@stub_name, fn conn ->
+          if conn.request_path == "/api/contacts/1/#{endpoint}",
+            do: Req.Test.json(conn, %{"data" => [unquote(Macro.escape(item))]}),
+            else: Req.Test.json(conn, %{"data" => []})
+        end)
+
+        plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => [endpoint]}]
+
+        for _ <- 1..2,
+            do: assert(:ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan)))
+
+        assert Repo.aggregate(unquote(schema), :count) == 1
+      end
     end
   end
 

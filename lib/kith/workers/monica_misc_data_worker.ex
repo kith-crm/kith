@@ -30,13 +30,16 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   import Ecto.Query, warn: false
 
+  alias Kith.Activities.{Activity, Call}
   alias Kith.Contacts
+  alias Kith.Contacts.{Debt, Gift}
   alias Kith.Conversations.{Conversation, Message}
   alias Kith.Imports
   alias Kith.Imports.Monica.ReminderMapper
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
   alias Kith.Reminders
   alias Kith.Repo
+  alias Kith.Tasks.Task
 
   @impl Oban.Worker
   def timeout(_job), do: :timer.minutes(30)
@@ -260,7 +263,16 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     end
   end
 
+  # An Oban retry of this import must not recreate what an earlier attempt mapped.
   defp import_single_call(account_id, contact, call_data, import_job) do
+    if mapped_entity(import_job, "call", call_data["id"], Call) do
+      :ok
+    else
+      create_imported_call(account_id, contact, call_data, import_job)
+    end
+  end
+
+  defp create_imported_call(account_id, contact, call_data, import_job) do
     occurred_at = parse_datetime(call_data["called_at"])
 
     if is_nil(occurred_at) do
@@ -305,7 +317,16 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     end
   end
 
+  # An Oban retry of this import must not recreate what an earlier attempt mapped.
   defp import_single_activity(account_id, contact, activity_data, import_job) do
+    if mapped_entity(import_job, "activity", activity_data["id"], Activity) do
+      :ok
+    else
+      create_imported_activity(account_id, contact, activity_data, import_job)
+    end
+  end
+
+  defp create_imported_activity(account_id, contact, activity_data, import_job) do
     occurred_at =
       parse_datetime(activity_data["happened_at"] || activity_data["date_it_happened"])
 
@@ -350,7 +371,16 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     end
   end
 
+  # An Oban retry of this import must not recreate what an earlier attempt mapped.
   defp import_single_gift(account_id, user_id, contact, gift_data, import_job) do
+    if mapped_entity(import_job, "gift", gift_data["id"], Gift) do
+      :ok
+    else
+      create_imported_gift(account_id, user_id, contact, gift_data, import_job)
+    end
+  end
+
+  defp create_imported_gift(account_id, user_id, contact, gift_data, import_job) do
     direction =
       case gift_data["is_for"] do
         "contact" -> "given"
@@ -407,7 +437,16 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     end
   end
 
+  # An Oban retry of this import must not recreate what an earlier attempt mapped.
   defp import_single_debt(account_id, user_id, contact, debt_data, import_job) do
+    if mapped_entity(import_job, "debt", debt_data["id"], Debt) do
+      :ok
+    else
+      create_imported_debt(account_id, user_id, contact, debt_data, import_job)
+    end
+  end
+
+  defp create_imported_debt(account_id, user_id, contact, debt_data, import_job) do
     direction =
       case debt_data["in_debt"] do
         "yes" -> "owed_by_me"
@@ -457,7 +496,16 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     end
   end
 
+  # An Oban retry of this import must not recreate what an earlier attempt mapped.
   defp import_single_task(account_id, user_id, contact, task_data, import_job) do
+    if mapped_entity(import_job, "task", task_data["id"], Task) do
+      :ok
+    else
+      create_imported_task(account_id, user_id, contact, task_data, import_job)
+    end
+  end
+
+  defp create_imported_task(account_id, user_id, contact, task_data, import_job) do
     status = if task_data["completed"], do: "completed", else: "pending"
 
     attrs = %{
@@ -757,8 +805,11 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
            type,
            to_string(source_id)
          ) do
-      %{local_entity_id: id} when is_integer(id) -> Repo.get(schema, id)
-      _ -> nil
+      %{local_entity_id: id} when is_integer(id) ->
+        Repo.get_by(schema, id: id, account_id: import_job.account_id)
+
+      _ ->
+        nil
     end
   end
 
