@@ -5,6 +5,9 @@
 # Also uploads two valid PNGs (ok-1.png, avatar-a.png) to the fake S3.
 alias Kith.{Accounts, Contacts, Repo}
 
+# Keep Ecto debug SQL off stdout so the final JSON line is the only output.
+Logger.configure(level: :warning)
+
 email = "img-#{System.unique_integer([:positive])}@test.local"
 {:ok, user} = Accounts.register_user(%{email: email, password: "ValidP@ssword123!"})
 user = user |> Ecto.Changeset.change(confirmed_at: DateTime.utc_now(:second)) |> Repo.update!()

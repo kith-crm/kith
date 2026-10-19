@@ -1143,6 +1143,7 @@ git commit -m "feat(imports): pure Monica 4.1.2 reminder mapper tested against r
 **Interfaces:**
 - Consumes: A1 (`description`, `day`, `Reminders.account_today/1`), A2 (`sync_first_met/1`, `get_first_met_reminder/2`, `first_met_reminder`), A6 (`ReminderMapper.map/3`).
 - Produces: per Monica reminder, exactly one mapped Kith reminder; re-imports update in place.
+  > **Superseded 2026-10-19:** re-import is unsupported (contacts from an earlier import are skipped); see the decision note at the top of `docs/superpowers/specs/2026-10-14-monica-reminder-import-design.md`. Only same-job Oban retries are idempotent.
 
 - [ ] **Step 1: Replace the old reminder tests with failing ones**
 
@@ -1242,6 +1243,7 @@ Delete lines 197–469 (the whole `describe "reminders import — date handling 
       assert [%{description: "Has a description"}] = contact_reminders(ctx.account_id, contact.id)
     end
 
+    # SUPERSEDED 2026-10-19: re-import is unsupported; see the spec's decision note.
     test "re-importing updates the mapped reminder in place", ctx do
       contact = contact_fixture(ctx.account_id)
       payload = fn title -> [monica(3, %{"title" => title, "frequency_type" => "year", "initial_date" => "2015-03-09T00:00:00Z"})] end
@@ -1267,6 +1269,7 @@ Delete lines 197–469 (the whole `describe "reminders import — date handling 
       assert Imports.find_import_record(ctx.account_id, "monica_api", "reminder", "5").local_entity_id == new.id
     end
 
+    # SUPERSEDED 2026-10-19: re-import is unsupported; see the spec's decision note.
     test "re-importing after the user deleted the mapped reminder recreates it", ctx do
       contact = contact_fixture(ctx.account_id)
       payload = [monica(7, %{"frequency_type" => "one_time", "initial_date" => "2099-01-10T00:00:00Z"})]
