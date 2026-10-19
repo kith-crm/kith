@@ -651,7 +651,13 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   # ── crawl/5 — rate limiting ──────────────────────────────────────────
 
   describe "crawl/5 — rate limiting" do
-    @tag :slow
+    # The shared credential/1 sets `retry: false`, so Req never retries a 429.
+    # These tests exercise the retry path with a zero backoff delay.
+    defp retrying_credential do
+      credential(req_options: [plug: {Req.Test, @stub_name}, retry_delay: 0])
+    end
+
+    @tag :capture_log
     test "retries on 429 from contacts endpoint", %{user: user, account_id: account_id} do
       contacts = [contact_json(id: 1, first_name: "Patient")]
 
@@ -668,20 +674,26 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       end)
 
       import_job = api_import_fixture(account_id, user.id)
-      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, retrying_credential(), import_job, %{})
+
       assert summary.contacts == 1
 
       Agent.stop(agent)
     end
 
-    @tag :slow
+    @tag :capture_log
     test "fails after max retries on persistent 429", %{user: user, account_id: account_id} do
       Req.Test.stub(@stub_name, fn conn ->
         Plug.Conn.send_resp(conn, 429, "")
       end)
 
       import_job = api_import_fixture(account_id, user.id)
-      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, retrying_credential(), import_job, %{})
+
       assert summary.error_count > 0
       assert Enum.any?(summary.errors, &String.contains?(&1, "Rate limited"))
     end
