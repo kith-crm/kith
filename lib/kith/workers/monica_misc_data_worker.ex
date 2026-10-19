@@ -31,6 +31,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   import Ecto.Query, warn: false
 
   alias Kith.Contacts
+  alias Kith.Conversations.{Conversation, Message}
   alias Kith.Imports
   alias Kith.Imports.Monica.ReminderMapper
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
@@ -484,10 +485,17 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       {:ok, %{"data" => reminders}} when is_list(reminders) ->
         today = Reminders.account_today(contact.account_id)
 
-        Enum.reduce(reminders, no_reminder_counts(), fn reminder, acc ->
-          outcome = import_single_reminder(user_id, contact, reminder, import_job, today)
-          tally_reminder(acc, outcome)
-        end)
+        # `contact` is threaded through: importing a first-met reminder updates
+        # the contact, and later reminders must see that update.
+        {counts, _contact} =
+          Enum.reduce(reminders, {no_reminder_counts(), contact}, fn reminder, {acc, contact} ->
+            {outcome, contact} =
+              import_single_reminder(user_id, contact, reminder, import_job, today)
+
+            {tally_reminder(acc, outcome), contact}
+          end)
+
+        counts
 
       {:ok, _} ->
         no_reminder_counts()
@@ -518,66 +526,75 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp tally_reminder(acc, {:error, _}), do: acc
 
   # Carries out `ReminderMapper`'s decision (design spec 2026-10-14 §4).
+  # Returns `{outcome, contact}`; the contact may have been updated.
   defp import_single_reminder(user_id, contact, data, import_job, today) do
     case ReminderMapper.map(data, contact, today) do
       :birthday ->
-        contact
-        |> import_derived(data, import_job, fn -> Reminders.sync_birthday(contact) end)
-        |> with_warnings(0)
+        outcome =
+          contact
+          |> import_derived(data, import_job, fn -> Reminders.sync_birthday(contact) end)
+          |> with_warnings(0)
+
+        {outcome, contact}
 
       :first_met ->
-        contact
-        |> import_derived(data, import_job, fn -> opt_in_first_met(contact) end)
-        |> with_warnings(0)
+        import_first_met(contact, data, import_job)
 
       {:create, attrs, notes} ->
         Enum.each(notes, fn note ->
           Logger.warning("[MonicaMiscData] reminder #{data["id"]}: #{note}; imported as one-time")
         end)
 
-        user_id
-        |> upsert_reminder(contact, data, attrs, import_job)
-        |> with_warnings(length(notes))
+        outcome =
+          user_id
+          |> upsert_reminder(contact, data, attrs, import_job)
+          |> with_warnings(length(notes))
+
+        {outcome, contact}
 
       {:skip, reason} ->
         Logger.warning("[MonicaMiscData] reminder #{data["id"]} skipped: #{reason}")
-        :skipped
+        {:skipped, contact}
     end
   end
 
   defp with_warnings(:ok, warnings), do: {:ok, warnings}
   defp with_warnings(other, _warnings), do: other
 
-  defp opt_in_first_met(contact) do
-    with {:ok, contact} <- Contacts.update_contact(contact, %{first_met_reminder: true}) do
-      Reminders.sync_first_met(contact)
+  defp import_first_met(contact, data, import_job) do
+    case Contacts.update_contact(contact, %{first_met_reminder: true}) do
+      {:ok, updated} ->
+        outcome =
+          updated
+          |> import_derived(data, import_job, fn -> Reminders.sync_first_met(updated) end)
+          |> with_warnings(0)
+
+        {outcome, updated}
+
+      {:error, reason} ->
+        {log_reminder_error(reason), contact}
     end
   end
 
   # A derived reminder (birthday / first_met) is owned by the contact, not the
-  # import. A mapping left over from an earlier import that made a generic row
-  # (before the contact had the date) is dropped and re-pointed here.
+  # import; the import only records the mapping.
   defp import_derived(contact, data, import_job, sync) do
-    with :ok <- drop_stale_generic(mapped_local_reminder(import_job, data["id"])),
-         {:ok, %Reminders.Reminder{} = reminder} <- sync.() do
-      maybe_record_entity(import_job, "reminder", data["id"], "reminder", reminder.id)
-      :ok
-    else
-      {:ok, :none} -> log_reminder_error({:no_derived_reminder, contact.id})
-      {:error, reason} -> log_reminder_error(reason)
+    case sync.() do
+      {:ok, %Reminders.Reminder{} = reminder} ->
+        maybe_record_entity(import_job, "reminder", data["id"], "reminder", reminder.id)
+        :ok
+
+      {:ok, :none} ->
+        log_reminder_error({:no_derived_reminder, contact.id})
+
+      {:error, reason} ->
+        log_reminder_error(reason)
     end
   end
 
-  defp drop_stale_generic(%Reminders.Reminder{type: type} = mapped)
-       when type not in ["birthday", "first_met"] do
-    case Reminders.delete_reminder(mapped) do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp drop_stale_generic(_mapped), do: :ok
-
+  # Upsert by mapping so an Oban retry of the same contact's misc job updates
+  # the reminder it already made instead of duplicating it. Cross-import
+  # re-imports never get here: contacts from earlier imports are skipped.
   defp upsert_reminder(user_id, contact, data, attrs, import_job) do
     new_type = attrs["type"]
 
@@ -586,10 +603,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
         %Reminders.Reminder{type: ^new_type} = mapped ->
           Reminders.update_reminder(mapped, Map.delete(attrs, "type"))
 
-        %Reminders.Reminder{type: type} = mapped when type not in ["birthday", "first_met"] ->
-          with {:ok, _} <- Reminders.delete_reminder(mapped), do: create(user_id, contact, attrs)
-
-        _derived_or_missing ->
+        _missing_or_other ->
           create(user_id, contact, attrs)
       end
 
@@ -678,7 +692,15 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       "subject" => non_empty_string(convo_data["subject"])
     }
 
-    case Kith.Conversations.create_conversation(account_id, user_id, attrs) do
+    # Upsert by mapping so an Oban retry of this job reuses the conversation
+    # (and skips the messages) it already imported.
+    result =
+      case mapped_entity(import_job, "conversation", convo_data["id"], Conversation) do
+        %Conversation{} = existing -> {:ok, existing}
+        nil -> Kith.Conversations.create_conversation(account_id, user_id, attrs)
+      end
+
+    case result do
       {:ok, conversation} ->
         maybe_record_entity(
           import_job,
@@ -701,20 +723,43 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     messages = convo_data["messages"] || []
 
     Enum.each(messages, fn msg ->
-      attrs = %{
-        "body" => msg["content"] || msg["written_by_me_body"] || "",
-        "direction" => if(msg["written_by_me"], do: "sent", else: "received"),
-        "sent_at" => parse_datetime(msg["written_at"]) || DateTime.utc_now()
-      }
-
-      case Kith.Conversations.add_message(conversation, attrs) do
-        {:ok, message} ->
-          maybe_record_entity(import_job, "message", msg["id"], "message", message.id)
-
-        {:error, reason} ->
-          Logger.warning("[MonicaMiscData] message error: #{inspect_errors(reason)}")
+      if is_nil(mapped_entity(import_job, "message", msg["id"], Message)) do
+        add_conversation_message(conversation, msg, import_job)
       end
     end)
+  end
+
+  defp add_conversation_message(conversation, msg, import_job) do
+    attrs = %{
+      "body" => msg["content"] || msg["written_by_me_body"] || "",
+      "direction" => if(msg["written_by_me"], do: "sent", else: "received"),
+      "sent_at" => parse_datetime(msg["written_at"]) || DateTime.utc_now()
+    }
+
+    case Kith.Conversations.add_message(conversation, attrs) do
+      {:ok, message} ->
+        maybe_record_entity(import_job, "message", msg["id"], "message", message.id)
+
+      {:error, reason} ->
+        Logger.warning("[MonicaMiscData] message error: #{inspect_errors(reason)}")
+    end
+  end
+
+  # The local row an earlier attempt of this import mapped `source_id` to, if it
+  # still exists.
+  defp mapped_entity(nil, _type, _source_id, _schema), do: nil
+  defp mapped_entity(_import_job, _type, nil, _schema), do: nil
+
+  defp mapped_entity(import_job, type, source_id, schema) do
+    case Imports.find_import_record(
+           import_job.account_id,
+           import_job.source,
+           type,
+           to_string(source_id)
+         ) do
+      %{local_entity_id: id} when is_integer(id) -> Repo.get(schema, id)
+      _ -> nil
+    end
   end
 
   # ── Local helpers (copied from MonicaApi) ────────────────────────────

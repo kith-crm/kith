@@ -327,64 +327,57 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert [%{description: "Has a description"}] = contact_reminders(ctx.account_id, contact.id)
     end
 
-    test "re-importing updates the mapped reminder in place", ctx do
-      contact = contact_fixture(ctx.account_id)
-
-      payload = fn title ->
-        [
-          monica(3, %{
-            "title" => title,
-            "frequency_type" => "year",
-            "initial_date" => "2015-03-09T00:00:00Z"
-          })
-        ]
-      end
-
-      import_reminders(ctx.import_job, contact, payload.("Wedding"))
-      [first] = contact_reminders(ctx.account_id, contact.id)
-
-      import_reminders(ctx.import_job, contact, payload.("Wedding anniversary"))
-      assert [again] = contact_reminders(ctx.account_id, contact.id)
-      assert again.id == first.id
-      assert again.title == "Wedding anniversary"
-    end
-
-    test "a changed frequency type replaces the row and re-points the mapping", ctx do
-      contact = contact_fixture(ctx.account_id)
-
-      import_reminders(ctx.import_job, contact, [
-        monica(5, %{"frequency_type" => "one_time", "initial_date" => "2099-01-01T00:00:00Z"})
-      ])
-
-      [old] = contact_reminders(ctx.account_id, contact.id)
-
-      import_reminders(ctx.import_job, contact, [
-        monica(5, %{"frequency_type" => "month", "initial_date" => "2099-01-01T00:00:00Z"})
-      ])
-
-      assert [%{type: "recurring"} = new] = contact_reminders(ctx.account_id, contact.id)
-      refute new.id == old.id
-
-      assert Imports.find_import_record(ctx.account_id, "monica_api", "reminder", "5").local_entity_id ==
-               new.id
-    end
-
-    test "re-importing after the user deleted the mapped reminder recreates it", ctx do
+    test "a retry of the same import updates the mapped reminder instead of duplicating it",
+         ctx do
       contact = contact_fixture(ctx.account_id)
 
       payload = [
-        monica(7, %{"frequency_type" => "one_time", "initial_date" => "2099-01-10T00:00:00Z"})
+        monica(3, %{
+          "title" => "Wedding anniversary",
+          "frequency_type" => "year",
+          "initial_date" => "2015-03-09T00:00:00Z"
+        })
       ]
 
       import_reminders(ctx.import_job, contact, payload)
-      [r] = contact_reminders(ctx.account_id, contact.id)
-      {:ok, _} = Kith.Reminders.delete_reminder(r)
+      [first] = contact_reminders(ctx.account_id, contact.id)
 
-      assert :ok = import_reminders(ctx.import_job, contact, payload)
-      assert [new] = contact_reminders(ctx.account_id, contact.id)
+      import_reminders(ctx.import_job, contact, payload)
+      assert [again] = contact_reminders(ctx.account_id, contact.id)
+      assert again.id == first.id
+    end
 
-      assert Imports.find_import_record(ctx.account_id, "monica_api", "reminder", "7").local_entity_id ==
-               new.id
+    test "a first-met opt-in is visible to later reminders of the same contact", ctx do
+      contact = contact_fixture(ctx.account_id, %{first_met_at: ~D[2012-09-01]})
+
+      import_reminders(ctx.import_job, contact, [
+        monica(12, %{"frequency_type" => "year", "initial_date" => "2012-09-01T00:00:00Z"}),
+        monica(13, %{
+          "frequency_type" => "week",
+          "frequency_number" => 2,
+          "initial_date" => "2026-01-05T00:00:00Z"
+        })
+      ])
+
+      assert Enum.sort(Enum.map(contact_reminders(ctx.account_id, contact.id), & &1.type)) ==
+               ["first_met", "recurring"]
+    end
+
+    test "a missing frequency_number imports one-time and counts as a warning", ctx do
+      contact = contact_fixture(ctx.account_id)
+
+      capture_log(fn ->
+        import_reminders(ctx.import_job, contact, [
+          monica(31, %{
+            "frequency_type" => "month",
+            "frequency_number" => nil,
+            "initial_date" => "2099-01-01T00:00:00Z"
+          })
+        ])
+      end)
+
+      assert [%{type: "one_time"}] = contact_reminders(ctx.account_id, contact.id)
+      assert %{"reminders" => 1, "reminders_warnings" => 1} = misc_summary(ctx.import_job)
     end
 
     test "an unknown frequency type is skipped with a warning", ctx do
@@ -419,30 +412,47 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
 
       assert %{"reminders" => 0, "reminders_skipped" => 2} = misc_summary(ctx.import_job)
     end
+  end
 
-    test "a generic row from an earlier import is replaced once the contact has a birthdate",
-         ctx do
-      contact = contact_fixture(ctx.account_id)
+  describe "conversations" do
+    test "a retry of the same import does not duplicate conversations or messages",
+         %{user: user, account_id: account_id} do
+      contact = contact_fixture(account_id)
+      import_job = api_import(account_id, user.id)
 
-      payload = [
-        monica(9, %{
-          "title" => "Wish happy birthday to Mona",
-          "frequency_type" => "year",
-          "initial_date" => "1990-06-15T00:00:00Z"
-        })
-      ]
+      Req.Test.stub(@stub_name, fn conn ->
+        case conn.request_path do
+          "/api/contacts/1/conversations" ->
+            Req.Test.json(conn, %{
+              "data" => [
+                %{
+                  "id" => 10,
+                  "contact_field_type" => %{"name" => "Email"},
+                  "messages" => [
+                    %{"id" => 100, "content" => "hi", "written_at" => "2025-01-01T10:00:00Z"},
+                    %{
+                      "id" => 101,
+                      "content" => "yo",
+                      "written_by_me" => true,
+                      "written_at" => "2025-01-01T11:00:00Z"
+                    }
+                  ]
+                }
+              ]
+            })
 
-      import_reminders(ctx.import_job, contact, payload)
-      assert [%{type: "recurring"} = generic] = contact_reminders(ctx.account_id, contact.id)
+          _ ->
+            Req.Test.json(conn, %{"data" => []})
+        end
+      end)
 
-      {:ok, contact} = Kith.Contacts.update_contact(contact, %{birthdate: ~D[1990-06-15]})
-      import_reminders(ctx.import_job, contact, payload)
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["conversations"]}]
 
-      assert [%{type: "birthday"} = r] = contact_reminders(ctx.account_id, contact.id)
-      refute r.id == generic.id
+      for _ <- 1..2,
+          do: assert(:ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan)))
 
-      assert Imports.find_import_record(ctx.account_id, "monica_api", "reminder", "9").local_entity_id ==
-               r.id
+      assert Repo.aggregate(Kith.Conversations.Conversation, :count) == 1
+      assert Repo.aggregate(Kith.Conversations.Message, :count) == 2
     end
   end
 

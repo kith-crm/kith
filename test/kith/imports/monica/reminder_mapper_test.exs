@@ -48,45 +48,35 @@ defmodule Kith.Imports.Monica.ReminderMapperTest do
       "active" => active
     }
 
-  # Monica reminder id => expected decision (spec §4 R1–R6, §8)
-  @expected %{
-    # API-edited, delible: true (M3)
-    1 => :birthday,
-    # 29 Feb
-    2 => :birthday,
-    3 => {:recurring, "year", 1, ~D[2015-03-09]},
-    4 => {:recurring, "week", 2, ~D[2026-01-05]},
-    5 => {:recurring, "month", 1, ~D[2024-02-01]},
-    6 => {:one_time, ~D[2020-01-01], false},
-    7 => {:one_time, ~D[2027-01-10], true},
-    # year-unknown (M6)
-    8 => :birthday,
-    # deceased title (M5)
-    9 => :birthday,
-    # death anniversary
-    10 => {:recurring, "year", 1, ~D[2020-08-01]},
-    11 => :birthday,
-    12 => :first_met,
-    13 => {:recurring, "week", 2, ~D[2026-01-05]},
-    14 => {:recurring, "month", 1, ~D[2025-01-31]},
-    15 => {:recurring, "month", 3, ~D[2025-11-30]},
-    16 => {:recurring, "year", 2, ~D[2016-02-29]},
-    # today counts as due (D6)
-    17 => {:one_time, ~D[2026-10-14], true},
-    18 => {:one_time, ~D[2025-03-01], false},
-    # already sent in Monica (M10)
-    19 => {:one_time, ~D[2026-10-12], false},
-    20 => {:one_time, ~D[2027-02-14], true},
-    # frequency_number 0 (D7)
-    21 => {:one_time, ~D[2027-06-01], true},
-    # "Fiona birthday party" (D1 cost)
-    22 => :birthday,
-    # life event
-    23 => {:recurring, "year", 1, ~D[2019-05-10]}
-  }
+  # {Monica reminder id, expected decision, optional reason} (spec §4 R1–R6, §8)
+  @expected [
+    {1, :birthday, "API-edited, delible: true (M3)"},
+    {2, :birthday, "29 Feb"},
+    {3, {:recurring, "year", 1, ~D[2015-03-09]}, "wedding anniversary"},
+    {4, {:recurring, "week", 2, ~D[2026-01-05]}, "every 2 weeks"},
+    {5, {:recurring, "month", 1, ~D[2024-02-01]}, "monthly rent"},
+    {6, {:one_time, ~D[2020-01-01], false}, "past one-time, never sent"},
+    {7, {:one_time, ~D[2027-01-10], true}, "future one-time"},
+    {8, :birthday, "year-unknown (M6)"},
+    {9, :birthday, "deceased title (M5)"},
+    {10, {:recurring, "year", 1, ~D[2020-08-01]}, "death anniversary"},
+    {11, :birthday, "birthday reminder"},
+    {12, :first_met, "first met day"},
+    {13, {:recurring, "week", 2, ~D[2026-01-05]}, "every 2 weeks"},
+    {14, {:recurring, "month", 1, ~D[2025-01-31]}, "month-end clamp (31st)"},
+    {15, {:recurring, "month", 3, ~D[2025-11-30]}, "every 3 months"},
+    {16, {:recurring, "year", 2, ~D[2016-02-29]}, "leap-day, every 2 years"},
+    {17, {:one_time, ~D[2026-10-14], true}, "today counts as due (D6)"},
+    {18, {:one_time, ~D[2025-03-01], false}, "past one-time, never sent"},
+    {19, {:one_time, ~D[2026-10-12], false}, "already sent in Monica (M10)"},
+    {20, {:one_time, ~D[2027-02-14], true}, "future one-time with description"},
+    {21, {:one_time, ~D[2027-06-01], true}, "frequency_number 0 (D7)"},
+    {22, :birthday, "\"Fiona birthday party\" (D1 cost)"},
+    {23, {:recurring, "year", 1, ~D[2019-05-10]}, "life event"}
+  ]
 
   test "every captured Monica 4.1.2 reminder maps as the spec says", ctx do
-    for {id, expected} <- @expected do
+    for {id, expected, _why} <- @expected do
       got = decide(ctx, id)
 
       case expected do
@@ -115,6 +105,39 @@ defmodule Kith.Imports.Monica.ReminderMapperTest do
 
   test "frequency_number 0 is noted", ctx do
     assert {:create, _, [:non_positive_interval]} = decide(ctx, 21)
+  end
+
+  test "a missing or unparseable frequency_number is noted as :missing_interval" do
+    contact = %{birthdate: nil, first_met_at: nil}
+
+    for count <- [nil, "abc"] do
+      assert {:create, %{"type" => "one_time", "anchor_date" => ~D[2027-01-01]},
+              [:missing_interval]} =
+               ReminderMapper.map(
+                 %{
+                   "frequency_type" => "month",
+                   "frequency_number" => count,
+                   "initial_date" => "2027-01-01T00:00:00Z"
+                 },
+                 contact,
+                 @today
+               )
+    end
+  end
+
+  test "a yearly reminder on 29 Feb matches a contact born 1992-02-29 (year is ignored)" do
+    contact = %{birthdate: ~D[1992-02-29], first_met_at: nil}
+
+    assert :birthday =
+             ReminderMapper.map(
+               %{
+                 "frequency_type" => "year",
+                 "frequency_number" => 1,
+                 "initial_date" => "2000-02-29T00:00:00Z"
+               },
+               contact,
+               @today
+             )
   end
 
   test "unknown frequency types and unparseable dates are skipped" do

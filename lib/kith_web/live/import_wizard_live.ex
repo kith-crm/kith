@@ -771,7 +771,7 @@ defmodule KithWeb.ImportWizardLive do
                 class="text-[var(--color-warning)]"
               >
                 <span class="font-semibold">{@results["skipped"] || @results[:skipped]}</span>
-                entries skipped
+                skipped (already imported from Monica, or deleted)
               </p>
               <p
                 :if={(@results["skipped_duplicates"] || @results[:skipped_duplicates] || 0) > 0}

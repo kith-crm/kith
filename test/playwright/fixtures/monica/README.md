@@ -19,7 +19,7 @@ docker exec -u www-data kith-monica-e2e-monica-1 php /tmp/state.php   # DB-only 
 ```
 PHP must run as `-u www-data`; as root it creates root-owned log files and breaks Monica.
 
-The one-time reminders are date-relative (today, today - 2 days, today + 120 days), so the spec's expectations hold
+The one-time reminders are date-relative (today, today - 2 days, today + 83 days, today + 120 days; computed in UTC), so the spec's expectations hold
 on any day. Yara's year-unknown birthday takes the container's current year. Exact next dates are pinned by ExUnit.
 
 ## Run the spec

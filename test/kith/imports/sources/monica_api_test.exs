@@ -255,6 +255,32 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                r.id
     end
 
+    test "a failing stay-in-touch create is logged and the crawl continues", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_contacts([
+        contact_json(id: 9, first_name: "Gina", stay_in_touch_frequency: 14),
+        contact_json(id: 10, first_name: "Hank")
+      ])
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      # A nil creator makes Reminders.create_reminder fail validation.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, summary} = MonicaApi.crawl(account_id, nil, credential(), import_job, %{})
+          assert summary.contacts == 2
+        end)
+
+      assert log =~ "stay-in-touch for 9"
+
+      assert Repo.all(
+               from r in Kith.Reminders.Reminder,
+                 where: r.account_id == ^account_id and r.type == "stay_in_touch"
+             ) == []
+    end
+
     test "is skipped when the reminders option is off", %{user: user, account_id: account_id} do
       contacts = [contact_json(id: 9, first_name: "Gina", stay_in_touch_frequency: 14)]
 
@@ -651,7 +677,13 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   # ── crawl/5 — rate limiting ──────────────────────────────────────────
 
   describe "crawl/5 — rate limiting" do
-    @tag :slow
+    # The shared credential/1 sets `retry: false`, so Req never retries a 429.
+    # These tests exercise the retry path with a zero backoff delay.
+    defp retrying_credential do
+      credential(req_options: [plug: {Req.Test, @stub_name}, retry_delay: 0])
+    end
+
+    @tag :capture_log
     test "retries on 429 from contacts endpoint", %{user: user, account_id: account_id} do
       contacts = [contact_json(id: 1, first_name: "Patient")]
 
@@ -668,20 +700,26 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       end)
 
       import_job = api_import_fixture(account_id, user.id)
-      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, retrying_credential(), import_job, %{})
+
       assert summary.contacts == 1
 
       Agent.stop(agent)
     end
 
-    @tag :slow
+    @tag :capture_log
     test "fails after max retries on persistent 429", %{user: user, account_id: account_id} do
       Req.Test.stub(@stub_name, fn conn ->
         Plug.Conn.send_resp(conn, 429, "")
       end)
 
       import_job = api_import_fixture(account_id, user.id)
-      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, retrying_credential(), import_job, %{})
+
       assert summary.error_count > 0
       assert Enum.any?(summary.errors, &String.contains?(&1, "Rate limited"))
     end
@@ -711,54 +749,192 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
 
   # ── crawl/5 — re-import / deduplication ──────────────────────────────
 
-  describe "crawl/5 — re-import / deduplication" do
-    test "updates existing contacts on re-import", %{user: user, account_id: account_id} do
-      contacts_v1 = [contact_json(id: 1, first_name: "Alice", last_name: "Old")]
+  defp stub_contacts(contacts) do
+    Req.Test.stub(@stub_name, fn conn ->
+      Req.Test.json(conn, contacts_page_json(contacts))
+    end)
+  end
 
-      Req.Test.stub(@stub_name, fn conn ->
-        Req.Test.json(conn, contacts_page_json(contacts_v1))
-      end)
-
-      import_job1 = api_import_fixture(account_id, user.id)
-      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job1, %{})
-
-      alice =
-        Repo.one(
-          from c in Contacts.Contact,
-            where: c.first_name == "Alice" and c.account_id == ^account_id
-        )
-
-      assert alice.last_name == "Old"
-
-      # Complete the first import so we can create a second
-      Imports.update_import_status(import_job1, "completed", %{completed_at: DateTime.utc_now()})
-
-      # Re-import with updated name
-      contacts_v2 = [contact_json(id: 1, first_name: "Alice", last_name: "New")]
-
-      Req.Test.stub(@stub_name, fn conn ->
-        Req.Test.json(conn, contacts_page_json(contacts_v2))
-      end)
-
-      import_job2 = api_import_fixture(account_id, user.id)
-      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job2, %{})
-
-      alice = Repo.get!(Contacts.Contact, alice.id)
-      assert alice.last_name == "New"
-
-      # Still only one contact in DB
-      count =
+  defp children_snapshot(account_id) do
+    %{
+      stay_in_touch:
         Repo.aggregate(
-          from(c in Contacts.Contact,
-            where: c.first_name == "Alice" and c.account_id == ^account_id
+          from(r in Kith.Reminders.Reminder,
+            where: r.account_id == ^account_id and r.type == "stay_in_touch"
           ),
           :count
-        )
+        ),
+      stay_in_touch_interval:
+        Repo.all(
+          from r in Kith.Reminders.Reminder,
+            where: r.account_id == ^account_id and r.type == "stay_in_touch",
+            select: {r.id, r.interval_count, r.updated_at}
+        ),
+      notes:
+        Repo.aggregate(from(n in Kith.Contacts.Note, where: n.account_id == ^account_id), :count)
+    }
+  end
 
-      assert count == 1
+  describe "crawl/5 — re-import / deduplication" do
+    # Decision 2026-10-19: re-importing previously imported contacts is not supported.
+    test "a contact from an earlier import is skipped and left untouched", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_contacts([
+        contact_json(
+          id: 1,
+          first_name: "Alice",
+          last_name: "Old",
+          stay_in_touch_frequency: 14,
+          notes: [note_json(body: "first note")]
+        )
+      ])
+
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, first} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      assert first.contacts == 1
+      Imports.update_import_status(job1, "completed", %{completed_at: DateTime.utc_now()})
+
+      alice_id =
+        Imports.find_import_record(account_id, "monica_api", "contact", "1").local_entity_id
+
+      before_children = children_snapshot(account_id)
+
+      stub_contacts([
+        contact_json(
+          id: 1,
+          first_name: "Alice",
+          last_name: "New",
+          stay_in_touch_frequency: 30,
+          notes: [note_json(body: "first note"), note_json(body: "a new note")]
+        )
+      ])
+
+      job2 = api_import_fixture(account_id, user.id)
+
+      assert {:ok, second} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+      assert second.skipped == 1
+      assert second.contacts == 0
+
+      assert Repo.get!(Contacts.Contact, alice_id).last_name == "Old"
+      assert children_snapshot(account_id) == before_children
+
+      assert Repo.aggregate(
+               from(c in Contacts.Contact, where: c.account_id == ^account_id),
+               :count
+             ) == 1
     end
 
-    test "skips soft-deleted contacts on re-import", %{user: user, account_id: account_id} do
+    test "a purged contact is re-created and its import record re-pointed", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_contacts([contact_json(id: 1, first_name: "Purged")])
+
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      Imports.update_import_status(job1, "completed", %{completed_at: DateTime.utc_now()})
+
+      old = Imports.find_import_record(account_id, "monica_api", "contact", "1")
+      Repo.delete!(Repo.get!(Contacts.Contact, old.local_entity_id))
+
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, second} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+      assert second.contacts == 1
+      assert second.skipped == 0
+
+      rec = Imports.find_import_record(account_id, "monica_api", "contact", "1")
+      refute rec.local_entity_id == old.local_entity_id
+      assert rec.import_id == job2.id
+      assert Repo.get!(Contacts.Contact, rec.local_entity_id).first_name == "Purged"
+    end
+
+    test "re-running the same import job is idempotent, children included", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_contacts([
+        contact_json(
+          id: 1,
+          first_name: "Retry",
+          stay_in_touch_frequency: 14,
+          notes: [note_json(body: "only once")]
+        )
+      ])
+
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job, %{})
+      snapshot = children_snapshot(account_id)
+      assert snapshot.stay_in_touch == 1
+      assert snapshot.notes == 1
+
+      # An Oban retry re-runs the crawl with the same import job.
+      assert {:ok, again} = MonicaApi.crawl(account_id, user.id, credential(), job, %{})
+      assert again.skipped == 0
+
+      assert children_snapshot(account_id) == snapshot
+
+      assert Repo.aggregate(
+               from(c in Contacts.Contact, where: c.account_id == ^account_id),
+               :count
+             ) == 1
+    end
+
+    test "a new contact still links to a skipped, previously imported one", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_contacts([contact_json(id: 2, first_name: "Bob", last_name: "Spouse")])
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      Imports.update_import_status(job1, "completed", %{completed_at: DateTime.utc_now()})
+
+      alice =
+        contact_json(
+          id: 1,
+          first_name: "Alice",
+          relationships: %{
+            "love" => %{
+              "total" => 1,
+              "contacts" => [
+                %{
+                  "relationship" => %{
+                    "id" => 1,
+                    "uuid" => Ecto.UUID.generate(),
+                    "name" => "spouse"
+                  },
+                  "contact" => contact_short_json(2, Ecto.UUID.generate(), "Bob", "Spouse")
+                }
+              ]
+            },
+            "family" => %{"total" => 0, "contacts" => []},
+            "friend" => %{"total" => 0, "contacts" => []},
+            "work" => %{"total" => 0, "contacts" => []}
+          }
+        )
+
+      stub_contacts([alice, contact_json(id: 2, first_name: "Bob", last_name: "Spouse")])
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+      assert summary.contacts == 1
+      assert summary.skipped == 1
+
+      alice_rec = Imports.find_import_record(account_id, "monica_api", "contact", "1")
+      bob_rec = Imports.find_import_record(account_id, "monica_api", "contact", "2")
+
+      assert Repo.exists?(
+               from r in Contacts.Relationship,
+                 where:
+                   r.contact_id == ^alice_rec.local_entity_id and
+                     r.related_contact_id == ^bob_rec.local_entity_id
+             )
+    end
+
+    test "a soft-deleted contact from an earlier import stays skipped", %{
+      user: user,
+      account_id: account_id
+    } do
       contacts = [contact_json(id: 1, first_name: "Deleted")]
 
       Req.Test.stub(@stub_name, fn conn ->
@@ -1768,10 +1944,9 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert length(active) == 1
     end
 
-    # Issue #2 review IMP-1: on a re-import, the importer writes a fresh
-    # ImportRecord for every *updated* contact too, so the second pass must
-    # scope to contacts genuinely created this run — not merely referenced by
-    # an ImportRecord from it — or it would auto-merge the whole prior corpus.
+    # Issue #2 review IMP-1: the second pass must scope to contacts genuinely
+    # created this run, or it would auto-merge the whole prior corpus. (Since
+    # 2026-10-19 previously imported contacts are skipped, not updated.)
     test "re-import does not auto-merge a pre-existing contact into a new namesake",
          %{user: user, account_id: account_id} do
       # First import: creates Monica contact 1 ("Nora Reed"), nothing to merge.
@@ -1799,7 +1974,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
 
       Imports.update_import_status(job1, "completed", %{completed_at: DateTime.utc_now()})
 
-      # Second import: re-sends contact 1 (an UPDATE) plus a brand-new contact 2
+      # Second import: re-sends contact 1 (skipped) plus a brand-new contact 2
       # with an identical display_name and nothing else shared.
       Req.Test.stub(@stub_name, fn conn ->
         Req.Test.json(
@@ -1841,6 +2016,81 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
 
       # The detector still flags the pair — it is deliberately not auto-merged.
       assert Kith.DuplicateDetection.cluster_count(account_id) >= 1
+    end
+  end
+
+  describe "coverage backfill on a second import" do
+    # Stubs the listing with `contacts` and records every per-contact fetch.
+    defp stub_listing_recording_fetches(contacts, total) do
+      pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case conn.request_path do
+          "/api/contacts" ->
+            Req.Test.json(conn, contacts_page_json(contacts, 1, 1, total))
+
+          "/api/contacts/" <> id ->
+            send(pid, {:single_fetch, id})
+            Req.Test.json(conn, %{"data" => Enum.find(contacts, &(to_string(&1["id"]) == id))})
+        end
+      end)
+    end
+
+    defp complete(job),
+      do: Imports.update_import_status(job, "completed", %{completed_at: DateTime.utc_now()})
+
+    test "all contacts skipped: no unresolved gap, no per-contact fetches", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = for i <- 1..3, do: contact_json(id: i, first_name: "C#{i}")
+      stub_listing_recording_fetches(contacts, 3)
+
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      complete(job1)
+      flush_fetches()
+
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+
+      assert summary.skipped == 3
+      assert summary.contacts == 0
+      assert summary.coverage_backfill.unresolved_gap == 0
+      assert summary.coverage_backfill.gap_detected == 0
+      refute_received {:single_fetch, _}
+    end
+
+    test "mixed new and skipped: skipped contacts are counted once and never re-fetched", %{
+      user: user,
+      account_id: account_id
+    } do
+      first = [contact_json(id: 1, first_name: "C1"), contact_json(id: 3, first_name: "C3")]
+      stub_listing_recording_fetches(first, 2)
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      complete(job1)
+      flush_fetches()
+
+      all = for i <- 1..3, do: contact_json(id: i, first_name: "C#{i}")
+      stub_listing_recording_fetches(all, 3)
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+
+      assert summary.contacts == 1
+      assert summary.skipped == 2
+      assert summary.coverage_backfill.gap_detected == 0
+      assert summary.coverage_backfill.imported_full == 0
+      assert summary.coverage_backfill.unresolved_gap == 0
+      refute_received {:single_fetch, _}
+    end
+
+    defp flush_fetches do
+      receive do
+        {:single_fetch, _} -> flush_fetches()
+      after
+        0 -> :ok
+      end
     end
   end
 
