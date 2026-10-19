@@ -571,6 +571,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             >{@record && @record.body}</textarea>
           </div>
           <label class="flex items-center gap-2 cursor-pointer">
+            <input type="hidden" name="entry[is_private]" value="false" />
             <input
               type="checkbox"
               name="entry[is_private]"

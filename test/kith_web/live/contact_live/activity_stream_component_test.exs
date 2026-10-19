@@ -161,6 +161,23 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
       assert has_element?(view, ~s|input[name="entry[is_private]"][checked]|)
     end
 
+    test "private note can be made public via edit", %{conn: conn, contact: contact, user: user} do
+      note = note_fixture(contact, user.id, %{"body" => "Secret", "is_private" => true})
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      click_edit(view, "note", note.id)
+
+      assert has_element?(
+               view,
+               ~s|input[type="hidden"][name="entry[is_private]"][value="false"]|
+             )
+
+      view
+      |> form("#entry-modal form", %{})
+      |> render_submit(%{"entry" => %{"body" => "Secret", "is_private" => "false"}})
+
+      refute Kith.Repo.get!(Kith.Contacts.Note, note.id).is_private
+    end
+
     test "call", %{conn: conn, contact: contact, account_id: account_id} do
       call = call_for(contact, account_id)
       {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")

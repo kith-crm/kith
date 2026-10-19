@@ -6,8 +6,9 @@ defmodule Kith.Imports.Monica.NoteTimestamps do
 
   @spec from_note(map()) :: [inserted_at: DateTime.t() | nil, updated_at: DateTime.t() | nil]
   def from_note(note) when is_map(note) do
-    inserted_at = parse(note["created_at"])
-    [inserted_at: inserted_at, updated_at: parse(note["updated_at"]) || inserted_at]
+    updated_at = parse(note["updated_at"])
+    inserted_at = parse(note["created_at"]) || updated_at
+    [inserted_at: inserted_at, updated_at: updated_at || inserted_at]
   end
 
   defp parse(value) when is_binary(value) do

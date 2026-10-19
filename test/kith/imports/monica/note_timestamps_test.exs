@@ -31,4 +31,9 @@ defmodule Kith.Imports.Monica.NoteTimestampsTest do
     assert NoteTimestamps.from_note(%{"created_at" => "2024-02-20 12:00:00"})[:inserted_at] ==
              ~U[2024-02-20 12:00:00Z]
   end
+
+  test "updated_at alone is used for both timestamps" do
+    assert NoteTimestamps.from_note(%{"updated_at" => "2024-02-21T09:30:00Z"}) ==
+             [inserted_at: ~U[2024-02-21 09:30:00Z], updated_at: ~U[2024-02-21 09:30:00Z]]
+  end
 end
