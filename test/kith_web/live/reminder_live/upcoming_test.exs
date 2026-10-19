@@ -11,15 +11,17 @@ defmodule KithWeb.ReminderLive.UpcomingTest do
     user: user
   } do
     contact = contact_fixture(user.account_id)
-    # Anniversary five days from now, whatever the year.
-    met = Date.shift(Date.add(Date.utc_today(), 5), year: -3)
+    # Anniversary in about five days; skip 29 Feb so the shift is never clamped.
+    soon = Date.add(Date.utc_today(), 5)
+    soon = if {soon.month, soon.day} == {2, 29}, do: Date.add(soon, 1), else: soon
+    met = Date.shift(soon, year: -3)
 
     {:ok, _} =
       Kith.Contacts.update_contact(contact, %{first_met_at: met, first_met_reminder: true})
 
-    {:ok, _view, html} = live(conn, ~p"/reminders/upcoming")
+    {:ok, view, _html} = live(conn, ~p"/reminders/upcoming")
 
-    assert html =~ "hero-sparkles"
-    assert html =~ "First met"
+    assert has_element?(view, "span.hero-sparkles")
+    assert has_element?(view, "p", "First met")
   end
 end

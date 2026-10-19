@@ -26,10 +26,7 @@ defmodule KithWeb.ContactLive.PetsComponentTest do
 
     years = today.year - 2020 - if(Date.compare(anniversary, today) == :gt, do: 1, else: 0)
 
-    expected =
-      if years > 0,
-        do: "(#{years}y)",
-        else: "(#{(today.year - 2020) * 12 + today.month - 2}mo)"
+    expected = "(#{years}y)"
 
     html =
       render_component(KithWeb.ContactLive.PetsComponent,
