@@ -369,6 +369,74 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
                new.id
     end
 
+    test "a failed replacement keeps the old row and its mapping", ctx do
+      contact = contact_fixture(ctx.account_id)
+
+      import_reminders(ctx.import_job, contact, [
+        monica(5, %{"frequency_type" => "one_time", "initial_date" => "2099-01-01T00:00:00Z"})
+      ])
+
+      [old] = contact_reminders(ctx.account_id, contact.id)
+
+      # Make the INSERT half of the replace blow up (DDL rolls back with the sandbox).
+      Repo.query!("""
+      CREATE FUNCTION pg_temp.boom() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'boom'; END $$ LANGUAGE plpgsql
+      """)
+
+      Repo.query!("""
+      CREATE TRIGGER reminders_boom BEFORE INSERT ON reminders
+      FOR EACH ROW EXECUTE FUNCTION pg_temp.boom()
+      """)
+
+      capture_log(fn ->
+        assert_raise Postgrex.Error, ~r/boom/, fn ->
+          import_reminders(ctx.import_job, contact, [
+            monica(5, %{"frequency_type" => "month", "initial_date" => "2099-01-01T00:00:00Z"})
+          ])
+        end
+      end)
+
+      assert [%{id: id, type: "one_time"}] = contact_reminders(ctx.account_id, contact.id)
+      assert id == old.id
+
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "reminder", "5").local_entity_id ==
+               old.id
+    end
+
+    test "a first-met opt-in is visible to later reminders of the same contact", ctx do
+      contact = contact_fixture(ctx.account_id, %{first_met_at: ~D[2012-09-01]})
+
+      import_reminders(ctx.import_job, contact, [
+        monica(12, %{"frequency_type" => "year", "initial_date" => "2012-09-01T00:00:00Z"}),
+        monica(13, %{
+          "frequency_type" => "week",
+          "frequency_number" => 2,
+          "initial_date" => "2026-01-05T00:00:00Z"
+        })
+      ])
+
+      assert Enum.sort(Enum.map(contact_reminders(ctx.account_id, contact.id), & &1.type)) ==
+               ["first_met", "recurring"]
+    end
+
+    test "a missing frequency_number imports one-time and counts as a warning", ctx do
+      contact = contact_fixture(ctx.account_id)
+
+      capture_log(fn ->
+        import_reminders(ctx.import_job, contact, [
+          monica(31, %{
+            "frequency_type" => "month",
+            "frequency_number" => nil,
+            "initial_date" => "2099-01-01T00:00:00Z"
+          })
+        ])
+      end)
+
+      assert [%{type: "one_time"}] = contact_reminders(ctx.account_id, contact.id)
+      assert %{"reminders" => 1, "reminders_warnings" => 1} = misc_summary(ctx.import_job)
+    end
+
     test "re-importing after the user deleted the mapped reminder recreates it", ctx do
       contact = contact_fixture(ctx.account_id)
 

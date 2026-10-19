@@ -8,8 +8,9 @@ defmodule Kith.Imports.Monica.ReminderMapper do
     * yearly, every 1 year, on the contact's birthday (month-day) → `:birthday`
     * yearly, every 1 year, on the contact's first-met day → `:first_met`
     * week/month/year every N ≥ 1 → a `recurring` reminder anchored on `initial_date`
-    * one-time, or N ≤ 0 → a `one_time` reminder on `initial_date`, inactive when
-      that date is before `today`
+    * one-time, or an unusable N → a `one_time` reminder on `initial_date`, inactive
+      when that date is before `today`. N ≤ 0 is noted `:non_positive_interval`; a
+      nil or unparseable N is noted `:missing_interval`.
 
   Monica 4.1.2 sends no `next_expected_date` and no birthday flag, so the
   schedule is rebuilt from `initial_date` and Kith's own calendar maths.
@@ -46,7 +47,7 @@ defmodule Kith.Imports.Monica.ReminderMapper do
         recurring(reminder, type, count, date)
 
       true ->
-        one_time(reminder, type, date, today)
+        one_time(reminder, type, count, date, today)
     end
   end
 
@@ -124,8 +125,8 @@ defmodule Kith.Imports.Monica.ReminderMapper do
     {:create, attrs, []}
   end
 
-  defp one_time(reminder, type, date, today) do
-    notes = if type == "one_time", do: [], else: [:non_positive_interval]
+  defp one_time(reminder, type, count, date, today) do
+    notes = interval_notes(type, count)
 
     attrs =
       Map.merge(base(reminder, date), %{
@@ -137,6 +138,12 @@ defmodule Kith.Imports.Monica.ReminderMapper do
 
     {:create, attrs, notes}
   end
+
+  # A week/month/year reminder only lands here when its interval is unusable:
+  # an integer <= 0, or a missing / unparseable count.
+  defp interval_notes("one_time", _count), do: []
+  defp interval_notes(_type, count) when is_integer(count), do: [:non_positive_interval]
+  defp interval_notes(_type, _count), do: [:missing_interval]
 
   defp base(reminder, date) do
     %{

@@ -484,10 +484,17 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       {:ok, %{"data" => reminders}} when is_list(reminders) ->
         today = Reminders.account_today(contact.account_id)
 
-        Enum.reduce(reminders, no_reminder_counts(), fn reminder, acc ->
-          outcome = import_single_reminder(user_id, contact, reminder, import_job, today)
-          tally_reminder(acc, outcome)
-        end)
+        # `contact` is threaded through: importing a first-met reminder updates
+        # the contact, and later reminders must see that update.
+        {counts, _contact} =
+          Enum.reduce(reminders, {no_reminder_counts(), contact}, fn reminder, {acc, contact} ->
+            {outcome, contact} =
+              import_single_reminder(user_id, contact, reminder, import_job, today)
+
+            {tally_reminder(acc, outcome), contact}
+          end)
+
+        counts
 
       {:ok, _} ->
         no_reminder_counts()
@@ -518,39 +525,53 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp tally_reminder(acc, {:error, _}), do: acc
 
   # Carries out `ReminderMapper`'s decision (design spec 2026-10-14 §4).
+  # Returns `{outcome, contact}`; the contact may have been updated.
   defp import_single_reminder(user_id, contact, data, import_job, today) do
     case ReminderMapper.map(data, contact, today) do
       :birthday ->
-        contact
-        |> import_derived(data, import_job, fn -> Reminders.sync_birthday(contact) end)
-        |> with_warnings(0)
+        outcome =
+          contact
+          |> import_derived(data, import_job, fn -> Reminders.sync_birthday(contact) end)
+          |> with_warnings(0)
+
+        {outcome, contact}
 
       :first_met ->
-        contact
-        |> import_derived(data, import_job, fn -> opt_in_first_met(contact) end)
-        |> with_warnings(0)
+        import_first_met(contact, data, import_job)
 
       {:create, attrs, notes} ->
         Enum.each(notes, fn note ->
           Logger.warning("[MonicaMiscData] reminder #{data["id"]}: #{note}; imported as one-time")
         end)
 
-        user_id
-        |> upsert_reminder(contact, data, attrs, import_job)
-        |> with_warnings(length(notes))
+        outcome =
+          user_id
+          |> upsert_reminder(contact, data, attrs, import_job)
+          |> with_warnings(length(notes))
+
+        {outcome, contact}
 
       {:skip, reason} ->
         Logger.warning("[MonicaMiscData] reminder #{data["id"]} skipped: #{reason}")
-        :skipped
+        {:skipped, contact}
     end
   end
 
   defp with_warnings(:ok, warnings), do: {:ok, warnings}
   defp with_warnings(other, _warnings), do: other
 
-  defp opt_in_first_met(contact) do
-    with {:ok, contact} <- Contacts.update_contact(contact, %{first_met_reminder: true}) do
-      Reminders.sync_first_met(contact)
+  defp import_first_met(contact, data, import_job) do
+    case Contacts.update_contact(contact, %{first_met_reminder: true}) do
+      {:ok, updated} ->
+        outcome =
+          updated
+          |> import_derived(data, import_job, fn -> Reminders.sync_first_met(updated) end)
+          |> with_warnings(0)
+
+        {outcome, updated}
+
+      {:error, reason} ->
+        {log_reminder_error(reason), contact}
     end
   end
 
@@ -587,7 +608,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
           Reminders.update_reminder(mapped, Map.delete(attrs, "type"))
 
         %Reminders.Reminder{type: type} = mapped when type not in ["birthday", "first_met"] ->
-          with {:ok, _} <- Reminders.delete_reminder(mapped), do: create(user_id, contact, attrs)
+          replace_reminder(mapped, user_id, contact, attrs)
 
         _derived_or_missing ->
           create(user_id, contact, attrs)
@@ -601,6 +622,19 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       {:error, reason} ->
         log_reminder_error(reason)
     end
+  end
+
+  # Delete-then-create in one transaction: if the create fails the old row (and
+  # the mapping that still points at it) survive.
+  defp replace_reminder(mapped, user_id, contact, attrs) do
+    Repo.transaction(fn ->
+      with {:ok, _} <- Reminders.delete_reminder(mapped),
+           {:ok, reminder} <- create(user_id, contact, attrs) do
+        reminder
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
 
   defp create(user_id, contact, attrs),
