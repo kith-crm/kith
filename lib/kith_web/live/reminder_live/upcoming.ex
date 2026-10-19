@@ -231,12 +231,14 @@ defmodule KithWeb.ReminderLive.Upcoming do
   defp type_icon("stay_in_touch"), do: "hero-hand-raised"
   defp type_icon("one_time"), do: "hero-map-pin"
   defp type_icon("recurring"), do: "hero-arrow-path"
+  defp type_icon("first_met"), do: "hero-sparkles"
   defp type_icon(_), do: "hero-bell"
 
   defp type_label("birthday"), do: "Birthday"
   defp type_label("stay_in_touch"), do: "Stay in touch"
   defp type_label("one_time"), do: "One-time"
   defp type_label("recurring"), do: "Recurring"
+  defp type_label("first_met"), do: "First met"
   defp type_label(_), do: "Reminder"
 
   defp snooze_label("15_minutes"), do: "15 minutes"

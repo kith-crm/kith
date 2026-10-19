@@ -585,4 +585,26 @@ defmodule Kith.RemindersTest do
       assert updated_instance.resolved_at
     end
   end
+
+  test "list_contact_reminders/2 includes inactive reminders, active first", ctx do
+    {:ok, past} =
+      Reminders.create_reminder(ctx.account_id, ctx.user.id, %{
+        "type" => "one_time",
+        "title" => "Old",
+        "anchor_date" => ~D[2020-01-01],
+        "active" => false,
+        "contact_id" => ctx.contact.id
+      })
+
+    {:ok, live} =
+      Reminders.create_reminder(ctx.account_id, ctx.user.id, %{
+        "type" => "one_time",
+        "title" => "New",
+        "anchor_date" => Date.add(Date.utc_today(), 5),
+        "contact_id" => ctx.contact.id
+      })
+
+    assert Enum.map(Reminders.list_contact_reminders(ctx.account_id, ctx.contact.id), & &1.id) ==
+             [live.id, past.id]
+  end
 end

@@ -108,6 +108,7 @@ defmodule KithWeb.KithUI do
   defp reminder_icon_name(%{type: "call"}), do: "hero-phone"
   defp reminder_icon_name(%{type: "email"}), do: "hero-envelope"
   defp reminder_icon_name(%{type: "meeting"}), do: "hero-calendar-days"
+  defp reminder_icon_name(%{type: "first_met"}), do: "hero-sparkles"
   defp reminder_icon_name(_), do: "hero-bell"
 
   defp format_reminder_date(%{date: date}, locale) do

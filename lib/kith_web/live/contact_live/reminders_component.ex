@@ -15,7 +15,8 @@ defmodule KithWeb.ContactLive.RemindersComponent do
     {"Monthly", "monthly"},
     {"Every 3 months", "3months"},
     {"Every 6 months", "6months"},
-    {"Annually", "annually"}
+    {"Annually", "annually"},
+    {"Custom…", "custom"}
   ]
 
   @impl true
@@ -24,12 +25,13 @@ defmodule KithWeb.ContactLive.RemindersComponent do
      socket
      |> assign(:reminders, [])
      |> assign(:show_form, false)
-     |> assign(:form_type, "one_time")}
+     |> assign(:form_type, "one_time")
+     |> assign(:form_frequency, "weekly")}
   end
 
   @impl true
   def update(assigns, socket) do
-    reminders = Reminders.list_reminders(assigns.account_id, assigns.contact_id)
+    reminders = Reminders.list_contact_reminders(assigns.account_id, assigns.contact_id)
 
     {:ok,
      socket
@@ -39,27 +41,36 @@ defmodule KithWeb.ContactLive.RemindersComponent do
 
   @impl true
   def handle_event("show-form", _params, socket) do
-    {:noreply, socket |> assign(:show_form, true) |> assign(:form_type, "one_time")}
+    {:noreply,
+     socket
+     |> assign(:show_form, true)
+     |> assign(:form_type, "one_time")
+     |> assign(:form_frequency, "weekly")}
   end
 
   def handle_event("cancel-form", _params, socket) do
     {:noreply, assign(socket, :show_form, false)}
   end
 
-  def handle_event("type-changed", %{"reminder" => %{"type" => type}}, socket) do
-    {:noreply, assign(socket, :form_type, type)}
+  def handle_event("type-changed", %{"reminder" => params}, socket) do
+    {:noreply,
+     socket
+     |> assign(:form_type, params["type"] || socket.assigns.form_type)
+     |> assign(:form_frequency, params["frequency"] || socket.assigns.form_frequency)}
   end
 
   def handle_event("save", %{"reminder" => params}, socket) do
     attrs =
       params
+      |> normalize_schedule()
       |> Map.put("contact_id", socket.assigns.contact_id)
       |> Map.put("account_id", socket.assigns.account_id)
       |> Map.put("creator_id", socket.assigns.creator_id)
 
     case Reminders.create_reminder(socket.assigns.account_id, socket.assigns.creator_id, attrs) do
       {:ok, _} ->
-        reminders = Reminders.list_reminders(socket.assigns.account_id, socket.assigns.contact_id)
+        reminders =
+          Reminders.list_contact_reminders(socket.assigns.account_id, socket.assigns.contact_id)
 
         {:noreply,
          socket
@@ -75,7 +86,9 @@ defmodule KithWeb.ContactLive.RemindersComponent do
   def handle_event("delete", %{"id" => id}, socket) do
     reminder = Reminders.get_reminder!(socket.assigns.account_id, String.to_integer(id))
     {:ok, _} = Reminders.delete_reminder(reminder)
-    reminders = Reminders.list_reminders(socket.assigns.account_id, socket.assigns.contact_id)
+
+    reminders =
+      Reminders.list_contact_reminders(socket.assigns.account_id, socket.assigns.contact_id)
 
     {:noreply,
      socket
@@ -83,7 +96,14 @@ defmodule KithWeb.ContactLive.RemindersComponent do
      |> put_flash(:info, "Reminder deleted.")}
   end
 
+  # "Custom…" sends unit + count; a preset sends only its name.
+  defp normalize_schedule(%{"frequency" => "custom"} = params),
+    do: Map.delete(params, "frequency")
+
+  defp normalize_schedule(params), do: Map.drop(params, ["interval_unit", "interval_count"])
+
   defp type_label("birthday"), do: "Birthday"
+  defp type_label("first_met"), do: "First met"
   defp type_label("stay_in_touch"), do: "Stay in touch"
   defp type_label("one_time"), do: "One-time"
   defp type_label("recurring"), do: "Recurring"
@@ -109,7 +129,7 @@ defmodule KithWeb.ContactLive.RemindersComponent do
       |> assign(:frequency_options, @frequency_options)
 
     ~H"""
-    <div>
+    <div id={@id}>
       <div class="flex items-center justify-between mb-2">
         <h3 class="text-sm font-medium">Reminders</h3>
         <button
@@ -161,8 +181,30 @@ defmodule KithWeb.ContactLive.RemindersComponent do
                   required
                 >
                   <%= for {label, value} <- @frequency_options do %>
-                    <option value={value}>{label}</option>
+                    <option value={value} selected={value == @form_frequency}>{label}</option>
                   <% end %>
+                </select>
+              </div>
+              <div
+                :if={needs_frequency?(@form_type) and @form_frequency == "custom"}
+                class="flex items-center gap-2"
+              >
+                <span class="text-xs text-[var(--color-text-secondary)]">Every</span>
+                <input
+                  type="number"
+                  name="reminder[interval_count]"
+                  min="1"
+                  required
+                  class="w-16 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-2 py-1.5 text-xs"
+                />
+                <select
+                  name="reminder[interval_unit]"
+                  class="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-2 py-1.5 text-xs"
+                >
+                  <option value="day" selected>days</option>
+                  <option value="week">weeks</option>
+                  <option value="month">months</option>
+                  <option value="year">years</option>
                 </select>
               </div>
               <div>
@@ -176,6 +218,16 @@ defmodule KithWeb.ContactLive.RemindersComponent do
                   required
                   min={Date.utc_today()}
                 />
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-0.5">
+                  Description (optional)
+                </label>
+                <textarea
+                  name="reminder[description]"
+                  rows="2"
+                  class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-2 py-1.5 text-xs"
+                ></textarea>
               </div>
             </div>
             <div class="flex gap-2 mt-2.5">
@@ -219,6 +271,12 @@ defmodule KithWeb.ContactLive.RemindersComponent do
                 <div class={[!reminder.active && "text-[var(--color-text-tertiary)]"]}>
                   {reminder.title || type_label(reminder.type)}
                 </div>
+                <div
+                  :if={reminder.description}
+                  class="text-xs text-[var(--color-text-secondary)] whitespace-pre-line"
+                >
+                  {reminder.description}
+                </div>
                 <div class="text-xs text-[var(--color-text-tertiary)]">
                   {type_label(reminder.type)}
                   <span :if={Kith.Reminders.Reminder.interval_label(reminder)}>
@@ -230,7 +288,7 @@ defmodule KithWeb.ContactLive.RemindersComponent do
                 </div>
               </div>
               <button
-                :if={@can_edit && reminder.type != "birthday"}
+                :if={@can_edit && reminder.type not in ["birthday", "first_met"]}
                 phx-click="delete"
                 phx-value-id={reminder.id}
                 phx-target={@myself}

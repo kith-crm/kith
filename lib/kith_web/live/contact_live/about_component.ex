@@ -92,7 +92,7 @@ defmodule KithWeb.ContactLive.AboutComponent do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
+    <div id={@id}>
       <div class="flex justify-between items-center">
         <span class="font-semibold text-xs text-[var(--color-text-primary)]">About</span>
         <button
@@ -136,6 +136,17 @@ defmodule KithWeb.ContactLive.AboutComponent do
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-2 py-1.5 text-xs text-[var(--color-text-primary)] focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
             />
           </div>
+
+          <label class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+            <input type="hidden" name="contact[first_met_reminder]" value="false" />
+            <input
+              type="checkbox"
+              name="contact[first_met_reminder]"
+              value="true"
+              checked={@contact.first_met_reminder}
+              class="rounded border-[var(--color-border)]"
+            /> Remind me every year
+          </label>
 
           <div>
             <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-0.5">
