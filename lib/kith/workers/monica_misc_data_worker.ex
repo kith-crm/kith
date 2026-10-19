@@ -576,11 +576,9 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   end
 
   # A derived reminder (birthday / first_met) is owned by the contact, not the
-  # import. A mapping left over from an earlier import that made a generic row
-  # (before the contact had the date) is dropped and re-pointed here.
+  # import; the import only records the mapping.
   defp import_derived(contact, data, import_job, sync) do
-    with :ok <- drop_stale_generic(mapped_local_reminder(import_job, data["id"])),
-         {:ok, %Reminders.Reminder{} = reminder} <- sync.() do
+    with {:ok, %Reminders.Reminder{} = reminder} <- sync.() do
       maybe_record_entity(import_job, "reminder", data["id"], "reminder", reminder.id)
       :ok
     else
@@ -589,16 +587,9 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     end
   end
 
-  defp drop_stale_generic(%Reminders.Reminder{type: type} = mapped)
-       when type not in ["birthday", "first_met"] do
-    case Reminders.delete_reminder(mapped) do
-      {:ok, _} -> :ok
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp drop_stale_generic(_mapped), do: :ok
-
+  # Upsert by mapping so an Oban retry of the same contact's misc job updates
+  # the reminder it already made instead of duplicating it. Cross-import
+  # re-imports never get here: contacts from earlier imports are skipped.
   defp upsert_reminder(user_id, contact, data, attrs, import_job) do
     new_type = attrs["type"]
 
@@ -607,10 +598,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
         %Reminders.Reminder{type: ^new_type} = mapped ->
           Reminders.update_reminder(mapped, Map.delete(attrs, "type"))
 
-        %Reminders.Reminder{type: type} = mapped when type not in ["birthday", "first_met"] ->
-          replace_reminder(mapped, user_id, contact, attrs)
-
-        _derived_or_missing ->
+        _missing_or_other ->
           create(user_id, contact, attrs)
       end
 
@@ -622,19 +610,6 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       {:error, reason} ->
         log_reminder_error(reason)
     end
-  end
-
-  # Delete-then-create in one transaction: if the create fails the old row (and
-  # the mapping that still points at it) survive.
-  defp replace_reminder(mapped, user_id, contact, attrs) do
-    Repo.transaction(fn ->
-      with {:ok, _} <- Reminders.delete_reminder(mapped),
-           {:ok, reminder} <- create(user_id, contact, attrs) do
-        reminder
-      else
-        {:error, reason} -> Repo.rollback(reason)
-      end
-    end)
   end
 
   defp create(user_id, contact, attrs),
