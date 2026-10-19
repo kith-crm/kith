@@ -54,34 +54,52 @@ export async function dav(
   return { status: res.status(), headers: res.headers(), body: await res.text() };
 }
 
-/** All <href> values in a multistatus document, prefix-agnostic. */
-export function hrefs(xml: string): string[] {
-  const out: string[] = [];
-  const re = /<(?:[\w.-]+:)?href(?:\s[^>]*)?>([\s\S]*?)<\/(?:[\w.-]+:)?href>/g;
+const NAME = String.raw`(?:[\w.-]+:)?`;
+
+/**
+ * Elements with the given local name (any prefix), in document order.
+ * Self-closed elements (`<x/>`, `<x />`, with attributes) yield an empty
+ * inner string and never match across to a later closing tag.
+ */
+function elements(xml: string, localName: string): { start: number; end: number; inner: string }[] {
+  const name = localName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const open = new RegExp(`<${NAME}${name}(?:\\s[^>]*?)?(\\/?)>`, "g");
+  const close = new RegExp(`<\\/${NAME}${name}\\s*>`, "g");
+  const out: { start: number; end: number; inner: string }[] = [];
   let m: RegExpExecArray | null;
-  while ((m = re.exec(xml))) out.push(decodeXml(m[1].trim()));
+  while ((m = open.exec(xml))) {
+    const innerStart = m.index + m[0].length;
+    if (m[1] === "/") {
+      out.push({ start: m.index, end: innerStart, inner: "" });
+      continue;
+    }
+    close.lastIndex = innerStart;
+    const c = close.exec(xml);
+    if (!c) break;
+    out.push({ start: m.index, end: c.index + c[0].length, inner: xml.slice(innerStart, c.index) });
+    open.lastIndex = c.index + c[0].length;
+  }
   return out;
 }
 
-/** The <response> block whose href equals `href`, or undefined. */
+/** All <href> values in a multistatus document, prefix-agnostic. */
+export function hrefs(xml: string): string[] {
+  return elements(xml, "href").map((e) => decodeXml(e.inner.trim()));
+}
+
+/** The <response> block whose first href equals `href`, or undefined. */
 export function responseFor(xml: string, href: string): string | undefined {
-  const re = /<(?:[\w.-]+:)?response(?:\s[^>]*)?>[\s\S]*?<\/(?:[\w.-]+:)?response>/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml))) {
-    const block = m[0];
+  for (const e of elements(xml, "response")) {
+    const block = xml.slice(e.start, e.end);
     if (hrefs(block)[0] === href) return block;
   }
   return undefined;
 }
 
-/** Text content of the first element with this local name (any prefix), or undefined. */
+/** Text content of the first element with this local name (any prefix); "" if self-closed, undefined if absent. */
 export function propText(block: string, localName: string): string | undefined {
-  const name = localName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const re = new RegExp(
-    `<(?:[\\w.-]+:)?${name}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?${name}>`,
-  );
-  const m = re.exec(block);
-  return m ? decodeXml(m[1].trim()) : undefined;
+  const e = elements(block, localName)[0];
+  return e ? decodeXml(e.inner.trim()) : undefined;
 }
 
 /** Throws unless `xmllint --noout -` accepts the document. */
@@ -119,8 +137,10 @@ export function runPrefix(): string {
   return RUN;
 }
 
-function decodeXml(s: string): string {
+export function decodeXml(s: string): string {
   return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')

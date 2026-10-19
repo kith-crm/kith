@@ -29,13 +29,14 @@ if [ -n "$listener" ]; then
   exit 1
 fi
 
-# Reuse dirs from a previous env file so data stays consistent across restarts.
+# Reuse only the temp dirs from a previous env file (never DB_NAME/PORT),
+# so the guard above always applies to the values actually used.
+STORAGE_PATH=""
+PLAYWRIGHT_OUTPUT_DIR=""
 if [ -f "$ENV_FILE" ]; then
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
+  STORAGE_PATH="$(sed -n 's/^export STORAGE_PATH=//p' "$ENV_FILE")"
+  PLAYWRIGHT_OUTPUT_DIR="$(sed -n 's/^export PLAYWRIGHT_OUTPUT_DIR=//p' "$ENV_FILE")"
 fi
-STORAGE_PATH="${STORAGE_PATH:-}"
-PLAYWRIGHT_OUTPUT_DIR="${PLAYWRIGHT_OUTPUT_DIR:-}"
 [ -d "$STORAGE_PATH" ] || STORAGE_PATH="$(mktemp -d)"
 [ -d "$PLAYWRIGHT_OUTPUT_DIR" ] || PLAYWRIGHT_OUTPUT_DIR="$(mktemp -d)"
 
