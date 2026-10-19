@@ -7,38 +7,40 @@ defmodule KithWeb.ContactLive.ClusterMergeS3Test do
   alias Kith.{AccountsFixtures, ContactsFixtures}
 
   setup %{conn: conn} do
-    saved =
-      for {app, key} <- [
-            {:kith, Kith.Storage},
-            {:ex_aws, :s3},
-            {:ex_aws, :access_key_id},
-            {:ex_aws, :secret_access_key},
-            {:ex_aws, :region}
-          ],
-          do: {app, key, Application.fetch_env(app, key)}
-
-    Application.put_env(:kith, Kith.Storage, backend: :s3, bucket: "kith-test")
-    Application.put_env(:ex_aws, :access_key_id, "test")
-    Application.put_env(:ex_aws, :secret_access_key, "test")
-    Application.put_env(:ex_aws, :region, "us-east-1")
-    Application.put_env(:ex_aws, :s3, scheme: "https://", host: "s3.example.com", port: 443)
-
-    on_exit(fn ->
-      for {app, key, v} <- saved do
-        case v do
-          {:ok, val} -> Application.put_env(app, key, val)
-          :error -> Application.delete_env(app, key)
-        end
-      end
-    end)
+    Kith.TestEnv.configure_s3()
 
     ContactsFixtures.seed_reference_data!()
     user = AccountsFixtures.user_fixture()
     %{conn: log_in_user(conn, user), account_id: user.account_id}
   end
 
-  # Presigned URLs are signed per UTC hour, so a run that straddles an hour
-  # boundary can flake once.
+  # Presigned URLs are signed per UTC hour, so two renders can straddle an hour
+  # boundary. Compare everything but the signature, and allow the signing hour
+  # to roll over by exactly one hour.
+  defp assert_same_url_modulo_hour_rollover(before, later) do
+    parse = fn url ->
+      uri = url |> String.replace("&amp;", "&") |> URI.parse()
+      query = URI.decode_query(uri.query)
+      {uri.path, Map.drop(query, ["X-Amz-Date", "X-Amz-Signature"]), query["X-Amz-Date"]}
+    end
+
+    {path_a, query_a, date_a} = parse.(before)
+    {path_b, query_b, date_b} = parse.(later)
+
+    assert path_a == path_b
+    assert query_a == query_b
+    assert query_a["X-Amz-Expires"] == "7200"
+
+    hours = DateTime.diff(parse_amz_date(date_b), parse_amz_date(date_a), :hour)
+    assert hours in [0, 1]
+    if hours == 0, do: assert(before == later)
+  end
+
+  defp parse_amz_date(<<y::binary-4, m::binary-2, d::binary-2, "T", h::binary-2, "0000Z">>) do
+    {:ok, dt, _} = DateTime.from_iso8601("#{y}-#{m}-#{d}T#{h}:00:00Z")
+    dt
+  end
+
   test "an avatar's URL is unchanged after toggling a member off and on", ctx do
     e =
       ContactsFixtures.contact_fixture(ctx.account_id, %{
@@ -79,6 +81,6 @@ defmodule KithWeb.ContactLive.ClusterMergeS3Test do
     before = src.()
     live |> element("input[phx-click='toggle-member'][phx-value-id='#{f.id}']") |> render_click()
     live |> element("input[phx-click='toggle-member'][phx-value-id='#{f.id}']") |> render_click()
-    assert src.() == before
+    assert_same_url_modulo_hour_rollover(before, src.())
   end
 end

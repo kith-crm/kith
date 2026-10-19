@@ -72,6 +72,44 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
       assert has_element?(view, ~s(#photo-#{photo.id}[data-refreshable="true"]))
     end
 
+    test "timeline variant pins the failed-badge classes", %{conn: conn, contact: contact} do
+      photo_fixture(contact)
+      {:ok, _view, html} = live(conn, ~p"/contacts/#{contact.id}")
+
+      assert html =~
+               ~s|class="hidden group-data-[img-failed]:flex size-[72px] rounded-lg bg-amber-50 border border-amber-200 flex-col items-center justify-center text-amber-600 gap-0.5"|
+
+      assert html =~ ~s|class="text-[9px] font-medium leading-tight text-center"|
+    end
+
+    test "tile variant pins the failed-badge classes", %{conn: conn, contact: contact} do
+      photo_fixture(contact)
+      {:ok, view, _html} = live(conn, ~p"/contacts/#{contact.id}")
+      html = open_gallery(view)
+
+      assert html =~
+               ~s|class="hidden group-data-[img-failed]:flex w-full h-full bg-amber-50 border border-amber-200 flex-col items-center justify-center text-amber-600 gap-1"|
+
+      assert html =~ ~s|class="text-[10px] font-medium"|
+    end
+
+    test "timeline variant pins the syncing classes", %{conn: conn, contact: contact} do
+      photo_fixture(contact, %{"storage_key" => "pending_sync:immich-t1"})
+      {:ok, _view, html} = live(conn, ~p"/contacts/#{contact.id}")
+
+      assert html =~
+               ~s|class="size-[72px] rounded-lg bg-gradient-to-br from-stone-100 to-stone-200 flex-col items-center justify-center text-[var(--color-text-tertiary)] inline-flex gap-0.5"|
+    end
+
+    test "tile variant pins the syncing classes", %{conn: conn, contact: contact} do
+      photo_fixture(contact, %{"storage_key" => "pending_sync:immich-t2"})
+      {:ok, view, _html} = live(conn, ~p"/contacts/#{contact.id}")
+      html = open_gallery(view)
+
+      assert html =~
+               ~s|class="w-full h-full bg-gradient-to-br from-stone-100 to-stone-200 flex-col items-center justify-center text-[var(--color-text-tertiary)] flex gap-1"|
+    end
+
     test "pending-sync photo keeps the placeholder and renders no image for it", %{
       conn: conn,
       contact: contact
@@ -93,5 +131,11 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
       refute gallery_html =~ ~s(src="#{Kith.Storage.url("pending_sync:immich-abc123")}")
       assert gallery_html =~ "Syncing"
     end
+  end
+
+  defp open_gallery(view) do
+    view
+    |> element(~s|button[phx-click="filter-toggle"][phx-value-type="photo"]|)
+    |> render_click()
   end
 end

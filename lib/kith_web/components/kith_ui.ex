@@ -193,7 +193,7 @@ defmodule KithWeb.KithUI do
 
   ## Examples
 
-      <.contact_badge id="badge-1" contact={%{id: 1, display_name: "John Doe", avatar_url: nil}} />
+      <.contact_badge id="badge-1" contact={%{id: 1, display_name: "John Doe", avatar: nil}} />
   """
   attr :id, :string, required: true
   attr :contact, :map, required: true

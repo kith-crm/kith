@@ -16,13 +16,18 @@ from urllib.parse import urlparse, unquote
 LOG = sys.argv[1] if len(sys.argv) > 1 else "s3.log"
 ROOT = os.path.abspath(sys.argv[2] if len(sys.argv) > 2 else "s3-data")
 PORT = int(sys.argv[3]) if len(sys.argv) > 3 else 9000
-
+MAX_PUT_BYTES = 10 * 1024 * 1024  # larger PUT bodies are refused with 413
 
 
 class Handler(BaseHTTPRequestHandler):
     def _path(self):
         rel = unquote(urlparse(self.path).path).lstrip("/")
-        full = os.path.abspath(os.path.join(ROOT, rel))
+        if "\0" in rel:
+            return None
+        try:
+            full = os.path.abspath(os.path.join(ROOT, rel))
+        except (ValueError, OSError):
+            return None
         return full if full.startswith(ROOT + os.sep) else None
 
     def _log(self):
@@ -33,10 +38,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cross-Origin-Resource-Policy", "cross-origin")
 
+    def _empty(self, status):
+        self.send_response(status)
+        self._cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _serve(self, head):
         self._log()
         p = self._path()
-        if not p or not os.path.isfile(p):
+        if p is None:
+            self._empty(400)
+            return
+        if not os.path.isfile(p):
             self.send_response(404)
             self._cors()
             self.send_header("Content-Length", "0")
@@ -69,13 +83,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self):
         self._log()
         p = self._path()
-        n = int(self.headers.get("Content-Length", 0))
-        body = self.rfile.read(n)
         if not p:
-            self.send_response(400)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
+            self._empty(400)
             return
+        try:
+            n = int(self.headers.get("Content-Length", 0))
+        except ValueError:
+            n = -1
+        if n < 0:
+            self._empty(400)
+            return
+        if n > MAX_PUT_BYTES:
+            self.close_connection = True  # body is not read
+            self._empty(413)
+            return
+        body = self.rfile.read(n)
         os.makedirs(os.path.dirname(p), exist_ok=True)
         with open(p, "wb") as f:
             f.write(body)

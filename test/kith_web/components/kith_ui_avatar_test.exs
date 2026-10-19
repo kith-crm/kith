@@ -26,4 +26,16 @@ defmodule KithWeb.KithUIAvatarTest do
       render_component(&KithUI.avatar/1, src: "/uploads/x.png", name: "Mona Vale")
     end
   end
+
+  test "contact_badge derives the inner avatar id from its own id" do
+    html =
+      render_component(&KithUI.contact_badge/1,
+        id: "badge-7",
+        contact: %{id: 7, display_name: "Mona Vale", avatar: "avatars/x.png"}
+      )
+
+    assert html =~ ~s(id="badge-7")
+    assert html =~ ~s(id="badge-7-avatar")
+    assert html =~ ~s(href="/contacts/7")
+  end
 end

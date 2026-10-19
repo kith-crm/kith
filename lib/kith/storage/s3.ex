@@ -7,7 +7,9 @@ defmodule Kith.Storage.S3 do
   - `AWS_S3_BUCKET`
   - `AWS_S3_ENDPOINT` (optional, for MinIO/custom S3-compatible services)
 
-  Generates presigned GET URLs signed from the start of the current UTC hour and valid for 2 hours, so a key has one URL per hour (LiveView diffs nothing, browsers cache) and every URL handed out stays valid for at least an hour.
+  Generates presigned GET URLs signed from the start of the current UTC hour and
+  valid for 2 hours, so a key has one URL per hour (LiveView diffs nothing,
+  browsers cache) and every URL handed out stays valid for at least an hour.
   """
 
   @behaviour Kith.Storage.Backend

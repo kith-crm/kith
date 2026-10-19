@@ -2,6 +2,11 @@ import { test, expect, type Page, type WebSocketRoute } from "@playwright/test";
 import { execSync } from "node:child_process";
 
 const seed = process.env.IMG_SEED_JSON ? JSON.parse(process.env.IMG_SEED_JSON) : null;
+// Upper bound we wait before asserting that something did NOT happen (no further
+// refresh_url push, no state change). There is no condition to poll for an
+// absence, so this is one short bounded wait; every positive wait polls instead.
+const NOTHING_HAPPENS_MS = 1500;
+
 test.skip(!seed, "IMG_SEED_JSON not set (see test/playwright/fixtures/s3/README.md)");
 
 async function login(page: Page) {
@@ -40,7 +45,7 @@ test("a missing photo retries once, never shows the broken image, then says unav
   const root = page.locator(`[id^="photo-"][data-refreshable="true"]`).first();
   await expect(root).toHaveAttribute("data-img-failed", "", { timeout: 10_000 });
   await expect(root.getByText("Image unavailable")).toBeVisible();
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(NOTHING_HAPPENS_MS);
   expect(refreshes.length).toBe(1);
   expect(await page.evaluate(() => (window as any).__sawRetrying)).toBe(true);
   expect(await page.evaluate(() => (window as any).__brokenVisible)).toBe(false);
@@ -74,7 +79,7 @@ test("an img that already failed before the hook mounts still retries once, then
   const root = page.locator(`[id^="photo-"][data-refreshable="true"]`).first();
   await expect(root).toHaveAttribute("data-img-failed", "", { timeout: 10_000 });
   await expect(root.getByText("Image unavailable")).toBeVisible();
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(NOTHING_HAPPENS_MS);
   expect(refreshes.length).toBe(1);
 });
 
@@ -115,7 +120,8 @@ test("a syncing photo that becomes an image is judged on its new node only", asy
 
   const img = page.locator(`img[data-fallback-img][src*="ok-1.png"]`).first();
   await expect(img).toBeVisible();
-  await page.waitForTimeout(1500);
+  await expect.poll(() => img.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(true);
+  await page.waitForTimeout(NOTHING_HAPPENS_MS);
   const root = img.locator("xpath=ancestor::*[@phx-hook='ImgFallback'][1]");
   await expect(root).not.toHaveAttribute("data-img-failed", "");
 });
@@ -259,7 +265,7 @@ test("(c) [server reply simulated, hook real] refresh_url changed:true keeps ret
   await expect(root).toHaveAttribute("data-img-retrying", "");
 
   st.ws!.send(st.held!); // deliver changed:true
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(NOTHING_HAPPENS_MS);
   await expect(root).toHaveAttribute("data-img-retrying", ""); // not failed: waiting for the new URL
   await expect(root).not.toHaveAttribute("data-img-failed", "");
 
@@ -291,7 +297,7 @@ test("(d) a late changed:false reply after a node swap does not fail the new img
   await expect.poll(() => img.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth > 0)).toBe(true);
 
   st.ws!.send(st.held!); // the stale changed:false reply arrives late
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(NOTHING_HAPPENS_MS);
   await expect(root).not.toHaveAttribute("data-img-failed", "");
   await expect(root).not.toHaveAttribute("data-img-retrying", "");
   await expect(img).toBeVisible();
