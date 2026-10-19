@@ -27,14 +27,22 @@ defmodule Kith.Workers.ReminderEmailWorkerTest do
       Reminders.create_reminder(user.account_id, user.id, %{
         type: "one_time",
         title: "Call Mona",
-        anchor_date: Date.utc_today(),
+        anchor_date: Reminders.account_today(user.account_id),
         contact_id: contact.id
       })
 
-    :ok = Dispatcher.run(DateTime.new!(Date.utc_today(), ~T[10:00:00], "Etc/UTC"))
+    :ok = dispatch_today(user.account_id)
     [instance] = Repo.all(from i in ReminderInstance, where: i.reminder_id == ^reminder.id)
 
     %{user: user, contact: contact, instance: instance}
+  end
+
+  # Runs the dispatcher at a late hour of the account-local "today", so the
+  # run is never before send_hour and never straddles local midnight.
+  defp dispatch_today(account_id) do
+    account = Kith.Accounts.get_account!(account_id)
+    today = Reminders.account_today(account_id)
+    Dispatcher.run(DateTime.new!(today, ~T[23:00:00], account.timezone))
   end
 
   defp fail_mail(_ctx) do
@@ -87,7 +95,7 @@ defmodule Kith.Workers.ReminderEmailWorkerTest do
     end
 
     test "a stay-in-touch reminder is re-armed one interval from today", ctx do
-      today = Date.utc_today()
+      today = Reminders.account_today(ctx.user.account_id)
 
       {:ok, reminder} =
         Reminders.create_reminder(ctx.user.account_id, ctx.user.id, %{
@@ -97,7 +105,7 @@ defmodule Kith.Workers.ReminderEmailWorkerTest do
           contact_id: ctx.contact.id
         })
 
-      :ok = Dispatcher.run(DateTime.new!(today, ~T[11:00:00], "Etc/UTC"))
+      :ok = dispatch_today(ctx.user.account_id)
       [instance] = Repo.all(from i in ReminderInstance, where: i.reminder_id == ^reminder.id)
 
       assert {:error, :boom} =
@@ -114,10 +122,13 @@ defmodule Kith.Workers.ReminderEmailWorkerTest do
         Reminders.create_reminder(
           user.account_id,
           user.id,
-          Map.merge(%{anchor_date: Date.utc_today(), contact_id: contact.id}, attrs)
+          Map.merge(
+            %{anchor_date: Reminders.account_today(user.account_id), contact_id: contact.id},
+            attrs
+          )
         )
 
-      :ok = Dispatcher.run(DateTime.new!(Date.utc_today(), ~T[10:00:00], "Etc/UTC"))
+      :ok = dispatch_today(user.account_id)
       [i] = Repo.all(from i in ReminderInstance, where: i.reminder_id == ^r.id)
       perform_job(ReminderEmailWorker, %{instance_id: i.id})
     end
