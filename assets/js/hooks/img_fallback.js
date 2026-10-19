@@ -30,10 +30,14 @@ const ImgFallback = {
   // removed so a late error from it cannot fail the new one (design B4).
   bind() {
     const img = this.el.querySelector("img[data-fallback-img]")
-    if (img === this.img) return
+    if (img === this.img) {
+      this.rebindSrc(img)
+      return
+    }
 
     this.unbind()
     this.img = img
+    this.src = img && img.getAttribute("src")
     this.state = "ok"
     this.apply()
     if (!img) return
@@ -45,6 +49,19 @@ const ImgFallback = {
 
     // Failed before we were listening (cached 404).
     if (img.complete && img.naturalWidth === 0 && img.getAttribute("src")) this.handleError()
+  },
+
+  // Same node, new src (storage_key change, fresh URL after a reconnect): a
+  // failed image is hidden and lazy, so the browser would never fetch it and
+  // no `load` could clear the state. Start over so it can. An unchanged src
+  // is left alone, or a genuinely missing image would loop.
+  rebindSrc(img) {
+    if (!img) return
+    const src = img.getAttribute("src")
+    if (src === this.src) return
+
+    this.src = src
+    this.setState("ok")
   },
 
   unbind() {
