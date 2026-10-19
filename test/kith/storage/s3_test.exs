@@ -7,30 +7,7 @@ defmodule Kith.Storage.S3Test do
   alias Kith.Storage.S3
 
   setup do
-    saved =
-      for key <- [
-            {:kith, Kith.Storage},
-            {:ex_aws, :s3},
-            {:ex_aws, :access_key_id},
-            {:ex_aws, :secret_access_key},
-            {:ex_aws, :region}
-          ],
-          do: {key, Application.fetch_env(elem(key, 0), elem(key, 1))}
-
-    Application.put_env(:kith, Kith.Storage, backend: :s3, bucket: "kith-test")
-    Application.put_env(:ex_aws, :access_key_id, "test")
-    Application.put_env(:ex_aws, :secret_access_key, "test")
-    Application.put_env(:ex_aws, :region, "us-east-1")
-    Application.put_env(:ex_aws, :s3, scheme: "https://", host: "s3.example.com", port: 443)
-
-    on_exit(fn ->
-      for {{app, key}, value} <- saved do
-        case value do
-          {:ok, v} -> Application.put_env(app, key, v)
-          :error -> Application.delete_env(app, key)
-        end
-      end
-    end)
+    Kith.TestEnv.configure_s3()
   end
 
   describe "presigned_url/2" do
