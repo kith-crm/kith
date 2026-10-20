@@ -646,7 +646,11 @@ defmodule Kith.DAV.CardDAVPlug do
   # contact back and overwrites it, instead of creating a duplicate beside it
   # (CDV-18, CDV-27).
   defp create_contact(aid, {:hidden, hidden}, {scalar_attrs, nested_data}) do
-    with {:ok, shown} <- unhide(hidden),
+    # The contact rejoins the collection: neither the card's UID nor the one it
+    # already carries may be held by a visible contact (CDV-35)
+    with :ok <- check_uid_conflict(aid, nested_data.uid),
+         :ok <- check_uid_conflict(aid, hidden.dav_uid),
+         {:ok, shown} <- unhide(hidden),
          {:ok, contact} <- overwrite_contact(shown, aid, scalar_attrs, nested_data),
          do: {:ok, 201, contact}
   end

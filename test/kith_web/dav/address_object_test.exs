@@ -1778,6 +1778,41 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-35: no-uid-conflict on restore/unarchive" do
+    test "CDV-35: a PUT that would restore a trashed or archived contact whose UID is now taken is 409",
+         %{account_id: account_id} = context do
+      a = "/dav/addressbooks/default/restore-a.vcf"
+      b = "/dav/addressbooks/default/restore-b.vcf"
+      assert authed_dav(context, "PUT", a, build_vcard("Re", "A", uid: "taken-uid")).status == 201
+      assert authed_dav(context, "DELETE", a).status == 204
+      assert authed_dav(context, "PUT", b, build_vcard("Re", "B", uid: "taken-uid")).status == 201
+
+      restore = authed_dav(context, "PUT", a, build_vcard("Re", "A2", uid: "taken-uid"))
+      assert restore.status == 409
+
+      assert restore.resp_body =~
+               "<card:no-uid-conflict><d:href>#{b}</d:href></card:no-uid-conflict>"
+
+      assert authed_dav(context, "GET", a).status == 404
+
+      c = "/dav/addressbooks/default/restore-c.vcf"
+      assert authed_dav(context, "PUT", c, build_vcard("Re", "C", uid: "c-uid")).status == 201
+      archived = Contacts.get_contact_by_dav_name(account_id, "restore-c.vcf")
+      {:ok, _} = Contacts.archive_contact(archived)
+
+      assert authed_dav(
+               context,
+               "PUT",
+               "/dav/addressbooks/default/restore-d.vcf",
+               build_vcard("Re", "D", uid: "c-uid")
+             ).status == 201
+
+      unarchive = authed_dav(context, "PUT", c, build_vcard("Re", "C2", uid: "c-uid"))
+      assert unarchive.status == 409
+      assert Contacts.get_contact(account_id, archived.id).is_archived
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════
