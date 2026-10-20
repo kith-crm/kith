@@ -194,6 +194,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | CDV-80 | medium | RELATED ignores exact custom UIDs, links UID substrings to unrelated contacts and emits a different UID | Live custom UID RELATED leaves zero relationships; `urn:evil:kith-contact-N-k-extra` creates one to N and GET4 emits hardcoded urn:uuid:kith-contact-N. ExUnit RED 16/1. Resolve stored UID first, only anchored canonical default UIDs second, within visible account; resource/RELATED share UID generation; retain matching relationship ids/types | fixed |
 
+| CDV-81 | low | vCard 4.0 emits 3.0 extended date/timestamp syntax for BDAY and REV | GET Accept4 returns BDAY:1990-06-15 and REV:2026-10-20T20:32:45Z (live variants probe); RFC6350 §4.3 ABNF requires basic date/time. ExUnit RED 29/1; serializer now uses YYYYMMDD and YYYYMMDDThhmmssZ for 4.0, preserves 3.0 formatting | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.

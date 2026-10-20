@@ -43,7 +43,7 @@ defmodule Kith.VCard.Serializer do
       gender_line(contact, version),
       categories_line(contact),
       related_lines(contact, version),
-      rev_line(contact),
+      rev_line(contact, version),
       photo_line(contact, version),
       contact_field_lines(contact),
       address_lines(contact),
@@ -106,7 +106,9 @@ defmodule Kith.VCard.Serializer do
     name <> ":--" <> month_day
   end
 
-  defp bday_line(%{birthdate: date}, _version) do
+  defp bday_line(%{birthdate: date}, :v40), do: "BDAY:" <> Calendar.strftime(date, "%Y%m%d")
+
+  defp bday_line(%{birthdate: date}, :v30) do
     "BDAY:" <> Date.to_iso8601(date)
   end
 
@@ -124,10 +126,18 @@ defmodule Kith.VCard.Serializer do
 
   # ── REV ──────────────────────────────────────────────────────────────
 
-  defp rev_line(contact) do
+  defp rev_line(contact, version) do
     case Map.get(contact, :updated_at) do
-      %DateTime{} = dt -> "REV:" <> DateTime.to_iso8601(dt)
-      _ -> nil
+      %DateTime{} = dt ->
+        timestamp =
+          if version == :v40,
+            do: Calendar.strftime(dt, "%Y%m%dT%H%M%SZ"),
+            else: DateTime.to_iso8601(dt)
+
+        "REV:" <> timestamp
+
+      _ ->
+        nil
     end
   end
 

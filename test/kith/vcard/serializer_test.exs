@@ -613,4 +613,21 @@ defmodule Kith.VCard.SerializerTest do
     lines = ["BEGIN:VCARD", "VERSION:3.0", "EMAIL:pref@example.test", "END:VCARD"]
     assert "EMAIL;TYPE=PREF:pref@example.test" in Kith.VCard.Metadata.merge(lines, contact, :v30)
   end
+
+  test "CDV-81: vCard 4.0 dates and REV use basic date/timestamp syntax" do
+    contact = %{
+      first_name: "Valid",
+      last_name: "Vcard",
+      nickname: nil,
+      birthdate: ~D[1990-06-15],
+      company: nil,
+      occupation: nil,
+      description: nil,
+      updated_at: ~U[2026-10-20 20:30:00Z]
+    }
+
+    card = Serializer.serialize(contact, version: :v40)
+    assert card =~ "BDAY:19900615\r\n"
+    assert card =~ "REV:20261020T203000Z\r\n"
+  end
 end
