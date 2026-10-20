@@ -147,6 +147,29 @@ test("CDV-87: natively deleted children stay deleted after PUT-back", async ({ r
     expect((await api(request, "GET", `/api/contacts/${id}/relationships`)).data).toEqual([]);
   }
 });
+test("CDV-88: relationships to archived and trashed targets survive unchanged PUT-backs", async ({ request }) => {
+  for (const hidden of ["archived", "trashed"]) {
+    const target = `${BOOK}${prefix}-${hidden}-target.vcf`; const href = `${BOOK}${prefix}-${hidden}-owner.vcf`;
+    expect((await put(request, target, vcard({ fn: `${prefix} ${hidden} Target`, uid: `urn:uuid:${prefix}-${hidden}-target` }))).status).toBe(201);
+    expect((await put(request, href, `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${prefix}-${hidden}-owner\r\nN:Owner;${prefix} owner-${hidden};;;\r\nFN:${prefix} owner-${hidden} Owner\r\nRELATED;TYPE=friend:urn:uuid:${prefix}-${hidden}-target\r\nEND:VCARD\r\n`)).status).toBe(201);
+    created.push(href);
+    const id = await contactId(request, `${prefix} owner-${hidden}`);
+    const before = (await api(request, "GET", `/api/contacts/${id}/relationships`)).data;
+    expect(before).toHaveLength(1);
+    const targetId = before[0].related_contact_id;
+    if (hidden === "archived") await api(request, "POST", `/api/contacts/${targetId}/archive`);
+    else expect((await dav(request, "DELETE", target)).status).toBe(204);
+    for (const version of ["3.0", "4.0"]) {
+      const g = await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } });
+      expect((await put(request, href, g.body)).status).toBe(204);
+      expect((await api(request, "GET", `/api/contacts/${id}/relationships`)).data.map((r: { id: number }) => r.id)).toEqual(before.map((r: { id: number }) => r.id));
+    }
+    if (hidden === "archived") {
+      await api(request, "DELETE", `/api/contacts/${targetId}/archive`);
+      expect((await dav(request, "DELETE", target)).status).toBe(204);
+    }
+  }
+});
 test("V3: unicode survives multiget and the web contact page", async ({ request, page }) => {
   const href = `${BOOK}${prefix}-unicode-folding.vcf`;
   const card = await reportCard(request, href);

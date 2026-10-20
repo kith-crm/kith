@@ -391,6 +391,35 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
+  test "CDV-88: relationships to archived or trashed targets survive unchanged PUT-backs", %{
+    contact: contact,
+    account_id: aid
+  } do
+    archived = contact_fixture(aid)
+    {:ok, archived} = Contacts.put_dav_identity(archived, %{dav_uid: "urn:uuid:cdv88-archived"})
+    trashed = contact_fixture(aid)
+
+    body =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Hidden;Hal;;;\r\nFN:Hal Hidden\r\nRELATED;TYPE=friend:urn:uuid:cdv88-archived\r\nRELATED;TYPE=sibling:urn:uuid:kith-contact-#{trashed.id}\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, body)
+    ids = contact.id |> Contacts.list_relationships() |> Enum.map(& &1.id) |> Enum.sort()
+    assert length(ids) == 2
+    {:ok, _} = Contacts.archive_contact(archived)
+    {:ok, _} = Contacts.soft_delete_contact(trashed)
+
+    for version <- [:v30, :v40, :v40] do
+      contact = dav_put(contact, aid, dav_get(contact, version))
+
+      assert contact.id |> Contacts.list_relationships() |> Enum.map(& &1.id) |> Enum.sort() ==
+               ids
+    end
+
+    # A PUT naming only a hidden target neither duplicates nor drops either row
+    contact = dav_put(contact, aid, String.replace(body, ~r/RELATED;TYPE=sibling.*\r\n/, ""))
+    assert contact.id |> Contacts.list_relationships() |> Enum.map(& &1.id) |> Enum.sort() == ids
+  end
+
   defp dav_put(contact, aid, body) do
     {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
     {:ok, contact} = Contacts.update_contact(contact, attrs)

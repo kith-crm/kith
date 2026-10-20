@@ -1721,23 +1721,31 @@ defmodule Kith.Contacts do
 
   defp replace_contact_relationships(_contact, _account_id, []), do: :ok
 
+  # R41: a target hidden from DAV (archived or trashed, R5) is resolved only so
+  # its entry matches; DAV neither creates nor deletes a relationship to it,
+  # since the client cannot see that contact (CDV-88).
   defp replace_contact_relationships(contact, account_id, related_entries) do
     entries =
       Enum.flat_map(related_entries, fn entry ->
         case related_contact_by_uid(account_id, entry.value) do
           nil -> []
-          related -> [{related.id, entry.type}]
+          related -> [{related.id, entry.type, hidden_from_dav?(related)}]
         end
       end)
 
-    entries = Enum.uniq_by(entries, fn {id, type} -> {id, String.downcase(type)} end)
+    entries =
+      entries
+      |> Enum.reject(fn {_id, _type, hidden} -> hidden end)
+      |> Enum.map(fn {id, type, _hidden} -> {id, type} end)
+      |> Enum.uniq_by(fn {id, type} -> {id, String.downcase(type)} end)
 
     existing =
       from(r in Relationship,
         where: r.contact_id == ^contact.id and r.account_id == ^account_id,
-        preload: [:relationship_type]
+        preload: [:relationship_type, :related_contact]
       )
       |> Repo.all()
+      |> Enum.reject(&hidden_from_dav?(&1.related_contact))
 
     entries
     |> retain_dav_entries(existing, &same_dav_relationship?/2)
@@ -1756,20 +1764,32 @@ defmodule Kith.Contacts do
     end)
   end
 
+  defp hidden_from_dav?(%Contact{deleted_at: deleted_at, is_archived: archived}),
+    do: deleted_at != nil or archived
+
   defp same_dav_relationship?(relationship, {related_id, type}) do
     relationship.related_contact_id == related_id and
       Serializer.relationship_type_to_vcard(relationship.relationship_type.name) ==
         String.downcase(type)
   end
 
+  # Any contact of the account, hidden ones included (see R41)
   defp related_contact_by_uid(account_id, uid) do
-    get_contact_by_dav_uid(account_id, uid) || default_related_contact(account_id, uid)
+    by_uid =
+      from(c in Contact,
+        where: c.account_id == ^account_id and c.dav_uid == ^uid,
+        order_by: [asc: c.is_archived, asc_nulls_first: c.deleted_at],
+        limit: 1
+      )
+      |> Repo.one()
+
+    by_uid || default_related_contact(account_id, uid)
   end
 
   defp default_related_contact(account_id, uid) do
     with [_, id] <- Regex.run(~r/\A(?:urn:uuid:)?kith-contact-([1-9]\d{0,17})\z/, uid),
-         %Contact{dav_uid: nil, is_archived: false} = related <-
-           get_contact(account_id, String.to_integer(id)) do
+         %Contact{dav_uid: nil, account_id: ^account_id} = related <-
+           Repo.get(Contact, String.to_integer(id)) do
       related
     else
       _ -> nil
