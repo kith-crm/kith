@@ -578,14 +578,15 @@ defmodule Kith.DAV.CardDAVPlug do
       {:error, :precondition_failed} ->
         send_resp(conn, 412, "Precondition Failed")
 
-      {:error, {:uid_conflict, holder}} ->
-        xml =
-          XMLBuilder.error_body(
-            "<card:no-uid-conflict><d:href>#{contact_href(holder)}</d:href></card:no-uid-conflict>",
-            "This UID is already used by another address object"
-          )
+      # A concurrent writer took the UID first: the visible-UID unique index
+      # stands in for the check (CDV-36)
+      {:error, %Ecto.Changeset{errors: [{:dav_uid, _} | _]} = changeset} ->
+        uid = Ecto.Changeset.get_field(changeset, :dav_uid)
+        holder = Contacts.get_contact_by_dav_uid(elem(target, 0), uid)
+        send_uid_conflict(conn, holder)
 
-        send_dav_response(conn, 409, xml)
+      {:error, {:uid_conflict, holder}} ->
+        send_uid_conflict(conn, holder)
 
       # A concurrent PUT created the same name first (unique index): run the
       # PUT again, now against that contact, as an update (CDV-25).
@@ -595,6 +596,19 @@ defmodule Kith.DAV.CardDAVPlug do
       {:error, _} ->
         send_invalid_vcard(conn)
     end
+  end
+
+  # RFC 6352 §6.3.2.1: names the resource already holding the UID, if visible
+  defp send_uid_conflict(conn, holder) do
+    href = if holder, do: "<d:href>#{contact_href(holder)}</d:href>", else: ""
+
+    xml =
+      XMLBuilder.error_body(
+        "<card:no-uid-conflict>#{href}</card:no-uid-conflict>",
+        "This UID is already used by another address object"
+      )
+
+    send_dav_response(conn, 409, xml)
   end
 
   defp put_transaction(conn, {aid, name}, scalar_attrs, nested_data) do

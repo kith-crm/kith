@@ -1813,6 +1813,27 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-36: one visible contact per UID" do
+    test "CDV-36: restoring from the UI a contact whose UID is now taken keeps one holder",
+         %{account_id: account_id} = context do
+      a = "/dav/addressbooks/default/ui-restore-a.vcf"
+      assert authed_dav(context, "PUT", a, build_vcard("Ui", "A", uid: "ui-uid")).status == 201
+      trashed = Contacts.get_contact_by_dav_name(account_id, "ui-restore-a.vcf")
+      {:ok, _} = Contacts.soft_delete_contact(trashed)
+
+      assert authed_dav(
+               context,
+               "PUT",
+               "/dav/addressbooks/default/ui-restore-b.vcf",
+               build_vcard("Ui", "B", uid: "ui-uid")
+             ).status == 201
+
+      assert {:ok, restored} = Contacts.restore_contact(Kith.Repo.reload!(trashed))
+      assert restored.dav_uid == nil
+      assert authed_dav(context, "GET", a).resp_body =~ "UID:kith-contact-#{trashed.id}\r\n"
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

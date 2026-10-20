@@ -329,7 +329,7 @@ defmodule Kith.Contacts do
   def restore_contact(%Contact{} = contact) do
     contact
     |> Contact.restore_changeset()
-    |> Repo.update()
+    |> update_rejoining_contact()
   end
 
   def archive_contact(%Contact{} = contact) do
@@ -341,7 +341,24 @@ defmodule Kith.Contacts do
   def unarchive_contact(%Contact{} = contact) do
     contact
     |> Contact.archive_changeset(false)
-    |> Repo.update()
+    |> update_rejoining_contact()
+  end
+
+  # A contact coming back from the trash or the archive may carry a CardDAV UID
+  # that another visible contact has taken meanwhile (unique index, CDV-36).
+  # Outside a transaction (UI, API) it then drops its stored UID and falls back
+  # to `kith-contact-<id>`; inside one (a CardDAV PUT) the aborted transaction
+  # cannot retry, so the error is returned for a 409.
+  defp update_rejoining_contact(changeset) do
+    case Repo.update(changeset) do
+      {:error, %Ecto.Changeset{errors: [{:dav_uid, _} | _]}} = error ->
+        if Repo.in_transaction?(),
+          do: error,
+          else: changeset |> Ecto.Changeset.put_change(:dav_uid, nil) |> Repo.update()
+
+      result ->
+        result
+    end
   end
 
   def hard_delete_contact(%Contact{} = contact) do

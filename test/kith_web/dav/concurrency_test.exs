@@ -207,4 +207,41 @@ defmodule KithWeb.DAV.ConcurrencyTest do
       assert put_status == 204
     end
   end
+
+  describe "CDV-36: concurrent creates with one UID" do
+    test "CDV-36: a create racing an uncommitted create with the same UID is 409 no-uid-conflict",
+         %{user: user, account_id: account_id} do
+      conn =
+        Sandbox.unboxed_run(Repo, fn ->
+          {:ok, task} =
+            Repo.transaction(fn ->
+              {:ok, c} = Contacts.create_contact(account_id, %{"first_name" => "First"})
+
+              {:ok, _} =
+                Contacts.put_dav_identity(c, %{
+                  dav_resource_name: "uid-1.vcf",
+                  dav_uid: "race-uid"
+                })
+
+              task =
+                Task.async(fn ->
+                  dav_put(
+                    user,
+                    @book <> "uid-2.vcf",
+                    build_vcard("Second", "Card", uid: "race-uid")
+                  )
+                end)
+
+              Process.sleep(500)
+              task
+            end)
+
+          Task.await(task, 10_000)
+        end)
+
+      assert conn.status == 409
+      assert conn.resp_body =~ "<d:href>#{@book}uid-1.vcf</d:href>"
+      assert count(account_id) == 1
+    end
+  end
 end

@@ -162,18 +162,23 @@ defmodule Kith.Contacts.Contact do
     contact
     |> cast(attrs, [:dav_resource_name, :dav_uid])
     |> unique_constraint(:dav_resource_name, name: :contacts_account_id_dav_resource_name_index)
+    |> unique_dav_uid()
   end
+
+  # At most one visible contact per stored vCard UID (CDV-36)
+  defp unique_dav_uid(changeset),
+    do: unique_constraint(changeset, :dav_uid, name: :contacts_account_id_dav_uid_index)
 
   def soft_delete_changeset(contact) do
     change(contact, deleted_at: DateTime.utc_now() |> DateTime.truncate(:second))
   end
 
   def restore_changeset(contact) do
-    change(contact, deleted_at: nil)
+    contact |> change(deleted_at: nil) |> unique_dav_uid()
   end
 
   def archive_changeset(contact, archived?) do
-    change(contact, is_archived: archived?)
+    contact |> change(is_archived: archived?) |> unique_dav_uid()
   end
 
   defp validate_first_met_through_account(changeset) do
