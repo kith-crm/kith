@@ -521,6 +521,45 @@ defmodule KithWeb.DAV.ReportTest do
       assert sync(context, token).status == 207
     end
 
+    test "CDV-49: the ctag changes after every change to the book's members, in the same second",
+         %{account_id: account_id} = context do
+      ctag = fn ->
+        body =
+          ~s(<d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:prop><cs:getctag/></d:prop></d:propfind>)
+
+        conn =
+          context.conn
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("depth", "0")
+          |> dav_request("PROPFIND", "/dav/addressbooks/default/", body)
+
+        [ctag] =
+          Regex.run(~r{<cs:getctag>([^<]+)</cs:getctag>}, conn.resp_body, capture: :all_but_first)
+
+        ctag
+      end
+
+      older = ContactsFixtures.contact_fixture(account_id, %{first_name: "Older"})
+      other = ContactsFixtures.contact_fixture(account_id, %{first_name: "Other"})
+      _newest = ContactsFixtures.contact_fixture(account_id, %{first_name: "Newest"})
+
+      mutations = [
+        edit: fn -> {:ok, _} = Contacts.update_contact(other, %{first_name: "Edited"}) end,
+        trash_non_newest: fn -> {:ok, _} = Contacts.soft_delete_contact(older) end,
+        purge: fn -> {:ok, _} = Contacts.empty_trash(account_id) end,
+        archive: fn ->
+          {:ok, _} = Contacts.archive_contact(Contacts.get_contact!(account_id, other.id))
+        end
+      ]
+
+      Enum.reduce(mutations, ctag.(), fn {label, mutate}, before ->
+        mutate.()
+        after_ctag = ctag.()
+        refute after_ctag == before, "ctag unchanged after #{label}"
+        after_ctag
+      end)
+    end
+
     test "CDV-47: an unknown, foreign, old-format or future sync token is 403 valid-sync-token",
          context do
       [_, rev, snapshot] = Regex.run(~r{/sync/(\d+)-(.+)\z}, initial_token(context))

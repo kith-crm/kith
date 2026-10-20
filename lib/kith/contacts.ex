@@ -1842,6 +1842,28 @@ defmodule Kith.Contacts do
   end
 
   @doc """
+  The CardDAV ctag of the account's address book: the newest revision of any of
+  its contacts (trashed and archived ones too, so hiding a contact changes it)
+  or of its last hard delete, `0` when it has neither. It changes on every
+  write, even within one second (CDV-49).
+  """
+  def dav_ctag(account_id) do
+    %{rows: [[ctag]]} =
+      Repo.query!(
+        """
+        SELECT GREATEST(
+          (SELECT max(dav_revision) FROM contacts WHERE account_id = $1),
+          (SELECT revision FROM dav_sync_floors WHERE account_id = $1),
+          0
+        )
+        """,
+        [account_id]
+      )
+
+    ctag
+  end
+
+  @doc """
   False when a contact of the account was hard-deleted after the sync position
   `{revision, snapshot}` was taken (or while it was taken): such a deletion
   cannot be reported, so the token is invalid (R3, CDV-48).

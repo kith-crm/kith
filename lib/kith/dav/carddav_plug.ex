@@ -294,7 +294,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   defp handle_addressbook_propfind_depth(conn, request_type, depth) do
     contacts = list_contacts_for_propfind(conn)
-    responses = [addressbook_response(conn, request_type, contacts)]
+    responses = [addressbook_response(conn, request_type)]
 
     responses =
       if depth != "0" do
@@ -964,21 +964,8 @@ defmodule Kith.DAV.CardDAVPlug do
       Enum.all?(xips, &(&1 >= xmin and &1 < xmax))
   end
 
-  defp addressbook_response(_conn, request_type, contacts) do
-    ctag =
-      case contacts do
-        # A fixed value: an empty book must not look changed on every poll.
-        # It still differs from every non-empty ctag (a Unix timestamp).
-        [] ->
-          "0"
-
-        contacts ->
-          contacts
-          |> Enum.map(& &1.updated_at)
-          |> Enum.max(DateTime)
-          |> DateTime.to_unix()
-          |> to_string()
-      end
+  defp addressbook_response(conn, request_type) do
+    ctag = conn |> account_id() |> Contacts.dav_ctag() |> to_string()
 
     props = [
       current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
