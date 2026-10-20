@@ -351,6 +351,46 @@ defmodule Kith.ContactsDAVTest do
     refute first =~ "URL"
   end
 
+  test "CDV-87: retained metadata never resurrects natively deleted children", %{
+    contact: contact,
+    account_id: aid
+  } do
+    target = contact_fixture(aid)
+    {:ok, _} = Contacts.put_dav_identity(target, %{dav_uid: "urn:uuid:cdv87-target"})
+
+    body =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Deleted;Dee;;;\r\nFN:Dee Deleted\r\nIMPP;TYPE=HOME:xmpp:dee@example.test\r\nRELATED;TYPE=friend:urn:uuid:cdv87-target\r\nitem1.TEL;TYPE=CELL:+15550009999\r\nitem1.X-ABLabel:Mobile\r\nitem2.X-ABDATE:2010-06-01\r\nitem2.X-ABLabel:_$!<Anniversary>!$_\r\nEMAIL;TYPE=WORK:keep@example.test\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, body)
+    assert [_relationship] = Contacts.list_relationships(contact.id)
+    card30 = dav_get(contact, :v30)
+    assert card30 =~ ".X-ABRELATEDNAMES:"
+    contact = dav_put(contact, aid, card30)
+
+    for field <- Contacts.list_contact_fields(contact.id),
+        field.value in ["xmpp:dee@example.test", "+15550009999"],
+        do: {:ok, _} = Contacts.delete_contact_field(field)
+
+    [relationship] = Contacts.list_relationships(contact.id)
+    {:ok, _} = Contacts.delete_relationship(relationship)
+
+    for version <- [:v30, :v40] do
+      card = dav_get(contact, version)
+      refute card =~ "IMPP"
+      refute card =~ "RELATED"
+      refute card =~ "item1."
+      assert card =~ "item2.X-ABDATE:2010-06-01\r\n"
+      assert card =~ "item2.X-ABLabel:_$!<Anniversary>!$_\r\n"
+      contact = dav_put(contact, aid, card)
+
+      assert Enum.map(Contacts.list_contact_fields(contact.id), & &1.value) == [
+               "keep@example.test"
+             ]
+
+      assert Contacts.list_relationships(contact.id) == []
+    end
+  end
+
   defp dav_put(contact, aid, body) do
     {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
     {:ok, contact} = Contacts.update_contact(contact, attrs)

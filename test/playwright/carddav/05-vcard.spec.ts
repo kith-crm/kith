@@ -130,6 +130,23 @@ test("CDV-86: Apple social profile stays one field over three PUT-backs", async 
     expect((await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data).toHaveLength(count);
   }
 });
+test("CDV-87: natively deleted children stay deleted after PUT-back", async ({ request }) => {
+  const href = `${BOOK}${prefix}-deleted.vcf`; created.push(href);
+  const body = `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${prefix}-deleted\r\nN:Deleted;${prefix} Dee;;;\r\nFN:${prefix} Dee Deleted\r\nIMPP;TYPE=HOME:xmpp:dee@example.test\r\nRELATED;TYPE=friend:urn:uuid:${prefix}-friend\r\nitem1.TEL;TYPE=CELL:+15550009999\r\nitem1.X-ABLabel:Mobile\r\nEMAIL;TYPE=WORK:keep@example.test\r\nEND:VCARD\r\n`;
+  expect((await put(request, href, body)).status).toBe(201);
+  const id = await contactId(request, prefix + " Dee");
+  for (const field of (await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data)
+    if (field.value !== "keep@example.test") await api(request, "DELETE", `/api/contact_fields/${field.id}`, undefined, 204);
+  for (const rel of (await api(request, "GET", `/api/contacts/${id}/relationships`)).data)
+    await api(request, "DELETE", `/api/relationships/${rel.id}`, undefined, 204);
+  for (const version of ["3.0", "4.0"]) {
+    const g = await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } });
+    expect(g.body).not.toMatch(/IMPP|RELATED|item1\./);
+    expect((await put(request, href, g.body)).status).toBe(204);
+    expect((await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data.map((f: { value: string }) => f.value)).toEqual(["keep@example.test"]);
+    expect((await api(request, "GET", `/api/contacts/${id}/relationships`)).data).toEqual([]);
+  }
+});
 test("V3: unicode survives multiget and the web contact page", async ({ request, page }) => {
   const href = `${BOOK}${prefix}-unicode-folding.vcf`;
   const card = await reportCard(request, href);
