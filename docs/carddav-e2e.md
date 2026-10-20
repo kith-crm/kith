@@ -18,6 +18,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | Spec | Cases | Passed | Failed | Notes |
 |---|---|---|---|---|
 | 00-harness | H1-H3 | 3 | 0 | |
+| 02-auth | A1-A5, M1-M3, RL1-RL3 | 10 | 0 | A4 is `test.fixme` (CDV-11, product decision) |
 
 ### 01-discovery
 
@@ -37,6 +38,22 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | P9 | pass |
 | P10 | pass (CDV-06 also corrects the namespaces it echoes) |
 
+### 02-auth
+
+| Case | Result |
+|---|---|
+| A1 | pass |
+| A2 | pass |
+| A3 | pass (`users.email` is citext; web login and DAV both accept `DAV-Admin@…`) |
+| A4 | product decision CDV-11 |
+| A5 | fixed CDV-10 |
+| M1 | pass |
+| M2 | pass |
+| M3 | pass (B's PUT to A's `kith-contact-N.vcf` creates a new contact in B; A unchanged) |
+| RL1 | pass |
+| RL2 | fixed CDV-09 |
+| RL3 | pass |
+
 ## Bug log
 
 | ID | Severity | Summary | Request / response | Status |
@@ -51,6 +68,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | CDV-08 | low | The ctag of an empty address book is the current Unix time, so it changes every second and clients re-sync on every poll | `PROPFIND /dav/addressbooks/default/` as `dav-other` (empty book) twice, 1.2 s apart -> `<cs:getctag>1792450260` then `<cs:getctag>1792450261` | fixed |
 | CDV-09 | critical | Roles are not enforced over DAV: a `viewer` can create, overwrite and delete contacts (R6) | as `dav-viewer`: `PUT /dav/addressbooks/default/<new>.vcf` -> 201; `PUT kith-contact-21.vcf` -> 204 and FN changed; `DELETE kith-contact-21.vcf` -> 204 (admin GET then 404); `PROPPATCH /dav/addressbooks/default/` -> 207 | fixed |
 | CDV-10 | high | No brute-force protection on DAV Basic auth: unlimited password guesses per IP+email (R7) | 11 x `PROPFIND /dav/` with `Basic <throwaway-email>:wrong-N` from one IP -> all `401`, no `429` / `Retry-After` | fixed |
+| CDV-11 | medium | A TOTP-enabled user authenticates over DAV with the account password alone; the second factor is bypassed for DAV (R1) | `PROPFIND /dav/` as `dav-totp@carddav.test:ValidP@ssword123!` -> 207. Recommendation: per-user, revocable DAV app passwords (required once TOTP is on); until then keep DAV working for 2FA users | product decision |
 
 ## Rulings I made
 
@@ -59,5 +77,6 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 - R13 — `/dav/` and `/dav/principals/` answer Depth 1 with only themselves, and 404s are plain-text without a `DAV` header. Left as is — no client relies on either, and neither is a MUST — cost if wrong: none observed.
 - R10 — Unknown requested props are reported in a `404 Not Found` propstat with their own namespace (replaces the old "silently ignored" test in `propfind_test.exs`) — RFC 4918 §9.1 requires every requested prop to appear in the response — cost if wrong: none; clients ignore 404 propstats.
 - R14 — DAV auth limiting (R7) counts only failures that carry a parseable Basic email (key: client IP + lowercased email, Hammer fixed 5-minute window, shared ETS/Redis backend). Once a pair has 10 failures it gets `429` + `Retry-After` (seconds to the window end) *before* its credentials are checked, so even the right password is refused until the window ends; a success clears the pair's count. Requests with no or unparseable credentials are never counted — otherwise a client's challenge-seeking first request (or any proxy) would lock out every user behind that IP, and they cannot guess a password anyway — cost if wrong: a legitimate user who mistyped 10 times waits up to 5 minutes; a fixed window allows up to 20 guesses across a window boundary.
+- R15 — Role checks for DAV writes use `Kith.Policy.can?(user, action, :contact)` with `:create` for a PUT to an unknown href, `:update` for a PUT to an existing contact and for PROPPATCH, `:delete` for DELETE. The 403 is sent before the vCard is parsed, but after the contact lookup, so a viewer DELETE on a missing href is still 404 — RFC 4918 lets the server pick between 403 and 404, and 404 for a missing resource leaks nothing — cost if wrong: none.
 
 ## Real-client smoke
