@@ -20,6 +20,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | 00-harness | H1-H3 | 3 | 0 | |
 | 02-auth | A1-A5, M1-M3, RL1-RL3 | 10 | 0 | A4 is `test.fixme` (CDV-11, product decision) |
 | 03-crud | C1-C5, C1b, K1-K6, E1-E7 | 20 | 0 | 19 cases in 20 tests (E6 is split in two); fix round 1 adds CDV-24..31 (ExUnit-only cases: concurrency, archived, UID conflict) |
+| 04-reports | R1-R4, Q1-Q2, S1-S8 | 14 | 0 | fix round adds CDV-39..50; CDV-51 open (Task 6) |
 
 ### 01-discovery
 
@@ -79,6 +80,25 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | E6 | fixed CDV-13 (CDV-12 percent-encodes hrefs) |
 | E7 | fixed CDV-22 |
 
+### 04-reports
+
+| Case | Result |
+|---|---|
+| R1 | fixed CDV-40 (also CDV-39: REPORT body cap) |
+| R2 | fixed CDV-40 (prefixes), CDV-41 (absolute / percent-encoded hrefs) |
+| R3 | fixed CDV-42 |
+| R4 | pass |
+| Q1 | fixed CDV-43 |
+| Q2 | fixed CDV-44 |
+| S1 | pass |
+| S2 | fixed CDV-46 |
+| S3 | fixed CDV-45, CDV-46 |
+| S4 | fixed CDV-46 |
+| S5 | fixed CDV-48 (403 `valid-sync-token`) |
+| S6 | fixed CDV-47 |
+| S7 | fixed CDV-46 (token), CDV-49 (ctag) |
+| S8 | fixed CDV-50 (`infinite` handled as 1; over the limit -> 507) |
+
 ## Bug log
 
 | ID | Severity | Summary | Request / response | Status |
@@ -133,6 +153,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | CDV-48 | high | A hard delete (Trash "Delete Forever", Empty Trash, the 30-day `ContactPurgeWorker`, account cleanup) removes the row, so a client whose token predates it is never told: the card stays on the device forever (R3). Worse with the old token, a trash + purge between two syncs left no trace at all. Now an `AFTER DELETE … FOR EACH STATEMENT` trigger on `contacts` (transition table, so every path including raw SQL) upserts `dav_sync_floors(account_id, revision, xid)` with a fresh revision and the deleting transaction; a token older than the floor (smaller revision, or a snapshot that did not see the deleting transaction) is 403 `valid-sync-token` and the client resyncs. Per account: another account's purge does not invalidate tokens | `REPORT` sync-collection initial (token T); `DELETE /api/contacts/284` (trash), then "Delete Forever" in `/contacts/trash`; `REPORT` with T -> 207 with no response for `kith-contact-284.vcf` | fixed |
 | CDV-49 | medium | The ctag is `max(updated_at)` of the visible contacts in whole seconds, so it does not change for a second edit in the same second, nor when a contact other than the newest is deleted, trashed, archived or purged (the max is unchanged or even goes down). Apple Contacts and other ctag pollers then skip the sync and keep stale cards (S7). Now the ctag is `Contacts.dav_ctag/1`: the greatest `dav_revision` of any of the account's contacts, hidden ones included (trash/archive/restore write the row, so bump it), or of its hard-delete floor (CDV-48); `0` for a book that never had a contact (CDV-08 still holds) | `PROPFIND /dav/addressbooks/default/` `<cs:getctag/>` -> `1792518828`; `PUT` an edit in the same second -> ctag still `1792518828`; `DELETE` a non-newest contact -> unchanged | fixed |
 | CDV-50 | low | sync-collection ignores `<d:limit><d:nresults>`: a client asking for at most N changes gets all of them (S8: 110 members for `nresults` 1), which RFC 6578 §3.7 forbids. Now a sync whose result exceeds the limit is `507` with `<d:number-of-matches-within-limits/>` (R27), a non-positive or non-numeric limit is 400; `sync-level` `infinite` is answered like `1` (the book has no child collections) | `REPORT` sync-collection `<d:sync-token/>` `<d:limit><d:nresults>1</d:nresults></d:limit>` -> 207 with 110 member responses | fixed |
+| CDV-51 | medium | The TYPE of a TEL (and EMAIL) sent by a client is dropped: a card PUT with `TEL;TYPE=CELL:+1 555 0001111` is served (GET, multiget, query) as `TEL:+1 555 0001111`, so a client's next sync rewrites its "mobile" number as an untyped one. Seen while writing the Q1 param-filter case; it belongs to the lossless round trip of Task 6 (V cases), so not fixed here | `PUT cdv-…-qa.vcf` with `TEL;TYPE=CELL:+1 555 0001111`, `EMAIL;TYPE=INTERNET:…`; `REPORT` query with address-data -> `TEL:+1 555 0001111`, `EMAIL:cdv-…-qa@example.test` | open (Task 6) |
 
 ## Rulings I made
 
