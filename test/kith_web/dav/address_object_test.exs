@@ -1727,6 +1727,28 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-29: chunked request bodies on DAV paths" do
+    test "CDV-29: a chunked request to /dav or /.well-known/carddav is 411 before any body read",
+         %{account_id: account_id} = context do
+      for {method, path} <- [
+            {"PUT", "/dav/addressbooks/default/chunk.vcf"},
+            {"PROPFIND", "/dav/"},
+            {"PROPFIND", "/.well-known/carddav"}
+          ] do
+        conn =
+          build_conn()
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("transfer-encoding", "chunked")
+          |> dav_request(method, path, build_vcard("Chunk", "Ed"))
+
+        assert conn.status == 411, "#{method} #{path} -> #{conn.status}"
+        assert get_resp_header(conn, "connection") == ["close"]
+      end
+
+      assert Contacts.count_contacts(account_id) == 0
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════
