@@ -178,6 +178,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | CDV-71 | low | X-MOZILLA-HTML disappears | Task6 full/client fixtures PUT 201 → GET 200 omitted this client data. Shared root cause: no persistence for unmapped vCard components/parameters and grouped names ignored. Live evidence `/tmp/kith-task6/cdv58-live-red.txt` and `loss-live-red.txt`; regression `CDV-58` RED 13/1, GREEN 13/0. JSON metadata retains it; matching native values permit UI edits to override. One root-cause fix, R34 | fixed |
 | CDV-72 | low | IMPP TYPE disappears | Task6 full/client fixtures PUT 201 → GET 200 omitted this client data. Shared root cause: no persistence for unmapped vCard components/parameters and grouped names ignored. Live evidence `/tmp/kith-task6/cdv58-live-red.txt` and `loss-live-red.txt`; regression `CDV-58` RED 13/1, GREEN 13/0. JSON metadata retains it; matching native values permit UI edits to override. One root-cause fix, R34 | fixed |
 
+| CDV-73 | medium | Yearless BDAY is dropped although Kith has a year-unknown flag | PUT v40-full `BDAY:--1210` → GET 200 with no BDAY; live spec RED `cdv73-live-red.txt`; ExUnit RED 14/1 (birthdate nil instead of leap-day sentinel). Parse month/day using 2000 plus existing flag, preserve through both versions | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.
@@ -208,5 +210,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 - R33 — Omit ETag on every successful DAV PUT because the server stores structured data and reserializes it; GET and REPORT still return strong validators. Existing CRUD, concurrency and ETag tests/specs now obtain validators from GET — RFC6352 §6.3.2.3 — cost if wrong: one GET after a write.
 
 - R34 — Retain vCard components, client parameters and unsupported properties in `contacts.dav_vcard` JSON; native values remain authoritative. Serialization reapplies parameter/group metadata only to matching values, keeps N prefix/suffix, keeps ORG units only for the same company, and keeps formatted FN only for the same structured name. Strip PHOTO/UID/REV from metadata; convert PREF between TYPE=PREF (3.0) and PREF=1 (4.0). Shared preservation root cause CDV-58–72 is one commit, with one log row per dropped fixture property — RFC6352 §6.3.2.2 and lossless client editing — cost if wrong: extra per-contact JSON; unmapped fields have no UI editor.
+
+- R35 — Yearless birthdays use existing `birthdate_year_unknown` with leap-safe placeholder 2000; 4.0 emits `BDAY:--MMDD`, 3.0 emits `X-KITH-BDAY:--MMDD` (parsed back as BDAY) because RFC2426 BDAY requires a year — avoids inventing a birth year; native Kith UI keeps month/day — cost if wrong: a 3.0-only client that ignores the extension cannot display that birthday.
 
 ## Real-client smoke

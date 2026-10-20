@@ -68,7 +68,8 @@ defmodule Kith.DAV.VCardAdapter do
       "company" => parsed.company,
       "occupation" => parsed.occupation,
       "description" => parsed.description,
-      "birthdate" => parsed.birthdate && Date.to_iso8601(parsed.birthdate)
+      "birthdate" => parsed.birthdate && Date.to_iso8601(parsed.birthdate),
+      "birthdate_year_unknown" => parsed.birthdate_year_unknown
     }
   end
 

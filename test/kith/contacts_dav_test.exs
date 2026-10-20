@@ -155,6 +155,29 @@ defmodule Kith.ContactsDAVTest do
     refute output =~ "TYPE=WORK,INTERNET"
   end
 
+  test "CDV-73: yearless birthdays survive both versions without inventing a year", %{
+    contact: contact,
+    account_id: aid
+  } do
+    body =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Leap;Yearless;;;\r\nFN:Yearless Leap\r\nBDAY:--0229\r\nEND:VCARD\r\n"
+
+    {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
+    assert attrs["birthdate"] == "2000-02-29"
+    assert attrs["birthdate_year_unknown"] == true
+    assert {:ok, contact} = Contacts.update_contact(contact, attrs)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    contact = Kith.Repo.get!(Contacts.Contact, contact.id)
+
+    for version <- [:v30, :v40] do
+      card = Kith.DAV.VCardAdapter.contact_to_vcard(contact, version: version)
+      assert card =~ if(version == :v40, do: "BDAY:--0229", else: "X-KITH-BDAY:--0229")
+      {attrs, _nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(card)
+      assert attrs["birthdate"] == "2000-02-29"
+      assert attrs["birthdate_year_unknown"] == true
+    end
+  end
+
   describe "touch_contact!/1" do
     test "bumps updated_at", %{contact: contact} do
       old_updated_at = contact.updated_at

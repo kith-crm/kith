@@ -36,7 +36,7 @@ defmodule Kith.VCard.Serializer do
       fn_line(contact),
       n_line(contact),
       nickname_line(contact),
-      bday_line(contact),
+      bday_line(contact, version),
       org_line(contact),
       title_line(contact),
       note_line(contact),
@@ -93,9 +93,15 @@ defmodule Kith.VCard.Serializer do
   defp nickname_line(%{nickname: ""}), do: nil
   defp nickname_line(%{nickname: nick}), do: "NICKNAME:" <> escape(nick)
 
-  defp bday_line(%{birthdate: nil}), do: nil
+  defp bday_line(%{birthdate: nil}, _version), do: nil
 
-  defp bday_line(%{birthdate: date}) do
+  defp bday_line(%{birthdate: date, birthdate_year_unknown: true}, version) do
+    month_day = Calendar.strftime(date, "%m%d")
+    name = if version == :v40, do: "BDAY", else: "X-KITH-BDAY"
+    name <> ":--" <> month_day
+  end
+
+  defp bday_line(%{birthdate: date}, _version) do
     "BDAY:" <> Date.to_iso8601(date)
   end
 

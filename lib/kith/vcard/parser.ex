@@ -75,6 +75,7 @@ defmodule Kith.VCard.Parser do
       display_name: nil,
       nickname: nil,
       birthdate: nil,
+      birthdate_year_unknown: false,
       company: nil,
       occupation: nil,
       description: nil,
@@ -123,8 +124,15 @@ defmodule Kith.VCard.Parser do
   defp apply_property(acc, "NICKNAME", _params, value),
     do: %{acc | nickname: unescape(value)}
 
-  defp apply_property(acc, "BDAY", _params, value),
-    do: %{acc | birthdate: parse_date(value)}
+  defp apply_property(acc, name, _params, value) when name in ["BDAY", "X-KITH-BDAY"] do
+    date = parse_date(value)
+
+    %{
+      acc
+      | birthdate: date,
+        birthdate_year_unknown: date != nil and String.starts_with?(value, "--")
+    }
+  end
 
   defp apply_property(acc, "ORG", _params, value) do
     company = value |> String.split(";") |> List.first() |> unescape()
@@ -344,9 +352,10 @@ defmodule Kith.VCard.Parser do
           _ -> nil
         end
 
-      # vCard 4.0 with dashes but no year: --0615
+      # A leap-safe placeholder stores month/day; the separate flag prevents
+      # exposing this implementation year to clients or age calculations.
       String.match?(str, ~r/^--\d{4}$/) ->
-        nil
+        parse_date("2000" <> String.replace_prefix(str, "--", ""))
 
       true ->
         nil

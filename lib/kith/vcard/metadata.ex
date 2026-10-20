@@ -3,7 +3,7 @@ defmodule Kith.VCard.Metadata do
 
   alias Kith.VCard.Parser
 
-  @mapped ~w(BEGIN END VERSION UID REV PHOTO FN N NICKNAME BDAY ORG TITLE NOTE GENDER X-GENDER CATEGORIES EMAIL TEL ADR URL)
+  @mapped ~w(BEGIN END VERSION UID REV PHOTO FN N NICKNAME BDAY X-KITH-BDAY ORG TITLE NOTE GENDER X-GENDER CATEGORIES EMAIL TEL ADR URL)
 
   @doc "Overlays retained metadata only while the corresponding native value still matches."
   def merge(lines, contact, version) do
