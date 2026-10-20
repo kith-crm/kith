@@ -363,6 +363,27 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
              ) == 1
     end
 
+    test "extra notes keep Monica created_at", %{user: user, account_id: account_id} do
+      contact = contact_fixture(account_id)
+      import_job = api_import(account_id, user.id)
+      Imports.record_imported_entity(import_job, "contact", "42", "contact", contact.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, %{
+          "data" => [
+            %{"uuid" => "n1", "body" => "Dated", "created_at" => "2018-07-07T07:07:07Z"}
+          ],
+          "meta" => %{"last_page" => 1}
+        })
+      end)
+
+      assert :ok =
+               perform_job(MonicaMiscDataWorker, build_args(import_job, notes_plan(contact, 0)))
+
+      note = Repo.one!(from(n in Kith.Contacts.Note, where: n.contact_id == ^contact.id))
+      assert note.inserted_at == ~U[2018-07-07 07:07:07Z]
+    end
+
     test "attaches notes to the surviving contact when the planned one was merged away",
          %{user: user, account_id: account_id} do
       loser = contact_fixture(account_id)

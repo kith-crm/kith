@@ -1507,6 +1507,79 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
     end
   end
 
+  describe "crawl/5 — note timestamps" do
+    defp crawl_notes(user, account_id, first_name, notes) do
+      contacts = [
+        contact_json(
+          id: 1,
+          first_name: first_name,
+          last_name: "Stamp",
+          number_of_notes: length(notes),
+          notes: notes
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      contact =
+        Repo.one!(
+          from(c in Contacts.Contact,
+            where: c.first_name == ^first_name and c.account_id == ^account_id
+          )
+        )
+
+      Repo.all(from(n in Contacts.Note, where: n.contact_id == ^contact.id))
+    end
+
+    test "embedded notes keep Monica created_at/updated_at", %{user: user, account_id: account_id} do
+      [note] =
+        crawl_notes(user, account_id, "Old", [
+          note_json(
+            body: "Old",
+            created_at: "2019-05-04T10:00:00Z",
+            updated_at: "2020-01-01T00:00:00Z"
+          )
+        ])
+
+      assert note.inserted_at == ~U[2019-05-04 10:00:00Z]
+      assert note.updated_at == ~U[2020-01-01 00:00:00Z]
+    end
+
+    test "note without created_at falls back to now", %{user: user, account_id: account_id} do
+      [note] =
+        crawl_notes(user, account_id, "Fresh", [
+          note_json(body: "New", created_at: nil, updated_at: nil)
+        ])
+
+      assert DateTime.diff(DateTime.utc_now(), note.inserted_at) < 60
+    end
+
+    test "re-import does not change timestamps of existing notes", %{
+      user: user,
+      account_id: account_id
+    } do
+      [first] =
+        crawl_notes(user, account_id, "Again", [
+          note_json(body: "Same", created_at: "2019-05-04T10:00:00Z")
+        ])
+
+      Repo.update_all(Kith.Imports.Import, set: [status: "completed"])
+
+      [second] =
+        crawl_notes(user, account_id, "Again", [
+          note_json(body: "Same", created_at: "2015-01-01T00:00:00Z")
+        ])
+
+      assert second.id == first.id
+      assert second.inserted_at == ~U[2019-05-04 10:00:00Z]
+    end
+  end
+
   # ── Auto-merge duplicate contacts ───────────────────────────────────
 
   describe "crawl/5 — auto-merge duplicates" do
