@@ -230,7 +230,7 @@ defmodule KithWeb.DAV.AccessControlTest do
       vcard = build_vcard("Lifecycle", "Test", email: "lifecycle@example.com")
 
       conn1 =
-        authed_dav(context, "PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", vcard)
+        authed_dav(context, "PUT", "/dav/addressbooks/default/new-999999.vcf", vcard)
 
       assert conn1.status == 201
 
@@ -241,8 +241,8 @@ defmodule KithWeb.DAV.AccessControlTest do
         |> put_req_header("depth", "1")
         |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
 
-      [[_, id_str]] = Regex.scan(~r{kith-contact-(\d+)\.vcf}, conn2.resp_body)
-      resource_path = "/dav/addressbooks/default/kith-contact-#{id_str}.vcf"
+      [[_, id_str]] = Regex.scan(~r{new-(\d+)\.vcf}, conn2.resp_body)
+      resource_path = "/dav/addressbooks/default/new-#{id_str}.vcf"
 
       # 3. GET to retrieve (RFC 6352 §8.6)
       conn3 =

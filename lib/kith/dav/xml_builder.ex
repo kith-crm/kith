@@ -93,10 +93,18 @@ defmodule Kith.DAV.XMLBuilder do
 
   @doc "Builds a DAV precondition error response (RFC 6352 §10)."
   def precondition_error(precondition, message) do
+    error_body("<card:#{precondition}/>", message)
+  end
+
+  @doc """
+  Builds a DAV:error body around an already-built condition element (RFC 4918
+  §16). `card:` (CardDAV) and `k:` (Kith, `https://kith.app/ns/`) are bound.
+  """
+  def error_body(condition_xml, message) do
     """
     <?xml version="1.0" encoding="UTF-8"?>
-    <d:error xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
-    <card:#{precondition}/>
+    <d:error xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:k="https://kith.app/ns/">
+    #{condition_xml}
     <d:description>#{escape(message)}</d:description>
     </d:error>
     """

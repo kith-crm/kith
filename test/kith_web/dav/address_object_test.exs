@@ -201,7 +201,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
       vcard = build_vcard("New", "Contact")
 
       conn =
-        authed_dav(context, "PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", vcard)
+        authed_dav(context, "PUT", "/dav/addressbooks/default/new-999999.vcf", vcard)
 
       assert conn.status == 201
     end
@@ -210,7 +210,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
       vcard = build_vcard("New", "Contact")
 
       conn =
-        authed_dav(context, "PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", vcard)
+        authed_dav(context, "PUT", "/dav/addressbooks/default/new-999999.vcf", vcard)
 
       assert conn.status == 201
       assert get_resp_header(conn, "etag") != []
@@ -220,7 +220,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
       vcard = build_vcard("Created", "ViaDAV", nickname: "Davy")
 
       conn1 =
-        authed_dav(context, "PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", vcard)
+        authed_dav(context, "PUT", "/dav/addressbooks/default/new-999999.vcf", vcard)
 
       assert conn1.status == 201
 
@@ -230,12 +230,12 @@ defmodule KithWeb.DAV.AddressObjectTest do
         |> put_req_header("depth", "1")
         |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
 
-      [[_, id_str]] = Regex.scan(~r{kith-contact-(\d+)\.vcf}, conn2.resp_body)
+      [[_, id_str]] = Regex.scan(~r{new-(\d+)\.vcf}, conn2.resp_body)
 
       conn3 =
         build_conn()
         |> basic_auth(context.user.email, dav_password())
-        |> dav_request("GET", "/dav/addressbooks/default/kith-contact-#{id_str}.vcf")
+        |> dav_request("GET", "/dav/addressbooks/default/new-#{id_str}.vcf")
 
       assert conn3.status == 200
       assert conn3.resp_body =~ "Created"
@@ -246,7 +246,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
       invalid = "BEGIN:VCARD\r\nVERSION:3.0\r\nNOTE:no name\r\nEND:VCARD\r\n"
 
       conn =
-        authed_dav(context, "PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", invalid)
+        authed_dav(context, "PUT", "/dav/addressbooks/default/new-999999.vcf", invalid)
 
       assert conn.status in 400..499
     end
@@ -458,7 +458,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         build_conn()
         |> basic_auth(context.user.email, dav_password())
         |> put_req_header("if-none-match", "*")
-        |> dav_request("PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", vcard)
+        |> dav_request("PUT", "/dav/addressbooks/default/new-999999.vcf", vcard)
 
       assert conn.status == 201
     end
@@ -600,7 +600,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         authed_dav(
           context,
           "PUT",
-          "/dav/addressbooks/default/kith-contact-999999.vcf",
+          "/dav/addressbooks/default/new-999999.vcf",
           vcard
         )
 
@@ -615,7 +615,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/new-\d+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -672,7 +672,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         authed_dav(
           context,
           "PUT",
-          "/dav/addressbooks/default/kith-contact-999999.vcf",
+          "/dav/addressbooks/default/new-999999.vcf",
           vcard
         )
 
@@ -686,7 +686,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/new-\d+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -754,7 +754,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         authed_dav(
           context,
           "PUT",
-          "/dav/addressbooks/default/kith-contact-999999.vcf",
+          "/dav/addressbooks/default/new-999999.vcf",
           vcard
         )
 
@@ -768,7 +768,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/new-\d+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -1116,7 +1116,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         authed_dav(
           context,
           "PUT",
-          "/dav/addressbooks/default/kith-contact-999999.vcf",
+          "/dav/addressbooks/default/new-999999.vcf",
           vcard
         )
 
@@ -1130,7 +1130,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/new-\d+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -1161,7 +1161,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         authed_dav(
           context,
           "PUT",
-          "/dav/addressbooks/default/kith-contact-999999.vcf",
+          "/dav/addressbooks/default/new-999999.vcf",
           vcard
         )
 
@@ -1175,7 +1175,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/new-\d+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -1595,6 +1595,41 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       xml = ~s(<d:propfind xmlns:d="DAV:"><!--#{note}--><d:allprop/></d:propfind>)
       assert chunked(context, :propfind, "/dav/", "application/xml", xml).status == 413
+    end
+  end
+
+  describe "CDV-26: reserved kith-contact-N names (R20)" do
+    defp last_contact_id do
+      [[v]] = Ecto.Adapters.SQL.query!(Kith.Repo, "SELECT last_value FROM contacts_id_seq").rows
+      v
+    end
+
+    test "CDV-26: a PUT-create at a future kith-contact-N.vcf is refused and cannot shadow N",
+         %{account_id: account_id} = context do
+      n = last_contact_id() + 10_000_000
+      href = "/dav/addressbooks/default/kith-contact-#{n}.vcf"
+
+      put =
+        authed_dav(context, "PUT", href, build_vcard("Client", "Named", uid: "kith-contact-#{n}"))
+
+      assert put.status == 403
+      assert put.resp_body =~ "reserved-resource-name"
+      assert Contacts.count_contacts(account_id) == 0
+
+      # Contact N appears later (UI, import): it owns its default href.
+      Kith.Repo.insert!(%Kith.Contacts.Contact{id: n, account_id: account_id, first_name: "Ui"})
+      get = authed_dav(context, "GET", href)
+      assert get.status == 200
+      assert get.resp_body =~ "FN:Ui\r\n"
+    end
+
+    test "CDV-26: an already-issued kith-contact-N.vcf name (another account's id) is accepted",
+         %{account_id: account_id} = context do
+      other = ContactsFixtures.contact_fixture(Kith.AccountsFixtures.user_fixture().account.id)
+      href = "/dav/addressbooks/default/kith-contact-#{other.id}.vcf"
+      assert authed_dav(context, "PUT", href, build_vcard("Copied", "Card")).status == 201
+      assert authed_dav(context, "GET", href).resp_body =~ "Copied"
+      assert Contacts.count_contacts(account_id) == 1
     end
   end
 

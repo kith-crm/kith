@@ -545,6 +545,23 @@ defmodule Kith.DAV.CardDAVPlug do
     send_dav_response(conn, 422, xml)
   end
 
+  # R20: `kith-contact-<id>.vcf` is the default href of contact <id>. Storing it
+  # as a client name for another contact would shadow contact <id> once that id
+  # is assigned, so a create there is refused while <id> is still unissued
+  # (CDV-26). An id already issued can never become a contact of this account
+  # without already resolving above.
+  defp check_reserved_name(name) do
+    case Regex.run(~r/\Akith-contact-(\d+)\.vcf\z/, name) do
+      [_, id] ->
+        if String.to_integer(id) > Contacts.max_issued_contact_id(),
+          do: {:error, :reserved_name},
+          else: :ok
+
+      _ ->
+        :ok
+    end
+  end
+
   # One PUT is one transaction (CDV-21). The target row is read FOR UPDATE and
   # the preconditions are evaluated on that locked row, so two writers holding
   # the same ETag cannot both win and their child sets cannot mix (CDV-24).
@@ -555,6 +572,15 @@ defmodule Kith.DAV.CardDAVPlug do
 
       {:error, :precondition_failed} ->
         send_resp(conn, 412, "Precondition Failed")
+
+      {:error, :reserved_name} ->
+        xml =
+          XMLBuilder.error_body(
+            "<k:reserved-resource-name/>",
+            "kith-contact-<id>.vcf names are reserved for Kith's own contacts"
+          )
+
+        send_dav_response(conn, 403, xml)
 
       # A concurrent PUT created the same name first (unique index): run the
       # PUT again, now against that contact, as an update (CDV-25).
@@ -619,7 +645,8 @@ defmodule Kith.DAV.CardDAVPlug do
   defp create_contact(aid, {:missing, name}, {scalar_attrs, nested_data}) do
     identity = %{dav_resource_name: name, dav_uid: nested_data.uid}
 
-    with {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
+    with :ok <- check_reserved_name(name),
+         {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
          {:ok, contact} <- Contacts.put_dav_identity(contact, identity),
          {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data),
          do: {:ok, 201, Contacts.touch_contact!(contact)}
