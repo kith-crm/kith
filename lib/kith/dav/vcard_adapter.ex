@@ -82,7 +82,11 @@ defmodule Kith.DAV.VCardAdapter do
       categories: parsed.categories || [],
       related: parsed.related || [],
       impp: parsed.impp || [],
-      photo: parsed.photo
+      photo: parsed.photo,
+      vcard_metadata: %{
+        "properties" =>
+          Enum.reject(parsed.properties, &(&1["name"] in ~w(BEGIN END VERSION UID REV PHOTO)))
+      }
     }
   end
 

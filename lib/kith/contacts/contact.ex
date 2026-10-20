@@ -42,6 +42,7 @@ defmodule Kith.Contacts.Contact do
 
     # R4: set by a DB trigger on every write of the row; the ETag derives from it
     field :dav_revision, :integer, read_after_writes: true
+    field :dav_vcard, :map, default: %{}
 
     # First-met metadata
     field :middle_name, :string

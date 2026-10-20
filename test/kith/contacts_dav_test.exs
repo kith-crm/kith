@@ -97,6 +97,64 @@ defmodule Kith.ContactsDAVTest do
     assert card =~ "TEL;TYPE=CELL:+15550001111"
   end
 
+  test "CDV-58: client properties and parameters survive DAV without overriding UI edits", %{
+    contact: contact,
+    account_id: aid
+  } do
+    body =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nUID:opaque-id\r\nN:Last;First;Middle;Dr;Jr\r\nFN:Dr First Middle Last Jr\r\nORG:Company;Unit\r\nEMAIL;TYPE=WORK,INTERNET;PREF=1;X-CLIENT=custom:a@example.test\r\nitem1.TEL;TYPE=CELL:+15550001111\r\nitem1.X-ABLabel:Mobile\r\nADR;TYPE=HOME:PO 4;Suite;Street;City;Region;Zip;Country\r\nURL;TYPE=WORK:https://example.test\r\nPRODID:-//Client//EN\r\nX-ABUID:apple-id\r\nX-CUSTOM:opaque\r\nX-PHONETIC-FIRST-NAME:First\r\nX-MOZILLA-HTML:TRUE\r\nIMPP;TYPE=HOME:xmpp:first@example.test\r\nEND:VCARD\r\n"
+
+    {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
+    assert {:ok, contact} = Contacts.update_contact(contact, attrs)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    contact = Kith.Repo.get!(Contacts.Contact, contact.id)
+
+    output =
+      Kith.DAV.VCardAdapter.contact_to_vcard(contact, version: :v40)
+      |> String.replace("\r\n ", "")
+
+    for line <- [
+          "FN:Dr First Middle Last Jr",
+          "N:Last;First;Middle;Dr;Jr",
+          "ORG:Company;Unit",
+          "EMAIL;TYPE=WORK,INTERNET;PREF=1;X-CLIENT=custom:a@example.test",
+          "item1.TEL;TYPE=CELL:+15550001111",
+          "item1.X-ABLabel:Mobile",
+          "ADR;TYPE=HOME:PO 4;Suite;Street;City;Region;Zip;Country",
+          "URL;TYPE=WORK:https://example.test",
+          "PRODID:-//Client//EN",
+          "X-ABUID:apple-id",
+          "X-CUSTOM:opaque",
+          "X-PHONETIC-FIRST-NAME:First",
+          "X-MOZILLA-HTML:TRUE",
+          "IMPP;TYPE=HOME:xmpp:first@example.test"
+        ] do
+      assert output =~ line
+    end
+
+    assert {:ok, changed} =
+             Contacts.update_contact(contact, %{first_name: "Edited", company: "New company"})
+
+    output = Kith.DAV.VCardAdapter.contact_to_vcard(changed, version: :v40)
+    assert output =~ "FN:Edited Middle Last"
+    assert output =~ "ORG:New company\r\n"
+    refute output =~ "ORG:Company"
+
+    field =
+      contact.id |> Contacts.list_contact_fields() |> Enum.find(&(&1.value == "a@example.test"))
+
+    assert {:ok, _} =
+             Contacts.update_contact_field(field, %{label: "Home"})
+
+    output =
+      Kith.DAV.VCardAdapter.contact_to_vcard(Kith.Repo.get!(Contacts.Contact, contact.id),
+        version: :v40
+      )
+
+    assert output =~ "EMAIL;TYPE=HOME:a@example.test"
+    refute output =~ "TYPE=WORK,INTERNET"
+  end
+
   describe "touch_contact!/1" do
     test "bumps updated_at", %{contact: contact} do
       old_updated_at = contact.updated_at

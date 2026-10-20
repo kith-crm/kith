@@ -10,6 +10,8 @@ defmodule Kith.VCard.Serializer do
   - Special characters (semicolons, commas, backslashes, newlines) must be escaped
   """
 
+  alias Kith.VCard.Metadata
+
   @crlf "\r\n"
 
   @doc """
@@ -49,6 +51,7 @@ defmodule Kith.VCard.Serializer do
     ]
     |> List.flatten()
     |> Enum.reject(&is_nil/1)
+    |> Metadata.merge(contact, version)
     |> Enum.map_join(@crlf, &fold_line/1)
     |> Kernel.<>(@crlf)
   end
@@ -255,17 +258,17 @@ defmodule Kith.VCard.Serializer do
 
       "https" ->
         if vcard_label && String.starts_with?(vcard_label, "X-") do
-          "#{vcard_label}:#{escape(field.value)}"
+          "#{vcard_label}#{type_param}:#{escape(field.value)}"
         else
-          "URL:#{escape(field.value)}"
+          "URL#{type_param}:#{escape(field.value)}"
         end
 
       "http" ->
-        "URL:#{escape(field.value)}"
+        "URL#{type_param}:#{escape(field.value)}"
 
       _ ->
         if vcard_label do
-          "#{vcard_label}:#{escape(field.value)}"
+          "#{vcard_label}#{type_param}:#{escape(field.value)}"
         end
     end
   end

@@ -89,7 +89,8 @@ defmodule Kith.VCard.Parser do
       related: [],
       impp: [],
       rev: nil,
-      photo: nil
+      photo: nil,
+      properties: []
     }
 
     Enum.reduce(lines, base, &parse_line/2)
@@ -97,8 +98,14 @@ defmodule Kith.VCard.Parser do
 
   defp parse_line(line, acc) do
     case parse_property(line) do
-      {name, params, value} -> apply_property(acc, name, params, value)
-      _ -> acc
+      {name, params, value} ->
+        head = line |> String.split(":", parts: 2) |> hd()
+        property = %{"name" => name, "head" => head, "value" => value}
+        acc = %{acc | properties: acc.properties ++ [property]}
+        apply_property(acc, name, params, value)
+
+      _ ->
+        acc
     end
   end
 
@@ -181,6 +188,9 @@ defmodule Kith.VCard.Parser do
     %{acc | gender_text: unescape(value)}
   end
 
+  defp apply_property(acc, "X-KITH-RELATED", params, value),
+    do: apply_property(acc, "RELATED", params, value)
+
   defp apply_property(acc, "RELATED", params, value) do
     type = extract_type(params) || "contact"
     %{acc | related: acc.related ++ [%{value: unescape(value), type: type}]}
@@ -201,7 +211,7 @@ defmodule Kith.VCard.Parser do
     case String.split(line, ":", parts: 2) do
       [name_and_params, value] ->
         {name, params} = parse_name_params(name_and_params)
-        {String.upcase(name), params, value}
+        {name |> String.split(".") |> List.last() |> String.upcase(), params, value}
 
       _ ->
         nil
@@ -286,6 +296,9 @@ defmodule Kith.VCard.Parser do
   defp sanitize_photo_type(_), do: "image/jpeg"
 
   # ── Helpers ────────────────────────────────────────────────────────────
+
+  @doc false
+  def split_components(str, delimiter), do: split_unescaped(str, delimiter)
 
   defp split_unescaped(str, delimiter) do
     Regex.split(~r/(?<!\\)#{Regex.escape(delimiter)}/, str)

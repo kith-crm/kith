@@ -1591,6 +1591,10 @@ defmodule Kith.Contacts do
         )
       end
 
+      if metadata = Map.get(nested_data, :vcard_metadata) do
+        contact |> Ecto.Changeset.change(dav_vcard: metadata) |> Repo.update!()
+      end
+
       # Photo
       if photo = Map.get(nested_data, :photo) do
         maybe_import_vcard_photo(contact, account_id, photo)
