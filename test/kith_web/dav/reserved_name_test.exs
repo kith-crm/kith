@@ -48,7 +48,9 @@ defmodule KithWeb.DAV.ReservedNameTest do
       alt = authed_dav(context, "GET", "/dav/addressbooks/default/kith-contact-#{n}-k.vcf")
       assert alt.status == 200
       assert alt.resp_body =~ "FN:Ui\r\n"
-      assert alt.resp_body =~ "UID:kith-contact-#{n}\r\n"
+      # CDV-38: the client card keeps `kith-contact-N`; contact N needs another UID
+      assert alt.resp_body =~ "UID:kith-contact-#{n}-k\r\n"
+      refute alt.resp_body =~ "UID:kith-contact-#{n}\r\n"
       assert authed_dav(context, "GET", href).resp_body =~ "Exported"
 
       listing =
@@ -65,6 +67,58 @@ defmodule KithWeb.DAV.ReservedNameTest do
       assert hrefs == Enum.uniq(hrefs)
       assert ["/dav/addressbooks/default/kith-contact-#{n}-k.vcf"] in hrefs
       assert [href] in hrefs
+    end
+  end
+
+  describe "CDV-38: a contact whose default UID a client card already holds" do
+    defp uid_line(context, href, accept \\ nil) do
+      conn = build_conn() |> basic_auth(context.user.email, dav_password())
+      conn = if accept, do: put_req_header(conn, "accept", accept), else: conn
+      body = dav_request(conn, "GET", href).resp_body
+      [line] = Regex.run(~r/^UID:[^\r]*/m, body)
+      line
+    end
+
+    test "CDV-38: a <uuid>.vcf carrying UID:kith-contact-N (plain or urn:uuid) leaves contact N a distinct UID",
+         %{account_id: account_id} = context do
+      n = last_contact_id() + 50
+      m = n + 1
+
+      assert authed_dav(
+               context,
+               "PUT",
+               "/dav/addressbooks/default/plain.vcf",
+               build_vcard("Plain", "Card", uid: "kith-contact-#{n}")
+             ).status == 201
+
+      assert authed_dav(
+               context,
+               "PUT",
+               "/dav/addressbooks/default/urn.vcf",
+               build_vcard("Urn", "Card", uid: "urn:uuid:kith-contact-#{m}")
+             ).status == 201
+
+      contact_n = create_until(account_id, n)
+      contact_m = create_until(account_id, m)
+      assert {contact_n.id, contact_m.id} == {n, m}
+      # No href clash here: both keep their default names
+      assert contact_n.dav_resource_name == nil
+
+      uids =
+        for href <- ["plain.vcf", "kith-contact-#{n}.vcf", "urn.vcf", "kith-contact-#{m}.vcf"],
+            accept <- [nil, "text/vcard;version=4.0"] do
+          uid_line(context, "/dav/addressbooks/default/" <> href, accept)
+        end
+
+      # Each resource keeps one UID in both vCard versions, and no two share one
+      assert Enum.chunk_every(uids, 2) |> Enum.all?(fn [v3, v4] -> v3 == v4 end)
+
+      assert uids |> Enum.take_every(2) == [
+               "UID:kith-contact-#{n}",
+               "UID:kith-contact-#{n}-k",
+               "UID:urn:uuid:kith-contact-#{m}",
+               "UID:kith-contact-#{m}-k"
+             ]
     end
   end
 end

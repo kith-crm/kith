@@ -36,7 +36,9 @@ defmodule Kith.Contacts.Contact do
     # R2: client-chosen CardDAV resource name and vCard UID (nil = kith defaults).
     # The name can also be set by a DB trigger at insert (R20), hence read back.
     field :dav_resource_name, :string, read_after_writes: true
-    field :dav_uid, :string
+    # Also set by the insert trigger when a client card holds this contact's
+    # default UID (CDV-38), hence read back.
+    field :dav_uid, :string, read_after_writes: true
 
     # R4: set by a DB trigger on every write of the row; the ETag derives from it
     field :dav_revision, :integer, read_after_writes: true
