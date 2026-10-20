@@ -586,6 +586,42 @@ defmodule KithWeb.DAV.ReportTest do
       assert count_responses(conn.resp_body) == 3
     end
 
+    test "CDV-54: rows restored from a dump of another cluster are not re-reported forever",
+         %{account_id: account_id} = context do
+      restored = ContactsFixtures.contact_fixture(account_id, %{first_name: "Restored"})
+
+      # A dump restores the change log and its sequence together as plain
+      # data: no transaction id is stored, so nothing depends on the new
+      # cluster's xid counter. Simulate rows restored as they were dumped
+      # (triggers off, as during a restore).
+      Kith.Repo.query!("SET LOCAL session_replication_role = replica")
+
+      Kith.Repo.query!("UPDATE contacts SET first_name = 'RestoredRow' WHERE id = $1", [
+        restored.id
+      ])
+
+      Kith.Repo.query!("SET LOCAL session_replication_role = origin")
+
+      refute Kith.Repo.query!(
+               "SELECT 1 FROM information_schema.columns WHERE table_name = 'contacts' AND column_name = 'dav_xid'"
+             ).num_rows == 1
+
+      token = initial_token(context)
+      assert sync_changes(sync(context, token)) == %{}
+    end
+
+    test "CDV-54: a token from another database incarnation (restore, PITR) is 403", context do
+      token = initial_token(context)
+      [_, rest] = Regex.run(~r{\Ahttps://kith\.app/ns/sync/(.+)\z}, token)
+
+      foreign =
+        "https://kith.app/ns/sync/0000deadbeef-" <> (rest |> String.split("-") |> List.last())
+
+      conn = sync(context, foreign)
+      assert conn.status == 403
+      assert conn.resp_body =~ "<d:valid-sync-token/>"
+    end
+
     test "CDV-52: crafted sync tokens Postgres would reject are 403, never 500", context do
       for token <- [
             "https://kith.app/ns/sync/0-0:0:",
@@ -602,17 +638,17 @@ defmodule KithWeb.DAV.ReportTest do
 
     test "CDV-47: an unknown, foreign, old-format or future sync token is 403 valid-sync-token",
          context do
-      [_, rev, snapshot] = Regex.run(~r{/sync/(\d+)-(.+)\z}, initial_token(context))
-      [xmin, xmax, _] = String.split(snapshot, ":")
-      future_xmin = String.to_integer(xmax) + 1_000_000
+      ContactsFixtures.contact_fixture(context.account_id)
+      [_, epoch, seq] = Regex.run(~r{/sync/([0-9a-f]+)-(\d+)\z}, initial_token(context))
+      other_epoch = if epoch == "000000000000", do: "111111111111", else: "000000000000"
 
       for token <- [
             "garbage",
-            "http://other.example/ns/sync/#{rev}-#{snapshot}",
+            "http://other.example/ns/sync/#{epoch}-#{seq}",
             "https://kith.app/ns/sync/1700000000",
-            "https://kith.app/ns/sync/#{String.to_integer(rev) + 1_000_000}-#{snapshot}",
-            "https://kith.app/ns/sync/#{rev}-#{future_xmin}:#{future_xmin}:",
-            "https://kith.app/ns/sync/#{rev}-#{xmax}:#{xmin}:"
+            "https://kith.app/ns/sync/#{epoch}-#{String.to_integer(seq) + 1_000_000}",
+            "https://kith.app/ns/sync/#{other_epoch}-#{seq}",
+            "https://kith.app/ns/sync/#{epoch}-#{seq}-1"
           ] do
         conn = sync(context, token)
         assert conn.status == 403, token

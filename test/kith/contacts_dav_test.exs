@@ -96,13 +96,13 @@ defmodule Kith.ContactsDAVTest do
       contact: contact
     } do
       quiet = contact_fixture(aid)
-      position = Contacts.dav_sync_position()
-      assert [] = Contacts.list_contacts_changed_since(aid, position)
+      %{seq: seq} = Contacts.dav_sync_state(aid)
+      assert [] = Contacts.list_contacts_changed_since(aid, seq)
 
       {:ok, _} = Contacts.soft_delete_contact(contact)
       created = contact_fixture(aid)
 
-      ids = aid |> Contacts.list_contacts_changed_since(position) |> Enum.map(& &1.id)
+      ids = aid |> Contacts.list_contacts_changed_since(seq) |> Enum.map(& &1.id)
       assert Enum.sort(ids) == Enum.sort([contact.id, created.id])
       refute quiet.id in ids
     end

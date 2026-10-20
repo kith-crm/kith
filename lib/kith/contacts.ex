@@ -1805,102 +1805,45 @@ defmodule Kith.Contacts do
   end
 
   @doc """
-  The current CardDAV sync position, `{revision, snapshot}`: the last value
-  drawn from `contacts_dav_revision_seq` and the current Postgres snapshot (as
-  text). Take it *before* reading the contacts a sync response lists, so that
-  every write visible in the snapshot is in that response (R3, CDV-46).
+  The account's CardDAV sync state: `epoch` identifies this database
+  incarnation (it changes on a restore into another cluster or database and on
+  a point-in-time recovery), `seq` is the newest commit-ordered change of the
+  account's contacts or hard delete (CDV-53), `floor` the newest hard delete.
+  A sync token is `{epoch, seq}`; a later commit always gets a greater `seq`,
+  so a change is never missed (R3, CDV-54).
   """
-  def dav_sync_position do
-    %{rows: [[revision, snapshot, own_xid]]} =
-      Repo.query!("""
-      SELECT (SELECT last_value FROM contacts_dav_revision_seq),
-             pg_current_snapshot()::text,
-             pg_current_xact_id_if_assigned()::text
-      """)
-
-    {revision, without_own_xid(snapshot, own_xid)}
-  end
-
-  # Postgres' snapshot never counts the caller's own transaction as visible
-  # (its xid is >= xmax or in the in-progress list), yet the caller sees its own
-  # writes, so they count as seen: xmax is moved past the own xid and any xid
-  # skipped over is listed as in progress (conservative). Only matters when the
-  # position is taken inside a writing transaction, e.g. in tests.
-  defp without_own_xid(snapshot, nil), do: snapshot
-
-  defp without_own_xid(snapshot, own_xid) do
-    [xmin, xmax, xip] = snapshot |> String.split(":") |> Enum.map(&String.trim/1)
-    {xmax, own} = {String.to_integer(xmax), String.to_integer(own_xid)}
-    xips = xip |> String.split(",", trim: true) |> Enum.map(&String.to_integer/1)
-
-    {xmax, xips} =
-      if own >= xmax and own - xmax < 1000,
-        do: {own + 1, xips ++ Enum.to_list(xmax..(own - 1)//1)},
-        else: {xmax, xips}
-
-    "#{xmin}:#{xmax}:#{xips |> List.delete(own) |> Enum.join(",")}"
-  end
-
-  @doc """
-  The CardDAV ctag of the account's address book: the newest commit-ordered
-  change (`contact_dav_changes.seq`, written at COMMIT for every write of a
-  contact, hidden ones included) or hard delete (`dav_sync_floors.seq`), `0`
-  when it has neither. It changes whenever a committed write becomes visible,
-  even one that started before a write committed earlier (CDV-49, CDV-53).
-  """
-  def dav_ctag(account_id) do
-    %{rows: [[ctag]]} =
+  def dav_sync_state(account_id) do
+    %{rows: [[epoch, seq, floor]]} =
       Repo.query!(
         """
-        SELECT GREATEST(
-          (SELECT max(seq) FROM contact_dav_changes WHERE account_id = $1),
-          (SELECT seq FROM dav_sync_floors WHERE account_id = $1),
-          0
-        )
+        SELECT kith_dav_sync_epoch(),
+               GREATEST((SELECT max(seq) FROM contact_dav_changes WHERE account_id = $1), f.seq, 0),
+               COALESCE(f.seq, 0)
+        FROM (SELECT (SELECT seq FROM dav_sync_floors WHERE account_id = $1) AS seq) f
         """,
         [account_id]
       )
 
-    ctag
+    %{epoch: epoch, seq: seq, floor: floor}
   end
 
   @doc """
-  False when a contact of the account was hard-deleted after the sync position
-  `{revision, snapshot}` was taken (or while it was taken): such a deletion
-  cannot be reported, so the token is invalid (R3, CDV-48).
+  The CardDAV ctag of the account's address book: its sync `seq`, which moves
+  whenever a committed write or hard delete becomes visible, `0` for an account
+  that never had a contact (CDV-08, CDV-49, CDV-53).
   """
-  def dav_sync_position_valid?(account_id, {revision, snapshot}) do
-    %{rows: [[valid]]} =
-      Repo.query!(
-        """
-        SELECT NOT EXISTS (
-          SELECT 1 FROM dav_sync_floors
-          WHERE account_id = $1
-            AND (revision > $2 OR NOT pg_visible_in_snapshot(xid, $3::text::pg_snapshot))
-        )
-        """,
-        [account_id, revision, snapshot]
-      )
-
-    valid
-  end
+  def dav_ctag(account_id), do: dav_sync_state(account_id).seq
 
   @doc """
-  Lists every contact of the account written since the sync position
-  `{revision, snapshot}`, hidden ones (trashed, archived) included: a write
-  drew a newer revision, or its transaction was not visible in the snapshot
-  (still in flight when the position was taken). Used by CardDAV
-  sync-collection; an unchanged contact may be listed again, a changed one is
-  never missed (R3).
+  Lists every contact of the account whose last committed write is newer than
+  the sync `seq`, hidden ones (trashed, archived) included. Used by CardDAV
+  sync-collection.
   """
-  def list_contacts_changed_since(account_id, {revision, snapshot}) do
+  def list_contacts_changed_since(account_id, seq) do
     Contact
     |> scope_to_account(account_id)
-    |> where(
-      [c],
-      c.dav_revision > ^revision or
-        fragment("NOT pg_visible_in_snapshot(dav_xid, ?::text::pg_snapshot)", ^snapshot)
-    )
+    |> join(:inner, [c], ch in "contact_dav_changes", on: ch.contact_id == c.id)
+    |> where([_c, ch], ch.seq > ^seq)
     |> preload(^dav_preloads())
     |> Repo.all()
   end

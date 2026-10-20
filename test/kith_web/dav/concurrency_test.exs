@@ -322,4 +322,42 @@ defmodule KithWeb.DAV.ConcurrencyTest do
       refute ctag(user) == before
     end
   end
+
+  defp sync(user, token) do
+    body =
+      ~s(<d:sync-collection xmlns:d="DAV:"><d:sync-token>#{token}</d:sync-token>) <>
+        ~s(<d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>)
+
+    conn = dav(user, "REPORT", @book, body)
+    assert conn.status == 207, conn.resp_body
+
+    [next] =
+      Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, conn.resp_body, capture: :all_but_first)
+
+    hrefs = Regex.scan(~r{<d:href>([^<]+)</d:href>}, conn.resp_body, capture: :all_but_first)
+    {List.flatten(hrefs), next}
+  end
+
+  describe "CDV-54: sync tokens follow commit order" do
+    test "CDV-54: a write uncommitted when the token was issued is reported once it commits",
+         %{user: user, account_id: account_id} do
+      slow = unboxed_contact(account_id, "Slow")
+      fast = unboxed_contact(account_id, "Fast")
+      quiet = unboxed_contact(account_id, "Quiet")
+
+      # T1 writes first and stays open while the token is issued
+      t1 = hold_write(fn -> rename(slow, "SlowEdited") end)
+      {_, token} = sync(user, "")
+      Sandbox.unboxed_run(Repo, fn -> rename(fast, "FastEdited") end)
+      commit(t1)
+
+      {changed, next} = sync(user, token)
+      assert "#{@book}kith-contact-#{slow.id}.vcf" in changed
+      assert "#{@book}kith-contact-#{fast.id}.vcf" in changed
+      refute "#{@book}kith-contact-#{quiet.id}.vcf" in changed
+
+      # and nothing is re-reported once everything has committed
+      assert {[], ^next} = sync(user, next)
+    end
+  end
 end

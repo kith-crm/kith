@@ -398,30 +398,25 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   defp handle_sync_collection_report(conn, %{token: client_token} = request) do
-    # Taken before the contacts are read, so the new token covers no write
-    # this response misses (CDV-46).
-    position = Contacts.dav_sync_position()
+    # Read before the contacts are, so the new token covers no write this
+    # response misses (CDV-46).
+    state = conn |> account_id() |> Contacts.dav_sync_state()
 
-    case parse_sync_token(client_token, position) |> check_sync_floor(conn) do
+    case parse_sync_token(client_token, state) do
       :invalid ->
         # R3 / RFC 6578 §3.2: never fall back to a full sync silently (CDV-47)
         send_precondition_failed(conn, "<d:valid-sync-token/>")
 
       since ->
-        send_sync_responses(conn, since, request, position)
+        send_sync_responses(conn, since, request, state)
     end
   end
 
-  # RFC 6578 §3.7: results over the client's DAV:limit are refused with a 507
-  # number-of-matches-within-limits rather than truncated, since a truncated
-  # response could not carry a token that resumes it (CDV-50, R27).
-  # DAV:sync-level is not checked: the book has no child collections, so
-  # `infinite` and `1` are the same.
-  defp send_sync_responses(conn, since, %{props: props, version: version} = request, position) do
+  defp send_sync_responses(conn, since, %{props: props, version: version} = request, state) do
     with {:ok, limit} <- parse_limit(request.limit),
          responses = sync_responses(conn, since, props, version),
          true <- limit == nil or length(responses) <= limit do
-      xml = XMLBuilder.multistatus(responses, sync_token: sync_token(position))
+      xml = XMLBuilder.multistatus(responses, sync_token: sync_token(state))
       send_dav_response(conn, 207, xml)
     else
       {:error, :bad_limit} ->
@@ -436,19 +431,6 @@ defmodule Kith.DAV.CardDAVPlug do
         )
     end
   end
-
-  # A hard delete since the token cannot be reported (R3, CDV-48)
-  # Anything the snapshot cast still refuses is an invalid token, not a 500.
-  defp check_sync_floor({_rev, _snapshot} = since, conn) do
-    if Contacts.dav_sync_position_valid?(account_id(conn), since), do: since, else: :invalid
-  rescue
-    e in Postgrex.Error ->
-      if e.postgres[:code] == :invalid_text_representation,
-        do: :invalid,
-        else: reraise(e, __STACKTRACE__)
-  end
-
-  defp check_sync_floor(since, _conn), do: since
 
   defp sync_responses(conn, since, props, version) do
     case since do
@@ -955,46 +937,31 @@ defmodule Kith.DAV.CardDAVPlug do
 
   @sync_token_prefix "https://kith.app/ns/sync/"
 
-  # R3: a token is the sync position `<revision>-<snapshot>` (CDV-46), e.g.
-  # `https://kith.app/ns/sync/4711-1200:1205:1201,1203`.
-  defp sync_token({revision, snapshot}), do: "#{@sync_token_prefix}#{revision}-#{snapshot}"
+  # R3: a token is `<epoch>-<seq>` (R25, CDV-54), e.g.
+  # `https://kith.app/ns/sync/3f9a1c0b7d2e-4711`.
+  defp sync_token(%{epoch: epoch, seq: seq}), do: "#{@sync_token_prefix}#{epoch}-#{seq}"
 
-  defp generate_sync_token, do: sync_token(Contacts.dav_sync_position())
+  # `:initial` for no token, the token's `seq` for one this database could
+  # have issued to this account, `:invalid` for anything else: another epoch
+  # (restore, PITR), a position not reached yet, or one older than a hard
+  # delete it cannot express (CDV-47, CDV-48, CDV-52, CDV-54).
+  defp parse_sync_token(nil, _state), do: :initial
 
-  # `:initial` for no token, the position for a token this server issued,
-  # `:invalid` for anything else, including a position not reached yet.
-  defp parse_sync_token(nil, _current), do: :initial
-
-  defp parse_sync_token(token, {current_rev, current_snapshot}) do
-    [_xmin, current_xmax, _xip] = String.split(current_snapshot, ":")
-
+  defp parse_sync_token(token, %{epoch: epoch, seq: current, floor: floor}) do
     with @sync_token_prefix <> position <- token,
-         [_, rev, xmin, xmax, xip] <-
-           Regex.run(
-             ~r/\A(\d{1,18})-(\d{1,19}):(\d{1,19}):((?:\d{1,19}(?:,\d{1,19})*)?)\z/,
-             position
-           ),
-         {rev, xmin, xmax} =
-           {String.to_integer(rev), String.to_integer(xmin), String.to_integer(xmax)},
-         true <- valid_snapshot?(xmin, xmax, xip),
-         true <- rev <= current_rev and xmin <= String.to_integer(current_xmax) do
-      {rev, "#{xmin}:#{xmax}:#{xip}"}
+         [_, ^epoch, seq] <- Regex.run(~r/\A([0-9a-f]{12})-(\d{1,18})\z/, position),
+         seq = String.to_integer(seq),
+         true <- seq >= floor and seq <= current do
+      seq
     else
       _ -> :invalid
     end
   end
 
-  # The bounds `pg_snapshot` input accepts: 1 <= xmin <= xip < xmax, strictly
-  # ascending, and a sane number of in-progress xids (CDV-52).
-  defp valid_snapshot?(xmin, xmax, xip) do
-    xips = if xip == "", do: [], else: xip |> String.split(",") |> Enum.map(&String.to_integer/1)
-
-    xmin >= 1 and xmin <= xmax and xmax < 0x7FFFFFFFFFFFFFFF and length(xips) <= 1000 and
-      xips == xips |> Enum.uniq() |> Enum.sort() and Enum.all?(xips, &(&1 >= xmin and &1 < xmax))
-  end
-
   defp addressbook_response(conn, request_type) do
-    ctag = conn |> account_id() |> Contacts.dav_ctag() |> to_string()
+    # The ctag is the sync seq: both move with every committed change (CDV-53)
+    state = conn |> account_id() |> Contacts.dav_sync_state()
+    ctag = to_string(state.seq)
 
     props = [
       current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
@@ -1002,7 +969,7 @@ defmodule Kith.DAV.CardDAVPlug do
       displayname: XMLBuilder.displayname("Kith Contacts"),
       getctag: XMLBuilder.getctag(ctag),
       # RFC 6578 §4: a collection supporting sync-collection exposes DAV:sync-token
-      sync_token: XMLBuilder.sync_token(generate_sync_token()),
+      sync_token: XMLBuilder.sync_token(sync_token(state)),
       supported_address_data: XMLBuilder.supported_address_data(),
       max_resource_size: XMLBuilder.max_resource_size(@max_resource_size),
       supported_collation_set: XMLBuilder.supported_collation_set(),
