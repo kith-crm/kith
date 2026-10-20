@@ -109,6 +109,98 @@ defmodule KithWeb.DAV.AccessControlTest do
   end
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # Roles (R6): viewer is read-only over DAV
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "roles" do
+    setup do
+      viewer = AccountsFixtures.user_fixture(%{role: "viewer"})
+      contact = ContactsFixtures.contact_fixture(viewer.account.id, %{first_name: "Original"})
+      %{conn: build_conn(), user: viewer, contact: contact}
+    end
+
+    defp count_contacts(account_id) do
+      import Ecto.Query
+
+      Kith.Repo.aggregate(
+        from(c in Kith.Contacts.Contact, where: c.account_id == ^account_id),
+        :count
+      )
+    end
+
+    test "CDV-09: viewer PUT of a new contact is 403 and creates nothing", context do
+      before = count_contacts(context.user.account.id)
+
+      conn =
+        authed_dav(context, "PUT", "/dav/addressbooks/default/new.vcf", build_vcard("New", "One"))
+
+      assert conn.status == 403
+      assert count_contacts(context.user.account.id) == before
+    end
+
+    test "CDV-09: viewer PUT to an existing contact is 403 and changes nothing", context do
+      conn =
+        authed_dav(context, "PUT", contact_path(context.contact), build_vcard("Hacked", "Edit"))
+
+      assert conn.status == 403
+      assert Kith.Repo.reload!(context.contact).first_name == "Original"
+    end
+
+    test "CDV-09: viewer DELETE is 403 and the contact survives", context do
+      conn = authed_dav(context, "DELETE", contact_path(context.contact))
+
+      assert conn.status == 403
+      assert is_nil(Kith.Repo.reload!(context.contact).deleted_at)
+    end
+
+    test "CDV-09: viewer PROPPATCH is 403", context do
+      body = """
+      <?xml version="1.0"?>
+      <d:propertyupdate xmlns:d="DAV:"><d:set><d:prop><d:displayname>X</d:displayname></d:prop></d:set></d:propertyupdate>
+      """
+
+      conn = authed_dav(context, "PROPPATCH", "/dav/addressbooks/default/", body)
+      assert conn.status == 403
+    end
+
+    test "viewer can still PROPFIND, GET and REPORT", context do
+      assert authed_dav(context, "GET", contact_path(context.contact)).status == 200
+
+      conn =
+        context.conn
+        |> put_req_header("depth", "1")
+        |> basic_auth(context.user.email, dav_password())
+        |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
+
+      assert conn.status == 207
+
+      body = multiget_body([contact_path(context.contact)])
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+      assert conn.resp_body =~ "Original"
+    end
+
+    test "editor can PUT and DELETE" do
+      editor = AccountsFixtures.user_fixture(%{role: "editor"})
+      contact = ContactsFixtures.contact_fixture(editor.account.id)
+      context = %{conn: build_conn(), user: editor}
+
+      assert authed_dav(context, "PUT", contact_path(contact), build_vcard("Ed", "It")).status ==
+               204
+
+      assert authed_dav(context, "PUT", "/dav/addressbooks/default/n.vcf", build_vcard("N", "W")).status ==
+               201
+
+      assert authed_dav(
+               build_conn() |> then(&%{context | conn: &1}),
+               "DELETE",
+               contact_path(contact)
+             ).status ==
+               204
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # RFC 4918 — Method routing
   # ═══════════════════════════════════════════════════════════════════════════
 

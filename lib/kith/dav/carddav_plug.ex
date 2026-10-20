@@ -115,6 +115,13 @@ defmodule Kith.DAV.CardDAVPlug do
 
   defp account_id(conn), do: conn.assigns.current_scope.account.id
 
+  # R6: writes go through Kith.Policy, so a viewer is read-only over DAV.
+  defp authorize(conn, action, fun) do
+    if Kith.Policy.can?(conn.assigns.current_scope.user, action, :contact),
+      do: fun.(),
+      else: send_resp(conn, 403, "Forbidden")
+  end
+
   # ── OPTIONS ────────────────────────────────────────────────────────────
 
   defp handle_options(conn) do
@@ -481,16 +488,18 @@ defmodule Kith.DAV.CardDAVPlug do
 
   defp do_put_contact(conn, uid, body) do
     aid = account_id(conn)
+    existing = find_contact_by_uid(conn, uid)
 
-    case VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: aid) do
-      :error ->
-        xml = XMLBuilder.precondition_error("valid-address-data", "Invalid vCard format")
-        send_dav_response(conn, 422, xml)
+    authorize(conn, if(existing, do: :update, else: :create), fn ->
+      case VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: aid) do
+        :error ->
+          xml = XMLBuilder.precondition_error("valid-address-data", "Invalid vCard format")
+          send_dav_response(conn, 422, xml)
 
-      {scalar_attrs, nested_data} ->
-        existing = find_contact_by_uid(conn, uid)
-        put_contact(conn, aid, existing, scalar_attrs, nested_data)
-    end
+        {scalar_attrs, nested_data} ->
+          put_contact(conn, aid, existing, scalar_attrs, nested_data)
+      end
+    end)
   end
 
   defp put_contact(conn, aid, nil, scalar_attrs, nested_data) do
@@ -544,15 +553,19 @@ defmodule Kith.DAV.CardDAVPlug do
         send_resp(conn, 404, "Not Found")
 
       contact ->
-        # RFC 7232 §3.1: If-Match — only delete if ETag matches
-        case check_if_match(conn, contact) do
-          :precondition_failed ->
-            send_resp(conn, 412, "Precondition Failed")
+        authorize(conn, :delete, fn -> delete_contact(conn, contact) end)
+    end
+  end
 
-          :ok ->
-            Contacts.soft_delete_contact(contact)
-            send_resp(conn, 204, "")
-        end
+  defp delete_contact(conn, contact) do
+    # RFC 7232 §3.1: If-Match — only delete if ETag matches
+    case check_if_match(conn, contact) do
+      :precondition_failed ->
+        send_resp(conn, 412, "Precondition Failed")
+
+      :ok ->
+        Contacts.soft_delete_contact(contact)
+        send_resp(conn, 204, "")
     end
   end
 
@@ -560,7 +573,8 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── PROPPATCH stub (RFC 4918 §8.2) ────────────────────────────────────
 
-  defp handle_proppatch(conn), do: with_xml_body(conn, &proppatch/2)
+  defp handle_proppatch(conn),
+    do: authorize(conn, :update, fn -> with_xml_body(conn, &proppatch/2) end)
 
   defp proppatch(conn, body) do
     case XMLParser.parse_proppatch(body) do

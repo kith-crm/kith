@@ -49,6 +49,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | CDV-06 | medium | Unknown requested props are silently dropped instead of being reported in a 404 propstat (RFC 4918 §9.1) | `PROPFIND <contact href>` Depth 0 `<d:prop><d:getetag/><x:bogus xmlns:x="urn:x"/></d:prop>` -> 207 with only the 200 `getetag` propstat | fixed |
 | CDV-07 | medium | A PROPFIND / PROPPATCH body over 8 MB crashes with `MatchError` (`read_body` returns `{:more, ...}`) -> 500 (R8) | `PROPFIND /dav/` with a 9 MB body -> 500; server log `** (MatchError) no match of right hand side value: {:more, ...}` | fixed |
 | CDV-08 | low | The ctag of an empty address book is the current Unix time, so it changes every second and clients re-sync on every poll | `PROPFIND /dav/addressbooks/default/` as `dav-other` (empty book) twice, 1.2 s apart -> `<cs:getctag>1792450260` then `<cs:getctag>1792450261` | fixed |
+| CDV-09 | critical | Roles are not enforced over DAV: a `viewer` can create, overwrite and delete contacts (R6) | as `dav-viewer`: `PUT /dav/addressbooks/default/<new>.vcf` -> 201; `PUT kith-contact-21.vcf` -> 204 and FN changed; `DELETE kith-contact-21.vcf` -> 204 (admin GET then 404); `PROPPATCH /dav/addressbooks/default/` -> 207 | fixed |
 
 ## Rulings I made
 
