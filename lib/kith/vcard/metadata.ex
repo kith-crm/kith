@@ -268,10 +268,18 @@ defmodule Kith.VCard.Metadata do
 
       property ->
         current = Parser.split_components(current, ";") |> Enum.take(3)
-        original = Parser.split_components(property["value"], ";") |> Enum.drop(3)
-        "N:" <> Enum.join(current ++ original, ";")
+        original = Parser.split_components(property["value"], ";")
+
+        # R44: honorifics belong to the retained name; once the native
+        # family/given/additional name differs they no longer apply (CDV-93).
+        if Enum.map(current, &Parser.unescape/1) ==
+             original |> Enum.take(3) |> pad(3) |> Enum.map(&Parser.unescape/1),
+           do: "N:" <> Enum.join(current ++ Enum.drop(original, 3), ";"),
+           else: "N:" <> Enum.join(current, ";") <> ";;"
     end
   end
+
+  defp pad(list, size), do: list ++ List.duplicate("", max(size - length(list), 0))
 
   defp restore_org(company, line, properties) do
     case find(properties, "ORG") do

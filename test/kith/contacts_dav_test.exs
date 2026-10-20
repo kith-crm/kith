@@ -498,6 +498,30 @@ defmodule Kith.ContactsDAVTest do
     assert four =~ "EMAIL;PID=1.1;TYPE=work;ALTID=1:fay@example.test\r\n"
   end
 
+  test "CDV-93: retained N prefix and suffix do not outlive a native rename", %{
+    contact: contact,
+    account_id: aid
+  } do
+    body =
+      "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Lovelace;Ada;Augusta;Countess;PhD\r\nFN:Countess Ada Augusta Lovelace PhD\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, body)
+    assert dav_get(contact, :v30) =~ "N:Lovelace;Ada;Augusta;Countess;PhD\r\n"
+
+    {:ok, contact} =
+      Contacts.update_contact(contact, %{
+        first_name: "Grace",
+        middle_name: nil,
+        last_name: "Hopper"
+      })
+
+    for version <- [:v30, :v40] do
+      card = dav_get(contact, version)
+      assert card =~ "N:Hopper;Grace;;;\r\n"
+      assert card =~ "FN:Grace Hopper\r\n"
+    end
+  end
+
   defp dav_put(contact, aid, body) do
     {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
     {:ok, contact} = Contacts.update_contact(contact, attrs)

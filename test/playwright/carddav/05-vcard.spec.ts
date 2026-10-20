@@ -218,6 +218,18 @@ test("CDV-91: an embedded AGENT vCard does not truncate the card", async ({ requ
   expect(card).toContain("EMAIL;TYPE=WORK:after@example.test\r\n");
   expect(card).toContain("AGENT:BEGIN:VCARD\\nFN:Agent\\nEND:VCARD\r\n");
 });
+test("CDV-93: a native rename drops the retained N prefix and suffix", async ({ request }) => {
+  const href = `${BOOK}${prefix}-rename.vcf`; created.push(href);
+  const body = `BEGIN:VCARD\r\nVERSION:3.0\r\nUID:${prefix}-rename\r\nN:Lovelace;${prefix} Rena;Augusta;Countess;PhD\r\nFN:Countess ${prefix} Rena Augusta Lovelace PhD\r\nEND:VCARD\r\n`;
+  expect((await put(request, href, body)).status).toBe(201);
+  const id = await contactId(request, prefix + " Rena");
+  await api(request, "PATCH", `/api/contacts/${id}`, { contact: { first_name: `${prefix} Grace`, middle_name: "", last_name: "Hopper" } });
+  for (const version of ["3.0", "4.0"]) {
+    const card = unfold((await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } })).body);
+    expect(card).toContain(`N:Hopper;${prefix} Grace;;;\r\n`);
+    expect(card).toContain(`FN:${prefix} Grace Hopper\r\n`);
+  }
+});
 test("V3: unicode survives multiget and the web contact page", async ({ request, page }) => {
   const href = `${BOOK}${prefix}-unicode-folding.vcf`;
   const card = await reportCard(request, href);
