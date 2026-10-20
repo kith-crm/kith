@@ -420,6 +420,37 @@ defmodule Kith.ContactsDAVTest do
     assert contact.id |> Contacts.list_relationships() |> Enum.map(& &1.id) |> Enum.sort() == ids
   end
 
+  test "CDV-89: quoted parameters survive GET, native edits and PUT-back", %{
+    contact: contact,
+    account_id: aid
+  } do
+    body =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Quoted;Quinn;;;\r\nFN:Quinn Quoted\r\nTEL;TYPE=\"work,voice\":+15550007777\r\nADR;TYPE=home;LABEL=\"a;b:c\":;;1 Main St;Town;;;\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, body)
+    assert [%{label: "Work"} = tel] = Contacts.list_contact_fields(contact.id)
+    card = dav_get(contact, :v40)
+    assert card =~ "TEL;TYPE=\"work,voice\":+15550007777\r\n"
+
+    assert card |> String.replace("\r\n ", "") =~
+             "ADR;TYPE=home;LABEL=\"a;b:c\":;;1 Main St;Town;;;\r\n"
+
+    {:ok, _} = Contacts.update_contact_field(tel, %{value: "+15550007778"})
+    {:ok, _} = Contacts.update_contact_field(tel, %{label: "Desk; 2nd: floor, east"})
+
+    for version <- [:v30, :v40] do
+      card = dav_get(contact, version)
+      assert card =~ "TEL;TYPE=\"DESK; 2ND: FLOOR, EAST\":+15550007778\r\n"
+      contact = dav_put(contact, aid, card)
+
+      assert [%{id: id, label: "Desk; 2nd: floor, east"}] =
+               Contacts.list_contact_fields(contact.id)
+
+      assert id == tel.id
+      assert dav_get(contact, version) == card
+    end
+  end
+
   defp dav_put(contact, aid, body) do
     {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
     {:ok, contact} = Contacts.update_contact(contact, attrs)

@@ -170,6 +170,25 @@ test("CDV-88: relationships to archived and trashed targets survive unchanged PU
     }
   }
 });
+test("CDV-89: quoted parameter values survive GET, a native edit and PUT-back", async ({ request }) => {
+  const href = `${BOOK}${prefix}-quoted.vcf`; created.push(href);
+  const body = `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${prefix}-quoted\r\nN:Quoted;${prefix} Quinn;;;\r\nFN:${prefix} Quinn Quoted\r\nTEL;TYPE="work,voice":+15550007777\r\nADR;TYPE=home;LABEL="a;b:c":;;1 Main St;Town;;;\r\nEND:VCARD\r\n`;
+  expect((await put(request, href, body)).status).toBe(201);
+  const id = await contactId(request, prefix + " Quinn");
+  let card = unfold((await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0" } })).body);
+  expect(card).toContain('TEL;TYPE="work,voice":+15550007777\r\n');
+  expect(card).toContain('ADR;TYPE=home;LABEL="a;b:c":;;1 Main St;Town;;;\r\n');
+  const [tel] = (await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data;
+  await api(request, "PATCH", `/api/contact_fields/${tel.id}`, { contact_field: { value: "+15550007778", label: "Desk; 2nd: floor" } });
+  for (const version of ["3.0", "4.0"]) {
+    const g = await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } });
+    valid(g.body, version);
+    expect(unfold(g.body)).toContain('TEL;TYPE="DESK; 2ND: FLOOR":+15550007778\r\n');
+    expect((await put(request, href, g.body)).status).toBe(204);
+    expect(withoutRev((await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } })).body)).toBe(withoutRev(g.body));
+    expect((await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data.map((f: { id: number }) => f.id)).toEqual([tel.id]);
+  }
+});
 test("V3: unicode survives multiget and the web contact page", async ({ request, page }) => {
   const href = `${BOOK}${prefix}-unicode-folding.vcf`;
   const card = await reportCard(request, href);

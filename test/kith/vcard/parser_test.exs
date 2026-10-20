@@ -495,4 +495,22 @@ defmodule Kith.VCard.ParserTest do
     assert hd(parsed.addresses).country == "Country"
     assert parsed.categories == ["Ends\\", "Next"]
   end
+
+  test "CDV-89: quoted parameter values may contain separators" do
+    data =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Q\r\nTEL;TYPE=\"work,voice\":+15550007777\r\nADR;TYPE=home;LABEL=\"a;b:c\":;;1 Main St;Town;;;\r\nEMAIL;X-NOTE=\"x:y\";TYPE=home:q@example.test\r\nEND:VCARD\r\n"
+
+    assert {:ok, [parsed]} = Parser.parse(data)
+    assert [%{value: "+15550007777", label: "Work"}] = parsed.phones
+    assert [%{label: "Home", line1: "1 Main St", city: "Town"}] = parsed.addresses
+    assert [%{value: "q@example.test", label: "Home"}] = parsed.emails
+
+    assert Enum.map(parsed.properties, & &1["head"]) == [
+             "VERSION",
+             "FN",
+             "TEL;TYPE=\"work,voice\"",
+             "ADR;TYPE=home;LABEL=\"a;b:c\"",
+             "EMAIL;X-NOTE=\"x:y\";TYPE=home"
+           ]
+  end
 end

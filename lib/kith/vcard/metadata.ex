@@ -126,11 +126,11 @@ defmodule Kith.VCard.Metadata do
     do: type(render(property)) || Map.get(@social, property["name"])
 
   defp type(line) do
-    head = line |> String.split(":", parts: 2) |> hd()
+    {head, _value} = Parser.split_line(line)
 
-    case Regex.run(~r/;TYPE=([^;]+)/i, head) do
-      [_, value] ->
-        case value |> String.trim("\"") |> String.split(",") |> hd() |> String.downcase() do
+    case List.keyfind(Parser.params(head), "TYPE", 0) do
+      {"TYPE", [value | _]} ->
+        case String.downcase(value) do
           "pref" -> nil
           type -> type
         end
@@ -138,6 +138,16 @@ defmodule Kith.VCard.Metadata do
       _ ->
         nil
     end
+  end
+
+  @doc """
+  A parameter value as written on the wire: DQUOTE and control characters
+  cannot be represented and are dropped; a value containing `;`, `:` or `,`
+  is quoted (RFC 6350 §3.3, RFC 2426 §4; CDV-89).
+  """
+  def param_value(value) do
+    value = String.replace(value, ~r/["\x00-\x1F\x7F]/, "")
+    if String.match?(value, ~r/[;:,]/), do: "\"" <> value <> "\"", else: value
   end
 
   defp comparable("CATEGORIES", value) do
@@ -154,21 +164,21 @@ defmodule Kith.VCard.Metadata do
   defp render(property), do: property["head"] <> ":" <> property["value"]
 
   defp identity(line) do
-    [head, value] = String.split(line, ":", parts: 2)
+    {head, value} = Parser.split_line(line)
 
     name =
-      head |> String.split(";") |> hd() |> String.split(".") |> List.last() |> String.upcase()
+      head |> Parser.split_params() |> hd() |> String.split(".") |> List.last() |> String.upcase()
 
     name = if name == "X-KITH-RELATED", do: "RELATED", else: name
     {name, value}
   end
 
-  defp value(line), do: line |> String.split(":", parts: 2) |> List.last()
+  defp value(line), do: line |> Parser.split_line() |> elem(1)
 
   defp telephone_value(line, :v30) do
     case identity(line) do
       {"TEL", value} ->
-        [head, _] = String.split(line, ":", parts: 2)
+        {head, _} = Parser.split_line(line)
         head = Regex.replace(~r/;VALUE=uri/i, head, "")
         head <> ":" <> Parser.phone_value(value)
 
@@ -184,7 +194,7 @@ defmodule Kith.VCard.Metadata do
 
   defp declare_identifier_type(line, :v40) do
     {name, value} = identity(line)
-    [head, _] = String.split(line, ":", parts: 2)
+    {head, _} = Parser.split_line(line)
 
     if name in ["UID", "RELATED"] and not uri?(value) and not Regex.match?(~r/;VALUE=/i, head),
       do: head <> ";VALUE=text:" <> value,
@@ -198,19 +208,10 @@ defmodule Kith.VCard.Metadata do
   defp convert("X-KITH-RELATED" <> rest, :v40), do: convert("RELATED" <> rest, :v40)
 
   defp convert(line, version) do
-    [head, value] = String.split(line, ":", parts: 2)
-    [name | params] = String.split(head, ";")
+    {head, value} = Parser.split_line(line)
+    [name | params] = Parser.split_params(head)
     {types, params} = Enum.split_with(params, &String.starts_with?(String.upcase(&1), "TYPE="))
-
-    types =
-      Enum.flat_map(
-        types,
-        &(&1
-          |> String.split("=", parts: 2)
-          |> List.last()
-          |> String.trim("\"")
-          |> String.split(","))
-      )
+    types = Enum.flat_map(types, &(Parser.params("X;" <> &1) |> hd() |> elem(1)))
 
     {prefs, params} = Enum.split_with(params, &String.starts_with?(String.upcase(&1), "PREF="))
 
@@ -235,7 +236,11 @@ defmodule Kith.VCard.Metadata do
         :v40 -> {types, if(preferred, do: [List.first(prefs) || "PREF=1"], else: [])}
       end
 
-    params = if types == [], do: params, else: ["TYPE=" <> Enum.join(types, ",") | params]
+    params =
+      if types == [],
+        do: params,
+        else: ["TYPE=" <> Enum.map_join(types, ",", &param_value/1) | params]
+
     Enum.join([name | params ++ prefs], ";") <> ":" <> value
   end
 end

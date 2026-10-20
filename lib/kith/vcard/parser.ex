@@ -101,7 +101,7 @@ defmodule Kith.VCard.Parser do
   defp parse_line(line, acc) do
     case parse_property(line) do
       {name, params, value} ->
-        head = line |> String.split(":", parts: 2) |> hd()
+        {head, _value} = split_line(line)
         property = %{"name" => name, "head" => head, "value" => value}
         acc = %{acc | properties: acc.properties ++ [property]}
         apply_property(acc, name, params, value)
@@ -217,33 +217,79 @@ defmodule Kith.VCard.Parser do
   # ── Property Parsing ───────────────────────────────────────────────────
 
   defp parse_property(line) do
-    case String.split(line, ":", parts: 2) do
-      [name_and_params, value] ->
-        {name, params} = parse_name_params(name_and_params)
-        {name |> String.split(".") |> List.last() |> String.upcase(), params, value}
+    case split_line(line) do
+      {name_and_params, value} when is_binary(value) ->
+        [name | params] = split_params(name_and_params)
+        {name |> String.split(".") |> List.last() |> String.upcase(), parse_params(params), value}
 
       _ ->
         nil
     end
   end
 
-  defp parse_name_params(str) do
-    case String.split(str, ";", parts: 2) do
-      [name] -> {name, %{}}
-      [name, params_str] -> {name, parse_params(params_str)}
+  # RFC 6350 §3.3 / RFC 2426 §4: a param-value may be DQUOTE-quoted and then
+  # contain ";", ":" and ",". These helpers split only outside quotes (CDV-89).
+
+  @doc false
+  def split_line(line) do
+    case split_unquoted(line, ?:, 2) do
+      [head, value] ->
+        {head, value}
+
+      # An unbalanced quote: fall back to the first colon rather than lose the value
+      [head] ->
+        case String.split(head, ":", parts: 2) do
+          [head, value] -> {head, value}
+          [head] -> {head, nil}
+        end
     end
   end
 
-  defp parse_params(str) do
-    str
-    |> String.split(";")
-    |> Enum.reduce(%{}, fn param, acc ->
-      case String.split(param, "=", parts: 2) do
-        [key, value] -> Map.put(acc, String.upcase(key), value)
+  @doc false
+  def split_params(head), do: split_unquoted(head, ?;, :infinity)
+
+  @doc "Parameter `{KEY, values}` pairs of a property head, values unquoted."
+  def params(head), do: head |> split_params() |> tl() |> param_pairs()
+
+  defp param_pairs(params) do
+    Enum.map(params, fn param ->
+      case split_unquoted(param, ?=, 2) do
+        [key, value] -> {String.upcase(key), param_values(value)}
         # Bare parameter (vCard 2.1 style): e.g., TEL;CELL:...
-        [bare] -> Map.put(acc, "TYPE", bare)
+        [bare] -> {"TYPE", [bare]}
       end
     end)
+  end
+
+  # A quoted TYPE list (`TYPE="work,voice"`) is still a list of values.
+  defp param_values(value), do: value |> String.replace("\"", "") |> String.split(",")
+
+  defp split_unquoted(string, separator, parts),
+    do: split_unquoted(string, separator, parts, false, [], [])
+
+  defp split_unquoted(<<>>, _separator, _parts, _quoted, current, acc),
+    do: Enum.reverse([current |> Enum.reverse() |> IO.iodata_to_binary() | acc])
+
+  defp split_unquoted(rest, _separator, parts, _quoted, current, acc)
+       when parts != :infinity and length(acc) == parts - 1,
+       do: Enum.reverse([IO.iodata_to_binary([Enum.reverse(current), rest]) | acc])
+
+  defp split_unquoted(<<?", rest::binary>>, separator, parts, quoted, current, acc),
+    do: split_unquoted(rest, separator, parts, not quoted, [?" | current], acc)
+
+  defp split_unquoted(<<separator, rest::binary>>, separator, parts, false, current, acc),
+    do:
+      split_unquoted(rest, separator, parts, false, [], [
+        current |> Enum.reverse() |> IO.iodata_to_binary() | acc
+      ])
+
+  defp split_unquoted(<<byte, rest::binary>>, separator, parts, quoted, current, acc),
+    do: split_unquoted(rest, separator, parts, quoted, [byte | current], acc)
+
+  defp parse_params(params) do
+    params
+    |> param_pairs()
+    |> Enum.reduce(%{}, fn {key, values}, acc -> Map.put(acc, key, Enum.join(values, ",")) end)
   end
 
   # ── Address Parsing ────────────────────────────────────────────────────

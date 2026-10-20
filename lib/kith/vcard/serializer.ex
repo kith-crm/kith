@@ -332,7 +332,7 @@ defmodule Kith.VCard.Serializer do
         _ -> String.upcase(label)
       end
 
-    ";TYPE=#{type}"
+    ";TYPE=" <> Metadata.param_value(type)
   end
 
   # ── Addresses ──────────────────────────────────────────────────────────

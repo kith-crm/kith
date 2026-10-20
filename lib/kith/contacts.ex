@@ -1642,8 +1642,18 @@ defmodule Kith.Contacts do
   defp same_dav_field?(field, entry),
     do: field.value == entry.value and dav_label(field.label) == dav_label(entry.label)
 
+  # Compare labels the way they survive a TYPE parameter: the serializer
+  # drops DQUOTE/control characters and a parser keeps the first TYPE value
+  # of a list (CDV-89).
   defp dav_label(label) do
-    case String.downcase(label || "") do
+    label =
+      (label || "")
+      |> String.replace(~r/["\x00-\x1F\x7F]/, "")
+      |> String.split(",")
+      |> hd()
+      |> String.trim()
+
+    case String.downcase(label) do
       "mobile" -> "cell"
       "personal" -> "home"
       "business" -> "work"
