@@ -586,6 +586,40 @@ defmodule KithWeb.DAV.ReportTest do
       assert count_responses(conn.resp_body) == 3
     end
 
+    test "CDV-55: REPORT on an address object (multiget) and on the other collections",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Member"})
+      path = contact_path(contact)
+
+      # RFC 6352 §8.7: addressbook-multiget may target the address object itself
+      conn = authed_dav(context, "REPORT", path, multiget_body([path]))
+      assert conn.status == 207
+      assert conn.resp_body =~ "<d:href>#{path}</d:href>"
+      assert conn.resp_body =~ "200 OK"
+
+      sync_body =
+        ~s(<d:sync-collection xmlns:d="DAV:"><d:sync-token/><d:sync-level>1</d:sync-level></d:sync-collection>)
+
+      conn = authed_dav(context, "REPORT", path, sync_body)
+      assert conn.status == 403
+      assert conn.resp_body =~ "<d:supported-report/>"
+
+      assert authed_dav(
+               context,
+               "REPORT",
+               "/dav/addressbooks/default/nope.vcf",
+               multiget_body([path])
+             ).status ==
+               404
+
+      for collection <- ["/dav/", "/dav/principals/", "/dav/addressbooks/"] do
+        conn = authed_dav(context, "REPORT", collection, multiget_body([path]))
+        assert conn.status == 403, collection
+        assert conn.resp_body =~ "<d:supported-report/>"
+        assert authed_dav(context, "REPORT", collection, "<d:oops").status == 400
+      end
+    end
+
     test "CDV-54: rows restored from a dump of another cluster are not re-reported forever",
          %{account_id: account_id} = context do
       restored = ContactsFixtures.contact_fixture(account_id, %{first_name: "Restored"})

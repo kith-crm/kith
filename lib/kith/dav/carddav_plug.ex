@@ -88,6 +88,15 @@ defmodule Kith.DAV.CardDAVPlug do
 
   defp dispatch(conn, "REPORT", ["dav", "addressbooks", "default"]), do: handle_report(conn)
 
+  # RFC 6352 §8.7: addressbook-multiget may target an address object (CDV-55)
+  defp dispatch(conn, "REPORT", ["dav", "addressbooks", "default", raw]),
+    do: with_resource_name(conn, raw, &handle_member_report/2)
+
+  # Existing resources that support no report: 403 supported-report (CDV-55)
+  defp dispatch(conn, "REPORT", segments)
+       when segments in [["dav"], ["dav", "principals"], ["dav", "addressbooks"]],
+       do: with_body(conn, &unsupported_report/2)
+
   defp dispatch(conn, "GET", ["dav", "addressbooks", "default", raw]),
     do: with_resource_name(conn, raw, &handle_get_contact/2)
 
@@ -357,6 +366,31 @@ defmodule Kith.DAV.CardDAVPlug do
       {:ok, {:sync_collection, request}} -> handle_sync_collection_report(conn, request)
       {:ok, {:query, request}} -> handle_addressbook_query_report(conn, request)
       {:ok, {:unsupported, _root}} -> send_precondition_failed(conn, "<d:supported-report/>")
+      {:error, _} -> send_resp(conn, 400, "Bad Request")
+    end
+  end
+
+  defp handle_member_report(conn, name) do
+    case find_contact(conn, name) do
+      nil ->
+        send_resp(conn, 404, "Not Found")
+
+      _contact ->
+        with_body(conn, &member_report/2)
+    end
+  end
+
+  defp member_report(conn, body) do
+    case XMLParser.parse_report(body) do
+      {:ok, {:multiget, request}} -> handle_multiget_report(conn, request)
+      {:ok, _other} -> send_precondition_failed(conn, "<d:supported-report/>")
+      {:error, _} -> send_resp(conn, 400, "Bad Request")
+    end
+  end
+
+  defp unsupported_report(conn, body) do
+    case XMLParser.parse_report(body) do
+      {:ok, _report} -> send_precondition_failed(conn, "<d:supported-report/>")
       {:error, _} -> send_resp(conn, 400, "Bad Request")
     end
   end

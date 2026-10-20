@@ -180,6 +180,17 @@ test.describe("REPORT dispatch and multiget", () => {
 
     const empty = await report(request, "");
     expect(empty.status).toBe(400);
+
+    // CDV-55: multiget on the address object itself; other collections are 403
+    const member = `${BOOK}${P}-r1.vcf`;
+    const onMember = await dav(request, "REPORT", member, { headers: { Depth: "0" }, body: multiget([member]) });
+    expect(onMember.status).toBe(207);
+    expect(members(onMember.body)).toEqual([member]);
+    for (const path of ["/dav/addressbooks/", "/dav/", "/dav/principals/"]) {
+      const res = await dav(request, "REPORT", path, { body: multiget([member]) });
+      expect(res.status, path).toBe(403);
+      expect(res.body).toMatch(/supported-report/);
+    }
   });
 
   test("R2 multiget prefixes, absolute and percent-encoded hrefs give identical results", async ({ request, baseURL }) => {
