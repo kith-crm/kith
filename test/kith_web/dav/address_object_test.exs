@@ -1511,6 +1511,33 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-22: DELETE or PUT on a collection" do
+    test "CDV-22: DELETE and PUT on the collections are 405 with Allow and delete nothing",
+         %{account_id: account_id} = context do
+      ContactsFixtures.contact_fixture(account_id)
+
+      for path <- [
+            "/dav/addressbooks/default/",
+            "/dav/addressbooks/",
+            "/dav/principals/",
+            "/dav/"
+          ],
+          method <- ["DELETE", "PUT"] do
+        conn =
+          build_conn()
+          |> basic_auth(context.user.email, dav_password())
+          |> dav_request(method, path, build_vcard("Col", "Lection"))
+
+        assert conn.status == 405, "#{method} #{path} -> #{conn.status}"
+        [allow] = get_resp_header(conn, "allow")
+        assert allow =~ "PROPFIND"
+        refute allow =~ method
+      end
+
+      assert Contacts.count_contacts(account_id) == 1
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

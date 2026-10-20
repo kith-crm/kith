@@ -98,6 +98,17 @@ defmodule Kith.DAV.CardDAVPlug do
   defp dispatch(conn, "PROPPATCH", ["dav", "addressbooks", "default"]),
     do: handle_proppatch(conn)
 
+  # RFC 9110 §15.5.6: a collection exists but cannot be deleted or replaced
+  # over DAV, so DELETE / PUT there is a 405 with Allow, not a 404 (CDV-22).
+  defp dispatch(conn, method, ["dav", "addressbooks", "default"])
+       when method in ["DELETE", "PUT"],
+       do: method_not_allowed(conn, "OPTIONS, PROPFIND, PROPPATCH, REPORT")
+
+  defp dispatch(conn, method, segments)
+       when method in ["DELETE", "PUT"] and
+              segments in [["dav"], ["dav", "principals"], ["dav", "addressbooks"]],
+       do: method_not_allowed(conn, "OPTIONS, PROPFIND")
+
   # Redirect .well-known/carddav appearing as sub-path (Thunderbird fallback per RFC 6764)
   defp dispatch(conn, _, segments) do
     if ".well-known" in segments and "carddav" in segments do
@@ -107,6 +118,12 @@ defmodule Kith.DAV.CardDAVPlug do
     else
       send_resp(conn, 404, "Not Found")
     end
+  end
+
+  defp method_not_allowed(conn, allow) do
+    conn
+    |> put_resp_header("allow", allow)
+    |> send_resp(405, "Method Not Allowed")
   end
 
   defp path_segments(path) do
