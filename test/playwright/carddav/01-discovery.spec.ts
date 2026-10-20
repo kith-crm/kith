@@ -241,6 +241,30 @@ test.describe("01 discovery, OPTIONS and PROPFIND", () => {
     expect(p["sync-token"]).toMatch(/^[a-z][a-z0-9+.-]*:\S+$/i);
     expect(p["supported-report-set"]).toContain("sync-collection");
     expect(p["resourcetype"]).toContain("addressbook(");
+
+    // The PROPFIND sync-token works as a sync-collection token (CDV-03 round trip).
+    await new Promise((r) => setTimeout(r, 1100));
+    const fresh = okProps(await propfind(request, BOOK, "0", propfindBody("d", [{ ns: "DAV:", name: "sync-token" }])), BOOK);
+    const sync = () =>
+      dav(request, "REPORT", BOOK, {
+        body:
+          `<?xml version="1.0" encoding="UTF-8"?><d:sync-collection xmlns:d="DAV:">` +
+          `<d:sync-token>${fresh["sync-token"]}</d:sync-token><d:sync-level>1</d:sync-level>` +
+          `<d:prop><d:getetag/></d:prop></d:sync-collection>`,
+      });
+    const unchanged = await sync();
+    expect207(unchanged);
+    expect(hrefs(unchanged.body).filter((h) => h.endsWith(".vcf"))).toEqual([]);
+
+    await new Promise((r) => setTimeout(r, 1100));
+    const put = await dav(request, "PUT", contactHref, {
+      headers: { "Content-Type": "text/vcard; charset=utf-8" },
+      body: vcard({ fn: `${runPrefix()} Discovery Changed`, email: "disc@example.com" }),
+    });
+    expect([201, 204]).toContain(put.status);
+    const changed = await sync();
+    expect207(changed);
+    expect(hrefs(changed.body)).toContain(contactHref);
   });
 
   test("P5: Depth 1 lists active contacts; unknown props get a 404 propstat; infinity is 403", async ({

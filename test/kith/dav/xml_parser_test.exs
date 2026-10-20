@@ -19,6 +19,41 @@ defmodule Kith.DAV.XMLParserTest do
       end
     end
 
+    test "CDV-04: billion-laughs internal entities are refused, not expanded" do
+      body = """
+      <?xml version="1.0"?>
+      <!DOCTYPE d:propfind [
+        <!ENTITY lol "lol">
+        <!ENTITY lol1 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+        <!ENTITY lol2 "&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;&lol1;">
+        <!ENTITY lol3 "&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;">
+        <!ENTITY lol4 "&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;">
+        <!ENTITY lol5 "&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;&lol4;">
+        <!ENTITY lol6 "&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;&lol5;">
+        <!ENTITY lol7 "&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;&lol6;">
+        <!ENTITY lol8 "&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;&lol7;">
+        <!ENTITY lol9 "&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;&lol8;">
+      ]>
+      <d:propfind xmlns:d="DAV:"><d:prop><d:displayname>&lol9;</d:displayname></d:prop></d:propfind>
+      """
+
+      {micros, result} = :timer.tc(fn -> XMLParser.parse_propfind(body) end)
+      assert result == {:error, :invalid_xml}
+      assert micros < 1_000_000
+      assert {:error, :invalid_xml} = XMLParser.parse_proppatch(body)
+    end
+
+    test "CDV-04: external SYSTEM entities are refused, not fetched" do
+      body = """
+      <?xml version="1.0"?>
+      <!DOCTYPE d:propfind [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+      <d:propfind xmlns:d="DAV:"><d:prop><d:displayname>&xxe;</d:displayname></d:prop></d:propfind>
+      """
+
+      assert {:error, :invalid_xml} = XMLParser.parse_propfind(body)
+      assert {:error, :invalid_xml} = XMLParser.parse_proppatch(body)
+    end
+
     test "CDV-04: empty and whitespace-only bodies are allprop" do
       assert {:ok, :allprop} = XMLParser.parse_propfind("")
       assert {:ok, :allprop} = XMLParser.parse_propfind("  \r\n")

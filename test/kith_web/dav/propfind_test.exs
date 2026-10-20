@@ -728,6 +728,48 @@ defmodule KithWeb.DAV.PropfindTest do
       assert token =~ ~r/^[a-z][a-z0-9+.-]*:\S+$/i
     end
 
+    test "CDV-03: the PROPFIND sync-token round-trips through sync-collection", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      # Tokens have one-second resolution: let the fixture's second pass first.
+      Process.sleep(1_100)
+
+      propfind = """
+      <d:propfind xmlns:d="DAV:"><d:prop><d:sync-token/></d:prop></d:propfind>
+      """
+
+      conn =
+        context.conn
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("depth", "0")
+        |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind)
+
+      [_, token] = Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, conn.resp_body)
+
+      sync = fn ->
+        body = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <d:sync-collection xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+          <d:sync-token>#{token}</d:sync-token>
+          <d:sync-level>1</d:sync-level>
+          <d:prop><d:getetag/></d:prop>
+        </d:sync-collection>
+        """
+
+        authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+      end
+
+      unchanged = sync.()
+      assert unchanged.status == 207
+      assert count_responses(unchanged.resp_body) == 0
+
+      Process.sleep(1_100)
+      {:ok, _} = Contacts.update_contact(contact, %{first_name: "Changed"})
+
+      changed = sync.()
+      assert changed.status == 207
+      assert changed.resp_body =~ "<d:href>#{contact_path(contact)}</d:href>"
+    end
+
     test "CDV-04: malformed or non-UTF-8 PROPFIND and PROPPATCH bodies return 400", context do
       malformed = ~s(<d:propfind xmlns:d="DAV:"><d:prop><d:getetag></d:prop>)
       contact = ContactsFixtures.contact_fixture(context.account_id)
@@ -808,12 +850,14 @@ defmodule KithWeb.DAV.PropfindTest do
     test "CDV-07: PROPFIND/PROPPATCH bodies over max-resource-size return 413", context do
       padding = String.duplicate("x", 1_048_577)
       body = ~s(<d:propfind xmlns:d="DAV:"><!--#{padding}--><d:allprop/></d:propfind>)
+      contact = ContactsFixtures.contact_fixture(context.account_id)
 
       for path <- [
             "/dav/",
             "/dav/principals/",
             "/dav/addressbooks/",
-            "/dav/addressbooks/default/"
+            "/dav/addressbooks/default/",
+            contact_path(contact)
           ] do
         assert authed_dav(context, "PROPFIND", path, body).status == 413, path
       end
