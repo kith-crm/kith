@@ -47,7 +47,12 @@ function expectNot500(res: DavResponse): void {
  * A response that arrives before the server closes a half-sent upload (an early
  * 413) still counts: the later ECONNRESET / EPIPE is ignored.
  */
-function rawRequest(method: string, path: string, body?: string): Promise<{ status: number; body: string }> {
+function rawRequest(
+  method: string,
+  path: string,
+  body?: string,
+  opts: { chunked?: boolean } = {},
+): Promise<{ status: number; body: string }> {
   const base = new URL(process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:4517");
   const { email, password } = USERS.admin;
   return new Promise((resolve, reject) => {
@@ -62,6 +67,8 @@ function rawRequest(method: string, path: string, body?: string): Promise<{ stat
         headers: {
           Authorization: "Basic " + Buffer.from(`${email}:${password}`).toString("base64"),
           ...(body !== undefined ? { "Content-Type": "text/vcard; charset=utf-8" } : {}),
+          // Node sends a body without Content-Length as chunked, which DAV refuses with 411 (CDV-29).
+          ...(body !== undefined && !opts.chunked ? { "Content-Length": String(Buffer.byteLength(body)) } : {}),
         },
       },
       (res) => {
@@ -86,12 +93,26 @@ async function atSecondStart(): Promise<void> {
 
 // ── Create / update / delete ──────────────────────────────────────────────
 
+/** An id the server has already issued, in another account: `kith-contact-<it>.vcf` is free in A (R20). */
+async function issuedForeignId(request: APIRequestContext): Promise<string> {
+  const h = `${BOOK}${runPrefix()}-issued-${randomUUID()}.vcf`;
+  const p = await dav(request, "PUT", h, { user: "other", headers: VCARD_HEADERS, body: vcard({ fn: `${runPrefix()} Issued` }) });
+  expect(p.status).toBe(201);
+  const g = await dav(request, "GET", h, { user: "other" });
+  const id = /UID:kith-contact-(\d+)\r\n/.exec(g.body)?.[1];
+  expect(id, g.body).toBeTruthy();
+  await dav(request, "DELETE", h, { user: "other" });
+  return id!;
+}
+
 test.describe("03 crud: kith-named resource", () => {
-  const href = `${BOOK}kith-contact-${Date.now()}.vcf`;
+  let href = "";
   const fn = `${runPrefix()} Crud One`;
   let etag = "";
 
   test("C1: PUT a new kith-contact-<new>.vcf with If-None-Match: * is served at that href", async ({ request }) => {
+    // R20: <new> must be an id already issued (here: another account's); an unissued one is reserved (C1b).
+    href = `${BOOK}kith-contact-${await issuedForeignId(request)}.vcf`;
     const res = await put(request, href, vcard({ fn, email: "crud1@example.com" }), { "If-None-Match": "*" });
     expect(res.status, res.body).toBe(201);
     expect(res.headers["etag"]).toMatch(STRONG_ETAG);
@@ -102,6 +123,14 @@ test.describe("03 crud: kith-named resource", () => {
     expect(g.headers["etag"]).toBe(etag);
     expect(g.headers["content-type"]).toBe("text/vcard; charset=utf-8");
     expect(g.body).toContain(`FN:${fn}`);
+  });
+
+  test("C1b: PUT-create at an unissued kith-contact-<id>.vcf is 403 reserved-resource-name (R20)", async ({ request }) => {
+    const h = `${BOOK}kith-contact-${Date.now()}.vcf`;
+    const res = await put(request, h, vcard({ fn: `${fn} Reserved` }));
+    expect(res.status).toBe(403);
+    expect(res.body).toContain("reserved-resource-name");
+    expect((await get(request, h)).status).toBe(404);
   });
 
   test("C2: GET then PUT an edit with If-Match: <etag> gives a new ETag and the edit", async ({ request }) => {
@@ -285,6 +314,12 @@ test.describe("03 crud: request validation", () => {
       else expect(res.status, res.body.slice(0, 200)).toBe(413);
       expect((await get(request, h)).status).toBe(404);
     }
+  });
+
+  test("E3b: a chunked PUT body is 411 Length Required before any read (CDV-29)", async () => {
+    const h = `${BOOK}${runPrefix()}-e3b-${randomUUID()}.vcf`;
+    const res = await rawRequest("PUT", h, vcard({ fn: `${runPrefix()} Chunked` }), { chunked: true });
+    expect(res.status).toBe(411);
   });
 });
 
