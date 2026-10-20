@@ -1910,7 +1910,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
              422
   end
 
-  test "CDV-82: negotiated representations have distinct strong tags and usable conditional writes",
+  test "CDV-90 (reverses CDV-82): one strong ETag serves both vCard versions and every listing",
        context do
     href = "/dav/addressbooks/default/variant-etags.vcf"
     assert authed_dav(context, "PUT", href, build_vcard("Variant", "Probe")).status == 201
@@ -1931,15 +1931,39 @@ defmodule KithWeb.DAV.AddressObjectTest do
     [t3] = get_resp_header(g3, "etag")
     [t4] = get_resp_header(g4, "etag")
     assert g3.resp_body != g4.resp_body
-    assert t3 != t4
+    assert t3 == t4
     assert Enum.join(get_resp_header(g4, "vary"), ",") =~ "accept"
-    assert get.("4.0", [{"if-none-match", t3}]).status == 200
-    assert get.("4.0", [{"if-none-match", t4}]).status == 304
-    write_context = %{context | conn: put_req_header(build_conn(), "if-match", t4)}
+
+    propfind =
+      authed_dav(
+        %{context | conn: put_req_header(build_conn(), "depth", "0")},
+        "PROPFIND",
+        href,
+        ~s(<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>)
+      )
+
+    assert propfind.resp_body =~ "<d:getetag>#{t4}</d:getetag>"
+
+    for version <- ["3.0", "4.0"] do
+      report =
+        authed_dav(
+          context,
+          "REPORT",
+          "/dav/addressbooks/default/",
+          ~s(<c:addressbook-multiget xmlns:c="urn:ietf:params:xml:ns:carddav" xmlns:d="DAV:"><d:prop><d:getetag/><c:address-data content-type="text/vcard" version="#{version}"/></d:prop><d:href>#{href}</d:href></c:addressbook-multiget>)
+        )
+
+      assert report.resp_body =~ "<d:getetag>#{t4}</d:getetag>"
+      assert get.(version, [{"if-none-match", t3}]).status == 304
+    end
+
+    write_context = %{context | conn: put_req_header(build_conn(), "if-match", t3)}
     assert authed_dav(write_context, "PUT", href, g4.resp_body).status == 204
     assert authed_dav(write_context, "PUT", href, g4.resp_body).status == 412
-    [current4] = get.("4.0", []) |> get_resp_header("etag")
-    none_context = %{context | conn: put_req_header(build_conn(), "if-none-match", current4)}
+    [current] = get.("4.0", []) |> get_resp_header("etag")
+    assert [current] == get.("3.0", []) |> get_resp_header("etag")
+    assert get.("3.0", [{"if-none-match", t3}]).status == 200
+    none_context = %{context | conn: put_req_header(build_conn(), "if-none-match", current)}
     assert authed_dav(none_context, "PUT", href, g4.resp_body).status == 412
   end
 end

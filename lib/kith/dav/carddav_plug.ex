@@ -505,7 +505,7 @@ defmodule Kith.DAV.CardDAVPlug do
         do: XMLBuilder.address_data(vcard_fun.())
 
     available = [
-      getetag: XMLBuilder.getetag(compute_etag(contact, version)),
+      getetag: XMLBuilder.getetag(compute_etag(contact)),
       getcontenttype: XMLBuilder.getcontenttype(vcard_content_type(version) <> "; charset=utf-8"),
       getlastmodified: XMLBuilder.getlastmodified(contact.updated_at),
       address_data: address_data
@@ -581,7 +581,7 @@ defmodule Kith.DAV.CardDAVPlug do
         send_resp(conn, 404, "Not Found")
 
       contact ->
-        etag = compute_etag(contact, version)
+        etag = compute_etag(contact)
         conn = conn |> put_resp_header("etag", "\"#{etag}\"") |> put_resp_header("vary", "accept")
 
         # RFC 7232 §3.2 / §4.1: a matching If-None-Match on GET is a 304
@@ -738,7 +738,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   defp write_put_target(conn, aid, {:visible, contact}, {scalar_attrs, nested_data}) do
     # RFC 7232 §3.1 / §3.2 on the locked, current representation
-    if none_match_fails?(conn, current_etags(contact)) or
+    if none_match_fails?(conn, compute_etag(contact)) or
          check_if_match(conn, contact) == :precondition_failed do
       {:error, :precondition_failed}
     else
@@ -855,7 +855,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
       values ->
         header = Enum.join(values, ",")
-        strong = Enum.map(current_etags(contact), &{false, &1})
+        strong = [{false, compute_etag(contact)}]
 
         if String.trim(header) == "*" or Enum.any?(entity_tags(header), &(&1 in strong)),
           do: :ok,
@@ -960,13 +960,11 @@ defmodule Kith.DAV.CardDAVPlug do
     |> Kith.Repo.all()
   end
 
-  # R4: `dav_revision` changes on every write of the contact row (CDV-17)
-  defp current_etags(contact), do: Enum.map([:v30, :v40], &compute_etag(contact, &1))
-
-  defp compute_etag(contact, version \\ :v30)
-
-  defp compute_etag(%{id: id, dav_revision: revision}, version) do
-    data = "#{id}-#{revision}" <> if(version == :v40, do: "-4.0", else: "")
+  # R4: `dav_revision` changes on every write of the contact row (CDV-17).
+  # R42: one strong tag for both vCard versions, so ETag-only listings
+  # (PROPFIND, sync, multiget) match whatever version a client GETs (CDV-90).
+  defp compute_etag(%{id: id, dav_revision: revision}) do
+    data = "#{id}-#{revision}"
 
     :crypto.hash(:md5, data)
     |> Base.encode16(case: :lower)

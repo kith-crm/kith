@@ -248,20 +248,24 @@ test("CDV-74: escaped structured values survive", async ({ request }) => {
   expect(card).toContain("ADR;TYPE=HOME:;Suite\\;2;Street\\;3;City\\,Town;Region;Zip;Country");
 });
 
-test("CDV-82: version-specific strong tags support conditional writes", async ({ request }) => {
+test("CDV-90 (reverses CDV-82): one strong tag for both versions, listings and conditional requests", async ({ request }) => {
   const href = `${BOOK}${prefix}-variants.vcf`; created.push(href);
   expect((await put(request, href, vcard({ fn: `${prefix} Variants` }))).status).toBe(201);
   const g3 = await dav(request, "GET", href);
   const g4 = await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0" } });
-  expect(g4.headers.etag).not.toBe(g3.headers.etag);
+  expect(g4.body).not.toBe(g3.body);
+  expect(g4.headers.etag).toBe(g3.headers.etag);
   expect(g4.headers.vary.toLowerCase()).toContain("accept");
-  const report = await dav(request, "REPORT", BOOK, { body: `<c:addressbook-multiget xmlns:c="urn:ietf:params:xml:ns:carddav" xmlns:d="DAV:"><d:prop><d:getetag/><c:address-data content-type="text/vcard" version="4.0"/></d:prop><d:href>${href}</d:href></c:addressbook-multiget>` });
-  expect(report.status).toBe(207); assertWellFormedXml(report.body);
-  expect(propText(responseFor(report.body, href)!, "getetag")).toBe(g4.headers.etag);
-
-  expect((await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0", "If-None-Match": g3.headers.etag } })).status).toBe(200);
-  expect((await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0", "If-None-Match": g4.headers.etag } })).status).toBe(304);
-  const write = await dav(request, "PUT", href, { headers: { ...headers, "If-Match": g4.headers.etag }, body: g4.body });
+  const propfind = await dav(request, "PROPFIND", href, { headers: { Depth: "0" }, body: `<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>` });
+  expect(propText(responseFor(propfind.body, href)!, "getetag")).toBe(g4.headers.etag);
+  for (const data of ["", `<c:address-data content-type="text/vcard" version="4.0"/>`]) {
+    const report = await dav(request, "REPORT", BOOK, { body: `<c:addressbook-multiget xmlns:c="urn:ietf:params:xml:ns:carddav" xmlns:d="DAV:"><d:prop><d:getetag/>${data}</d:prop><d:href>${href}</d:href></c:addressbook-multiget>` });
+    expect(report.status).toBe(207); assertWellFormedXml(report.body);
+    expect(propText(responseFor(report.body, href)!, "getetag")).toBe(g4.headers.etag);
+  }
+  for (const version of ["3.0", "4.0"])
+    expect((await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}`, "If-None-Match": g3.headers.etag } })).status).toBe(304);
+  const write = await dav(request, "PUT", href, { headers: { ...headers, "If-Match": g3.headers.etag }, body: g4.body });
   expect(write.status).toBe(204);
   expect((await dav(request, "PUT", href, { headers: { ...headers, "If-Match": g4.headers.etag }, body: g4.body })).status).toBe(412);
 });
