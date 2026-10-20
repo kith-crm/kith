@@ -64,7 +64,7 @@ defmodule Kith.DAV.XMLParser do
 
   Returns one of
   - `{:ok, {:multiget, %{hrefs: hrefs, props: props, version: version}}}`
-  - `{:ok, {:sync_collection, %{token: token_or_nil, props: props, version: version}}}`
+  - `{:ok, {:sync_collection, %{token: token_or_nil, limit: limit, props: props, version: version}}}`
   - `{:ok, {:query, %{filter: filter, limit: limit, props: props, version: version}}}`
   - `{:ok, {:unsupported, {namespace, local_name}}}` for any other root
   - `{:error, :invalid_xml}` for a body that is not well-formed UTF-8 XML
@@ -99,7 +99,12 @@ defmodule Kith.DAV.XMLParser do
       end
 
     {:sync_collection,
-     %{token: token, props: report_props(root), version: requested_version(root)}}
+     %{
+       token: token,
+       limit: limit(root, @dav),
+       props: report_props(root),
+       version: requested_version(root)
+     }}
   end
 
   defp report_request(%{ns: @carddav, name: "addressbook-query"} = root) do
@@ -112,7 +117,7 @@ defmodule Kith.DAV.XMLParser do
     {:query,
      %{
        filter: filter,
-       limit: limit(root),
+       limit: limit(root, @carddav),
        props: report_props(root),
        version: requested_version(root)
      }}
@@ -155,9 +160,10 @@ defmodule Kith.DAV.XMLParser do
     }
   end
 
-  defp limit(root) do
-    with %{} = limit <- child(root, @carddav, "limit"),
-         %{} = nresults <- child(limit, @carddav, "nresults") do
+  # `<limit><nresults>` in CARDDAV: (query) or DAV: (sync-collection)
+  defp limit(root, ns) do
+    with %{} = limit <- child(root, ns, "limit"),
+         %{} = nresults <- child(limit, ns, "nresults") do
       String.trim(text(nresults))
     end
   end

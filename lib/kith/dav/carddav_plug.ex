@@ -398,7 +398,6 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   defp handle_sync_collection_report(conn, %{token: client_token} = request) do
-    %{props: props, version: version} = request
     # Taken before the contacts are read, so the new token covers no write
     # this response misses (CDV-46).
     position = Contacts.dav_sync_position()
@@ -409,9 +408,32 @@ defmodule Kith.DAV.CardDAVPlug do
         send_precondition_failed(conn, "<d:valid-sync-token/>")
 
       since ->
-        responses = sync_responses(conn, since, props, version)
-        xml = XMLBuilder.multistatus(responses, sync_token: sync_token(position))
-        send_dav_response(conn, 207, xml)
+        send_sync_responses(conn, since, request, position)
+    end
+  end
+
+  # RFC 6578 §3.7: results over the client's DAV:limit are refused with a 507
+  # number-of-matches-within-limits rather than truncated, since a truncated
+  # response could not carry a token that resumes it (CDV-50, R27).
+  # DAV:sync-level is not checked: the book has no child collections, so
+  # `infinite` and `1` are the same.
+  defp send_sync_responses(conn, since, %{props: props, version: version} = request, position) do
+    with {:ok, limit} <- parse_limit(request.limit),
+         responses = sync_responses(conn, since, props, version),
+         true <- limit == nil or length(responses) <= limit do
+      xml = XMLBuilder.multistatus(responses, sync_token: sync_token(position))
+      send_dav_response(conn, 207, xml)
+    else
+      {:error, :bad_limit} ->
+        send_resp(conn, 400, "Bad Request")
+
+      false ->
+        conn
+        |> put_resp_content_type("application/xml")
+        |> send_resp(
+          507,
+          XMLBuilder.error_body("<d:number-of-matches-within-limits/>", "Too many changes")
+        )
     end
   end
 

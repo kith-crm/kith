@@ -560,6 +560,32 @@ defmodule KithWeb.DAV.ReportTest do
       end)
     end
 
+    test "CDV-50: sync-collection honours DAV:limit (507 when over it) and sync-level infinite",
+         %{account_id: account_id} = context do
+      for n <- 1..3, do: ContactsFixtures.contact_fixture(account_id, %{first_name: "Lim#{n}"})
+      limit = fn n -> "<d:limit><d:nresults>#{n}</d:nresults></d:limit>" end
+
+      conn = sync(context, "", limit.(2))
+      assert conn.status == 507
+      assert conn.resp_body =~ "<d:number-of-matches-within-limits/>"
+      refute conn.resp_body =~ "Lim1"
+
+      conn = sync(context, "", limit.(3))
+      assert conn.status == 207
+      assert count_responses(conn.resp_body) == 3
+
+      assert sync(context, "", limit.("x")).status == 400
+
+      # the book has no child collections, so infinite is the same as 1
+      body =
+        ~s(<d:sync-collection xmlns:d="DAV:"><d:sync-token/><d:sync-level>infinite</d:sync-level>) <>
+          ~s(<d:prop><d:getetag/></d:prop></d:sync-collection>)
+
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+      assert count_responses(conn.resp_body) == 3
+    end
+
     test "CDV-47: an unknown, foreign, old-format or future sync token is 403 valid-sync-token",
          context do
       [_, rev, snapshot] = Regex.run(~r{/sync/(\d+)-(.+)\z}, initial_token(context))
