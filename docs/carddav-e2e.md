@@ -19,6 +19,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 |---|---|---|---|---|
 | 00-harness | H1-H3 | 3 | 0 | |
 | 02-auth | A1-A5, M1-M3, RL1-RL3 | 10 | 0 | A4 is `test.fixme` (CDV-11, product decision) |
+| 03-crud | C1-C5, K1-K6, E1-E7 | 19 | 0 | 18 cases in 19 tests (E6 is split in two) |
 
 ### 01-discovery
 
@@ -53,6 +54,29 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | RL1 | pass |
 | RL2 | fixed CDV-09 |
 | RL3 | pass |
+
+### 03-crud
+
+| Case | Result |
+|---|---|
+| C1 | fixed CDV-12 (the GET at the PUT href was 404) |
+| C2 | fixed CDV-17 (create and edit in one second shared an ETag) |
+| C3 | fixed CDV-12 |
+| C4 | fixed CDV-12 |
+| C5 | fixed CDV-12 |
+| K1 | pass |
+| K2 | pass |
+| K3 | fixed CDV-15 |
+| K4 | fixed CDV-16 |
+| K5 | fixed CDV-14 |
+| K6 | fixed CDV-17 |
+| E1 | fixed CDV-19 (`application/json` with a non-JSON body is 400 from the endpoint parser, R19) |
+| E2 | fixed CDV-21 (a vCard without BEGIN already gave 422 `valid-address-data`; one without FN/N gave a plain 422; empty or over-long values gave 500) |
+| E3 | fixed CDV-20, CDV-23 |
+| E4 | pass |
+| E5 | fixed CDV-18 (R18: restored in place) |
+| E6 | fixed CDV-13 (CDV-12 percent-encodes hrefs) |
+| E7 | fixed CDV-22 |
 
 ## Bug log
 
