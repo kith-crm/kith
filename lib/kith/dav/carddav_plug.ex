@@ -403,7 +403,7 @@ defmodule Kith.DAV.CardDAVPlug do
     # this response misses (CDV-46).
     position = Contacts.dav_sync_position()
 
-    case parse_sync_token(client_token, position) do
+    case parse_sync_token(client_token, position) |> check_sync_floor(conn) do
       :invalid ->
         # R3 / RFC 6578 §3.2: never fall back to a full sync silently (CDV-47)
         send_precondition_failed(conn, "<d:valid-sync-token/>")
@@ -414,6 +414,13 @@ defmodule Kith.DAV.CardDAVPlug do
         send_dav_response(conn, 207, xml)
     end
   end
+
+  # A hard delete since the token cannot be reported (R3, CDV-48)
+  defp check_sync_floor({_rev, _snapshot} = since, conn) do
+    if Contacts.dav_sync_position_valid?(account_id(conn), since), do: since, else: :invalid
+  end
+
+  defp check_sync_floor(since, _conn), do: since
 
   defp sync_responses(conn, since, props, version) do
     case since do

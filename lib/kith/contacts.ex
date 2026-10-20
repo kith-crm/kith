@@ -1842,6 +1842,27 @@ defmodule Kith.Contacts do
   end
 
   @doc """
+  False when a contact of the account was hard-deleted after the sync position
+  `{revision, snapshot}` was taken (or while it was taken): such a deletion
+  cannot be reported, so the token is invalid (R3, CDV-48).
+  """
+  def dav_sync_position_valid?(account_id, {revision, snapshot}) do
+    %{rows: [[valid]]} =
+      Repo.query!(
+        """
+        SELECT NOT EXISTS (
+          SELECT 1 FROM dav_sync_floors
+          WHERE account_id = $1
+            AND (revision > $2 OR NOT pg_visible_in_snapshot(xid, $3::text::pg_snapshot))
+        )
+        """,
+        [account_id, revision, snapshot]
+      )
+
+    valid
+  end
+
+  @doc """
   Lists every contact of the account written since the sync position
   `{revision, snapshot}`, hidden ones (trashed, archived) included: a write
   drew a newer revision, or its transaction was not visible in the snapshot

@@ -491,6 +491,36 @@ defmodule KithWeb.DAV.ReportTest do
       end)
     end
 
+    test "CDV-48: a hard delete invalidates older sync tokens, by every delete path",
+         %{account_id: account_id} = context do
+      deletes = [
+        fn c -> {:ok, _} = Contacts.hard_delete_contact(c) end,
+        fn _c -> {:ok, _} = Contacts.empty_trash(account_id) end,
+        fn c -> Kith.Repo.query!("DELETE FROM contacts WHERE id = $1", [c.id]) end
+      ]
+
+      for delete <- deletes do
+        contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Doomed"})
+        token = initial_token(context)
+        {:ok, contact} = Contacts.soft_delete_contact(contact)
+        delete.(contact)
+
+        conn = sync(context, token)
+        assert conn.status == 403
+        assert conn.resp_body =~ "<d:valid-sync-token/>"
+
+        # a token issued after the delete works
+        assert sync(context, initial_token(context)).status == 207
+      end
+
+      # another account's hard delete leaves this account's tokens alone
+      token = initial_token(context)
+      other = Kith.AccountsFixtures.user_fixture()
+      theirs = ContactsFixtures.contact_fixture(other.account_id)
+      {:ok, _} = Contacts.hard_delete_contact(theirs)
+      assert sync(context, token).status == 207
+    end
+
     test "CDV-47: an unknown, foreign, old-format or future sync token is 403 valid-sync-token",
          context do
       [_, rev, snapshot] = Regex.run(~r{/sync/(\d+)-(.+)\z}, initial_token(context))
