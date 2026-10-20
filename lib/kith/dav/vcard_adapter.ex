@@ -93,21 +93,11 @@ defmodule Kith.DAV.VCardAdapter do
 
   # ── Private ────────────────────────────────────────────────────────────
 
-  # Inserts a UID line after the VERSION line in the serialized vCard. A UID a
-  # CardDAV client chose (R2) is returned verbatim, in both versions.
-  defp inject_uid(vcard, %Contact{dav_uid: uid}, version) when is_binary(uid) do
+  # The resource and RELATED use exactly the same client-chosen/default UID.
+  defp inject_uid(vcard, contact, version) do
     v = if version == :v40, do: "4.0", else: "3.0"
+    uid = Serializer.uid_for(contact, version)
     String.replace(vcard, "VERSION:#{v}\r\n", "VERSION:#{v}\r\nUID:#{uid}\r\n")
-  end
-
-  defp inject_uid(vcard, %Contact{id: contact_id}, :v30) do
-    uid_line = "UID:kith-contact-#{contact_id}"
-    String.replace(vcard, "VERSION:3.0\r\n", "VERSION:3.0\r\n#{uid_line}\r\n")
-  end
-
-  defp inject_uid(vcard, %Contact{id: contact_id}, :v40) do
-    uid_line = "UID:urn:uuid:kith-contact-#{contact_id}"
-    String.replace(vcard, "VERSION:4.0\r\n", "VERSION:4.0\r\n#{uid_line}\r\n")
   end
 
   defp maybe_strip_nils(attrs, opts) do

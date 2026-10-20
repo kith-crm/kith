@@ -63,6 +63,11 @@ defmodule Kith.VCard.Serializer do
     Enum.map_join(contacts, "", &serialize(&1, opts))
   end
 
+  @doc false
+  def uid_for(%{dav_uid: uid}, _version) when is_binary(uid), do: uid
+  def uid_for(%{id: id}, :v30), do: "kith-contact-#{id}"
+  def uid_for(%{id: id}, :v40), do: "urn:uuid:kith-contact-#{id}"
+
   # ── Version ───────────────────────────────────────────────────────────
 
   defp version_line(:v30), do: "VERSION:3.0"
@@ -184,8 +189,8 @@ defmodule Kith.VCard.Serializer do
 
   defp do_related_lines(rels, :v40) do
     Enum.map(rels, fn rel ->
-      type = map_relationship_to_rfc6350(rel.relationship_type.name)
-      uid = "urn:uuid:kith-contact-#{rel.related_contact_id}"
+      type = relationship_type_to_vcard(rel.relationship_type.name)
+      uid = rel.related_contact |> Map.put_new(:id, rel.related_contact_id) |> uid_for(:v40)
       "RELATED;TYPE=#{type}:#{uid}"
     end)
   end
@@ -199,7 +204,8 @@ defmodule Kith.VCard.Serializer do
 
   defp display_name_for_related(_), do: ""
 
-  defp map_relationship_to_rfc6350(name) do
+  @doc false
+  def relationship_type_to_vcard(name) do
     case String.downcase(name) do
       n when n in ["spouse", "husband", "wife"] -> "spouse"
       n when n in ["parent", "mother", "father"] -> "parent"

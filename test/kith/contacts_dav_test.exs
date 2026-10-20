@@ -219,6 +219,82 @@ defmodule Kith.ContactsDAVTest do
     assert length(Contacts.list_contact_fields(contact.id)) == 2
   end
 
+  test "CDV-80: RELATED resolves exact visible UIDs and preserves relationship rows", %{
+    contact: contact,
+    account_id: aid
+  } do
+    target = contact_fixture(aid)
+    {:ok, target} = Contacts.put_dav_identity(target, %{dav_uid: "custom-related-uid"})
+
+    nested = %{
+      emails: [],
+      phones: [],
+      urls: [],
+      addresses: [],
+      related: [
+        %{value: target.dav_uid, type: "friend"},
+        %{value: target.dav_uid, type: "friend"}
+      ]
+    }
+
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    assert [relationship] = Contacts.list_relationships(contact.id)
+
+    card =
+      Kith.DAV.VCardAdapter.contact_to_vcard(Kith.Repo.get!(Contacts.Contact, contact.id),
+        version: :v40
+      )
+
+    assert card =~ "RELATED;TYPE=friend:custom-related-uid"
+    {_attrs, parsed} = Kith.DAV.VCardAdapter.vcard_to_attrs(card, account_id: aid)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, parsed)
+    assert [%{id: id}] = Contacts.list_relationships(contact.id)
+    assert id == relationship.id
+    card30 = Kith.DAV.VCardAdapter.contact_to_vcard(Kith.Repo.get!(Contacts.Contact, contact.id))
+    {_attrs, parsed30} = Kith.DAV.VCardAdapter.vcard_to_attrs(card30, account_id: aid)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, parsed30)
+
+    card40 =
+      Kith.DAV.VCardAdapter.contact_to_vcard(Kith.Repo.get!(Contacts.Contact, contact.id),
+        version: :v40
+      )
+
+    assert length(Regex.scan(~r/^RELATED[;:]/m, card40)) == 1
+
+    for uid <- [
+          "urn:evil:kith-contact-#{target.id}-k-extra",
+          "kith-contact-#{target.id}",
+          "urn:uuid:kith-contact-#{target.id}"
+        ] do
+      other = contact_fixture(aid)
+
+      assert {:ok, :ok} =
+               Contacts.replace_contact_children(other, aid, %{
+                 nested
+                 | related: [%{value: uid, type: "friend"}]
+               })
+
+      assert Contacts.list_relationships(other.id) == []
+    end
+
+    {:ok, target} = Contacts.put_dav_identity(target, %{dav_uid: "kith-contact-#{target.id}-k"})
+
+    assert {:ok, :ok} =
+             Contacts.replace_contact_children(contact, aid, %{
+               nested
+               | related: [%{value: target.dav_uid, type: "friend"}]
+             })
+
+    assert [_] = Contacts.list_relationships(contact.id)
+
+    card =
+      Kith.DAV.VCardAdapter.contact_to_vcard(Kith.Repo.get!(Contacts.Contact, contact.id),
+        version: :v40
+      )
+
+    assert card =~ "RELATED;TYPE=friend:#{target.dav_uid}"
+  end
+
   describe "touch_contact!/1" do
     test "bumps updated_at", %{contact: contact} do
       old_updated_at = contact.updated_at

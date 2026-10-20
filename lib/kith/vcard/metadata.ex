@@ -102,6 +102,7 @@ defmodule Kith.VCard.Metadata do
     name =
       head |> String.split(";") |> hd() |> String.split(".") |> List.last() |> String.upcase()
 
+    name = if name == "X-KITH-RELATED", do: "RELATED", else: name
     {name, value}
   end
 

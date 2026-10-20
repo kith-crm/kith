@@ -34,6 +34,7 @@ defmodule Kith.Contacts do
 
   alias Kith.Activities.{Activity, Call}
   alias Kith.Storage
+  alias Kith.VCard.Serializer
 
   require Logger
 
@@ -1721,34 +1722,57 @@ defmodule Kith.Contacts do
   defp replace_contact_relationships(_contact, _account_id, []), do: :ok
 
   defp replace_contact_relationships(contact, account_id, related_entries) do
-    from(r in Relationship, where: r.contact_id == ^contact.id and r.account_id == ^account_id)
-    |> Repo.delete_all()
+    entries =
+      Enum.flat_map(related_entries, fn entry ->
+        case related_contact_by_uid(account_id, entry.value) do
+          nil -> []
+          related -> [{related.id, entry.type}]
+        end
+      end)
 
-    Enum.each(related_entries, fn entry ->
-      with {:ok, related_id} <- extract_contact_id_from_uid(entry.value),
-           %Contact{} <- get_contact(account_id, related_id) do
-        type_name = vcard_type_to_relationship_name(entry.type)
-        rel_type = find_or_create_relationship_type!(account_id, type_name)
+    entries = Enum.uniq_by(entries, fn {id, type} -> {id, String.downcase(type)} end)
 
-        %Relationship{}
-        |> Relationship.changeset(%{
-          account_id: account_id,
-          contact_id: contact.id,
-          related_contact_id: related_id,
-          relationship_type_id: rel_type.id
-        })
-        |> Repo.insert(on_conflict: :nothing)
-      else
-        _ -> :ok
-      end
+    existing =
+      from(r in Relationship,
+        where: r.contact_id == ^contact.id and r.account_id == ^account_id,
+        preload: [:relationship_type]
+      )
+      |> Repo.all()
+
+    entries
+    |> retain_dav_entries(existing, &same_dav_relationship?/2)
+    |> Enum.each(fn {related_id, type} ->
+      rel_type =
+        find_or_create_relationship_type!(account_id, vcard_type_to_relationship_name(type))
+
+      %Relationship{}
+      |> Relationship.changeset(%{
+        account_id: account_id,
+        contact_id: contact.id,
+        related_contact_id: related_id,
+        relationship_type_id: rel_type.id
+      })
+      |> insert_or_rollback()
     end)
   end
 
-  defp extract_contact_id_from_uid(uid) do
-    # Match both "kith-contact-123" and "urn:uuid:kith-contact-123"
-    case Regex.run(~r/kith-contact-(\d+)/, uid) do
-      [_, id_str] -> {:ok, String.to_integer(id_str)}
-      _ -> :error
+  defp same_dav_relationship?(relationship, {related_id, type}) do
+    relationship.related_contact_id == related_id and
+      Serializer.relationship_type_to_vcard(relationship.relationship_type.name) ==
+        String.downcase(type)
+  end
+
+  defp related_contact_by_uid(account_id, uid) do
+    get_contact_by_dav_uid(account_id, uid) || default_related_contact(account_id, uid)
+  end
+
+  defp default_related_contact(account_id, uid) do
+    with [_, id] <- Regex.run(~r/\A(?:urn:uuid:)?kith-contact-([1-9]\d{0,17})\z/, uid),
+         %Contact{dav_uid: nil, is_archived: false} = related <-
+           get_contact(account_id, String.to_integer(id)) do
+      related
+    else
+      _ -> nil
     end
   end
 
