@@ -452,6 +452,32 @@ defmodule KithWeb.DAV.ReportTest do
   # ── CardDAV e2e regressions (Task 5) ────────────────────────────────────
 
   describe "CardDAV e2e regressions — REPORT" do
+    test "CDV-41: multiget answers equivalent hrefs with the resource's own href; foreign paths are 404",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Hrefs"})
+      path = contact_path(contact)
+      encoded = String.replace(path, "kith-contact-", "kith%2Dcontact%2D")
+      outside = String.replace(path, "/default/", "/other/")
+
+      for href <- ["http://www.example.com" <> path, encoded] do
+        conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", multiget_body([href]))
+        assert conn.status == 207
+
+        assert [^path] =
+                 Regex.scan(~r{<d:href>([^<]+)</d:href>}, conn.resp_body, capture: :all_but_first)
+                 |> List.flatten()
+
+        assert conn.resp_body =~ "200 OK"
+      end
+
+      for href <- [outside, "/dav/" <> contact_uid(contact)] do
+        conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", multiget_body([href]))
+        assert conn.status == 207
+        refute conn.resp_body =~ "200 OK", href
+        assert conn.resp_body =~ "404 Not Found"
+      end
+    end
+
     test "CDV-39: a REPORT body over max-resource-size returns 413", context do
       padding = String.duplicate(" ", 1_048_577)
 

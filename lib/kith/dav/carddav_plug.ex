@@ -370,9 +370,7 @@ defmodule Kith.DAV.CardDAVPlug do
   defp handle_multiget_report(conn, %{hrefs: hrefs, version: version}) do
     responses =
       Enum.map(hrefs, fn href ->
-        raw = href |> String.trim() |> String.split("/") |> List.last()
-
-        case decode_resource_name(raw) |> found_contact(conn) do
+        case multiget_contact(conn, href) do
           nil ->
             XMLBuilder.response(href, [
               XMLBuilder.propstat([], "HTTP/1.1 404 Not Found")
@@ -382,7 +380,7 @@ defmodule Kith.DAV.CardDAVPlug do
             vcard = VCardAdapter.contact_to_vcard(contact, version: version)
             etag = compute_etag(contact)
 
-            XMLBuilder.response(href, [
+            XMLBuilder.response(contact_href(contact), [
               XMLBuilder.propstat([
                 XMLBuilder.getetag(etag),
                 XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
@@ -393,6 +391,18 @@ defmodule Kith.DAV.CardDAVPlug do
       end)
 
     send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
+  end
+
+  # A multiget href (absolute URL or path, any equivalent percent-encoding)
+  # names a member only if its path is in this address book; the response then
+  # carries the member's own href, so every spelling gives one result (CDV-41).
+  defp multiget_contact(conn, href) do
+    with %URI{path: path} when is_binary(path) <- URI.parse(href),
+         ["dav", "addressbooks", "default", raw] <- path_segments(path) do
+      raw |> decode_resource_name() |> found_contact(conn)
+    else
+      _ -> nil
+    end
   end
 
   defp handle_sync_collection_report(conn, %{token: client_token, version: version}) do
