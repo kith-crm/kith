@@ -1296,6 +1296,18 @@ defmodule Kith.Contacts do
     |> Repo.get(id)
   end
 
+  @doc """
+  Re-reads `contact` with a `FOR UPDATE` row lock, whatever its state (trashed
+  or archived included), or nil if it no longer exists. Call inside a
+  transaction.
+  """
+  def lock_contact(%Contact{id: id}) do
+    Contact
+    |> where([c], c.id == ^id)
+    |> lock("FOR UPDATE")
+    |> Repo.one()
+  end
+
   @doc "Stores the CardDAV resource name and vCard UID a client chose (R2)."
   def put_dav_identity(%Contact{} = contact, attrs) do
     contact

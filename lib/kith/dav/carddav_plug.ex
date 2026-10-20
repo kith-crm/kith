@@ -530,7 +530,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
       case parsed do
         {scalar_attrs, nested_data} ->
-          put_contact(conn, {aid, name}, existing, scalar_attrs, nested_data)
+          put_contact(conn, {aid, name}, scalar_attrs, nested_data)
 
         _ ->
           send_invalid_vcard(conn)
@@ -545,64 +545,73 @@ defmodule Kith.DAV.CardDAVPlug do
     send_dav_response(conn, 422, xml)
   end
 
-  defp put_contact(conn, {aid, name}, nil, scalar_attrs, nested_data) do
-    # RFC 7232 §3.1: any If-Match (even `*`) fails when the resource is missing
-    if get_req_header(conn, "if-match") == [] do
-      create_contact(conn, {aid, name}, scalar_attrs, nested_data)
-    else
-      send_resp(conn, 412, "Precondition Failed")
+  # One PUT is one transaction (CDV-21). The target row is read FOR UPDATE and
+  # the preconditions are evaluated on that locked row, so two writers holding
+  # the same ETag cannot both win and their child sets cannot mix (CDV-24).
+  defp put_contact(conn, {aid, name}, scalar_attrs, nested_data) do
+    result =
+      Kith.Repo.transaction(fn ->
+        target = lock_put_target(conn, name)
+
+        case write_put_target(conn, aid, target, {scalar_attrs, nested_data}) do
+          {:ok, status, contact} -> {status, contact}
+          {:error, reason} -> Kith.Repo.rollback(reason)
+        end
+      end)
+
+    case result do
+      {:ok, {status, contact}} -> send_put_response(conn, status, contact)
+      {:error, :precondition_failed} -> send_resp(conn, 412, "Precondition Failed")
+      {:error, _} -> send_invalid_vcard(conn)
     end
   end
 
-  defp put_contact(conn, {aid, _name}, contact, scalar_attrs, nested_data) do
-    # RFC 7232 §3.2: If-None-Match: * means "only if resource does NOT exist"
-    if none_match_fails?(conn, compute_etag(contact)) do
-      send_resp(conn, 412, "Precondition Failed")
-    else
-      put_update_contact(conn, aid, contact, scalar_attrs, nested_data)
+  # `{:visible, contact}`, `{:trashed, contact}` or `{:missing, name}`; a found
+  # contact is re-read under a row lock.
+  defp lock_put_target(conn, name) do
+    case find_contact(conn, name) || find_trashed_contact(conn, name) do
+      nil -> {:missing, name}
+      contact -> contact |> Contacts.lock_contact() |> put_target(name)
     end
+  end
+
+  defp put_target(nil, name), do: {:missing, name}
+  defp put_target(%Contact{deleted_at: nil} = contact, _name), do: {:visible, contact}
+  defp put_target(%Contact{} = contact, _name), do: {:trashed, contact}
+
+  defp write_put_target(conn, aid, {:visible, contact}, {scalar_attrs, nested_data}) do
+    # RFC 7232 §3.1 / §3.2 on the locked, current representation
+    if none_match_fails?(conn, compute_etag(contact)) or
+         check_if_match(conn, contact) == :precondition_failed do
+      {:error, :precondition_failed}
+    else
+      with {:ok, contact} <- overwrite_contact(contact, aid, scalar_attrs, nested_data),
+           do: {:ok, 204, contact}
+    end
+  end
+
+  defp write_put_target(conn, aid, target, data) do
+    # RFC 7232 §3.1: any If-Match (even `*`) fails when the resource is missing
+    if get_req_header(conn, "if-match") == [],
+      do: create_contact(aid, target, data),
+      else: {:error, :precondition_failed}
   end
 
   # R18: a PUT to the href of a trashed contact restores that contact and
   # overwrites it, instead of creating a duplicate beside it (CDV-18).
-  defp create_contact(conn, {aid, name}, scalar_attrs, nested_data) do
-    case find_trashed_contact(conn, name) do
-      nil ->
-        insert_contact(conn, {aid, name}, scalar_attrs, nested_data)
-
-      trashed ->
-        write_contact(conn, 201, fn ->
-          restore_and_overwrite(trashed, aid, scalar_attrs, nested_data)
-        end)
-    end
-  end
-
-  defp restore_and_overwrite(trashed, aid, scalar_attrs, nested_data) do
+  defp create_contact(aid, {:trashed, trashed}, {scalar_attrs, nested_data}) do
     with {:ok, restored} <- Contacts.restore_contact(trashed),
-         do: overwrite_contact(restored, aid, scalar_attrs, nested_data)
+         {:ok, contact} <- overwrite_contact(restored, aid, scalar_attrs, nested_data),
+         do: {:ok, 201, contact}
   end
 
-  defp insert_contact(conn, {aid, name}, scalar_attrs, nested_data) do
+  defp create_contact(aid, {:missing, name}, {scalar_attrs, nested_data}) do
     identity = %{dav_resource_name: name, dav_uid: nested_data.uid}
 
-    write_contact(conn, 201, fn ->
-      with {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
-           {:ok, contact} <- Contacts.put_dav_identity(contact, identity),
-           {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data),
-           do: {:ok, Contacts.touch_contact!(contact)}
-    end)
-  end
-
-  defp put_update_contact(conn, aid, contact, scalar_attrs, nested_data) do
-    case check_if_match(conn, contact) do
-      :precondition_failed ->
-        send_resp(conn, 412, "Precondition Failed")
-
-      :ok ->
-        write_contact(conn, 204, fn ->
-          overwrite_contact(contact, aid, scalar_attrs, nested_data)
-        end)
-    end
+    with {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
+         {:ok, contact} <- Contacts.put_dav_identity(contact, identity),
+         {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data),
+         do: {:ok, 201, Contacts.touch_contact!(contact)}
   end
 
   # PUT replaces the whole representation: scalars, then children, then a touch
@@ -610,23 +619,6 @@ defmodule Kith.DAV.CardDAVPlug do
     with {:ok, updated} <- Contacts.update_contact(contact, scalar_attrs),
          {:ok, _} <- Contacts.replace_contact_children(updated, aid, nested_data),
          do: {:ok, Contacts.touch_contact!(updated)}
-  end
-
-  # One PUT is one transaction: a vCard rejected half-way leaves no
-  # half-written contact behind (CDV-21).
-  defp write_contact(conn, status, fun) do
-    result =
-      Kith.Repo.transaction(fn ->
-        case fun.() do
-          {:ok, contact} -> contact
-          {:error, reason} -> Kith.Repo.rollback(reason)
-        end
-      end)
-
-    case result do
-      {:ok, contact} -> send_put_response(conn, status, contact)
-      {:error, _} -> send_invalid_vcard(conn)
-    end
   end
 
   defp send_put_response(conn, status, contact) do
