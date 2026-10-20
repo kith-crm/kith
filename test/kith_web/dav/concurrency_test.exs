@@ -144,4 +144,67 @@ defmodule KithWeb.DAV.ConcurrencyTest do
       assert count(account_id) == 1
     end
   end
+
+  describe "CDV-33: PUT row lock vs. relationship foreign keys" do
+    test "CDV-33: a PUT whose RELATED points at a contact another writer holds does not deadlock",
+         %{user: user, account_id: account_id} do
+      {a, b, type} =
+        Sandbox.unboxed_run(Repo, fn ->
+          {:ok, a} = Contacts.create_contact(account_id, %{"first_name" => "Ann"})
+          {:ok, b} = Contacts.create_contact(account_id, %{"first_name" => "Bob"})
+
+          type =
+            Repo.one!(
+              from t in Kith.Contacts.RelationshipType,
+                where: is_nil(t.account_id),
+                order_by: t.id,
+                limit: 1
+            )
+
+          {a, b, type}
+        end)
+
+      card =
+        Enum.join(
+          [
+            "BEGIN:VCARD",
+            "VERSION:3.0",
+            "N:;Ann;;;",
+            "FN:Ann",
+            "RELATED;TYPE=friend:urn:uuid:kith-contact-#{b.id}",
+            "END:VCARD",
+            ""
+          ],
+          "\r\n"
+        )
+
+      # Another writer holds B's row lock (as a PUT of B would), the PUT of A
+      # needs a key-share lock on B for its relationship row, then the other
+      # writer inserts a relationship pointing at A, which the PUT has locked.
+      put_status =
+        Sandbox.unboxed_run(Repo, fn ->
+          {:ok, task} =
+            Repo.transaction(fn ->
+              Contacts.lock_contact(b)
+              task = Task.async(fn -> dav_put(user, contact_path(a), card) end)
+              Process.sleep(500)
+
+              %Kith.Contacts.Relationship{}
+              |> Kith.Contacts.Relationship.changeset(%{
+                account_id: account_id,
+                contact_id: b.id,
+                related_contact_id: a.id,
+                relationship_type_id: type.id
+              })
+              |> Repo.insert!()
+
+              task
+            end)
+
+          Task.await(task, 10_000).status
+        end)
+
+      assert put_status == 204
+    end
+  end
 end

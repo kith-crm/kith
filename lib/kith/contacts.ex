@@ -1309,14 +1309,16 @@ defmodule Kith.Contacts do
   end
 
   @doc """
-  Re-reads `contact` with a `FOR UPDATE` row lock, whatever its state (trashed
-  or archived included), or nil if it no longer exists. Call inside a
-  transaction.
+  Re-reads `contact` with a `FOR NO KEY UPDATE` row lock, whatever its state
+  (trashed or archived included), or nil if it no longer exists. Call inside a
+  transaction. Not `FOR UPDATE`: that conflicts with the `FOR KEY SHARE` lock a
+  foreign-key check takes when another writer inserts a row referencing this
+  contact (e.g. a relationship), which can deadlock two PUTs (CDV-33).
   """
   def lock_contact(%Contact{id: id}) do
     Contact
     |> where([c], c.id == ^id)
-    |> lock("FOR UPDATE")
+    |> lock("FOR NO KEY UPDATE")
     |> Repo.one()
   end
 
