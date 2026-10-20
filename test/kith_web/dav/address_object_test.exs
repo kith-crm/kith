@@ -206,14 +206,14 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert conn.status == 201
     end
 
-    test "response MUST include ETag header on creation (RFC 6352 §5.1)", context do
+    test "reserialized creation omits ETag (RFC 6352 §6.3.2.3)", context do
       vcard = build_vcard("New", "Contact")
 
       conn =
         authed_dav(context, "PUT", "/dav/addressbooks/default/new-999999.vcf", vcard)
 
       assert conn.status == 201
-      assert get_resp_header(conn, "etag") != []
+      assert get_resp_header(conn, "etag") == []
     end
 
     test "created resource MUST be retrievable via GET", context do
@@ -267,14 +267,14 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert conn.status == 204
     end
 
-    test "response MUST include updated ETag header (RFC 6352 §5.1)",
+    test "reserialized update omits ETag (RFC 6352 §6.3.2.3)",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id)
       vcard = build_vcard("Updated", "Contact")
 
       conn = authed_dav(context, "PUT", contact_path(contact), vcard)
 
-      assert get_resp_header(conn, "etag") != []
+      assert get_resp_header(conn, "etag") == []
     end
 
     test "updated properties MUST be reflected in subsequent GET",
@@ -310,7 +310,8 @@ defmodule KithWeb.DAV.AddressObjectTest do
       Process.sleep(1000)
       vcard = build_vcard("Updated", "Name")
       conn2 = authed_dav(context, "PUT", contact_path(contact), vcard)
-      [etag_after] = get_resp_header(conn2, "etag")
+      assert conn2.status == 204
+      [etag_after] = authed_dav(context, "GET", contact_path(contact)) |> get_resp_header("etag")
 
       assert etag_before != etag_after
     end
@@ -1202,12 +1203,12 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       put1 = authed_dav(context, "PUT", href, build_vcard("Ada", "Uuid", uid: uuid))
       assert put1.status == 201
-      [etag] = get_resp_header(put1, "etag")
+      assert get_resp_header(put1, "etag") == []
 
       get = authed_dav(context, "GET", href)
       assert get.status == 200
       assert get.resp_body =~ "UID:#{uuid}\r\n"
-      assert get_resp_header(get, "etag") == [etag]
+      assert [_] = get_resp_header(get, "etag")
 
       listing =
         context
@@ -1358,19 +1359,33 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  test "CDV-57: a reserialized PUT never returns a strong validator", context do
+    body = build_vcard("Reserialized", "Probe")
+    href = "/dav/addressbooks/default/cdv57.vcf"
+    put = authed_dav(context, "PUT", href, body)
+    get = authed_dav(context, "GET", href)
+    assert get.resp_body != body
+    assert get_resp_header(put, "etag") == []
+    assert [_] = get_resp_header(get, "etag")
+  end
+
   describe "CDV-17: same-second ETags (R4)" do
     test "CDV-17: a create and two edits inside one second give three distinct ETags",
          context do
       href = "/dav/addressbooks/default/same-second.vcf"
-      put = fn vcard -> authed_dav(context, "PUT", href, vcard) end
 
-      c = put.(build_vcard("Same", "Second", phone: "+15550000001"))
-      e1 = put.(build_vcard("Same", "Edited", phone: "+15550000001"))
+      put = fn vcard ->
+        response = authed_dav(context, "PUT", href, vcard)
+        {response, authed_dav(context, "GET", href)}
+      end
+
+      {c, gc} = put.(build_vcard("Same", "Second", phone: "+15550000001"))
+      {e1, ge1} = put.(build_vcard("Same", "Edited", phone: "+15550000001"))
       # Only a child (TEL) changes here, no scalar field.
-      e2 = put.(build_vcard("Same", "Edited", phone: "+15550000002"))
+      {e2, ge2} = put.(build_vcard("Same", "Edited", phone: "+15550000002"))
       assert [c.status, e1.status, e2.status] == [201, 204, 204]
 
-      etags = Enum.flat_map([c, e1, e2], &get_resp_header(&1, "etag"))
+      etags = Enum.flat_map([gc, ge1, ge2], &get_resp_header(&1, "etag"))
       assert length(Enum.uniq(etags)) == 3
       assert get_resp_header(authed_dav(context, "GET", href), "etag") == [List.last(etags)]
     end

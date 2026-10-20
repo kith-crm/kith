@@ -125,12 +125,12 @@ test.describe("03 crud: kith-named resource", () => {
     href = `${BOOK}kith-contact-${await issuedForeignId(request)}.vcf`;
     const res = await put(request, href, vcard({ fn, email: "crud1@example.com" }), { "If-None-Match": "*" });
     expect(res.status, res.body).toBe(201);
-    expect(res.headers["etag"]).toMatch(STRONG_ETAG);
-    etag = res.headers["etag"];
+    expect(res.headers["etag"]).toBeUndefined();
 
     const g = await get(request, href);
     expect(g.status, g.body).toBe(200);
-    expect(g.headers["etag"]).toBe(etag);
+    etag = g.headers["etag"];
+    expect(etag).toMatch(STRONG_ETAG);
     expect(g.headers["content-type"]).toBe("text/vcard; charset=utf-8");
     expect(g.body).toContain(`FN:${fn}`);
   });
@@ -158,13 +158,12 @@ test.describe("03 crud: kith-named resource", () => {
       "If-Match": etag,
     });
     expect([200, 201, 204], res.body).toContain(res.status);
-    expect(res.headers["etag"]).toMatch(STRONG_ETAG);
-    expect(res.headers["etag"]).not.toBe(etag);
+    expect(res.headers["etag"]).toBeUndefined();
 
     const g = await get(request, href);
     expect(g.body).toContain(`FN:${fn} Edited`);
-    expect(g.headers["etag"]).toBe(res.headers["etag"]);
-    etag = res.headers["etag"];
+    expect(g.headers["etag"]).toMatch(STRONG_ETAG);
+    etag = g.headers["etag"];
   });
 
   test("K1: PUT on an existing href with If-None-Match: * is 412", async ({ request }) => {
@@ -198,7 +197,7 @@ test.describe("03 crud: kith-named resource", () => {
   test("K5: If-Match lists match any strong tag; W/ weak tags never match", async ({ request }) => {
     const list = await put(request, href, vcard({ fn: `${fn} K5` }), { "If-Match": `"a", ${etag}` });
     expect([200, 201, 204], list.body).toContain(list.status);
-    etag = list.headers["etag"];
+    etag = (await get(request, href)).headers["etag"];
 
     const weak = await put(request, href, vcard({ fn: `${fn} K5 weak` }), { "If-Match": `W/${etag}` });
     expect(weak.status).toBe(412);
@@ -212,13 +211,16 @@ test.describe("03 crud: kith-named resource", () => {
     const h = `${BOOK}${runPrefix()}-k6-${randomUUID()}.vcf`;
     await atSecondStart();
     const c = await put(request, h, vcard({ fn: `${fn} K6`, tel: "+15550000001" }));
+    const gc = await get(request, h);
     const e1 = await put(request, h, vcard({ fn: `${fn} K6 one`, tel: "+15550000001" }));
+    const ge1 = await get(request, h);
     // Edit 2 changes only a child (TEL), not a scalar field.
     const e2 = await put(request, h, vcard({ fn: `${fn} K6 one`, tel: "+15550000002" }));
     expect([c.status, e1.status, e2.status]).toEqual([201, 204, 204]);
-    const tags = [c.headers["etag"], e1.headers["etag"], e2.headers["etag"]];
+    const ge2 = await get(request, h);
+    const tags = [gc.headers["etag"], ge1.headers["etag"], ge2.headers["etag"]];
     expect(new Set(tags).size, tags.join(" ")).toBe(3);
-    expect((await get(request, h)).headers["etag"]).toBe(e2.headers["etag"]);
+    expect((await get(request, h)).headers["etag"]).toBe(ge2.headers["etag"]);
     await dav(request, "DELETE", h);
   });
 
@@ -239,12 +241,12 @@ test.describe("03 crud: client-named resource (R2)", () => {
   test("C3: PUT <uuid>.vcf is served at that href, keeps its UID and is listed", async ({ request }) => {
     const res = await put(request, href, vcard({ fn, uid: uuid }), { "If-None-Match": "*" });
     expect(res.status, res.body).toBe(201);
-    expect(res.headers["etag"]).toMatch(STRONG_ETAG);
+    expect(res.headers["etag"]).toBeUndefined();
 
     const g = await get(request, href);
     expect(g.status, g.body).toBe(200);
     expect(g.body).toContain(`UID:${uuid}\r\n`);
-    expect(g.headers["etag"]).toBe(res.headers["etag"]);
+    expect(g.headers["etag"]).toMatch(STRONG_ETAG);
     expect(await members(request)).toContain(href);
   });
 

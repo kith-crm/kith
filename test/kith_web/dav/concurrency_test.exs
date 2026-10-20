@@ -35,6 +35,12 @@ defmodule KithWeb.DAV.ConcurrencyTest do
     end)
   end
 
+  defp dav_get(user, href) do
+    Sandbox.unboxed_run(Repo, fn ->
+      build_conn() |> basic_auth(user.email, dav_password()) |> dav_request("GET", href)
+    end)
+  end
+
   defp card(tel), do: build_vcard("Race", "Card", phone: tel)
 
   defp tels(account_id, href) do
@@ -51,7 +57,7 @@ defmodule KithWeb.DAV.ConcurrencyTest do
       href = @book <> "lock.vcf"
       created = dav_put(user, href, card("+15550000000"))
       assert created.status == 201
-      [etag] = get_resp_header(created, "etag")
+      [etag] = dav_get(user, href) |> get_resp_header("etag")
 
       # Another writer changes the contact and holds its row lock while the
       # PUT (carrying the now-stale ETag) runs; it commits half a second later.
@@ -89,8 +95,8 @@ defmodule KithWeb.DAV.ConcurrencyTest do
     test "CDV-24: two concurrent PUTs with the same If-Match: one 2xx, one 412, children of one body",
          %{user: user, account_id: account_id} do
       href = @book <> "pair.vcf"
-      created = dav_put(user, href, card("+15550000000"))
-      [etag] = get_resp_header(created, "etag")
+      assert dav_put(user, href, card("+15550000000")).status == 201
+      [etag] = dav_get(user, href) |> get_resp_header("etag")
 
       results =
         ["+15551111111", "+15552222222"]

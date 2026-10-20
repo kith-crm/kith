@@ -264,7 +264,7 @@ defmodule KithWeb.DAV.AccessControlTest do
         |> dav_request("PUT", resource_path, updated)
 
       assert conn4.status == 204
-      [etag_v2] = get_resp_header(conn4, "etag")
+      [etag_v2] = authed_dav(context, "GET", resource_path) |> get_resp_header("etag")
       assert etag_v1 != etag_v2
 
       # 5. GET to verify update

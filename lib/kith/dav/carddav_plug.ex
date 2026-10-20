@@ -794,11 +794,9 @@ defmodule Kith.DAV.CardDAVPlug do
          do: {:ok, Contacts.touch_contact!(updated)}
   end
 
-  defp send_put_response(conn, status, contact) do
-    conn
-    |> put_resp_header("etag", "\"#{compute_etag(contact)}\"")
-    |> send_resp(status, "")
-  end
+  # RFC 6352 §6.3.2.3: this server reserializes PUT bodies; clients must GET
+  # the stored representation before using its strong validator.
+  defp send_put_response(conn, status, _contact), do: send_resp(conn, status, "")
 
   # ── DELETE ─────────────────────────────────────────────────────────────
 
