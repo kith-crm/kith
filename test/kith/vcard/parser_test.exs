@@ -474,4 +474,25 @@ defmodule Kith.VCard.ParserTest do
       assert hd(parsed.addresses).city == "Portland"
     end
   end
+
+  test "CDV-74: escaping is decoded once and escaped structure delimiters stay in components" do
+    assert Parser.unescape(~S(literal \\n)) == ~S(literal \n)
+
+    body =
+      "BEGIN:VCARD\nVERSION:4.0\n" <>
+        ~S(N:Family\;Last;Given\;First;Middle\,Name;Dr;Jr) <>
+        "\n" <>
+        ~S(ADR;TYPE=HOME:;Suite\;2;Street\;3;City\,Town;Region;Zip;Country) <>
+        "\n" <>
+        ~S(CATEGORIES:Ends\\,Next) <> "\nEND:VCARD\n"
+
+    assert {:ok, [parsed]} = Parser.parse(body)
+    assert parsed.last_name == "Family;Last"
+    assert parsed.first_name == "Given;First"
+    assert parsed.middle_name == "Middle,Name"
+    assert hd(parsed.addresses).line2 == "Suite;2"
+    assert hd(parsed.addresses).line1 == "Street;3"
+    assert hd(parsed.addresses).country == "Country"
+    assert parsed.categories == ["Ends\\", "Next"]
+  end
 end

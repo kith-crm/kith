@@ -114,7 +114,7 @@ defmodule Kith.VCard.Parser do
     do: %{acc | display_name: unescape(value)}
 
   defp apply_property(acc, "N", _params, value) do
-    parts = String.split(value, ";", parts: 5)
+    parts = split_components(value, ";") |> Enum.take(5)
     last = Enum.at(parts, 0) |> unescape_or_nil()
     first = Enum.at(parts, 1) |> unescape_or_nil()
     middle = Enum.at(parts, 2) |> unescape_or_nil()
@@ -135,7 +135,7 @@ defmodule Kith.VCard.Parser do
   end
 
   defp apply_property(acc, "ORG", _params, value) do
-    company = value |> String.split(";") |> List.first() |> unescape()
+    company = value |> split_components(";") |> List.first() |> unescape()
     %{acc | company: company}
   end
 
@@ -248,7 +248,7 @@ defmodule Kith.VCard.Parser do
   # ── Address Parsing ────────────────────────────────────────────────────
 
   defp parse_address(value, label) do
-    parts = String.split(value, ";", parts: 7)
+    parts = split_components(value, ";") |> Enum.take(7)
 
     %{
       label: label,
@@ -306,11 +306,26 @@ defmodule Kith.VCard.Parser do
   # ── Helpers ────────────────────────────────────────────────────────────
 
   @doc false
-  def split_components(str, delimiter), do: split_unescaped(str, delimiter)
-
-  defp split_unescaped(str, delimiter) do
-    Regex.split(~r/(?<!\\)#{Regex.escape(delimiter)}/, str)
+  def split_components(value, <<delimiter>>) do
+    split_components(value, delimiter, [], [])
   end
+
+  defp split_components(<<>>, _delimiter, current, parts),
+    do: Enum.reverse([current |> Enum.reverse() |> IO.iodata_to_binary() | parts])
+
+  defp split_components(<<92, escaped, rest::binary>>, delimiter, current, parts),
+    do: split_components(rest, delimiter, [<<92, escaped>> | current], parts)
+
+  defp split_components(<<delimiter, rest::binary>>, delimiter, current, parts),
+    do:
+      split_components(rest, delimiter, [], [
+        current |> Enum.reverse() |> IO.iodata_to_binary() | parts
+      ])
+
+  defp split_components(<<byte, rest::binary>>, delimiter, current, parts),
+    do: split_components(rest, delimiter, [<<byte>> | current], parts)
+
+  defp split_unescaped(value, delimiter), do: split_components(value, delimiter)
 
   defp extract_type(params) do
     case Map.get(params, "TYPE") do
@@ -368,12 +383,9 @@ defmodule Kith.VCard.Parser do
   def unescape(nil), do: nil
 
   def unescape(value) do
-    value
-    |> String.replace("\\n", "\n")
-    |> String.replace("\\N", "\n")
-    |> String.replace("\\;", ";")
-    |> String.replace("\\,", ",")
-    |> String.replace("\\\\", "\\")
+    Regex.replace(~r/\\([\\nN;,])/, value, fn _, escaped ->
+      if escaped in ["n", "N"], do: "\n", else: escaped
+    end)
   end
 
   defp unescape_or_nil(nil), do: nil

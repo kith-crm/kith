@@ -180,6 +180,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | CDV-73 | medium | Yearless BDAY is dropped although Kith has a year-unknown flag | PUT v40-full `BDAY:--1210` → GET 200 with no BDAY; live spec RED `cdv73-live-red.txt`; ExUnit RED 14/1 (birthdate nil instead of leap-day sentinel). Parse month/day using 2000 plus existing flag, preserve through both versions | fixed |
 
+| CDV-74 | medium | Escapes are decoded repeatedly and escaped N/ADR separators split components; category separators after an escaped backslash are missed | Live PUT 201 `N:Family\;Last;Given\;First;…`, ADR Suite\;2 → GET 200 mangled name and shifted address; literal backslash-n becomes backslash + newline in native text. ExUnit RED 33/1; byte scanner splits only unescaped delimiters and single-pass unescape preserves literal sequences | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.
