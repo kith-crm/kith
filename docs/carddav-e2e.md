@@ -20,7 +20,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | 00-harness | H1-H3 | 3 | 0 | |
 | 02-auth | A1-A5, M1-M3, RL1-RL3 | 10 | 0 | A4 is `test.fixme` (CDV-11, product decision) |
 | 03-crud | C1-C5, C1b, K1-K6, E1-E7 | 20 | 0 | 19 cases in 20 tests (E6 is split in two); fix round 1 adds CDV-24..31 (ExUnit-only cases: concurrency, archived, UID conflict) |
-| 04-reports | R1-R4, Q1-Q2, S1-S8 | 14 | 0 | fix round adds CDV-39..50; CDV-51 open (Task 6) |
+| 04-reports | R1-R4, Q1-Q2, S1-S8 | 14 | 0 | CDV-39..50; review fix round CDV-52..55; CDV-51 open (Task 6) |
 
 ### 01-discovery
 
@@ -84,7 +84,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | Case | Result |
 |---|---|
-| R1 | fixed CDV-40 (also CDV-39: REPORT body cap) |
+| R1 | fixed CDV-40 (also CDV-39: REPORT body cap; CDV-55: REPORT on members and other collections) |
 | R2 | fixed CDV-40 (prefixes), CDV-41 (absolute / percent-encoded hrefs) |
 | R3 | fixed CDV-42 |
 | R4 | pass |
@@ -93,10 +93,10 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | S1 | pass |
 | S2 | fixed CDV-46 |
 | S3 | fixed CDV-45, CDV-46 |
-| S4 | fixed CDV-46 |
+| S4 | fixed CDV-46 (mechanism now CDV-53/CDV-54) |
 | S5 | fixed CDV-48 (403 `valid-sync-token`) |
-| S6 | fixed CDV-47 |
-| S7 | fixed CDV-46 (token), CDV-49 (ctag) |
+| S6 | fixed CDV-47, CDV-52 (crafted snapshots) |
+| S7 | fixed CDV-46 (token), CDV-49, CDV-53 (ctag, commit order) |
 | S8 | fixed CDV-50 (`infinite` handled as 1; over the limit -> 507) |
 
 ## Bug log
