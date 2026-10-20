@@ -225,6 +225,8 @@ Browser environment concern: `/assets/css/app.css` returns 404; the same missing
 
 | CDV-85 | low | Unchanged category associations reorder the card after PUT-back | Final live V5 repeat changed CATEGORIES:Computing,Friends\, close to Friends\, close,Computing. ExUnit RED30/1 deterministically reverses native association order. Metadata now compares category sets while reusing the client property order; real native tag edits still replace it | fixed |
 
+| CDV-86 | critical | Apple social-profile URLs multiply on every PUT-back | Fix round 1. `PUT …-social.vcf` (3.0) with `item3.X-SOCIALPROFILE;type=twitter;x-user=alice:https://twitter.com/alice` + `item3.X-ABLabel:Twitter` → 201; `GET` → 200 serves both `URL;TYPE=TWITTER:https://twitter.com/alice` and the raw `item3.X-SOCIALPROFILE…` line; each identical PUT-back → 204 adds one native URL field (1 → 2 → 3 → 4). Root cause: the parser consumes X-SOCIALPROFILE/X-TWITTER/X-INSTAGRAM into native URLs but metadata did not treat those names as mapped, so it also re-emitted the raw line. ExUnit `CDV-86` RED 1/1. Social names are now mapped onto native URL lines (the retained line decorates its URL; never emitted raw). Live 3 PUT-backs stay 1 field, `apple-ios` fixture carries the Apple line | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.

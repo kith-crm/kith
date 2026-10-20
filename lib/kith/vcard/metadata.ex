@@ -5,6 +5,9 @@ defmodule Kith.VCard.Metadata do
 
   @mapped ~w(BEGIN END VERSION UID REV PHOTO FN N NICKNAME BDAY X-KITH-BDAY ORG TITLE NOTE GENDER X-GENDER CATEGORIES EMAIL TEL ADR URL)
 
+  # Social profiles are parsed into native URL fields (CDV-86).
+  @social %{"X-SOCIALPROFILE" => nil, "X-TWITTER" => "twitter", "X-INSTAGRAM" => "instagram"}
+
   @doc "Overlays retained metadata only while the corresponding native value still matches."
   def merge(lines, contact, version) do
     properties = Map.get(contact, :dav_vcard, %{}) |> Map.get("properties", [])
@@ -13,7 +16,7 @@ defmodule Kith.VCard.Metadata do
 
     extras =
       Enum.reject(properties, fn property ->
-        property["name"] in @mapped or
+        property["name"] in @mapped or Map.has_key?(@social, property["name"]) or
           MapSet.member?(names_and_values, identity(render(property)))
       end)
       |> Enum.map(&render/1)
@@ -69,12 +72,19 @@ defmodule Kith.VCard.Metadata do
 
     match =
       Enum.find(properties, fn property ->
-        property["name"] == name and comparable(name, property["value"]) == comparable(name, val) and
-          type(render(property)) == type(line)
+        native_name(property["name"]) == name and
+          comparable(name, property["value"]) == comparable(name, val) and
+          property_type(property) == type(line)
       end)
 
     if match, do: render(match), else: line
   end
+
+  defp native_name(name) when is_map_key(@social, name), do: "URL"
+  defp native_name(name), do: name
+
+  defp property_type(property),
+    do: type(render(property)) || Map.get(@social, property["name"])
 
   defp type(line) do
     head = line |> String.split(":", parts: 2) |> hd()

@@ -16,7 +16,7 @@ const fixtureUids: Record<string, string> = { "v30-full": `${prefix}-v30`, "v40-
 const fixtures: Record<string, string[]> = {
   "v30-full": ["NICKNAME:Enchantress", "ORG:Analytical Engines;Research", "TITLE:Mathematician", "BDAY:1815-12-10", "EMAIL;TYPE=HOME:ada@home.example.test", "EMAIL;TYPE=WORK,INTERNET:ada@work.example.test", "TEL;TYPE=WORK,VOICE:+15550002222", "ADR;TYPE=HOME:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK", "URL;TYPE=WORK:https://ada.example.test/work", "IMPP;TYPE=HOME:xmpp:ada@example.test", "CATEGORIES:Computing,Friends\\, close", "X-CUSTOM:Keep me"],
   "v40-full": ["NICKNAME:Enchantress", "ORG:Analytical Engines;Research", "TITLE:Mathematician", "EMAIL;TYPE=HOME:ada@home.example.test", "EMAIL;TYPE=WORK,INTERNET:ada@work.example.test", "TEL;TYPE=WORK,VOICE:+15550002222", "ADR;TYPE=HOME:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK", "URL;TYPE=WORK:https://ada.example.test/work", "IMPP;TYPE=HOME:xmpp:ada@example.test", "CATEGORIES:Computing,Friends\\, close", "X-CUSTOM:Keep me"],
-  "apple-ios": ["item1.EMAIL;TYPE=INTERNET:alice@icloud.example.test", "item1.X-ABLabel:_$!<Home>!$_", "item2.TEL;TYPE=CELL:+15550003333", "item2.X-ABLabel:Mobile", "PRODID:-//Apple Inc.//iPhone OS 18.0//EN", `X-ABUID:${prefix}-apple-abuid`],
+  "apple-ios": ["item1.EMAIL;TYPE=INTERNET:alice@icloud.example.test", "item1.X-ABLabel:_$!<Home>!$_", "item2.TEL;TYPE=CELL:+15550003333", "item2.X-ABLabel:Mobile", "PRODID:-//Apple Inc.//iPhone OS 18.0//EN", `X-ABUID:${prefix}-apple-abuid`, `item3.X-SOCIALPROFILE;type=twitter;x-user=${prefix}-alice:https://twitter.com/${prefix}-alice`, "item3.X-ABLabel:Twitter"],
   "davx5-android": ["PRODID:-//bitfire web engineering//DAVx5//EN", "X-PHONETIC-FIRST-NAME:Amira", "IMPP:sip:amira@example.test"],
   "thunderbird": ["PRODID:-//Mozilla.org/NONSGML Mozilla Addressbook//EN", "URL:https://theo.example.test", "X-MOZILLA-HTML:TRUE"],
   "unicode-folding": [`N:王;${prefix} 小明😀 مرحبا;שלום;;`, "漢字😀مرحباשלום".repeat(20)],
@@ -117,6 +117,19 @@ for (const [name, values] of Object.entries(fixtures)) {
     }
   });
 }
+test("CDV-86: Apple social profile stays one field over three PUT-backs", async ({ request }) => {
+  const href = `${BOOK}${prefix}-apple-ios.vcf`;
+  const id = await contactId(request, prefix + " Alice");
+  const first = await dav(request, "GET", href);
+  const count = (await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data.length;
+  for (let i = 0; i < 3; i++) {
+    expect((await put(request, href, (await dav(request, "GET", href)).body)).status).toBe(204);
+    const card = (await dav(request, "GET", href)).body;
+    expect(withoutRev(card)).toBe(withoutRev(first.body));
+    expect(unfold(card).match(/twitter\.com/g)).toHaveLength(1);
+    expect((await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data).toHaveLength(count);
+  }
+});
 test("V3: unicode survives multiget and the web contact page", async ({ request, page }) => {
   const href = `${BOOK}${prefix}-unicode-folding.vcf`;
   const card = await reportCard(request, href);

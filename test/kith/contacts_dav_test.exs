@@ -329,6 +329,43 @@ defmodule Kith.ContactsDAVTest do
     assert [%{value: "+15550004444"}] = Contacts.list_contact_fields(contact.id)
   end
 
+  test "CDV-86: Apple social profiles stay one field across repeated PUT-backs", %{
+    contact: contact,
+    account_id: aid
+  } do
+    body =
+      "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Social;Sam;;;\r\nFN:Sam Social\r\nitem3.X-SOCIALPROFILE;type=twitter;x-user=sam:https://twitter.com/sam\r\nitem3.X-ABLabel:Twitter\r\nX-TWITTER:https://twitter.com/sam2\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, body)
+    first = dav_get(contact, :v30)
+
+    for _ <- 1..3 do
+      contact = dav_put(contact, aid, dav_get(contact, :v30))
+      assert dav_get(contact, :v30) == first
+      assert length(Contacts.list_contact_fields(contact.id)) == 2
+    end
+
+    assert first =~ "item3.X-SOCIALPROFILE;type=twitter;x-user=sam:https://twitter.com/sam\r\n"
+    assert first =~ "item3.X-ABLabel:Twitter\r\n"
+    assert first =~ "X-TWITTER:https://twitter.com/sam2\r\n"
+    refute first =~ "URL"
+  end
+
+  defp dav_put(contact, aid, body) do
+    {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
+    {:ok, contact} = Contacts.update_contact(contact, attrs)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    Kith.Repo.get!(Contacts.Contact, contact.id)
+  end
+
+  defp dav_get(contact, version) do
+    contact = Kith.Repo.get!(Contacts.Contact, contact.id)
+
+    contact
+    |> Kith.DAV.VCardAdapter.contact_to_vcard(version: version)
+    |> String.replace(~r/^REV:.*\r\n/m, "")
+  end
+
   describe "touch_contact!/1" do
     test "bumps updated_at", %{contact: contact} do
       old_updated_at = contact.updated_at
