@@ -805,6 +805,23 @@ defmodule KithWeb.DAV.PropfindTest do
       refute not_found =~ "getetag"
     end
 
+    test "CDV-07: PROPFIND/PROPPATCH bodies over max-resource-size return 413", context do
+      padding = String.duplicate("x", 1_048_577)
+      body = ~s(<d:propfind xmlns:d="DAV:"><!--#{padding}--><d:allprop/></d:propfind>)
+
+      for path <- [
+            "/dav/",
+            "/dav/principals/",
+            "/dav/addressbooks/",
+            "/dav/addressbooks/default/"
+          ] do
+        assert authed_dav(context, "PROPFIND", path, body).status == 413, path
+      end
+
+      update = ~s(<d:propertyupdate xmlns:d="DAV:"><!--#{padding}--></d:propertyupdate>)
+      assert authed_dav(context, "PROPPATCH", "/dav/addressbooks/default/", update).status == 413
+    end
+
     test "CDV-06: PROPPATCH echoes every prop with its own namespace", context do
       body = """
       <d:propertyupdate xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">

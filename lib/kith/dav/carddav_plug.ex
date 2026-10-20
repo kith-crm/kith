@@ -49,6 +49,9 @@ defmodule Kith.DAV.CardDAVPlug do
     address_data: "<card:address-data/>"
   }
 
+  # RFC 6352 §6.2.1, advertised on the address book
+  @max_resource_size 1_048_576
+
   @impl Plug
   def init(opts), do: opts
 
@@ -126,10 +129,20 @@ defmodule Kith.DAV.CardDAVPlug do
   # Parses the PROPFIND body and hands the request type to `handler`.
   # A body that is not well-formed XML is a 400 (RFC 4918 §8.7).
   defp propfind(conn, handler) do
-    {:ok, body, conn} = read_body(conn)
+    with_xml_body(conn, fn conn, body ->
+      case XMLParser.parse_propfind(body) do
+        {:ok, request_type} -> handler.(conn, request_type)
+        {:error, _} -> send_resp(conn, 400, "Bad Request")
+      end
+    end)
+  end
 
-    case XMLParser.parse_propfind(body) do
-      {:ok, request_type} -> handler.(conn, request_type)
+  # Reads a request body of at most the advertised max-resource-size;
+  # anything larger is a 413 (R8), never a MatchError.
+  defp with_xml_body(conn, fun) do
+    case read_body(conn, length: @max_resource_size) do
+      {:ok, body, conn} -> fun.(conn, body)
+      {:more, _partial, conn} -> send_resp(conn, 413, "Request Entity Too Large")
       {:error, _} -> send_resp(conn, 400, "Bad Request")
     end
   end
@@ -547,9 +560,9 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── PROPPATCH stub (RFC 4918 §8.2) ────────────────────────────────────
 
-  defp handle_proppatch(conn) do
-    {:ok, body, conn} = read_body(conn)
+  defp handle_proppatch(conn), do: with_xml_body(conn, &proppatch/2)
 
+  defp proppatch(conn, body) do
     case XMLParser.parse_proppatch(body) do
       {:ok, props} ->
         # All properties are live (server-managed) — cannot be modified (RFC 4918 §9.2)
@@ -652,7 +665,7 @@ defmodule Kith.DAV.CardDAVPlug do
       # RFC 6578 §4: a collection supporting sync-collection exposes DAV:sync-token
       sync_token: XMLBuilder.sync_token(generate_sync_token()),
       supported_address_data: XMLBuilder.supported_address_data(),
-      max_resource_size: XMLBuilder.max_resource_size(1_048_576),
+      max_resource_size: XMLBuilder.max_resource_size(@max_resource_size),
       supported_collation_set: XMLBuilder.supported_collation_set(),
       owner: XMLBuilder.owner("/dav/principals/"),
       current_user_privilege_set: XMLBuilder.current_user_privilege_set(),
