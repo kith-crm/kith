@@ -13,13 +13,19 @@ const withoutRev = (s: string) => s.replace(/^REV:.*\r\n/gm, "");
 const created: string[] = [];
 let bearer = "";
 const fixtureUids: Record<string, string> = { "v30-full": `${prefix}-v30`, "v40-full": `${prefix}-v40`, "apple-ios": `${prefix}-apple`, "davx5-android": `${prefix}-davx5`, "thunderbird": `${prefix}-thunderbird`, "unicode-folding": `${prefix}-unicode` };
-const fixtures: Record<string, string[]> = {
-  "v30-full": ["NICKNAME:Enchantress", "ORG:Analytical Engines;Research", "TITLE:Mathematician", "BDAY:1815-12-10", "EMAIL;TYPE=HOME:ada@home.example.test", "EMAIL;TYPE=WORK,INTERNET:ada@work.example.test", "TEL;TYPE=WORK,VOICE:+15550002222", "ADR;TYPE=HOME:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK", "URL;TYPE=WORK:https://ada.example.test/work", "IMPP;TYPE=HOME:xmpp:ada@example.test", "CATEGORIES:Computing,Friends\\, close", "X-CUSTOM:Keep me"],
-  "v40-full": ["NICKNAME:Enchantress", "ORG:Analytical Engines;Research", "TITLE:Mathematician", "EMAIL;TYPE=HOME:ada@home.example.test", "EMAIL;TYPE=WORK,INTERNET:ada@work.example.test", "TEL;TYPE=WORK,VOICE:+15550002222", "ADR;TYPE=HOME:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK", "URL;TYPE=WORK:https://ada.example.test/work", "IMPP;TYPE=HOME:xmpp:ada@example.test", "CATEGORIES:Computing,Friends\\, close", "X-CUSTOM:Keep me"],
-  "apple-ios": ["item1.EMAIL;TYPE=INTERNET:alice@icloud.example.test", "item1.X-ABLabel:_$!<Home>!$_", "item2.TEL;TYPE=CELL:+15550003333", "item2.X-ABLabel:Mobile", "PRODID:-//Apple Inc.//iPhone OS 18.0//EN", `X-ABUID:${prefix}-apple-abuid`, `item3.X-SOCIALPROFILE;type=twitter;x-user=${prefix}-alice:https://twitter.com/${prefix}-alice`, "item3.X-ABLabel:Twitter"],
-  "davx5-android": ["PRODID:-//bitfire web engineering//DAVx5//EN", "X-PHONETIC-FIRST-NAME:Amira", "IMPP:sip:amira@example.test"],
-  "thunderbird": ["PRODID:-//Mozilla.org/NONSGML Mozilla Addressbook//EN", "URL:https://theo.example.test", "X-MOZILLA-HTML:TRUE"],
-  "unicode-folding": [`N:王;${prefix} 小明😀 مرحبا;שלום;;`, "漢字😀مرحباשלום".repeat(20)],
+// Per-fixture values table (V1): every property each fixture carries, as served
+// in 3.0 and 4.0. A pair is [3.0, 4.0]; null means that version has no syntax for
+// it and drops it (CDV-92). Name, note, photo, birthday, gender and RELATED are
+// checked by the -full block below.
+type Expected = string | [string | null, string | null];
+const fullCommon: Expected[] = ["NICKNAME:Enchantress", "ORG:Analytical Engines;Research", "TITLE:Mathematician", "EMAIL;TYPE=HOME:ada@home.example.test", "EMAIL;TYPE=WORK,INTERNET:ada@work.example.test", "TEL;TYPE=CELL:+15550001111", "TEL;TYPE=WORK,VOICE:+15550002222", "URL;TYPE=HOME:https://ada.example.test/home", "URL;TYPE=WORK:https://ada.example.test/work", "IMPP;TYPE=HOME:xmpp:ada@example.test", "CATEGORIES:Computing,Friends\\, close", "X-CUSTOM:Keep me", ["KEY;ENCODING=b;TYPE=PGP:AAEC", "KEY:data:application/pgp-keys;base64,AAEC"]];
+const fixtures: Record<string, Expected[]> = {
+  "v30-full": [...fullCommon, "BDAY:1815-12-10", ["ADR;TYPE=HOME:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK\r\n", "ADR;TYPE=HOME;LABEL=PO 42\\nLondon:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK\r\n"], ["LABEL;TYPE=HOME:PO 42\\nLondon", null], "ADR;TYPE=WORK:;Floor 3;20 Office St;Oxford;Oxon;OX1;UK\r\n", ["AGENT:BEGIN:VCARD\\nFN:Agent Smith\\nEND:VCARD", null], ["X-CHARSET;CHARSET=utf-8:Charset value", "X-CHARSET:Charset value"]],
+  "v40-full": [...fullCommon, "ADR;TYPE=HOME:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK\r\n", ["ADR;TYPE=WORK:;Floor 3;20 Office St;Oxford;Oxon;OX1;UK\r\nLABEL;TYPE=WORK:Floor 3\\, 20 Office St\\nOxford\r\n", 'ADR;TYPE=WORK;LABEL="Floor 3, 20 Office St\\nOxford":;Floor 3;20 Office St;Oxford;Oxon;OX1;UK\r\n'], ["EMAIL;TYPE=WORK:pid@example.test", "EMAIL;PID=1.1;TYPE=WORK:pid@example.test"], [null, "KIND:individual"], [null, "ANNIVERSARY:20100601"]],
+  "apple-ios": [`N:Apple;${prefix} Alice;;;`, `FN:${prefix} Alice Apple`, "item1.EMAIL;TYPE=INTERNET:alice@icloud.example.test", "item1.X-ABLabel:_$!<Home>!$_", "item2.TEL;TYPE=CELL:+15550003333", "item2.X-ABLabel:Mobile", "PRODID:-//Apple Inc.//iPhone OS 18.0//EN", `X-ABUID:${prefix}-apple-abuid`, `item3.X-SOCIALPROFILE;type=twitter;x-user=${prefix}-alice:https://twitter.com/${prefix}-alice`, "item3.X-ABLabel:Twitter"],
+  "davx5-android": [`N:Android;${prefix} Amira;;;`, `FN:${prefix} Amira Android`, "PRODID:-//bitfire web engineering//DAVx5//EN", ["EMAIL;TYPE=WORK,PREF:amira@example.test", "EMAIL;TYPE=WORK;PREF=1:amira@example.test"], ["TEL;TYPE=CELL:+15550004444", "TEL;TYPE=CELL;VALUE=uri:tel:+15550004444"], "X-PHONETIC-FIRST-NAME:Amira", "IMPP:sip:amira@example.test"],
+  "thunderbird": [`N:Thunderbird;${prefix} Theo;;;`, `FN:${prefix} Theo Thunderbird`, "PRODID:-//Mozilla.org/NONSGML Mozilla Addressbook//EN", ["EMAIL;TYPE=PREF:theo@example.test", "EMAIL;PREF=1:theo@example.test"], "URL:https://theo.example.test", "X-MOZILLA-HTML:TRUE"],
+  "unicode-folding": [`N:王;${prefix} 小明😀 مرحبا;שלום;;`, `FN:${prefix} 小明😀 مرحبا שלום 王`, "NOTE:" + "漢字😀مرحباשלום".repeat(20)],
 };
 async function put(request: APIRequestContext, href: string, body: string) {
   return dav(request, "PUT", href, { headers, body });
@@ -33,8 +39,17 @@ function valid(body: string, version: string) {
   }
   expect(unfold(body).match(/^FN:/gm)).toHaveLength(1);
   expect(body.endsWith("END:VCARD\r\n")).toBe(true);
-  if (version === "4.0") expect(body).not.toMatch(/^BDAY:\d{4}-|^REV:\d{4}-|ENCODING=|TYPE=[^;:\r\n]*\bPREF\b|^X-GENDER:/m);
-  else expect(body).not.toMatch(/^GENDER:|^RELATED[;:]|;PREF=|PHOTO:data:|^TEL[^:\r\n]*;VALUE=uri/mi);
+  // No syntax of the other version (CDV-92): 3.0-only properties/params in 4.0 and
+  // 4.0-only properties/params, data: URIs and non-binary VALUE=uri in 3.0.
+  const card = unfold(body);
+  if (version === "4.0") {
+    expect(card).not.toMatch(/^BDAY:\d{4}-|^REV:\d{4}-|ENCODING=|TYPE=[^;:\r\n]*\bPREF\b|^X-GENDER:/m);
+    expect(card).not.toMatch(/^(?:[\w-]+\.)?(?:LABEL|AGENT|NAME|MAILER|CLASS|PROFILE|SORT-STRING)[;:]|^[^:\r\n]*;CHARSET=/mi);
+  } else {
+    expect(card).not.toMatch(/^GENDER:|^RELATED[;:]|;PREF=|PHOTO:data:|^TEL[^:\r\n]*;VALUE=uri/mi);
+    expect(card).not.toMatch(/^(?:[\w-]+\.)?(?:KIND|GENDER|ANNIVERSARY|LANG|MEMBER|CLIENTPIDMAP|XML|RELATED)[;:]|^[^:\r\n]*;(?:PID|ALTID|CALSCALE|SORT-AS|GEO|TZ|MEDIATYPE|INDEX|LEVEL|CC|LABEL)=|^[^:\r\n]*:data:/mi);
+    expect(card).not.toMatch(/^(?!(?:[\w-]+\.)?(?:PHOTO|LOGO|SOUND|AGENT)[;:])[^:\r\n]*;VALUE=uri/mi);
+  }
 }
 async function reportCard(request: APIRequestContext, href: string, sync = false) {
   const body = sync
@@ -89,16 +104,20 @@ for (const [name, values] of Object.entries(fixtures)) {
       expect(res.status()).toBe(201);
     } else expect((await put(request, href, wire)).status).toBe(201);
     created.push(href);
-    for (const version of ["3.0", "4.0"]) {
+    // The fixture's own version first: its PUT-back cannot lose the other version's
+    // syntax before that version is checked.
+    const own = /^VERSION:4\.0/m.test(input) ? "4.0" : "3.0";
+    for (const version of [own, own === "4.0" ? "3.0" : "4.0"]) {
       const g = await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } });
       expect(g.status, g.body).toBe(200); valid(g.body, version);
       const card = unfold(g.body);
       expect(/^UID(?:;[^:]*)?:([^\r]*)/m.exec(card)?.[1]).toBe(fixtureUids[name]);
       for (const value of values) {
-        const expected = version === "4.0" ? value.replace(/^BDAY:(\d{4})-(\d{2})-(\d{2})$/, "BDAY:$1$2$3") : value;
+        const wanted = typeof value === "string" ? value : value[version === "3.0" ? 0 : 1];
+        if (wanted === null) continue;
+        const expected = version === "4.0" ? wanted.replace(/^BDAY:(\d{4})-(\d{2})-(\d{2})$/, "BDAY:$1$2$3") : wanted;
         expect(card, `${name} ${version}: ${expected}`).toContain(expected);
       }
-      if (name === "davx5-android") expect(card).toMatch(/^TEL;TYPE=CELL(?:;VALUE=uri)?:?(?:tel:)?\+15550004444\r\n/m);
       if (name === "v40-full") {
         expect(card).toContain(version === "4.0" ? "BDAY:--1210" : "X-KITH-BDAY:--1210");
         expect(card).toContain(version === "4.0" ? "GENDER:F" : "X-GENDER:Female");

@@ -38,10 +38,176 @@ defmodule Kith.VCard.Metadata do
 
     {body, [ending]} = Enum.split(lines, -1)
 
-    Enum.map(body ++ extras ++ [ending], fn line ->
+    (body ++ extras ++ [ending])
+    |> Enum.flat_map(&version_syntax(&1, version))
+    |> delivery_labels(version)
+    |> Enum.map(fn line ->
       line |> convert(version) |> telephone_value(version) |> declare_identifier_type(version)
     end)
   end
+
+  # ── Version-specific syntax (CDV-92) ────────────────────────────────────
+  # Retained lines are written in the client's version. Syntax the other
+  # version lacks is converted where RFC 6350 defines a mapping (3.0 LABEL ↔
+  # 4.0 ADR LABEL=, ENCODING=b ↔ data: URI) and dropped otherwise.
+
+  @v30_only ~w(AGENT NAME MAILER CLASS PROFILE SORT-STRING)
+  @v40_only ~w(KIND GENDER ANNIVERSARY LANG MEMBER CLIENTPIDMAP XML)
+  @v30_params ~w(CHARSET)
+  @v40_params ~w(PID ALTID CALSCALE SORT-AS GEO TZ MEDIATYPE INDEX LEVEL CC)
+  @v30_uri ~w(PHOTO LOGO SOUND AGENT)
+  @media %{"PGP" => "application/pgp-keys", "X509" => "application/pkix-cert"}
+
+  defp version_syntax(line, version) do
+    {head, value} = Parser.split_line(line)
+    [name | params] = Parser.split_params(head)
+    property = name |> String.split(".") |> List.last() |> String.upcase()
+
+    cond do
+      property in ["PHOTO", "BEGIN", "END", "VERSION"] -> [line]
+      version == :v40 and property in @v30_only -> []
+      version == :v30 and property in @v40_only -> []
+      true -> [rebuild(name, version_params(property, params, value, version))]
+    end
+  end
+
+  defp version_params(property, params, value, :v40) do
+    params = Enum.reject(params, &(param_key(&1) in @v30_params))
+    {encoding, params} = Enum.split_with(params, &(param_key(&1) == "ENCODING"))
+
+    if Enum.any?(encoding, &(param_raw(&1) |> String.upcase() |> Kernel.in(["B", "BASE64"]))) do
+      {types, params} = Enum.split_with(params, &(param_key(&1) == "TYPE"))
+      params = Enum.reject(params, &(param_key(&1) == "VALUE"))
+      type = types |> Enum.map(&param_raw/1) |> List.first()
+      {params, "data:" <> media_type(property, type) <> ";base64," <> value}
+    else
+      {params, value}
+    end
+  end
+
+  defp version_params(property, params, value, :v30) do
+    params = Enum.reject(params, &(param_key(&1) in @v40_params))
+
+    case Regex.run(~r/\Adata:([^;,]+)[^,]*;base64,(.*)\z/s, value) do
+      [_, media, data] when property != "PHOTO" ->
+        params = Enum.reject(params, &(param_key(&1) in ["TYPE", "VALUE"]))
+        {params ++ ["ENCODING=b", "TYPE=" <> media_name(media)], data}
+
+      _ ->
+        uri? = property in @v30_uri or property == "TEL"
+
+        {Enum.reject(
+           params,
+           &(param_key(&1) == "VALUE" and not uri? and
+               String.downcase(param_raw(&1)) == "uri")
+         ), value}
+    end
+  end
+
+  defp media_type(property, nil), do: media_type(property, "octet-stream")
+
+  defp media_type(property, type) do
+    case {property, String.upcase(type)} do
+      {_, type} when is_map_key(@media, type) -> @media[type]
+      {"SOUND", type} -> "audio/" <> String.downcase(type)
+      {_, type} when property in ["LOGO", "PHOTO"] -> "image/" <> String.downcase(type)
+      {_, "OCTET-STREAM"} -> "application/octet-stream"
+      {_, type} -> "application/" <> String.downcase(type)
+    end
+  end
+
+  defp media_name(media) do
+    case Enum.find(@media, fn {_name, type} -> type == String.downcase(media) end) do
+      {name, _} -> name
+      nil -> media |> String.split("/") |> List.last() |> String.upcase()
+    end
+  end
+
+  # 3.0 LABEL is the delivery label of the ADR with its group or first TYPE;
+  # 4.0 carries it as that ADR's LABEL parameter. A LABEL without its ADR
+  # is dropped like any other orphaned decoration (R40).
+  defp delivery_labels(lines, :v40) do
+    {labels, lines} = Enum.split_with(lines, &(property_name(&1) == "LABEL"))
+
+    Enum.reduce(labels, lines, fn label, lines ->
+      case Enum.find_index(lines, &labelled_address?(&1, label, false)) do
+        nil ->
+          lines
+
+        index ->
+          List.update_at(lines, index, &label_parameter(&1, label))
+      end
+    end)
+  end
+
+  defp delivery_labels(lines, :v30) do
+    lines
+    |> Enum.reject(fn line ->
+      property_name(line) == "LABEL" and not Enum.any?(lines, &labelled_address?(&1, line, true))
+    end)
+    |> Enum.flat_map(fn line ->
+      {head, value} = Parser.split_line(line)
+      [name | params] = Parser.split_params(head)
+      {labels, params} = Enum.split_with(params, &(param_key(&1) == "LABEL"))
+
+      case {property_name(line), labels} do
+        {"ADR", [label | _]} ->
+          group = String.replace_suffix(name, name |> String.split(".") |> List.last(), "")
+          types = Enum.filter(params, &(param_key(&1) == "TYPE"))
+          text = label |> String.split("=", parts: 2) |> List.last() |> String.trim("\"")
+          text = text |> Parser.unescape() |> escape_text()
+          [rebuild(name, {params, value}), rebuild(group <> "LABEL", {types, text})]
+
+        _ ->
+          [line]
+      end
+    end)
+  end
+
+  defp label_parameter(adr, label) do
+    {head, value} = Parser.split_line(adr)
+    text = label |> Parser.split_line() |> elem(1) |> Parser.unescape()
+    param = text |> String.replace("\\", "\\\\") |> String.replace("\n", "\\n")
+    head <> ";LABEL=" <> param_value(param) <> ":" <> value
+  end
+
+  defp labelled_address?(line, label, allow_labelled) do
+    property_name(line) == "ADR" and
+      (allow_labelled or not Enum.any?(params_of(line), &(param_key(&1) == "LABEL"))) and
+      case group(label) do
+        nil -> type(line) == type(label)
+        group -> group(line) == group
+      end
+  end
+
+  defp escape_text(text) do
+    text
+    |> String.replace("\\", "\\\\")
+    |> String.replace(",", "\\,")
+    |> String.replace(";", "\\;")
+    |> String.replace("\n", "\\n")
+  end
+
+  defp property_name(line) do
+    line
+    |> Parser.split_line()
+    |> elem(0)
+    |> Parser.split_params()
+    |> hd()
+    |> String.split(".")
+    |> List.last()
+    |> String.upcase()
+  end
+
+  defp params_of(line),
+    do: line |> Parser.split_line() |> elem(0) |> Parser.split_params() |> tl()
+
+  defp param_key(param), do: param |> String.split("=", parts: 2) |> hd() |> String.upcase()
+
+  defp param_raw(param),
+    do: param |> String.split("=", parts: 2) |> List.last() |> String.trim("\"")
+
+  defp rebuild(name, {params, value}), do: Enum.join([name | params], ";") <> ":" <> value
 
   # Kith's own 3.0 relationship lines live in `kithrelN.` groups.
   defp native?(property) do

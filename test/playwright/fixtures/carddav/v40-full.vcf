@@ -12,7 +12,7 @@ EMAIL;TYPE=WORK,INTERNET:ada@work.example.test
 TEL;TYPE=CELL:+15550001111
 TEL;TYPE=WORK,VOICE:+15550002222
 ADR;TYPE=HOME:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK
-ADR;TYPE=WORK:;Floor 3;20 Office St;Oxford;Oxon;OX1;UK
+ADR;TYPE=WORK;LABEL="Floor 3, 20 Office St\nOxford":;Floor 3;20 Office St;Oxford;Oxon;OX1;UK
 URL;TYPE=HOME:https://ada.example.test/home
 URL;TYPE=WORK:https://ada.example.test/work
 IMPP;TYPE=HOME:xmpp:ada@example.test
@@ -56,4 +56,8 @@ PHOTO:data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAA
  69KL9m9fi7ENM3EYa6vYN7qUxwIerGhS4/a4AQ227Ht9MTW9GWpLnwYtOdaPI81XCt1NOf+l/M
  7RQaduUv1dclS66J4PGVYq7OAPC5nV++aivKi/D2dJh6ajlvIpSoRWM2n8x92JjahoWa6oAAAA
  ASUVORK5CYII=
+KIND:individual
+ANNIVERSARY:20100601
+KEY:data:application/pgp-keys;base64,AAEC
+EMAIL;PID=1.1;TYPE=WORK:pid@example.test
 END:VCARD

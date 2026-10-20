@@ -451,6 +451,53 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
+  test "CDV-92: version-specific retained syntax is converted or dropped", %{
+    contact: contact,
+    account_id: aid
+  } do
+    v30 =
+      "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Three;Tess;;;\r\nFN:Tess Three\r\nADR;TYPE=HOME:;;1 Main St;Town;;;\r\nLABEL;TYPE=HOME:1 Main St\\nTown\\, North\r\nLABEL;TYPE=WORK:No such address\r\nAGENT:BEGIN:VCARD\\nFN:Agent\\nEND:VCARD\r\nX-CUSTOM;CHARSET=utf-8:opaque\r\nKEY;ENCODING=b;TYPE=PGP:AAEC\r\nLOGO;ENCODING=b;TYPE=PNG:AAEC\r\nMAILER:PigeonMail\r\nCLASS:PUBLIC\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, v30)
+    card = dav_get(contact, :v40) |> String.replace("\r\n ", "")
+    assert card =~ "ADR;TYPE=HOME;LABEL=\"1 Main St\\nTown, North\":;;1 Main St;Town;;;\r\n"
+    assert card =~ "X-CUSTOM:opaque\r\n"
+    assert card =~ "KEY:data:application/pgp-keys;base64,AAEC\r\n"
+    assert card =~ "LOGO:data:image/png;base64,AAEC\r\n"
+    refute card =~ ~r/^(LABEL|AGENT|MAILER|CLASS)[;:]|CHARSET|ENCODING/m
+    three = dav_get(contact, :v30)
+    assert three =~ "LABEL;TYPE=HOME:1 Main St\\nTown\\, North\r\n"
+    refute three =~ "No such address"
+    assert three =~ "KEY;ENCODING=b;TYPE=PGP:AAEC\r\n"
+
+    # The 4.0 form converts back to the same 3.0 syntax
+    contact = dav_put(contact, aid, card)
+
+    assert dav_get(contact, :v30) |> String.replace("\r\n ", "") =~
+             "ADR;TYPE=HOME:;;1 Main St;Town;;;\r\nLABEL;TYPE=HOME:1 Main St\\nTown\\, North\r\n"
+
+    v40 =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Four;Fay;;;\r\nFN:Fay Four\r\nKIND:individual\r\nANNIVERSARY:20100601\r\nLANG:en\r\nCLIENTPIDMAP:1;urn:uuid:abc\r\nEMAIL;PID=1.1;TYPE=work;ALTID=1:fay@example.test\r\nKEY;VALUE=uri:https://example.test/key.asc\r\nLOGO:data:image/png;base64,AAEC\r\nADR;TYPE=home;LABEL=\"1 Main St\\nTown, North\":;;1 Main St;Town;;;\r\nX-CUSTOM;VALUE=uri:https://example.test/x\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, v40)
+    card = dav_get(contact, :v30) |> String.replace("\r\n ", "")
+    assert card =~ "EMAIL;TYPE=work:fay@example.test\r\n"
+    assert card =~ "KEY:https://example.test/key.asc\r\n"
+    assert card =~ "LOGO;ENCODING=b;TYPE=PNG:AAEC\r\n"
+
+    assert card =~
+             "ADR;TYPE=home:;;1 Main St;Town;;;\r\nLABEL;TYPE=home:1 Main St\\nTown\\, North\r\n"
+
+    assert card =~ "X-CUSTOM:https://example.test/x\r\n"
+
+    refute card =~
+             ~r/^(KIND|ANNIVERSARY|LANG|CLIENTPIDMAP)[;:]|;(PID|ALTID|LABEL)=|:data:|VALUE=uri/m
+
+    four = dav_get(contact, :v40) |> String.replace("\r\n ", "")
+    assert four =~ "KIND:individual\r\n"
+    assert four =~ "EMAIL;PID=1.1;TYPE=work;ALTID=1:fay@example.test\r\n"
+  end
+
   defp dav_put(contact, aid, body) do
     {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
     {:ok, contact} = Contacts.update_contact(contact, attrs)
