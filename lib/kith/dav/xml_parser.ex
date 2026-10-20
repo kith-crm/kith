@@ -63,9 +63,9 @@ defmodule Kith.DAV.XMLParser do
   Parses a REPORT body and identifies the report by its root element.
 
   Returns one of
-  - `{:ok, {:multiget, %{hrefs: hrefs, version: version}}}`
-  - `{:ok, {:sync_collection, %{token: token_or_nil, version: version}}}`
-  - `{:ok, {:query, %{filter: filter, limit: limit, version: version}}}`
+  - `{:ok, {:multiget, %{hrefs: hrefs, props: props, version: version}}}`
+  - `{:ok, {:sync_collection, %{token: token_or_nil, props: props, version: version}}}`
+  - `{:ok, {:query, %{filter: filter, limit: limit, props: props, version: version}}}`
   - `{:ok, {:unsupported, {namespace, local_name}}}` for any other root
   - `{:error, :invalid_xml}` for a body that is not well-formed UTF-8 XML
 
@@ -74,6 +74,7 @@ defmodule Kith.DAV.XMLParser do
   `%{name: name, test: test, is_not_defined: boolean, text_matches: [text_match],
   param_filters: [%{name: name, is_not_defined: boolean, text_match: text_match | nil}]}`
   and each text match `%{text: text, collation: c, negate: boolean, match_type: t}`.
+  `props` is `:allprop`, `:propname` or `{:prop, props}` like `parse_propfind/1`.
   Attribute defaults are applied, values are not validated. `limit` is the
   `CARDDAV:limit/nresults` text, or nil.
   Element prefixes don't matter, only namespaces (CDV-40).
@@ -87,7 +88,7 @@ defmodule Kith.DAV.XMLParser do
 
   defp report_request(%{ns: @carddav, name: "addressbook-multiget"} = root) do
     hrefs = for %{ns: @dav, name: "href"} = el <- root.children, do: String.trim(text(el))
-    {:multiget, %{hrefs: hrefs, version: requested_version(root)}}
+    {:multiget, %{hrefs: hrefs, props: report_props(root), version: requested_version(root)}}
   end
 
   defp report_request(%{ns: @dav, name: "sync-collection"} = root) do
@@ -97,7 +98,8 @@ defmodule Kith.DAV.XMLParser do
         el -> el |> text() |> String.trim() |> then(&if(&1 == "", do: nil, else: &1))
       end
 
-    {:sync_collection, %{token: token, version: requested_version(root)}}
+    {:sync_collection,
+     %{token: token, props: report_props(root), version: requested_version(root)}}
   end
 
   defp report_request(%{ns: @carddav, name: "addressbook-query"} = root) do
@@ -107,7 +109,13 @@ defmodule Kith.DAV.XMLParser do
         el -> %{test: Map.get(el.attrs, "test", "anyof"), prop_filters: prop_filters(el)}
       end
 
-    {:query, %{filter: filter, limit: limit(root), version: requested_version(root)}}
+    {:query,
+     %{
+       filter: filter,
+       limit: limit(root),
+       props: report_props(root),
+       version: requested_version(root)
+     }}
   end
 
   defp report_request(root), do: {:unsupported, {root.ns, root.name}}
@@ -190,6 +198,23 @@ defmodule Kith.DAV.XMLParser do
     {@carddav, "supported-collation-set"} => :supported_collation_set,
     {@cs, "getctag"} => :getctag
   }
+
+  # The properties asked for, as `parse_propfind/1` returns them (CDV-44).
+  defp report_props(root) do
+    cond do
+      child(root, @dav, "propname") ->
+        :propname
+
+      prop = child(root, @dav, "prop") ->
+        {:prop,
+         prop.children
+         |> Enum.map(&Map.get(@known_props, {&1.ns, &1.name}, {&1.ns, &1.name}))
+         |> Enum.uniq()}
+
+      true ->
+        :allprop
+    end
+  end
 
   # The props named by the children of the `DAV:prop` elements found at
   # `depth` (2 inside `propfind`, 3 inside `propertyupdate/set|remove`).

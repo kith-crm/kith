@@ -452,6 +452,37 @@ defmodule KithWeb.DAV.ReportTest do
   # ── CardDAV e2e regressions (Task 5) ────────────────────────────────────
 
   describe "CardDAV e2e regressions — REPORT" do
+    test "CDV-44: REPORTs return only the requested properties",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Props"})
+      ns = ~s(xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav")
+      etag_only = "<d:prop><d:getetag/></d:prop>"
+
+      bodies = [
+        ~s(<card:addressbook-multiget #{ns}>#{etag_only}<d:href>#{contact_path(contact)}</d:href></card:addressbook-multiget>),
+        ~s(<d:sync-collection #{ns}><d:sync-token/><d:sync-level>1</d:sync-level>#{etag_only}</d:sync-collection>),
+        ~s(<card:addressbook-query #{ns}>#{etag_only}<card:filter><card:prop-filter name="FN"/></card:filter></card:addressbook-query>)
+      ]
+
+      for body <- bodies do
+        conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+        assert conn.status == 207
+        assert conn.resp_body =~ "<d:getetag>"
+        refute conn.resp_body =~ "address-data", body
+        refute conn.resp_body =~ "getcontenttype", body
+      end
+
+      # an unknown property is reported in a 404 propstat (RFC 4918 §9.1, R10)
+      body =
+        ~s(<card:addressbook-multiget #{ns} xmlns:x="urn:x"><d:prop><d:getetag/><x:bogus/></d:prop>) <>
+          ~s(<d:href>#{contact_path(contact)}</d:href></card:addressbook-multiget>)
+
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+
+      assert conn.resp_body =~
+               ~r{<x:bogus xmlns:x="urn:x"/>\s*</d:prop>\s*<d:status>HTTP/1.1 404 Not Found}
+    end
+
     defp put_card(context, name, card) do
       conn = authed_dav(context, "PUT", "/dav/addressbooks/default/#{name}.vcf", card)
       assert conn.status == 201

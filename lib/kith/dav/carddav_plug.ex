@@ -367,29 +367,22 @@ defmodule Kith.DAV.CardDAVPlug do
     |> send_resp(403, XMLBuilder.error_body(condition, "Precondition failed"))
   end
 
-  defp handle_multiget_report(conn, %{hrefs: hrefs, version: version}) do
-    responses =
-      Enum.map(hrefs, fn href ->
-        case multiget_contact(conn, href) do
-          # RFC 6352 §8.7: a missing member is a bare 404 status (CDV-42)
-          nil ->
-            XMLBuilder.status_response(href, "HTTP/1.1 404 Not Found")
-
-          contact ->
-            vcard = VCardAdapter.contact_to_vcard(contact, version: version)
-            etag = compute_etag(contact)
-
-            XMLBuilder.response(contact_href(contact), [
-              XMLBuilder.propstat([
-                XMLBuilder.getetag(etag),
-                XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
-                XMLBuilder.address_data(vcard)
-              ])
-            ])
-        end
-      end)
-
+  defp handle_multiget_report(conn, %{hrefs: hrefs} = request) do
+    responses = Enum.map(hrefs, &multiget_response(conn, &1, request))
     send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
+  end
+
+  defp multiget_response(conn, href, %{props: props, version: version}) do
+    case multiget_contact(conn, href) do
+      # RFC 6352 §8.7: a missing member is a bare 404 status (CDV-42)
+      nil ->
+        XMLBuilder.status_response(href, "HTTP/1.1 404 Not Found")
+
+      contact ->
+        report_member_response(contact, props, fn ->
+          VCardAdapter.contact_to_vcard(contact, version: version)
+        end)
+    end
   end
 
   # A multiget href (absolute URL or path, any equivalent percent-encoding)
@@ -404,7 +397,7 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
-  defp handle_sync_collection_report(conn, %{token: client_token, version: version}) do
+  defp handle_sync_collection_report(conn, %{token: client_token, props: props, version: version}) do
     aid = account_id(conn)
 
     {active_responses, deleted_responses} =
@@ -412,14 +405,14 @@ defmodule Kith.DAV.CardDAVPlug do
         nil ->
           # Initial sync: return all contacts, no deletions
           contacts = list_contacts_for_dav(conn)
-          {Enum.map(contacts, &sync_contact_response(&1, version)), []}
+          {Enum.map(contacts, &sync_contact_response(&1, props, version)), []}
 
         since ->
           # Incremental sync: only changes since token timestamp
           modified = Contacts.list_contacts_modified_since(aid, since)
           deleted = Contacts.list_contacts_deleted_since(aid, since)
 
-          active = Enum.map(modified, &sync_contact_response(&1, version))
+          active = Enum.map(modified, &sync_contact_response(&1, props, version))
 
           removed =
             Enum.map(deleted, fn contact ->
@@ -434,16 +427,28 @@ defmodule Kith.DAV.CardDAVPlug do
     send_dav_response(conn, 207, xml)
   end
 
-  defp sync_contact_response(contact, version) do
-    etag = compute_etag(contact)
-    vcard = VCardAdapter.contact_to_vcard(contact, version: version, include_photo: false)
+  defp sync_contact_response(contact, props, version) do
+    report_member_response(contact, props, fn ->
+      VCardAdapter.contact_to_vcard(contact, version: version, include_photo: false)
+    end)
+  end
 
-    XMLBuilder.response(contact_href(contact), [
-      XMLBuilder.propstat([
-        XMLBuilder.getetag(etag),
-        XMLBuilder.address_data(vcard)
-      ])
-    ])
+  # A member's response in any REPORT, holding only the properties the client
+  # asked for (unknown ones in a 404 propstat). The vCard is built only when
+  # address-data is wanted (CDV-44).
+  defp report_member_response(contact, props, vcard_fun) do
+    address_data =
+      if props == :allprop or (match?({:prop, _}, props) and :address_data in elem(props, 1)),
+        do: XMLBuilder.address_data(vcard_fun.())
+
+    available = [
+      getetag: XMLBuilder.getetag(compute_etag(contact)),
+      getcontenttype: XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
+      getlastmodified: XMLBuilder.getlastmodified(contact.updated_at),
+      address_data: address_data
+    ]
+
+    XMLBuilder.response(contact_href(contact), build_propstats(props, available))
   end
 
   # ── addressbook-query REPORT (RFC 6352 §8.6) ──────────────────────────
@@ -452,7 +457,9 @@ defmodule Kith.DAV.CardDAVPlug do
   # as; an unsupported filter or collation is a 403 precondition rather than a
   # silent match-all, and CARDDAV:limit truncates with a 507 for the
   # collection (§8.6.1) (CDV-43).
-  defp handle_addressbook_query_report(conn, %{filter: filter, limit: limit, version: version}) do
+  defp handle_addressbook_query_report(conn, %{filter: filter, limit: limit} = request) do
+    %{props: props, version: version} = request
+
     with :ok <- AddressQuery.validate(filter),
          {:ok, limit} <- parse_limit(limit) do
       matching =
@@ -469,7 +476,7 @@ defmodule Kith.DAV.CardDAVPlug do
           do: {Enum.take(matching, limit), true},
           else: {matching, false}
 
-      responses = Enum.map(matching, fn {contact, vcard} -> member_response(contact, vcard) end)
+      responses = Enum.map(matching, &query_member_response(&1, props))
 
       responses =
         if truncated?,
@@ -489,6 +496,9 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
+  defp query_member_response({contact, vcard}, props),
+    do: report_member_response(contact, props, fn -> vcard end)
+
   defp parse_limit(nil), do: {:ok, nil}
 
   defp parse_limit(text) do
@@ -496,15 +506,6 @@ defmodule Kith.DAV.CardDAVPlug do
       {n, ""} when n > 0 -> {:ok, n}
       _ -> {:error, :bad_limit}
     end
-  end
-
-  defp member_response(contact, vcard) do
-    XMLBuilder.response(contact_href(contact), [
-      XMLBuilder.propstat([
-        XMLBuilder.getetag(compute_etag(contact)),
-        XMLBuilder.address_data(vcard)
-      ])
-    ])
   end
 
   # ── GET ────────────────────────────────────────────────────────────────
