@@ -562,6 +562,28 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
+  # RFC 6352 §6.3.2.1 (CARDDAV:no-uid-conflict): a new resource may not reuse
+  # the UID of another visible contact — its stored UID, or the default
+  # `kith-contact-<id>` UID of a contact without one (CDV-28).
+  defp check_uid_conflict(_aid, nil), do: :ok
+
+  defp check_uid_conflict(aid, uid) do
+    case Contacts.get_contact_by_dav_uid(aid, uid) || default_uid_contact(aid, uid) do
+      nil -> :ok
+      holder -> {:error, {:uid_conflict, holder}}
+    end
+  end
+
+  defp default_uid_contact(aid, uid) do
+    with [_, id] <- Regex.run(~r/\A(?:urn:uuid:)?kith-contact-(\d{1,18})\z/, uid),
+         %Contact{dav_uid: nil, is_archived: false} = contact <-
+           Contacts.get_contact(aid, String.to_integer(id)) do
+      contact
+    else
+      _ -> nil
+    end
+  end
+
   # One PUT is one transaction (CDV-21). The target row is read FOR UPDATE and
   # the preconditions are evaluated on that locked row, so two writers holding
   # the same ETag cannot both win and their child sets cannot mix (CDV-24).
@@ -572,6 +594,15 @@ defmodule Kith.DAV.CardDAVPlug do
 
       {:error, :precondition_failed} ->
         send_resp(conn, 412, "Precondition Failed")
+
+      {:error, {:uid_conflict, holder}} ->
+        xml =
+          XMLBuilder.error_body(
+            "<card:no-uid-conflict><d:href>#{contact_href(holder)}</d:href></card:no-uid-conflict>",
+            "This UID is already used by another address object"
+          )
+
+        send_dav_response(conn, 409, xml)
 
       {:error, :reserved_name} ->
         xml =
@@ -650,6 +681,7 @@ defmodule Kith.DAV.CardDAVPlug do
     identity = %{dav_resource_name: name, dav_uid: nested_data.uid}
 
     with :ok <- check_reserved_name(name),
+         :ok <- check_uid_conflict(aid, nested_data.uid),
          {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
          {:ok, contact} <- Contacts.put_dav_identity(contact, identity),
          {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data),

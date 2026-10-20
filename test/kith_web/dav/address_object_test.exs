@@ -1679,6 +1679,54 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-28: no-uid-conflict (RFC 6352 §6.3.2.1)" do
+    test "CDV-28: a create whose UID is already used by another href is 409 no-uid-conflict",
+         %{account_id: account_id} = context do
+      a = "/dav/addressbooks/default/uid-a.vcf"
+
+      assert authed_dav(context, "PUT", a, build_vcard("Uid", "One", uid: "shared-uid")).status ==
+               201
+
+      dup =
+        authed_dav(
+          context,
+          "PUT",
+          "/dav/addressbooks/default/uid-b.vcf",
+          build_vcard("Uid", "Two", uid: "shared-uid")
+        )
+
+      assert dup.status == 409
+      assert dup.resp_body =~ "<card:no-uid-conflict><d:href>#{a}</d:href></card:no-uid-conflict>"
+
+      ui = ContactsFixtures.contact_fixture(account_id)
+
+      for uid <- ["kith-contact-#{ui.id}", "urn:uuid:kith-contact-#{ui.id}"] do
+        conn =
+          authed_dav(
+            context,
+            "PUT",
+            "/dav/addressbooks/default/uid-c.vcf",
+            build_vcard("Uid", "Three", uid: uid)
+          )
+
+        assert conn.status == 409
+        assert conn.resp_body =~ "<d:href>#{contact_path(ui)}</d:href>"
+      end
+
+      assert Contacts.count_contacts(account_id) == 2
+    end
+
+    test "CDV-28: re-PUTting the same href with its own UID is not a conflict", context do
+      a = "/dav/addressbooks/default/uid-self.vcf"
+
+      assert authed_dav(context, "PUT", a, build_vcard("Self", "One", uid: "self-uid")).status ==
+               201
+
+      assert authed_dav(context, "PUT", a, build_vcard("Self", "Two", uid: "self-uid")).status ==
+               204
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

@@ -1281,6 +1281,18 @@ defmodule Kith.Contacts do
     |> Repo.one()
   end
 
+  @doc """
+  Gets the visible (neither trashed nor archived) contact whose stored CardDAV
+  vCard UID is `uid`, or nil.
+  """
+  def get_contact_by_dav_uid(account_id, uid) when is_binary(uid) do
+    Contact
+    |> scope_active(account_id)
+    |> where([c], c.is_archived == false and c.dav_uid == ^uid)
+    |> limit(1)
+    |> Repo.one()
+  end
+
   @doc "Like `get_contact_by_dav_name/2`, but only for a contact in the trash."
   def get_trashed_contact_by_dav_name(account_id, name) when is_binary(name) do
     Contact
