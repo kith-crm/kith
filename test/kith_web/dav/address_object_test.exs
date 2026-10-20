@@ -1538,6 +1538,66 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-23: chunked bodies and max-resource-size (R8)" do
+    # Bandit reads a `Transfer-Encoding: chunked` body whole and ignores
+    # read_body's `:length`; this adapter does the same.
+    defmodule ChunkedAdapter do
+      @moduledoc false
+      @behaviour Plug.Conn.Adapter
+      alias Plug.Adapters.Test.Conn, as: T
+
+      @impl true
+      def read_req_body(%{req_body: body} = state, _opts),
+        do: {:ok, body, %{state | req_body: ""}}
+
+      @impl true
+      defdelegate send_resp(s, st, h, b), to: T
+      @impl true
+      defdelegate send_file(s, st, h, p, o, l), to: T
+      @impl true
+      defdelegate send_chunked(s, st, h), to: T
+      @impl true
+      defdelegate chunk(s, b), to: T
+      @impl true
+      defdelegate inform(s, st, h), to: T
+      @impl true
+      defdelegate upgrade(s, p, o), to: T
+      @impl true
+      defdelegate push(s, p, h), to: T
+      @impl true
+      defdelegate get_peer_data(s), to: T
+      @impl true
+      defdelegate get_sock_data(s), to: T
+      @impl true
+      defdelegate get_ssl_data(s), to: T
+      @impl true
+      defdelegate get_http_protocol(s), to: T
+    end
+
+    defp chunked(context, method, path, content_type, body) do
+      conn = build_conn(method, path, body)
+      {_, state} = conn.adapter
+
+      %{conn | adapter: {ChunkedAdapter, state}}
+      |> basic_auth(context.user.email, dav_password())
+      |> put_req_header("content-type", content_type)
+      |> put_req_header("depth", "0")
+      |> KithWeb.Endpoint.call([])
+    end
+
+    test "CDV-23: a chunked PUT or PROPFIND body over max-resource-size is 413",
+         %{account_id: account_id} = context do
+      note = String.duplicate("x", 2 * 1024 * 1024)
+      vcard = build_vcard("Chunked", "Big", note: note)
+      put = chunked(context, :put, "/dav/addressbooks/default/chunked.vcf", "text/vcard", vcard)
+      assert put.status == 413
+      assert Contacts.count_contacts(account_id) == 0
+
+      xml = ~s(<d:propfind xmlns:d="DAV:"><!--#{note}--><d:allprop/></d:propfind>)
+      assert chunked(context, :propfind, "/dav/", "application/xml", xml).status == 413
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

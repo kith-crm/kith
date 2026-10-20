@@ -172,9 +172,12 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # Reads a request body (XML or vCard) of at most the advertised max-resource-size;
   # anything larger is a 413 (R8), never a MatchError.
+  # Bandit ignores `:length` for a chunked body and returns it whole, so the
+  # size of what was read is checked too (CDV-23).
   defp with_body(conn, fun) do
     case read_body(conn, length: @max_resource_size) do
-      {:ok, body, conn} -> fun.(conn, body)
+      {:ok, body, conn} when byte_size(body) <= @max_resource_size -> fun.(conn, body)
+      {:ok, _too_big, conn} -> send_resp(conn, 413, "Request Entity Too Large")
       {:more, _partial, conn} -> send_resp(conn, 413, "Request Entity Too Large")
       {:error, _} -> send_resp(conn, 400, "Bad Request")
     end
