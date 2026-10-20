@@ -19,6 +19,24 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 |---|---|---|---|---|
 | 00-harness | H1-H3 | 3 | 0 | |
 
+### 01-discovery
+
+| Case | Result |
+|---|---|
+| W1 | pass |
+| W2 | pass |
+| O1 | fixed CDV-01 |
+| P1 | pass |
+| P2 | pass |
+| P3 | fixed CDV-02 |
+| P4 | fixed CDV-03 (also CDV-08: empty-book ctag) |
+| P5 | fixed CDV-06 |
+| P6 | fixed CDV-05 |
+| P7 | fixed CDV-04, CDV-07 |
+| P8 | pass |
+| P9 | pass |
+| P10 | pass (CDV-06 also corrects the namespaces it echoes) |
+
 ## Bug log
 
 | ID | Severity | Summary | Request / response | Status |
@@ -34,6 +52,9 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 ## Rulings I made
 
+- R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.
+- R12 — PROPFIND/PROPPATCH bodies are parsed with OTP's `:xmerl_sax_parser` (already loaded via `sweet_xml`; no new hex dep). Names come back as strings (no atom creation), entity declarations are refused (`disallow_entities`), a root other than `DAV:propfind` / `DAV:propertyupdate` or trailing content is a 400 — RFC 4918 §8.7 / §9.1 — cost if wrong: a client sending a non-standard root gets 400 instead of an allprop.
+- R13 — `/dav/` and `/dav/principals/` answer Depth 1 with only themselves, and 404s are plain-text without a `DAV` header. Left as is — no client relies on either, and neither is a MUST — cost if wrong: none observed.
 - R10 — Unknown requested props are reported in a `404 Not Found` propstat with their own namespace (replaces the old "silently ignored" test in `propfind_test.exs`) — RFC 4918 §9.1 requires every requested prop to appear in the response — cost if wrong: none; clients ignore 404 propstats.
 
 ## Real-client smoke
