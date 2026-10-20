@@ -822,6 +822,24 @@ defmodule KithWeb.DAV.PropfindTest do
       assert authed_dav(context, "PROPPATCH", "/dav/addressbooks/default/", update).status == 413
     end
 
+    test "CDV-08: the ctag of an empty address book is stable over time", context do
+      body = """
+      <d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
+        <d:prop><cs:getctag/></d:prop>
+      </d:propfind>
+      """
+
+      ctag = fn ->
+        conn = authed_dav(context, "PROPFIND", "/dav/addressbooks/default/", body)
+        [_, value] = Regex.run(~r{<cs:getctag>([^<]+)</cs:getctag>}, conn.resp_body)
+        value
+      end
+
+      first = ctag.()
+      Process.sleep(1_100)
+      assert ctag.() == first
+    end
+
     test "CDV-06: PROPPATCH echoes every prop with its own namespace", context do
       body = """
       <d:propertyupdate xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">

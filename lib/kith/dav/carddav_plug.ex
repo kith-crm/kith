@@ -646,8 +646,10 @@ defmodule Kith.DAV.CardDAVPlug do
   defp addressbook_response(_conn, request_type, contacts) do
     ctag =
       case contacts do
+        # A fixed value: an empty book must not look changed on every poll.
+        # It still differs from every non-empty ctag (a Unix timestamp).
         [] ->
-          DateTime.to_unix(DateTime.utc_now()) |> to_string()
+          "0"
 
         contacts ->
           contacts
