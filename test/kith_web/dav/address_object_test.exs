@@ -1452,6 +1452,19 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-20: PUT body size (R8)" do
+    test "CDV-20: a PUT body over max-resource-size is 413 and creates nothing",
+         %{account_id: account_id} = context do
+      for size <- [1_048_577, 9 * 1024 * 1024] do
+        big = build_vcard("Big", "Body", note: String.duplicate("x", size))
+        conn = authed_dav(context, "PUT", "/dav/addressbooks/default/big-#{size}.vcf", big)
+        assert conn.status == 413
+      end
+
+      assert Contacts.count_contacts(account_id) == 0
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

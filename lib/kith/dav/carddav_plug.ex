@@ -145,7 +145,7 @@ defmodule Kith.DAV.CardDAVPlug do
   # Parses the PROPFIND body and hands the request type to `handler`.
   # A body that is not well-formed XML is a 400 (RFC 4918 §8.7).
   defp propfind(conn, handler) do
-    with_xml_body(conn, fn conn, body ->
+    with_body(conn, fn conn, body ->
       case XMLParser.parse_propfind(body) do
         {:ok, request_type} -> handler.(conn, request_type)
         {:error, _} -> send_resp(conn, 400, "Bad Request")
@@ -153,9 +153,9 @@ defmodule Kith.DAV.CardDAVPlug do
     end)
   end
 
-  # Reads a request body of at most the advertised max-resource-size;
+  # Reads a request body (XML or vCard) of at most the advertised max-resource-size;
   # anything larger is a 413 (R8), never a MatchError.
-  defp with_xml_body(conn, fun) do
+  defp with_body(conn, fun) do
     case read_body(conn, length: @max_resource_size) do
       {:ok, body, conn} -> fun.(conn, body)
       {:more, _partial, conn} -> send_resp(conn, 413, "Request Entity Too Large")
@@ -492,8 +492,8 @@ defmodule Kith.DAV.CardDAVPlug do
       |> String.downcase()
 
     if media_type in ["text/vcard", "text/x-vcard"] do
-      {:ok, body, conn} = read_body(conn)
-      do_put_contact(conn, name, body)
+      # R8: a vCard over max-resource-size is a 413, never a 500 (CDV-20)
+      with_body(conn, &do_put_contact(&1, name, &2))
     else
       send_resp(conn, 415, "Unsupported Media Type")
     end
@@ -613,7 +613,7 @@ defmodule Kith.DAV.CardDAVPlug do
   # ── PROPPATCH stub (RFC 4918 §8.2) ────────────────────────────────────
 
   defp handle_proppatch(conn),
-    do: authorize(conn, :update, fn -> with_xml_body(conn, &proppatch/2) end)
+    do: authorize(conn, :update, fn -> with_body(conn, &proppatch/2) end)
 
   defp proppatch(conn, body) do
     case XMLParser.parse_proppatch(body) do
