@@ -80,8 +80,19 @@ function rawRequest(
     let status = 0;
     req.on("response", (res) => (status = res.statusCode ?? 0));
     req.on("error", (e) => (status ? resolve({ status, body: "" }) : reject(e)));
-    if (body !== undefined) req.write(body);
-    req.end();
+    if (body === undefined) return void req.end();
+    // Like curl: upload in slices and stop once an early final response (e.g. 413) has arrived
+    // (RFC 9112 §9.6), instead of pushing the rest into a connection the server is done with.
+    const data = Buffer.from(body);
+    const slice = 64 * 1024;
+    const pump = (offset: number): void => {
+      if (status) return void req.destroy();
+      if (offset >= data.length) return void req.end();
+      const more = req.write(data.subarray(offset, offset + slice));
+      if (more) setImmediate(() => pump(offset + slice));
+      else req.once("drain", () => pump(offset + slice));
+    };
+    pump(0);
   });
 }
 
@@ -111,7 +122,6 @@ test.describe("03 crud: kith-named resource", () => {
   let etag = "";
 
   test("C1: PUT a new kith-contact-<new>.vcf with If-None-Match: * is served at that href", async ({ request }) => {
-    // R20: <new> must be an id already issued (here: another account's); an unissued one is reserved (C1b).
     href = `${BOOK}kith-contact-${await issuedForeignId(request)}.vcf`;
     const res = await put(request, href, vcard({ fn, email: "crud1@example.com" }), { "If-None-Match": "*" });
     expect(res.status, res.body).toBe(201);
@@ -125,12 +135,22 @@ test.describe("03 crud: kith-named resource", () => {
     expect(g.body).toContain(`FN:${fn}`);
   });
 
-  test("C1b: PUT-create at an unissued kith-contact-<id>.vcf is 403 reserved-resource-name (R20)", async ({ request }) => {
-    const h = `${BOOK}kith-contact-${Date.now()}.vcf`;
-    const res = await put(request, h, vcard({ fn: `${fn} Reserved` }));
-    expect(res.status).toBe(403);
-    expect(res.body).toContain("reserved-resource-name");
-    expect((await get(request, h)).status).toBe(404);
+  test("C1b: a vdirsyncer-style PUT at an unissued kith-contact-<id>.vcf is stored and served there (R20)", async ({
+    request,
+  }) => {
+    const id = `${Date.now()}`;
+    const h = `${BOOK}kith-contact-${id}.vcf`;
+    const res = await put(request, h, vcard({ fn: `${fn} Exported`, uid: `kith-contact-${id}` }), {
+      "If-None-Match": "*",
+    });
+    expect(res.status, res.body).toBe(201);
+    const g = await get(request, h);
+    expect(g.status).toBe(200);
+    expect(g.body).toContain(`UID:kith-contact-${id}\r\n`);
+    const listed = await members(request);
+    expect(listed.filter((m) => m === h).length).toBe(1);
+    expect(new Set(listed).size).toBe(listed.length);
+    expect((await dav(request, "DELETE", h)).status).toBe(204);
   });
 
   test("C2: GET then PUT an edit with If-Match: <etag> gives a new ETag and the edit", async ({ request }) => {
