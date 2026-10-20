@@ -37,6 +37,9 @@ defmodule Kith.Contacts.Contact do
     field :dav_resource_name, :string
     field :dav_uid, :string
 
+    # R4: set by a DB trigger on every write of the row; the ETag derives from it
+    field :dav_revision, :integer, read_after_writes: true
+
     # First-met metadata
     field :middle_name, :string
     field :first_met_at, :date

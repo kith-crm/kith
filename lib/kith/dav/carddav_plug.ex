@@ -699,12 +699,13 @@ defmodule Kith.DAV.CardDAVPlug do
     Contact
     |> Kith.Scope.scope_active(account_id(conn))
     |> where([c], c.is_archived == false)
-    |> select([c], map(c, [:id, :updated_at, :dav_resource_name]))
+    |> select([c], map(c, [:id, :updated_at, :dav_revision, :dav_resource_name]))
     |> Kith.Repo.all()
   end
 
-  defp compute_etag(%{id: id, updated_at: updated_at}) do
-    data = "#{id}-#{DateTime.to_unix(updated_at)}"
+  # R4: `dav_revision` changes on every write of the contact row (CDV-17)
+  defp compute_etag(%{id: id, dav_revision: revision}) do
+    data = "#{id}-#{revision}"
 
     :crypto.hash(:md5, data)
     |> Base.encode16(case: :lower)

@@ -1354,6 +1354,33 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-17: same-second ETags (R4)" do
+    test "CDV-17: a create and two edits inside one second give three distinct ETags",
+         context do
+      href = "/dav/addressbooks/default/same-second.vcf"
+      put = fn vcard -> authed_dav(context, "PUT", href, vcard) end
+
+      c = put.(build_vcard("Same", "Second", phone: "+15550000001"))
+      e1 = put.(build_vcard("Same", "Edited", phone: "+15550000001"))
+      # Only a child (TEL) changes here, no scalar field.
+      e2 = put.(build_vcard("Same", "Edited", phone: "+15550000002"))
+      assert [c.status, e1.status, e2.status] == [201, 204, 204]
+
+      etags = Enum.flat_map([c, e1, e2], &get_resp_header(&1, "etag"))
+      assert length(Enum.uniq(etags)) == 3
+      assert get_resp_header(authed_dav(context, "GET", href), "etag") == [List.last(etags)]
+    end
+
+    test "CDV-17: touch_contact!/1 always yields a new ETag revision",
+         %{account_id: account_id} do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      t1 = Contacts.touch_contact!(contact)
+      t2 = Contacts.touch_contact!(t1)
+      assert t1.dav_revision != contact.dav_revision
+      assert t2.dav_revision != t1.dav_revision
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

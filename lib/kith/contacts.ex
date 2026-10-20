@@ -1714,11 +1714,14 @@ defmodule Kith.Contacts do
   defp photo_extension("image/webp"), do: ".webp"
   defp photo_extension(_), do: ".jpg"
 
-  @doc "Bumps `updated_at` on a contact. Used after replacing child data."
+  @doc """
+  Bumps `updated_at` and the ETag revision on a contact. Used after replacing
+  child data. Always writes the row, even within the same second (R4).
+  """
   def touch_contact!(%Contact{} = contact) do
     contact
     |> Ecto.Changeset.change(updated_at: DateTime.utc_now(:second))
-    |> Repo.update!()
+    |> Repo.update!(force: true)
   end
 
   @doc false
