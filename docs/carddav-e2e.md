@@ -188,6 +188,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | CDV-77 | high | A native custom field with no protocol makes GET crash | Via API add a protocol-less native field → GET its DAV card 500 (`String.trim_trailing(nil, "://")`), observed during V5; `/tmp/kith-task6/cdv77-78-live-red.txt`. ExUnit RED 27/1; scheme normalization now accepts nil and omits this non-vCard field | fixed |
 
+| CDV-78 | low | Preference-only EMAIL preference disappears on identical PUT-back | Separate defect introduced by CDV-58 metadata native-label comparison: Thunderbird GET 3.0 TYPE=PREF → identical PUT 204 → GET EMAIL without preference. Live RED v5-live-red.txt; ExUnit RED 28/1. TYPE=PREF now matches an unlabeled native field; parameters retained | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.
@@ -220,5 +222,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 - R34 — Retain vCard components, client parameters and unsupported properties in `contacts.dav_vcard` JSON; native values remain authoritative. Serialization reapplies parameter/group metadata only to matching values, keeps N prefix/suffix, keeps ORG units only for the same company, and keeps formatted FN only for the same structured name. Strip PHOTO/UID/REV from metadata; convert PREF between TYPE=PREF (3.0) and PREF=1 (4.0). Shared preservation root cause CDV-58–72 is one commit, with one log row per dropped fixture property — RFC6352 §6.3.2.2 and lossless client editing — cost if wrong: extra per-contact JSON; unmapped fields have no UI editor.
 
 - R35 — Yearless birthdays use existing `birthdate_year_unknown` with leap-safe placeholder 2000; 4.0 emits `BDAY:--MMDD`, 3.0 emits `X-KITH-BDAY:--MMDD` (parsed back as BDAY) because RFC2426 BDAY requires a year — avoids inventing a birth year; native Kith UI keeps month/day — cost if wrong: a 3.0-only client that ignores the extension cannot display that birthday.
+
+- R36 — Preference-only `TYPE=PREF` has no native field label and must match an unlabeled native field when reapplying metadata (CDV-78). Thunderbird live RED lost TYPE=PREF after identical PUT, ExUnit RED 28/1 — PREF is a preference marker in 3.0, not a display label — cost if wrong: none.
 
 ## Real-client smoke

@@ -77,8 +77,14 @@ defmodule Kith.VCard.Metadata do
     head = line |> String.split(":", parts: 2) |> hd()
 
     case Regex.run(~r/;TYPE=([^;]+)/i, head) do
-      [_, value] -> value |> String.trim("\"") |> String.split(",") |> hd() |> String.downcase()
-      _ -> nil
+      [_, value] ->
+        case value |> String.trim("\"") |> String.split(",") |> hd() |> String.downcase() do
+          "pref" -> nil
+          type -> type
+        end
+
+      _ ->
+        nil
     end
   end
 

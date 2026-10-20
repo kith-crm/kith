@@ -600,4 +600,17 @@ defmodule Kith.VCard.SerializerTest do
     assert card =~ "FN:Native Field"
     refute card =~ "Private native field"
   end
+
+  test "CDV-78: preference-only EMAIL metadata survives a 3.0 PUT-back" do
+    contact = %{
+      dav_vcard: %{
+        "properties" => [
+          %{"name" => "EMAIL", "head" => "EMAIL;TYPE=PREF", "value" => "pref@example.test"}
+        ]
+      }
+    }
+
+    lines = ["BEGIN:VCARD", "VERSION:3.0", "EMAIL:pref@example.test", "END:VCARD"]
+    assert "EMAIL;TYPE=PREF:pref@example.test" in Kith.VCard.Metadata.merge(lines, contact, :v30)
+  end
 end
