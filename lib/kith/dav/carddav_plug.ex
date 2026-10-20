@@ -603,18 +603,21 @@ defmodule Kith.DAV.CardDAVPlug do
     end)
   end
 
-  # `{:visible, contact}`, `{:trashed, contact}` or `{:missing, name}`; a found
-  # contact is re-read under a row lock.
+  # `{:visible, contact}`, `{:hidden, contact}` (trashed or archived) or
+  # `{:missing, name}`; a found contact is re-read under a row lock.
   defp lock_put_target(conn, name) do
-    case find_contact(conn, name) || find_trashed_contact(conn, name) do
+    case find_unarchived_or_archived(conn, name) || find_trashed_contact(conn, name) do
       nil -> {:missing, name}
       contact -> contact |> Contacts.lock_contact() |> put_target(name)
     end
   end
 
   defp put_target(nil, name), do: {:missing, name}
-  defp put_target(%Contact{deleted_at: nil} = contact, _name), do: {:visible, contact}
-  defp put_target(%Contact{} = contact, _name), do: {:trashed, contact}
+
+  defp put_target(%Contact{deleted_at: nil, is_archived: false} = contact, _name),
+    do: {:visible, contact}
+
+  defp put_target(%Contact{} = contact, _name), do: {:hidden, contact}
 
   defp write_put_target(conn, aid, {:visible, contact}, {scalar_attrs, nested_data}) do
     # RFC 7232 §3.1 / §3.2 on the locked, current representation
@@ -634,11 +637,12 @@ defmodule Kith.DAV.CardDAVPlug do
       else: {:error, :precondition_failed}
   end
 
-  # R18: a PUT to the href of a trashed contact restores that contact and
-  # overwrites it, instead of creating a duplicate beside it (CDV-18).
-  defp create_contact(aid, {:trashed, trashed}, {scalar_attrs, nested_data}) do
-    with {:ok, restored} <- Contacts.restore_contact(trashed),
-         {:ok, contact} <- overwrite_contact(restored, aid, scalar_attrs, nested_data),
+  # R18 / R21: a PUT to the href of a trashed or archived contact brings that
+  # contact back and overwrites it, instead of creating a duplicate beside it
+  # (CDV-18, CDV-27).
+  defp create_contact(aid, {:hidden, hidden}, {scalar_attrs, nested_data}) do
+    with {:ok, shown} <- unhide(hidden),
+         {:ok, contact} <- overwrite_contact(shown, aid, scalar_attrs, nested_data),
          do: {:ok, 201, contact}
   end
 
@@ -650,6 +654,15 @@ defmodule Kith.DAV.CardDAVPlug do
          {:ok, contact} <- Contacts.put_dav_identity(contact, identity),
          {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data),
          do: {:ok, 201, Contacts.touch_contact!(contact)}
+  end
+
+  defp unhide(contact) do
+    restored =
+      if contact.deleted_at, do: Contacts.restore_contact(contact), else: {:ok, contact}
+
+    with {:ok, contact} <- restored do
+      if contact.is_archived, do: Contacts.unarchive_contact(contact), else: {:ok, contact}
+    end
   end
 
   # PUT replaces the whole representation: scalars, then children, then a touch
@@ -753,8 +766,16 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # R2: a contact is found by the resource name a client stored for it, else by
   # the default `kith-contact-<id>.vcf` name of a contact that has no stored name.
-  # `name` is already percent-decoded.
+  # `name` is already percent-decoded. R5: an archived contact is hidden from
+  # DAV, so it is not found here (CDV-27).
   defp find_contact(conn, name) do
+    case find_unarchived_or_archived(conn, name) do
+      %Contact{is_archived: false} = contact -> contact
+      _ -> nil
+    end
+  end
+
+  defp find_unarchived_or_archived(conn, name) do
     Contacts.get_contact_by_dav_name(account_id(conn), name) ||
       find_contact_by_default_name(conn, name)
   end

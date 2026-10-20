@@ -1633,6 +1633,52 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-27: archived contacts are hidden from DAV (R5, R21)" do
+    test "CDV-27: GET, PROPFIND, multiget and DELETE treat an archived contact as missing",
+         %{account_id: account_id} = context do
+      ui = ContactsFixtures.contact_fixture(account_id)
+      {:ok, _} = Contacts.archive_contact(ui)
+
+      href = "/dav/addressbooks/default/archived.vcf"
+      assert authed_dav(context, "PUT", href, build_vcard("Arch", "Ived")).status == 201
+
+      {:ok, _} =
+        Contacts.archive_contact(Contacts.get_contact_by_dav_name(account_id, "archived.vcf"))
+
+      for path <- [contact_path(ui), href] do
+        assert authed_dav(context, "GET", path).status == 404
+
+        propfind = build_conn() |> basic_auth(context.user.email, dav_password())
+        assert dav_request(propfind, "PROPFIND", path, propfind_body()).status == 404
+
+        multiget = build_conn() |> basic_auth(context.user.email, dav_password())
+
+        body =
+          dav_request(multiget, "REPORT", "/dav/addressbooks/default/", multiget_body([path])).resp_body
+
+        assert body =~ "404 Not Found"
+        refute body =~ "BEGIN:VCARD"
+
+        delete = build_conn() |> basic_auth(context.user.email, dav_password())
+        assert dav_request(delete, "DELETE", path).status == 404
+      end
+
+      assert Contacts.list_archived_contacts(account_id) |> length() == 2
+    end
+
+    test "CDV-27: a PUT to an archived contact's href unarchives and overwrites it in place",
+         %{account_id: account_id} = context do
+      ui = ContactsFixtures.contact_fixture(account_id)
+      {:ok, _} = Contacts.archive_contact(ui)
+
+      conn = authed_dav(context, "PUT", contact_path(ui), build_vcard("Back", "Again"))
+      assert conn.status == 201
+      contact = Contacts.get_contact(account_id, ui.id)
+      assert %{is_archived: false, first_name: "Back"} = contact
+      assert Contacts.count_contacts(account_id) == 1
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════
