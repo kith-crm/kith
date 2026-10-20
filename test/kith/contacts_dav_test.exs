@@ -80,6 +80,23 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
+  test "CDV-51: seeded scheme protocols preserve TEL and EMAIL labels", %{
+    contact: contact,
+    account_id: aid
+  } do
+    nested = %{
+      emails: [%{value: "home@example.test", label: "Home"}],
+      phones: [%{value: "+15550001111", label: "Cell"}],
+      urls: [],
+      addresses: []
+    }
+
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    card = Kith.DAV.VCardAdapter.contact_to_vcard(contact)
+    assert card =~ "EMAIL;TYPE=HOME:home@example.test"
+    assert card =~ "TEL;TYPE=CELL:+15550001111"
+  end
+
   describe "touch_contact!/1" do
     test "bumps updated_at", %{contact: contact} do
       old_updated_at = contact.updated_at

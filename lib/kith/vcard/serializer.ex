@@ -246,7 +246,7 @@ defmodule Kith.VCard.Serializer do
     vcard_label = field.contact_field_type.vcard_label
     type_param = type_param_from_label(field.label)
 
-    case protocol do
+    case protocol |> String.trim_trailing("://") |> String.trim_trailing(":") do
       "tel" ->
         "TEL#{type_param}:#{escape(field.value)}"
 

@@ -818,7 +818,7 @@ defmodule KithWeb.DAV.ReportTest do
 
       assert query_hrefs(context, ~s(<C:prop-filter name="EMAIL"/>)) == Enum.sort([a, b])
 
-      # served as a bare `TEL:` line, so TYPE is not defined on it
+      # CDV-51: TYPE survives the seeded tel: protocol serialization
       param = fn inner ->
         query_hrefs(
           context,
@@ -826,8 +826,8 @@ defmodule KithWeb.DAV.ReportTest do
         )
       end
 
-      assert param.("<C:is-not-defined/>") == [a]
-      assert param.(~s(<C:text-match>cell</C:text-match>)) == []
+      assert param.("<C:is-not-defined/>") == []
+      assert param.(~s(<C:text-match>cell</C:text-match>)) == [a]
 
       either =
         tm("FN", "Qalpha Smith", ~s(match-type="equals")) <>
