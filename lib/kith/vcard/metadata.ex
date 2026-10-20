@@ -21,7 +21,7 @@ defmodule Kith.VCard.Metadata do
     {body, [ending]} = Enum.split(lines, -1)
 
     Enum.map(body ++ extras ++ [ending], fn line ->
-      line |> convert(version) |> declare_identifier_type(version)
+      line |> convert(version) |> telephone_value(version) |> declare_identifier_type(version)
     end)
   end
 
@@ -91,6 +91,7 @@ defmodule Kith.VCard.Metadata do
     end
   end
 
+  defp comparable("TEL", value), do: value |> Parser.unescape() |> Parser.phone_value()
   defp comparable("ADR", value), do: value |> Parser.split_components(";") |> Enum.drop(1)
   defp comparable(_, value), do: Parser.unescape(value)
 
@@ -110,6 +111,20 @@ defmodule Kith.VCard.Metadata do
   end
 
   defp value(line), do: line |> String.split(":", parts: 2) |> List.last()
+
+  defp telephone_value(line, :v30) do
+    case identity(line) do
+      {"TEL", value} ->
+        [head, _] = String.split(line, ":", parts: 2)
+        head = Regex.replace(~r/;VALUE=uri/i, head, "")
+        head <> ":" <> Parser.phone_value(value)
+
+      _ ->
+        line
+    end
+  end
+
+  defp telephone_value(line, _version), do: line
 
   @doc false
   def uri?(value), do: Regex.match?(~r/\A[A-Za-z][A-Za-z0-9+.-]*:[^\s\\]*\z/, value)

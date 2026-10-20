@@ -200,6 +200,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | CDV-83 | high | UID bypasses escaping/folding and 4.0 text UID lacks VALUE=text | Live valid text UID of 40 CJK characters plus escaped newline PUT201 → GET4 physical line143 bytes, bare LF and injected FN. ExUnit RED 17/1. UID now enters normal serializer folding/escaping; non-URI identifiers (UID/RELATED) declare VALUE=text in4.0; parser returns identical semantic UID | fixed |
 
+| CDV-84 | medium | 4.0 telephone URI is stored with tel: prefix and emitted as4.0 URI syntax in3.0 GET | Live DAVx5-shaped TEL;TYPE=CELL;VALUE=uri:tel:+15550004444 PUT201 → GET3 same URI property; RFC2426 TEL requires phone-number. ExUnit RED18/1 native value incorrectly tel:+… . Normalize phone value, preserve URI metadata for4.0 and emit phone-number without VALUE=uri for3.0 | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.
@@ -238,5 +240,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 - R37 — Strong validators identify the serialized version: 3.0 keeps the original revision hash; 4.0 hashes revision plus version. GET varies on Accept; REPORT getetag corresponds to its requested address-data version. Conditional writes accept either current representation tag (and reject both after a write) — RFC7232 strong validation / RFC6352 negotiated address data — cost if wrong: one4.0 revalidation download after upgrade.
 
 - R38 — Text UIDs and RELATED identifiers in4.0 declare VALUE=text; URI identifiers retain URI form. UID is serialized with all other properties so escaping and UTF8 folding apply. CDV38 reserved-name test compares parsed UID values across versions, and CDV80 expects the4.0 text parameter — RFC6350 §6.7.6/§6.6.6 — cost if wrong: none; UID values stay unchanged.
+
+- R39 — A vCard4.0 tel: URI maps to the native phone number; retained metadata may emit URI form in4.0, while3.0 emits the phone-number value and omits VALUE=uri — RFC2426 §3.3.1 / RFC6350 §6.4.1 — cost if wrong: no change to the telephone number.
 
 ## Real-client smoke

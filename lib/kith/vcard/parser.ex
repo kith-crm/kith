@@ -151,7 +151,7 @@ defmodule Kith.VCard.Parser do
 
   defp apply_property(acc, "TEL", params, value) do
     label = extract_type(params)
-    %{acc | phones: acc.phones ++ [%{value: unescape(value), label: label}]}
+    %{acc | phones: acc.phones ++ [%{value: value |> unescape() |> phone_value(), label: label}]}
   end
 
   defp apply_property(acc, "EMAIL", params, value) do
@@ -327,6 +327,9 @@ defmodule Kith.VCard.Parser do
     do: split_components(rest, delimiter, [<<byte>> | current], parts)
 
   defp split_unescaped(value, delimiter), do: split_components(value, delimiter)
+
+  @doc false
+  def phone_value(value), do: String.replace(value, ~r/\Atel:/i, "")
 
   defp extract_type(params) do
     case Map.get(params, "TYPE") do

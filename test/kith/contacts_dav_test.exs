@@ -310,6 +310,25 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
+  test "CDV-84: telephone URIs become phone-number values for 3.0", %{
+    contact: contact,
+    account_id: aid
+  } do
+    body =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:URI;Telephone;;;\r\nFN:Telephone URI\r\nTEL;TYPE=CELL;VALUE=uri:tel:+15550004444\r\nEND:VCARD\r\n"
+
+    {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body)
+    assert hd(nested.phones).value == "+15550004444"
+    assert {:ok, contact} = Contacts.update_contact(contact, attrs)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    card = Kith.DAV.VCardAdapter.contact_to_vcard(Kith.Repo.get!(Contacts.Contact, contact.id))
+    assert card =~ "TEL;TYPE=CELL:+15550004444"
+    refute card =~ "VALUE=uri"
+    {_attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(card)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    assert [%{value: "+15550004444"}] = Contacts.list_contact_fields(contact.id)
+  end
+
   describe "touch_contact!/1" do
     test "bumps updated_at", %{contact: contact} do
       old_updated_at = contact.updated_at
