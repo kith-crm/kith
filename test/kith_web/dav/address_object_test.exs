@@ -1309,6 +1309,27 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-15: If-Match on a missing resource" do
+    test "CDV-15: PUT with If-Match to a missing href is 412 and creates nothing",
+         %{account_id: account_id} = context do
+      for if_match <- [~s("whatever"), "*"] do
+        conn =
+          build_conn()
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("if-match", if_match)
+          |> dav_request(
+            "PUT",
+            "/dav/addressbooks/default/missing.vcf",
+            build_vcard("No", "Body")
+          )
+
+        assert conn.status == 412
+      end
+
+      assert Contacts.count_contacts(account_id) == 0
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

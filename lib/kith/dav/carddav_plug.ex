@@ -504,6 +504,24 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   defp put_contact(conn, {aid, name}, nil, scalar_attrs, nested_data) do
+    # RFC 7232 §3.1: any If-Match (even `*`) fails when the resource is missing
+    if get_req_header(conn, "if-match") == [] do
+      create_contact(conn, {aid, name}, scalar_attrs, nested_data)
+    else
+      send_resp(conn, 412, "Precondition Failed")
+    end
+  end
+
+  defp put_contact(conn, {aid, _name}, contact, scalar_attrs, nested_data) do
+    # RFC 7232 §3.2: If-None-Match: * means "only if resource does NOT exist"
+    if get_req_header(conn, "if-none-match") == ["*"] do
+      send_resp(conn, 412, "Precondition Failed")
+    else
+      put_update_contact(conn, aid, contact, scalar_attrs, nested_data)
+    end
+  end
+
+  defp create_contact(conn, {aid, name}, scalar_attrs, nested_data) do
     identity = %{dav_resource_name: name, dav_uid: nested_data.uid}
 
     with {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
@@ -517,15 +535,6 @@ defmodule Kith.DAV.CardDAVPlug do
       |> send_resp(201, "")
     else
       {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
-    end
-  end
-
-  defp put_contact(conn, {aid, _name}, contact, scalar_attrs, nested_data) do
-    # RFC 7232 §3.2: If-None-Match: * means "only if resource does NOT exist"
-    if get_req_header(conn, "if-none-match") == ["*"] do
-      send_resp(conn, 412, "Precondition Failed")
-    else
-      put_update_contact(conn, aid, contact, scalar_attrs, nested_data)
     end
   end
 
