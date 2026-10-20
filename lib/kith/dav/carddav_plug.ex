@@ -413,7 +413,7 @@ defmodule Kith.DAV.CardDAVPlug do
         XMLBuilder.status_response(href, "HTTP/1.1 404 Not Found")
 
       contact ->
-        report_member_response(contact, props, fn ->
+        report_member_response(contact, props, version, fn ->
           VCardAdapter.contact_to_vcard(contact, version: version)
         end)
     end
@@ -491,7 +491,7 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   defp sync_contact_response(contact, props, version) do
-    report_member_response(contact, props, fn ->
+    report_member_response(contact, props, version, fn ->
       VCardAdapter.contact_to_vcard(contact, version: version, include_photo: false)
     end)
   end
@@ -499,14 +499,14 @@ defmodule Kith.DAV.CardDAVPlug do
   # A member's response in any REPORT, holding only the properties the client
   # asked for (unknown ones in a 404 propstat). The vCard is built only when
   # address-data is wanted (CDV-44).
-  defp report_member_response(contact, props, vcard_fun) do
+  defp report_member_response(contact, props, version, vcard_fun) do
     address_data =
       if props == :allprop or (match?({:prop, _}, props) and :address_data in elem(props, 1)),
         do: XMLBuilder.address_data(vcard_fun.())
 
     available = [
-      getetag: XMLBuilder.getetag(compute_etag(contact)),
-      getcontenttype: XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
+      getetag: XMLBuilder.getetag(compute_etag(contact, version)),
+      getcontenttype: XMLBuilder.getcontenttype(vcard_content_type(version) <> "; charset=utf-8"),
       getlastmodified: XMLBuilder.getlastmodified(contact.updated_at),
       address_data: address_data
     ]
@@ -539,7 +539,7 @@ defmodule Kith.DAV.CardDAVPlug do
           do: {Enum.take(matching, limit), true},
           else: {matching, false}
 
-      responses = Enum.map(matching, &query_member_response(&1, props))
+      responses = Enum.map(matching, &query_member_response(&1, props, version))
 
       responses =
         if truncated?,
@@ -559,8 +559,8 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
-  defp query_member_response({contact, vcard}, props),
-    do: report_member_response(contact, props, fn -> vcard end)
+  defp query_member_response({contact, vcard}, props, version),
+    do: report_member_response(contact, props, version, fn -> vcard end)
 
   defp parse_limit(nil), do: {:ok, nil}
 
@@ -581,8 +581,8 @@ defmodule Kith.DAV.CardDAVPlug do
         send_resp(conn, 404, "Not Found")
 
       contact ->
-        etag = compute_etag(contact)
-        conn = put_resp_header(conn, "etag", "\"#{etag}\"")
+        etag = compute_etag(contact, version)
+        conn = conn |> put_resp_header("etag", "\"#{etag}\"") |> put_resp_header("vary", "accept")
 
         # RFC 7232 §3.2 / §4.1: a matching If-None-Match on GET is a 304
         if none_match_fails?(conn, etag) do
@@ -738,7 +738,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   defp write_put_target(conn, aid, {:visible, contact}, {scalar_attrs, nested_data}) do
     # RFC 7232 §3.1 / §3.2 on the locked, current representation
-    if none_match_fails?(conn, compute_etag(contact)) or
+    if none_match_fails?(conn, current_etags(contact)) or
          check_if_match(conn, contact) == :precondition_failed do
       {:error, :precondition_failed}
     else
@@ -855,9 +855,9 @@ defmodule Kith.DAV.CardDAVPlug do
 
       values ->
         header = Enum.join(values, ",")
-        strong = {false, compute_etag(contact)}
+        strong = Enum.map(current_etags(contact), &{false, &1})
 
-        if String.trim(header) == "*" or strong in entity_tags(header),
+        if String.trim(header) == "*" or Enum.any?(entity_tags(header), &(&1 in strong)),
           do: :ok,
           else: :precondition_failed
     end
@@ -872,7 +872,9 @@ defmodule Kith.DAV.CardDAVPlug do
 
       values ->
         header = Enum.join(values, ",")
-        String.trim(header) == "*" or Enum.any?(entity_tags(header), &(elem(&1, 1) == etag))
+
+        String.trim(header) == "*" or
+          Enum.any?(entity_tags(header), &(elem(&1, 1) in List.wrap(etag)))
     end
   end
 
@@ -959,8 +961,12 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   # R4: `dav_revision` changes on every write of the contact row (CDV-17)
-  defp compute_etag(%{id: id, dav_revision: revision}) do
-    data = "#{id}-#{revision}"
+  defp current_etags(contact), do: Enum.map([:v30, :v40], &compute_etag(contact, &1))
+
+  defp compute_etag(contact, version \\ :v30)
+
+  defp compute_etag(%{id: id, dav_revision: revision}, version) do
+    data = "#{id}-#{revision}" <> if(version == :v40, do: "-4.0", else: "")
 
     :crypto.hash(:md5, data)
     |> Base.encode16(case: :lower)

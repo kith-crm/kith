@@ -1909,4 +1909,37 @@ defmodule KithWeb.DAV.AddressObjectTest do
     assert authed_dav(context, "PUT", "/dav/addressbooks/default/invalid-utf8.vcf", bad).status ==
              422
   end
+
+  test "CDV-82: negotiated representations have distinct strong tags and usable conditional writes",
+       context do
+    href = "/dav/addressbooks/default/variant-etags.vcf"
+    assert authed_dav(context, "PUT", href, build_vcard("Variant", "Probe")).status == 201
+
+    get = fn version, headers ->
+      conn =
+        Enum.reduce(
+          headers,
+          put_req_header(build_conn(), "accept", "text/vcard; version=#{version}"),
+          fn {key, value}, conn -> put_req_header(conn, key, value) end
+        )
+
+      authed_dav(%{context | conn: conn}, "GET", href)
+    end
+
+    g3 = get.("3.0", [])
+    g4 = get.("4.0", [])
+    [t3] = get_resp_header(g3, "etag")
+    [t4] = get_resp_header(g4, "etag")
+    assert g3.resp_body != g4.resp_body
+    assert t3 != t4
+    assert Enum.join(get_resp_header(g4, "vary"), ",") =~ "accept"
+    assert get.("4.0", [{"if-none-match", t3}]).status == 200
+    assert get.("4.0", [{"if-none-match", t4}]).status == 304
+    write_context = %{context | conn: put_req_header(build_conn(), "if-match", t4)}
+    assert authed_dav(write_context, "PUT", href, g4.resp_body).status == 204
+    assert authed_dav(write_context, "PUT", href, g4.resp_body).status == 412
+    [current4] = get.("4.0", []) |> get_resp_header("etag")
+    none_context = %{context | conn: put_req_header(build_conn(), "if-none-match", current4)}
+    assert authed_dav(none_context, "PUT", href, g4.resp_body).status == 412
+  end
 end

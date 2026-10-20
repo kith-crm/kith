@@ -196,6 +196,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | CDV-81 | low | vCard 4.0 emits 3.0 extended date/timestamp syntax for BDAY and REV | GET Accept4 returns BDAY:1990-06-15 and REV:2026-10-20T20:32:45Z (live variants probe); RFC6350 §4.3 ABNF requires basic date/time. ExUnit RED 29/1; serializer now uses YYYYMMDD and YYYYMMDDThhmmssZ for 4.0, preserves 3.0 formatting | fixed |
 
+| CDV-82 | medium | Byte-different negotiated representations share a strong ETag and omit Vary Accept | GET3/GET4 bytes differ but same strong tag; GET4 If-None-Match GET3 tag returns304. ExUnit RED 99/1 (t3==t4). Version-specific GET/REPORT validators and Vary Accept; current 3.0/4.0 tags both usable for conditional writes, stale tags fail | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.
@@ -230,5 +232,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 - R35 — Yearless birthdays use existing `birthdate_year_unknown` with leap-safe placeholder 2000; 4.0 emits `BDAY:--MMDD`, 3.0 emits `X-KITH-BDAY:--MMDD` (parsed back as BDAY) because RFC2426 BDAY requires a year — avoids inventing a birth year; native Kith UI keeps month/day — cost if wrong: a 3.0-only client that ignores the extension cannot display that birthday.
 
 - R36 — Preference-only `TYPE=PREF` has no native field label and must match an unlabeled native field when reapplying metadata (CDV-78). Thunderbird live RED lost TYPE=PREF after identical PUT, ExUnit RED 28/1 — PREF is a preference marker in 3.0, not a display label — cost if wrong: none.
+
+- R37 — Strong validators identify the serialized version: 3.0 keeps the original revision hash; 4.0 hashes revision plus version. GET varies on Accept; REPORT getetag corresponds to its requested address-data version. Conditional writes accept either current representation tag (and reject both after a write) — RFC7232 strong validation / RFC6352 negotiated address data — cost if wrong: one4.0 revalidation download after upgrade.
 
 ## Real-client smoke
