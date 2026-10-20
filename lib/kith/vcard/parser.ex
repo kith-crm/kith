@@ -30,15 +30,16 @@ defmodule Kith.VCard.Parser do
   - :photo (map with :content_type/:data/:encoding or :url, or nil)
   """
   def parse(data) when is_binary(data) do
-    contacts =
-      data
-      |> normalize_line_endings()
-      |> unfold_lines()
-      |> split_vcards()
-      |> Enum.map(&parse_vcard/1)
-      |> Enum.reject(&is_nil/1)
+    # A fold can bisect a UTF-8 code point (RFC 6350 §3.2). Restore bytes
+    # before validating encoding; genuinely malformed input remains rejected.
+    data = data |> normalize_line_endings() |> unfold_lines()
 
-    {:ok, contacts}
+    if String.valid?(data) do
+      contacts = data |> split_vcards() |> Enum.map(&parse_vcard/1) |> Enum.reject(&is_nil/1)
+      {:ok, contacts}
+    else
+      {:error, "Invalid UTF-8"}
+    end
   rescue
     e -> {:error, "Failed to parse vCard file: #{Exception.message(e)}"}
   end

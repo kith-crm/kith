@@ -182,6 +182,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | CDV-74 | medium | Escapes are decoded repeatedly and escaped N/ADR separators split components; category separators after an escaped backslash are missed | Live PUT 201 `N:Family\;Last;Given\;First;…`, ADR Suite\;2 → GET 200 mangled name and shifted address; literal backslash-n becomes backslash + newline in native text. ExUnit RED 33/1; byte scanner splits only unescaped delimiters and single-pass unescape preserves literal sequences | fixed |
 
+| CDV-75 | medium | UTF-8 validation before unfolding rejects recoverable mid-codepoint folds | PUT unicode-folding fixture → 422 valid-address-data, GET 404. ExUnit RED 98/1; parser now unfolds bytes before checking String.valid?, still rejects a genuine FF byte. RFC6350 §3.2 explicitly recommends restoring these sequences | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.

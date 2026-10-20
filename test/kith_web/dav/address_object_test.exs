@@ -1895,4 +1895,18 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
     {path, conn}
   end
+
+  test "CDV-75: UTF-8 is validated after unfolding, malformed sequences still fail", context do
+    bytes = File.read!("test/playwright/fixtures/carddav/unicode-folding.vcf")
+    refute String.valid?(bytes)
+    href = "/dav/addressbooks/default/unicode-folded.vcf"
+    assert authed_dav(context, "PUT", href, bytes).status == 201
+    get = authed_dav(context, "GET", href)
+    assert get.status == 200
+    assert String.replace(get.resp_body, "\r\n ", "") =~ "小明😀 مرحبا"
+    bad = build_vcard("Invalid", "Utf8") |> String.replace("Invalid", <<255>>)
+
+    assert authed_dav(context, "PUT", "/dav/addressbooks/default/invalid-utf8.vcf", bad).status ==
+             422
+  end
 end

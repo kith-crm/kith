@@ -624,8 +624,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
     authorize(conn, if(existing, do: :update, else: :create), fn ->
       parsed =
-        String.valid?(body) &&
-          VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: aid)
+        VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: aid)
 
       case parsed do
         {scalar_attrs, nested_data} ->
