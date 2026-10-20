@@ -345,9 +345,10 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── REPORT ─────────────────────────────────────────────────────────────
 
-  defp handle_report(conn) do
-    {:ok, body, conn} = read_body(conn)
+  # The body goes through the same capped reader as PUT/PROPFIND (R8, CDV-39).
+  defp handle_report(conn), do: with_body(conn, &report/2)
 
+  defp report(conn, body) do
     cond do
       String.contains?(body, "addressbook-multiget") ->
         handle_multiget_report(conn, body)

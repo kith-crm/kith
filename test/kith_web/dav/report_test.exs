@@ -446,4 +446,18 @@ defmodule KithWeb.DAV.ReportTest do
       assert cdata_content =~ "\r\n"
     end
   end
+
+  # ── CardDAV e2e regressions (Task 5) ────────────────────────────────────
+
+  describe "CardDAV e2e regressions — REPORT" do
+    test "CDV-39: a REPORT body over max-resource-size returns 413", context do
+      padding = String.duplicate(" ", 1_048_577)
+
+      body =
+        ~s(<card:addressbook-multiget xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">) <>
+          padding <> "</card:addressbook-multiget>"
+
+      assert authed_dav(context, "REPORT", "/dav/addressbooks/default/", body).status == 413
+    end
+  end
 end
