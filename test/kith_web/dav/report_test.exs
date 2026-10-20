@@ -452,6 +452,60 @@ defmodule KithWeb.DAV.ReportTest do
   # ── CardDAV e2e regressions (Task 5) ────────────────────────────────────
 
   describe "CardDAV e2e regressions — REPORT" do
+    defp sync_token!(conn) do
+      [token] =
+        Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, conn.resp_body,
+          capture: :all_but_first
+        )
+
+      token
+    end
+
+    defp sync(context, token, extra \\ "") do
+      body = """
+      <d:sync-collection xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+        <d:sync-token>#{token}</d:sync-token><d:sync-level>1</d:sync-level>#{extra}
+        <d:prop><d:getetag/></d:prop>
+      </d:sync-collection>
+      """
+
+      authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+    end
+
+    defp initial_token(context), do: context |> sync("") |> sync_token!()
+
+    # href => :present (200 propstat) | :removed (bare 404 status)
+    defp sync_changes(conn) do
+      assert conn.status == 207, conn.resp_body
+
+      ~r{<d:response>\s*<d:href>([^<]+)</d:href>(.*?)</d:response>}s
+      |> Regex.scan(conn.resp_body, capture: :all_but_first)
+      |> Map.new(fn [href, rest] ->
+        cond do
+          rest =~ ~r{\A\s*<d:status>HTTP/1.1 404 Not Found</d:status>\s*\z} -> {href, :removed}
+          rest =~ "HTTP/1.1 200 OK" -> {href, :present}
+          true -> {href, {:other, rest}}
+        end
+      end)
+    end
+
+    test "CDV-45: incremental sync reports archiving as a removal and unarchiving as an addition",
+         %{account_id: account_id} = context do
+      to_archive = ContactsFixtures.contact_fixture(account_id, %{first_name: "ToArchive"})
+      archived = ContactsFixtures.contact_fixture(account_id, %{first_name: "Archived"})
+      {:ok, archived} = Contacts.archive_contact(archived)
+
+      token = initial_token(context)
+      Process.sleep(1100)
+      {:ok, _} = Contacts.archive_contact(to_archive)
+      {:ok, _} = Contacts.unarchive_contact(archived)
+
+      assert sync_changes(sync(context, token)) == %{
+               contact_path(to_archive) => :removed,
+               contact_path(archived) => :present
+             }
+    end
+
     test "CDV-44: REPORTs return only the requested properties",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Props"})

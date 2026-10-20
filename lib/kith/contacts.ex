@@ -1811,19 +1811,24 @@ defmodule Kith.Contacts do
   def list_contacts_modified_since(account_id, %DateTime{} = since) do
     Contact
     |> scope_active(account_id)
-    |> where([c], c.updated_at > ^since)
+    |> where([c], c.updated_at > ^since and c.is_archived == false)
     |> preload(^dav_preloads())
     |> Repo.all()
   end
 
   @doc """
-  Lists contacts soft-deleted since the given timestamp.
-  Used by CardDAV sync-collection REPORT to report deletions.
+  Lists contacts soft-deleted, or archived, since the given timestamp.
+  Used by CardDAV sync-collection REPORT to report deletions: an archived
+  contact is hidden from DAV (R5).
   """
   def list_contacts_deleted_since(account_id, %DateTime{} = since) do
     Contact
     |> scope_to_account(account_id)
-    |> where([c], not is_nil(c.deleted_at) and c.deleted_at > ^since)
+    |> where(
+      [c],
+      (not is_nil(c.deleted_at) and c.deleted_at > ^since) or
+        (c.is_archived and c.updated_at > ^since)
+    )
     |> Repo.all()
   end
 
