@@ -1752,6 +1752,32 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-34: only the canonical kith-contact-N name resolves" do
+    test "CDV-34: kith-contact-0N.vcf does not alias contact N; it is an ordinary client name",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Canon"})
+      alias_href = "/dav/addressbooks/default/kith-contact-0#{contact.id}.vcf"
+
+      assert authed_dav(context, "GET", alias_href).status == 404
+      assert authed_dav(context, "DELETE", alias_href).status == 404
+
+      put = authed_dav(context, "PUT", alias_href, build_vcard("Zero", "Padded"))
+      assert put.status == 201
+      assert Contacts.get_contact(account_id, contact.id).first_name == "Canon"
+      assert Contacts.count_contacts(account_id) == 2
+
+      dup =
+        authed_dav(
+          context,
+          "PUT",
+          "/dav/addressbooks/default/zero-uid.vcf",
+          build_vcard("Zero", "Uid", uid: "kith-contact-0#{contact.id}")
+        )
+
+      assert dup.status == 201
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

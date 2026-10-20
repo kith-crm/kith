@@ -558,7 +558,7 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   defp default_uid_contact(aid, uid) do
-    with [_, id] <- Regex.run(~r/\A(?:urn:uuid:)?kith-contact-(\d{1,18})\z/, uid),
+    with [_, id] <- Regex.run(~r/\A(?:urn:uuid:)?kith-contact-([1-9]\d{0,17})\z/, uid),
          %Contact{dav_uid: nil, is_archived: false} = contact <-
            Contacts.get_contact(aid, String.to_integer(id)) do
       contact
@@ -800,8 +800,10 @@ defmodule Kith.DAV.CardDAVPlug do
       default_name_contact(name, &Contacts.get_trashed_contact(aid, &1))
   end
 
+  # Only the canonical id (no leading zeros) resolves, so a contact has one
+  # default href; `kith-contact-05.vcf` is an ordinary client name (CDV-34).
   defp default_name_contact(name, get) do
-    with [_, id_str] <- Regex.run(~r/\Akith-contact-(\d{1,18})\.vcf\z/, name),
+    with [_, id_str] <- Regex.run(~r/\Akith-contact-([1-9]\d{0,17})\.vcf\z/, name),
          %Contact{dav_resource_name: nil} = contact <- get.(String.to_integer(id_str)) do
       contact
     else
