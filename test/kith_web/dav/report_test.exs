@@ -452,6 +452,28 @@ defmodule KithWeb.DAV.ReportTest do
   # ── CardDAV e2e regressions (Task 5) ────────────────────────────────────
 
   describe "CardDAV e2e regressions — REPORT" do
+    test "CDV-42: a missing multiget href is a response with a bare 404 status, no propstat",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Present"})
+      missing = "/dav/addressbooks/default/nope.vcf"
+      body = multiget_body([contact_path(contact), missing])
+
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+
+      [missing_block] =
+        Regex.scan(
+          ~r{<d:response>\s*<d:href>#{missing}</d:href>.*?</d:response>}s,
+          conn.resp_body
+        )
+        |> List.flatten()
+
+      refute missing_block =~ "propstat"
+
+      assert missing_block =~
+               ~r{<d:href>[^<]+</d:href>\s*<d:status>HTTP/1.1 404 Not Found</d:status>}
+    end
+
     test "CDV-41: multiget answers equivalent hrefs with the resource's own href; foreign paths are 404",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Hrefs"})

@@ -82,11 +82,17 @@ defmodule Kith.DAV.XMLBuilder do
   def empty_element(ns, name), do: "<x:#{name} xmlns:x=\"#{escape(ns)}\"/>"
 
   @doc "Builds a response element for a deleted resource in sync-collection (RFC 6578 §3.5)."
-  def response_deleted(href) do
+  def response_deleted(href), do: status_response(href, "HTTP/1.1 404 Not Found")
+
+  @doc """
+  Builds a response element carrying only a status, no propstat (RFC 4918
+  §14.24): a deleted sync member, a missing multiget href (RFC 6352 §8.7).
+  """
+  def status_response(href, status) do
     """
     <d:response>
     <d:href>#{escape(href)}</d:href>
-    <d:status>HTTP/1.1 404 Not Found</d:status>
+    <d:status>#{status}</d:status>
     </d:response>
     """
   end

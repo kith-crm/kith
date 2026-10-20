@@ -371,10 +371,9 @@ defmodule Kith.DAV.CardDAVPlug do
     responses =
       Enum.map(hrefs, fn href ->
         case multiget_contact(conn, href) do
+          # RFC 6352 §8.7: a missing member is a bare 404 status (CDV-42)
           nil ->
-            XMLBuilder.response(href, [
-              XMLBuilder.propstat([], "HTTP/1.1 404 Not Found")
-            ])
+            XMLBuilder.status_response(href, "HTTP/1.1 404 Not Found")
 
           contact ->
             vcard = VCardAdapter.contact_to_vcard(contact, version: version)
