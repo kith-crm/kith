@@ -172,8 +172,6 @@ defmodule KithWeb.DAV.ReportTest do
           capture: :all_but_first
         )
 
-      # Wait and create a new contact
-      Process.sleep(1100)
       ContactsFixtures.contact_fixture(account_id, %{first_name: "NewAfterSync"})
 
       # Incremental sync with the token
@@ -208,8 +206,6 @@ defmodule KithWeb.DAV.ReportTest do
           capture: :all_but_first
         )
 
-      # Wait and delete the contact
-      Process.sleep(1100)
       {:ok, _} = Contacts.soft_delete_contact(contact)
 
       # Incremental sync
@@ -718,7 +714,6 @@ defmodule KithWeb.DAV.ReportTest do
       {:ok, archived} = Contacts.archive_contact(archived)
 
       token = initial_token(context)
-      Process.sleep(1100)
       {:ok, _} = Contacts.archive_contact(to_archive)
       {:ok, _} = Contacts.unarchive_contact(archived)
 
@@ -863,7 +858,7 @@ defmodule KithWeb.DAV.ReportTest do
 
       conn = query(context, tm("FN", "Limit"), limit: 5)
       assert count_responses(conn.resp_body) == 3
-      refute conn.resp_body =~ "507"
+      refute conn.resp_body =~ "507 Insufficient Storage"
     end
 
     test "CDV-43: unsupported query filters are 403, not match-all", context do

@@ -235,7 +235,6 @@ defmodule KithWeb.DAV.PropfindTest do
         |> put_req_header("depth", "0")
         |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
 
-      Process.sleep(1000)
       {:ok, _} = Contacts.update_contact(contact, %{first_name: "Changed"})
 
       conn2 =
@@ -730,8 +729,6 @@ defmodule KithWeb.DAV.PropfindTest do
 
     test "CDV-03: the PROPFIND sync-token round-trips through sync-collection", context do
       contact = ContactsFixtures.contact_fixture(context.account_id)
-      # Tokens have one-second resolution: let the fixture's second pass first.
-      Process.sleep(1_100)
 
       propfind = """
       <d:propfind xmlns:d="DAV:"><d:prop><d:sync-token/></d:prop></d:propfind>
@@ -762,7 +759,6 @@ defmodule KithWeb.DAV.PropfindTest do
       assert unchanged.status == 207
       assert count_responses(unchanged.resp_body) == 0
 
-      Process.sleep(1_100)
       {:ok, _} = Contacts.update_contact(contact, %{first_name: "Changed"})
 
       changed = sync.()
