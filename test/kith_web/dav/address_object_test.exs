@@ -1330,6 +1330,30 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-16: GET with If-None-Match" do
+    test "CDV-16: GET with a matching If-None-Match is 304 with the ETag and no body",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      [etag] = authed_dav(context, "GET", contact_path(contact)) |> get_resp_header("etag")
+
+      get = fn inm ->
+        build_conn()
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("if-none-match", inm)
+        |> dav_request("GET", contact_path(contact))
+      end
+
+      for inm <- [etag, "W/#{etag}", ~s("other", #{etag}), "*"] do
+        conn = get.(inm)
+        assert conn.status == 304, "If-None-Match: #{inm} -> #{conn.status}"
+        assert conn.resp_body == ""
+        assert get_resp_header(conn, "etag") == [etag]
+      end
+
+      assert get.(~s("other")).status == 200
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

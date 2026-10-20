@@ -462,14 +462,19 @@ defmodule Kith.DAV.CardDAVPlug do
         send_resp(conn, 404, "Not Found")
 
       contact ->
-        vcard = VCardAdapter.contact_to_vcard(contact, version: version)
         etag = compute_etag(contact)
-        content_type = vcard_content_type(version)
+        conn = put_resp_header(conn, "etag", "\"#{etag}\"")
 
-        conn
-        |> put_resp_content_type(content_type, "utf-8")
-        |> put_resp_header("etag", "\"#{etag}\"")
-        |> send_resp(200, vcard)
+        # RFC 7232 §3.2 / §4.1: a matching If-None-Match on GET is a 304
+        if none_match_fails?(conn, etag) do
+          send_resp(conn, 304, "")
+        else
+          vcard = VCardAdapter.contact_to_vcard(contact, version: version)
+
+          conn
+          |> put_resp_content_type(vcard_content_type(version), "utf-8")
+          |> send_resp(200, vcard)
+        end
     end
   end
 
@@ -514,7 +519,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   defp put_contact(conn, {aid, _name}, contact, scalar_attrs, nested_data) do
     # RFC 7232 §3.2: If-None-Match: * means "only if resource does NOT exist"
-    if get_req_header(conn, "if-none-match") == ["*"] do
+    if none_match_fails?(conn, compute_etag(contact)) do
       send_resp(conn, 412, "Precondition Failed")
     else
       put_update_contact(conn, aid, contact, scalar_attrs, nested_data)
@@ -621,6 +626,19 @@ defmodule Kith.DAV.CardDAVPlug do
         if String.trim(header) == "*" or strong in entity_tags(header),
           do: :ok,
           else: :precondition_failed
+    end
+  end
+
+  # RFC 7232 §3.2: If-None-Match is `*` or a list of entity tags, compared
+  # weakly. True when the condition is false, i.e. the current tag is listed.
+  defp none_match_fails?(conn, etag) do
+    case get_req_header(conn, "if-none-match") do
+      [] ->
+        false
+
+      values ->
+        header = Enum.join(values, ",")
+        String.trim(header) == "*" or Enum.any?(entity_tags(header), &(elem(&1, 1) == etag))
     end
   end
 
