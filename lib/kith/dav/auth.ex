@@ -44,35 +44,51 @@ defmodule Kith.DAV.Auth do
   """
   def require_auth(conn) do
     case failure_key(conn) do
-      nil -> check_credentials(conn, nil, 0)
+      nil -> check_credentials(conn, nil)
       key -> require_auth(conn, key)
     end
   end
 
+  # The failure is counted *before* the password is verified, so N concurrent
+  # bad guesses can't all read a stale count (check-then-act). Hammer's ETS
+  # backend loses increments when two processes create a bucket at the same
+  # time, so the increment is serialized per key on this node.
   defp require_auth(conn, key) do
-    case Hammer.inspect_bucket(key, @failure_window_ms, @max_failures) do
-      {:ok, {failures, _remaining, ms_to_next, _created, _updated}}
-      when failures >= @max_failures ->
-        RateLimiter.deny(conn, max(div(ms_to_next + 999, 1000), 1))
-
-      {:ok, {failures, _remaining, _ms_to_next, _created, _updated}} ->
-        check_credentials(conn, key, failures)
-
-      # Backend unavailable (e.g. Redis down): fail open rather than 500.
-      {:error, _reason} ->
-        check_credentials(conn, key, 0)
+    case count_attempt(key) do
+      {:deny, _limit} -> RateLimiter.deny(conn, retry_after(key))
+      {:allow, _count} -> check_credentials(conn, key)
+      # Backend unavailable: fail open rather than 500.
+      {:error, _reason} -> check_credentials(conn, nil)
     end
   end
 
-  defp check_credentials(conn, key, failures) do
+  defp count_attempt(key) do
+    :global.trans(
+      {{__MODULE__, key}, self()},
+      fn -> Hammer.check_rate(key, @failure_window_ms, @max_failures) end,
+      [node()]
+    )
+  end
+
+  defp retry_after(key) do
+    case Hammer.inspect_bucket(key, @failure_window_ms, @max_failures) do
+      {:ok, {_count, _remaining, ms_to_next, _created, _updated}} ->
+        max(div(ms_to_next + 999, 1000), 1)
+
+      {:error, _reason} ->
+        div(@failure_window_ms, 1000)
+    end
+  end
+
+  # A success never consumes budget: it clears the pair's count, including
+  # the increment made for this request.
+  defp check_credentials(conn, key) do
     case authenticate(conn) do
       {:ok, user} ->
-        if failures > 0, do: Hammer.delete_buckets(key)
+        if key, do: Hammer.delete_buckets(key)
         assign(conn, :current_scope, Accounts.Scope.for_user(user))
 
       {:error, _} ->
-        if key, do: Hammer.check_rate(key, @failure_window_ms, @max_failures)
-
         conn
         |> put_resp_header("www-authenticate", ~s(Basic realm="Kith CardDAV"))
         |> send_resp(401, "Unauthorized")

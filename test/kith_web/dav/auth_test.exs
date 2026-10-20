@@ -104,6 +104,22 @@ defmodule KithWeb.DAV.AuthTest do
       assert propfind_as(other.email, dav_password()).status == 207
     end
 
+    test "CDV-10: the failure cap holds under concurrent bad attempts" do
+      email = "cdv10-race-#{System.unique_integer([:positive])}@example.com"
+
+      statuses =
+        1..30
+        |> Task.async_stream(fn i -> propfind_as(email, "wrong-#{i}").status end,
+          max_concurrency: 30,
+          timeout: 60_000
+        )
+        |> Enum.map(fn {:ok, status} -> status end)
+        |> Enum.frequencies()
+
+      assert Map.get(statuses, 401, 0) <= 10
+      assert Map.get(statuses, 401, 0) + Map.get(statuses, 429, 0) == 30
+    end
+
     test "CDV-10: requests without parseable credentials are never throttled" do
       for header <- [nil, "Bearer x", "Basic !!!", "Basic " <> Base.encode64("no-colon")],
           _ <- 1..11 do
