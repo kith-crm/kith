@@ -52,6 +52,9 @@ defmodule Kith.DAV.CardDAVPlug do
   # RFC 6352 §6.2.1, advertised on the address book
   @max_resource_size 1_048_576
 
+  # How much of an oversized body is read and discarded before answering 413
+  @drain_limit 16 * 1_048_576
+
   @impl Plug
   def init(opts), do: opts
 
@@ -176,10 +179,31 @@ defmodule Kith.DAV.CardDAVPlug do
   # size of what was read is checked too (CDV-23).
   defp with_body(conn, fun) do
     case read_body(conn, length: @max_resource_size) do
-      {:ok, body, conn} when byte_size(body) <= @max_resource_size -> fun.(conn, body)
-      {:ok, _too_big, conn} -> send_resp(conn, 413, "Request Entity Too Large")
-      {:more, _partial, conn} -> send_resp(conn, 413, "Request Entity Too Large")
-      {:error, _} -> send_resp(conn, 400, "Bad Request")
+      {:ok, body, conn} when byte_size(body) <= @max_resource_size ->
+        fun.(conn, body)
+
+      {:ok, _too_big, conn} ->
+        send_resp(conn, 413, "Request Entity Too Large")
+
+      {:more, _partial, conn} ->
+        conn |> drain_body(@drain_limit) |> send_resp(413, "Request Entity Too Large")
+
+      {:error, _} ->
+        send_resp(conn, 400, "Bad Request")
+    end
+  end
+
+  # Reads and discards the rest of an oversized body (bounded) before the 413,
+  # so the connection is clean and a client still uploading reads the answer
+  # instead of a reset (RFC 9112 §9.6). Past the bound the connection is closed.
+  defp drain_body(conn, budget) when budget <= 0,
+    do: put_resp_header(conn, "connection", "close")
+
+  defp drain_body(conn, budget) do
+    case read_body(conn, length: @max_resource_size) do
+      {:ok, _rest, conn} -> conn
+      {:more, chunk, conn} -> drain_body(conn, budget - byte_size(chunk))
+      {:error, _} -> put_resp_header(conn, "connection", "close")
     end
   end
 

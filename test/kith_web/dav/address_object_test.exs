@@ -1834,6 +1834,27 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-37: an early 413 leaves the connection readable" do
+    defp unread(conn) do
+      {Plug.Adapters.Test.Conn, %{req_body: rest}} = conn.adapter
+      byte_size(rest)
+    end
+
+    test "CDV-37: the rest of an oversized body is drained before the 413; past the bound the connection closes",
+         context do
+      drainable = build_vcard("Big", "Body", note: String.duplicate("x", 2_000_000))
+      conn = authed_dav(context, "PUT", "/dav/addressbooks/default/drain.vcf", drainable)
+      assert conn.status == 413
+      assert unread(conn) == 0
+      assert get_resp_header(conn, "connection") == []
+
+      huge = build_vcard("Huge", "Body", note: String.duplicate("x", 20 * 1_048_576))
+      conn = authed_dav(context, "PUT", "/dav/addressbooks/default/huge.vcf", huge)
+      assert conn.status == 413
+      assert get_resp_header(conn, "connection") == ["close"]
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════
