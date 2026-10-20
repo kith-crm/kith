@@ -58,7 +58,9 @@ defmodule Kith.VCard.Parser do
   end
 
   defp split_vcards(data) do
-    ~r/BEGIN:VCARD\n(.*?)END:VCARD/si
+    # Delimiters count only as whole lines: an escaped AGENT value may contain
+    # "BEGIN:VCARD…END:VCARD" text (CDV-91).
+    ~r/^BEGIN:VCARD\n(.*?)^END:VCARD$/msi
     |> Regex.scan(data, capture: :all_but_first)
     |> Enum.map(&List.first/1)
     |> Enum.reject(&is_nil/1)

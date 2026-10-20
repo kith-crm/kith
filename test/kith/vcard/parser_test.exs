@@ -513,4 +513,18 @@ defmodule Kith.VCard.ParserTest do
              "EMAIL;X-NOTE=\"x:y\";TYPE=home"
            ]
   end
+
+  test "CDV-91: an embedded AGENT vCard does not end the card" do
+    data =
+      "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Agent Card\r\nAGENT:BEGIN:VCARD\\nFN:Agent\\nEND:VCARD\r\nNOTE:after the agent\r\nEMAIL:after@example.test\r\nEND:VCARD\r\nBEGIN:VCARD\r\nVERSION:3.0\r\nFN:Second\r\nEND:VCARD\r\n"
+
+    assert {:ok, [parsed, second]} = Parser.parse(data)
+    assert parsed.description == "after the agent"
+    assert [%{value: "after@example.test"}] = parsed.emails
+
+    assert %{"value" => "BEGIN:VCARD\\nFN:Agent\\nEND:VCARD"} =
+             Enum.find(parsed.properties, &(&1["name"] == "AGENT"))
+
+    assert second.display_name == "Second"
+  end
 end

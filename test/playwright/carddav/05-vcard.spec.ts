@@ -45,7 +45,8 @@ async function reportCard(request: APIRequestContext, href: string, sync = false
   assertWellFormedXml(res.body);
   const block = responseFor(res.body, href);
   expect(block).toBeTruthy();
-  return propText(block!, "address-data")!;
+  // A client sees the CDATA section's content, not its markup.
+  return propText(block!, "address-data")!.replace(/^<!\[CDATA\[([\s\S]*)\]\]>$/, "$1").replace(/\]\]\]\]><!\[CDATA\[>/g, "]]>");
 }
 async function api(request: APIRequestContext, method: string, path: string, data?: unknown, status = 200) {
   const response = await request.fetch(path, { method, headers: { Authorization: `Bearer ${bearer}` }, data });
@@ -188,6 +189,15 @@ test("CDV-89: quoted parameter values survive GET, a native edit and PUT-back", 
     expect(withoutRev((await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } })).body)).toBe(withoutRev(g.body));
     expect((await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data.map((f: { id: number }) => f.id)).toEqual([tel.id]);
   }
+});
+test("CDV-91: an embedded AGENT vCard does not truncate the card", async ({ request }) => {
+  const href = `${BOOK}${prefix}-agent.vcf`; created.push(href);
+  const body = `BEGIN:VCARD\r\nVERSION:3.0\r\nUID:${prefix}-agent\r\nN:Card;${prefix} Agent;;;\r\nFN:${prefix} Agent Card\r\nAGENT:BEGIN:VCARD\\nFN:Agent\\nEND:VCARD\r\nNOTE:after the agent\r\nEMAIL;TYPE=WORK:after@example.test\r\nEND:VCARD\r\n`;
+  expect((await put(request, href, body)).status).toBe(201);
+  const card = unfold((await dav(request, "GET", href)).body);
+  expect(card).toContain("NOTE:after the agent\r\n");
+  expect(card).toContain("EMAIL;TYPE=WORK:after@example.test\r\n");
+  expect(card).toContain("AGENT:BEGIN:VCARD\\nFN:Agent\\nEND:VCARD\r\n");
 });
 test("V3: unicode survives multiget and the web contact page", async ({ request, page }) => {
   const href = `${BOOK}${prefix}-unicode-folding.vcf`;
