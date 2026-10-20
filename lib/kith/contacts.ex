@@ -1842,18 +1842,19 @@ defmodule Kith.Contacts do
   end
 
   @doc """
-  The CardDAV ctag of the account's address book: the newest revision of any of
-  its contacts (trashed and archived ones too, so hiding a contact changes it)
-  or of its last hard delete, `0` when it has neither. It changes on every
-  write, even within one second (CDV-49).
+  The CardDAV ctag of the account's address book: the newest commit-ordered
+  change (`contact_dav_changes.seq`, written at COMMIT for every write of a
+  contact, hidden ones included) or hard delete (`dav_sync_floors.seq`), `0`
+  when it has neither. It changes whenever a committed write becomes visible,
+  even one that started before a write committed earlier (CDV-49, CDV-53).
   """
   def dav_ctag(account_id) do
     %{rows: [[ctag]]} =
       Repo.query!(
         """
         SELECT GREATEST(
-          (SELECT max(dav_revision) FROM contacts WHERE account_id = $1),
-          (SELECT revision FROM dav_sync_floors WHERE account_id = $1),
+          (SELECT max(seq) FROM contact_dav_changes WHERE account_id = $1),
+          (SELECT seq FROM dav_sync_floors WHERE account_id = $1),
           0
         )
         """,

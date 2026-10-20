@@ -244,4 +244,82 @@ defmodule KithWeb.DAV.ConcurrencyTest do
       assert count(account_id) == 1
     end
   end
+
+  # ── Commit order (sync token, ctag) ──────────────────────────────────────
+
+  # Runs `write` in a transaction in another process and holds it open
+  # (uncommitted) until `commit/1` is called on the returned handle.
+  defp hold_write(write) do
+    parent = self()
+
+    task =
+      Task.async(fn ->
+        Sandbox.unboxed_run(Repo, fn ->
+          Repo.transaction(fn ->
+            write.()
+            send(parent, {:written, self()})
+
+            receive do
+              :commit -> :ok
+            after
+              10_000 -> Repo.rollback(:timeout)
+            end
+          end)
+        end)
+      end)
+
+    assert_receive {:written, pid}, 5_000
+    {task, pid}
+  end
+
+  defp commit({task, pid}) do
+    send(pid, :commit)
+    Task.await(task, 10_000)
+  end
+
+  defp unboxed_contact(account_id, first_name),
+    do:
+      Sandbox.unboxed_run(Repo, fn ->
+        Kith.ContactsFixtures.contact_fixture(account_id, %{first_name: first_name})
+      end)
+
+  defp rename(contact, first_name),
+    do: {:ok, _} = Contacts.update_contact(Repo.reload!(contact), %{first_name: first_name})
+
+  defp dav(user, method, path, body, headers \\ []) do
+    Sandbox.unboxed_run(Repo, fn ->
+      headers
+      |> Enum.reduce(build_conn(), fn {k, v}, c -> put_req_header(c, k, v) end)
+      |> basic_auth(user.email, dav_password())
+      |> dav_request(method, path, body)
+    end)
+  end
+
+  defp ctag(user) do
+    body =
+      ~s(<d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:prop><cs:getctag/></d:prop></d:propfind>)
+
+    conn = dav(user, "PROPFIND", @book, body, [{"depth", "0"}])
+
+    [ctag] =
+      Regex.run(~r{<cs:getctag>([^<]+)</cs:getctag>}, conn.resp_body, capture: :all_but_first)
+
+    ctag
+  end
+
+  describe "CDV-53: the ctag follows commit order" do
+    test "CDV-53: a write that commits after a later-started write still changes the ctag",
+         %{user: user, account_id: account_id} do
+      slow = unboxed_contact(account_id, "Slow")
+      fast = unboxed_contact(account_id, "Fast")
+
+      # T1 writes first (older revision) but commits last
+      t1 = hold_write(fn -> rename(slow, "SlowEdited") end)
+      Sandbox.unboxed_run(Repo, fn -> rename(fast, "FastEdited") end)
+      before = ctag(user)
+
+      commit(t1)
+      refute ctag(user) == before
+    end
+  end
 end

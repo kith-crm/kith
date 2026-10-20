@@ -37,6 +37,11 @@ defmodule Kith.DataCase do
   """
   def setup_sandbox(tags) do
     pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Kith.Repo, shared: not tags[:async])
+
+    # The CardDAV change log trigger is deferred to COMMIT, which a sandboxed
+    # test never reaches; run it at each statement instead (same order within
+    # one transaction). Tests outside the sandbox exercise the deferred path.
+    Ecto.Adapters.SQL.query!(Kith.Repo, "SET CONSTRAINTS contacts_log_dav_change IMMEDIATE")
     on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
   end
 
