@@ -577,4 +577,27 @@ defmodule Kith.VCard.SerializerTest do
       assert String.valid?(line)
     end
   end
+
+  test "CDV-77: a native field without a protocol does not crash serialization" do
+    contact = %{
+      first_name: "Native",
+      last_name: "Field",
+      nickname: nil,
+      birthdate: nil,
+      company: nil,
+      occupation: nil,
+      description: nil,
+      contact_fields: [
+        %{
+          value: "Private native field",
+          label: nil,
+          contact_field_type: %{protocol: nil, vcard_label: nil}
+        }
+      ]
+    }
+
+    card = Serializer.serialize(contact)
+    assert card =~ "FN:Native Field"
+    refute card =~ "Private native field"
+  end
 end

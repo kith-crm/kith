@@ -186,6 +186,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | CDV-76 | medium | Serializer folds inside UTF-8 codepoints, making GET invalid and REPORT XML malformed | Unicode PUT now201; GET strict UTF-8 decoder raises UnicodeDecodeError; live unicode spec RED fails length/replacement character checks. ExUnit RED 26/1 String.valid?(card) false; fold takes the largest valid UTF-8 chunk within 75 bytes (74 on continuations) | fixed |
 
+| CDV-77 | high | A native custom field with no protocol makes GET crash | Via API add a protocol-less native field → GET its DAV card 500 (`String.trim_trailing(nil, "://")`), observed during V5; `/tmp/kith-task6/cdv77-78-live-red.txt`. ExUnit RED 27/1; scheme normalization now accepts nil and omits this non-vCard field | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.
