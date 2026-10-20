@@ -99,6 +99,27 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | S7 | fixed CDV-46 (token), CDV-49, CDV-53 (ctag, commit order) |
 | S8 | fixed CDV-50 (`infinite` handled as 1; over the limit -> 507) |
 
+### 05-vcard
+
+| Case | Result |
+|---|---|
+| V1 | fixed CDV-51, CDV-58–76, CDV-78, CDV-80–85; all six fixtures survive both versions with valid framing, escaping, folds and value syntax |
+| V2 | fixed CDV-74, CDV-76, CDV-78–80, CDV-85; identical GET/PUT/GET stable apart from REV; no duplicated fields/addresses/tags |
+| V3 | fixed CDV-75, CDV-76; CJK, emoji, Arabic and Hebrew pass GET, multiget XML and browser contact-page checks |
+| V4 | pass; 1820-byte PNG is the visible native avatar; GET and multiget include PHOTO, sync deliberately omits it |
+| V5 | fixed CDV-79, CDV-80, CDV-85; photo-free sync PUT-back and 4.0 PUT-back preserve avatar, tags, relationship ids, notes, native reminder, custom native field, favorite and first-met metadata |
+| V6 | fixed CDV-58–72; one log row per dropped fixture property, shared preservation mechanism; no Task6 product decisions |
+
+All six fixtures (`v30-full`, `v40-full`, `apple-ios`, `davx5-android`, `thunderbird`, `unicode-folding`) pass both GET versions and identical PUT-back. The spec also checks separate validators/conditional writes and safe text UID serialization (12 live tests total).
+
+PHOTO policy: multiget is a complete card like GET; sync omits potentially large PHOTO. A subsequent sync PUT-back keeps the stored avatar. Native-only data is created through the authenticated API for V5 and verified afterwards; browser checks are limited to Unicode and avatar rendering.
+
+Run `source /tmp/kith-carddav-e2e.env && npx playwright test --project=e2e test/playwright/carddav/05-vcard.spec.ts --workers=1`. If Playwright's Chromium is unavailable, this spec accepts `PLAYWRIGHT_CHROMIUM_EXECUTABLE` for an existing compatible executable. Task6 used `/Users/basharqassis/.t3/tools/chrome-headless-shell/mac-arm64/154.0.8037.92/chrome-headless-shell`. The download of Playwright Chromium was incomplete and stopped; no dependency/build configuration changed.
+
+Deploy `20261020220000_add_contact_dav_vcard` before the updated code. Existing contacts default to empty preservation metadata. Rollback drops that retained metadata. Ordinary non-DAV import does not acquire this DAV-specific preservation storage.
+
+Browser environment concern: `/assets/css/app.css` returns 404; the same missing artifact appeared in logs before Task6. `source /tmp/kith-carddav-e2e.env && mix assets.build` fails with `mix tailwind kith exited with 137`. All required browser interactions still pass. This is an isolated live-server build prerequisite for Task7, not a CardDAV defect; pinned versions and build config were left unchanged.
+
 ## Bug log
 
 | ID | Severity | Summary | Request / response | Status |
