@@ -340,10 +340,16 @@ defmodule Kith.VCard.Serializer do
   defp fold_line(<<>>, _max, acc), do: acc
 
   defp fold_line(rest, max, acc) do
-    size = min(max, byte_size(rest))
+    size = utf8_chunk_size(rest, min(max, byte_size(rest)))
     <<chunk::binary-size(size), remaining::binary>> = rest
     # Continue lines use 74 octets (75 minus the leading space)
     fold_line(remaining, 74, [chunk | acc])
+  end
+
+  defp utf8_chunk_size(rest, size) do
+    if String.valid?(binary_part(rest, 0, size)),
+      do: size,
+      else: utf8_chunk_size(rest, size - 1)
   end
 
   # ── Escaping ───────────────────────────────────────────────────────────

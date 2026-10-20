@@ -557,4 +557,24 @@ defmodule Kith.VCard.SerializerTest do
       refute String.contains?(vcard, "ENCODING=b")
     end
   end
+
+  test "CDV-76: folded output never splits a UTF-8 sequence" do
+    contact = %{
+      first_name: "小明😀 مرحبا",
+      last_name: "王",
+      nickname: nil,
+      birthdate: nil,
+      company: nil,
+      occupation: nil,
+      description: String.duplicate("漢字😀مرحباשלום", 20)
+    }
+
+    card = Serializer.serialize(contact)
+    assert String.valid?(card)
+
+    for line <- String.split(card, "\r\n") do
+      assert byte_size(line) <= 75
+      assert String.valid?(line)
+    end
+  end
 end
