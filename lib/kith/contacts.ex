@@ -1281,6 +1281,21 @@ defmodule Kith.Contacts do
     |> Repo.one()
   end
 
+  @doc "Like `get_contact_by_dav_name/2`, but only for a contact in the trash."
+  def get_trashed_contact_by_dav_name(account_id, name) when is_binary(name) do
+    Contact
+    |> scope_trashed(account_id)
+    |> where([c], c.dav_resource_name == ^name)
+    |> Repo.one()
+  end
+
+  @doc "Gets a contact in the trash by id, or nil."
+  def get_trashed_contact(account_id, id) do
+    Contact
+    |> scope_trashed(account_id)
+    |> Repo.get(id)
+  end
+
   @doc "Stores the CardDAV resource name and vCard UID a client chose (R2)."
   def put_dav_identity(%Contact{} = contact, attrs) do
     contact

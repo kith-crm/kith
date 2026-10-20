@@ -526,18 +526,31 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
+  # R18: a PUT to the href of a trashed contact restores that contact and
+  # overwrites it, instead of creating a duplicate beside it (CDV-18).
   defp create_contact(conn, {aid, name}, scalar_attrs, nested_data) do
+    case find_trashed_contact(conn, name) do
+      nil ->
+        insert_contact(conn, {aid, name}, scalar_attrs, nested_data)
+
+      trashed ->
+        with {:ok, restored} <- Contacts.restore_contact(trashed),
+             {:ok, updated} <- Contacts.update_contact(restored, scalar_attrs),
+             {:ok, _} <- Contacts.replace_contact_children(updated, aid, nested_data) do
+          send_put_response(conn, 201, Contacts.touch_contact!(updated))
+        else
+          {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
+        end
+    end
+  end
+
+  defp insert_contact(conn, {aid, name}, scalar_attrs, nested_data) do
     identity = %{dav_resource_name: name, dav_uid: nested_data.uid}
 
     with {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
          {:ok, contact} <- Contacts.put_dav_identity(contact, identity),
          {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data) do
-      contact = Contacts.touch_contact!(contact)
-      etag = compute_etag(contact)
-
-      conn
-      |> put_resp_header("etag", "\"#{etag}\"")
-      |> send_resp(201, "")
+      send_put_response(conn, 201, Contacts.touch_contact!(contact))
     else
       {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
     end
@@ -551,16 +564,17 @@ defmodule Kith.DAV.CardDAVPlug do
       :ok ->
         with {:ok, updated} <- Contacts.update_contact(contact, scalar_attrs),
              {:ok, _} <- Contacts.replace_contact_children(updated, aid, nested_data) do
-          updated = Contacts.touch_contact!(updated)
-          etag = compute_etag(updated)
-
-          conn
-          |> put_resp_header("etag", "\"#{etag}\"")
-          |> send_resp(204, "")
+          send_put_response(conn, 204, Contacts.touch_contact!(updated))
         else
           {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
         end
     end
+  end
+
+  defp send_put_response(conn, status, contact) do
+    conn
+    |> put_resp_header("etag", "\"#{compute_etag(contact)}\"")
+    |> send_resp(status, "")
   end
 
   # ── DELETE ─────────────────────────────────────────────────────────────
@@ -661,9 +675,20 @@ defmodule Kith.DAV.CardDAVPlug do
   defp found_contact(:error, _conn), do: nil
 
   defp find_contact_by_default_name(conn, name) do
+    default_name_contact(name, &Contacts.get_contact(account_id(conn), &1))
+  end
+
+  # The trashed contact `name` would address if it were active (CDV-18).
+  defp find_trashed_contact(conn, name) do
+    aid = account_id(conn)
+
+    Contacts.get_trashed_contact_by_dav_name(aid, name) ||
+      default_name_contact(name, &Contacts.get_trashed_contact(aid, &1))
+  end
+
+  defp default_name_contact(name, get) do
     with [_, id_str] <- Regex.run(~r/\Akith-contact-(\d{1,18})\.vcf\z/, name),
-         %Contact{dav_resource_name: nil} = contact <-
-           Contacts.get_contact(account_id(conn), String.to_integer(id_str)) do
+         %Contact{dav_resource_name: nil} = contact <- get.(String.to_integer(id_str)) do
       contact
     else
       _ -> nil

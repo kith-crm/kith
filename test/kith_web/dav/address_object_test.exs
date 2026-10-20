@@ -1381,6 +1381,46 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-18: PUT to a trashed contact's href (R18)" do
+    defp all_rows(account_id) do
+      import Ecto.Query
+      Kith.Repo.all(from c in Kith.Contacts.Contact, where: c.account_id == ^account_id)
+    end
+
+    test "CDV-18: a client-named trashed contact is restored in place, not duplicated",
+         %{account_id: account_id} = context do
+      href = "/dav/addressbooks/default/trashed-uuid.vcf"
+
+      assert authed_dav(context, "PUT", href, build_vcard("Tr", "Ashed", uid: "trashed-uuid")).status ==
+               201
+
+      [%{id: id}] = all_rows(account_id)
+      assert authed_dav(context, "DELETE", href).status == 204
+
+      conn =
+        build_conn()
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("if-none-match", "*")
+        |> dav_request("PUT", href, build_vcard("Tr", "Back", uid: "trashed-uuid"))
+
+      assert conn.status == 201
+      assert [%{id: ^id, deleted_at: nil, last_name: "Back"}] = all_rows(account_id)
+      assert authed_dav(context, "GET", href).resp_body =~ "UID:trashed-uuid\r\n"
+    end
+
+    test "CDV-18: a trashed UI contact PUT at kith-contact-N.vcf is restored in place",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      {:ok, _} = Contacts.soft_delete_contact(contact)
+
+      conn = authed_dav(context, "PUT", contact_path(contact), build_vcard("Ui", "Back"))
+      assert conn.status == 201
+      assert [%{id: id, deleted_at: nil, last_name: "Back"}] = all_rows(account_id)
+      assert id == contact.id
+      assert authed_dav(context, "GET", contact_path(contact)).status == 200
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════
