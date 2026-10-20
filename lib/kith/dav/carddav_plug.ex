@@ -45,7 +45,8 @@ defmodule Kith.DAV.CardDAVPlug do
     owner: "<d:owner/>",
     current_user_privilege_set: "<d:current-user-privilege-set/>",
     max_resource_size: "<card:max-resource-size/>",
-    supported_collation_set: "<card:supported-collation-set/>"
+    supported_collation_set: "<card:supported-collation-set/>",
+    address_data: "<card:address-data/>"
   }
 
   @impl Plug
@@ -552,13 +553,10 @@ defmodule Kith.DAV.CardDAVPlug do
     case XMLParser.parse_proppatch(body) do
       {:ok, props} ->
         # All properties are live (server-managed) — cannot be modified (RFC 4918 §9.2)
-        prop_names =
-          Enum.map(props, &Atom.to_string/1) |> Enum.map(&String.replace(&1, "_", "-"))
-
         xml =
           XMLBuilder.multistatus([
             XMLBuilder.response("/dav/addressbooks/default/", [
-              XMLBuilder.propstat_forbidden(prop_names)
+              XMLBuilder.propstat(Enum.map(props, &empty_prop/1), "HTTP/1.1 403 Forbidden")
             ])
           ])
 
@@ -686,7 +684,7 @@ defmodule Kith.DAV.CardDAVPlug do
         elements =
           available_props
           |> Keyword.keys()
-          |> Enum.map(fn key -> Map.get(@prop_empty_elements, key, "<d:#{key}/>") end)
+          |> Enum.map(&empty_prop/1)
 
         [XMLBuilder.propstat(elements)]
 
@@ -702,7 +700,7 @@ defmodule Kith.DAV.CardDAVPlug do
         missing =
           MapSet.difference(requested_set, available_keys)
           |> MapSet.to_list()
-          |> Enum.map(fn key -> Map.get(@prop_empty_elements, key, "<d:#{key}/>") end)
+          |> Enum.map(&empty_prop/1)
 
         propstats = []
         propstats = if found != [], do: [XMLBuilder.propstat(found) | propstats], else: propstats
@@ -715,6 +713,11 @@ defmodule Kith.DAV.CardDAVPlug do
         Enum.reverse(propstats)
     end
   end
+
+  # Empty element naming a prop: known atoms use their canonical prefix,
+  # unknown `{namespace, name}` props keep their own namespace (RFC 4918 §9.1).
+  defp empty_prop({ns, name}), do: XMLBuilder.empty_element(ns, name)
+  defp empty_prop(key), do: Map.fetch!(@prop_empty_elements, key)
 
   defp requested_vcard_version(conn) do
     accept = get_req_header(conn, "accept") |> List.first("")

@@ -635,7 +635,8 @@ defmodule KithWeb.DAV.PropfindTest do
       refute conn.resp_body =~ "getlastmodified"
     end
 
-    test "requesting unknown property ignores it, serves known props", context do
+    # Ruling R10: unknown props get a 404 propstat (RFC 4918 §9.1), see CDV-06.
+    test "requesting unknown property reports it as 404, serves known props", context do
       body = """
       <?xml version="1.0" encoding="UTF-8"?>
       <d:propfind xmlns:d="DAV:">
@@ -653,8 +654,9 @@ defmodule KithWeb.DAV.PropfindTest do
       assert conn.status == 207
       # Known prop is still served
       assert conn.resp_body =~ "getetag"
-      # Unknown props are silently ignored (not in atom table)
-      refute conn.resp_body =~ "unknown-property"
+      # Unknown props are reported in a 404 propstat
+      assert conn.resp_body =~ "unknown-property"
+      assert conn.resp_body =~ "404 Not Found"
     end
 
     test "propname request returns empty property elements", context do
@@ -784,6 +786,37 @@ defmodule KithWeb.DAV.PropfindTest do
       conn = authed_dav(context, "PROPFIND", "/dav/addressbooks/default/", body)
       assert conn.resp_body =~ "<cs:getctag>"
       refute conn.resp_body =~ "404 Not Found"
+    end
+
+    test "CDV-06: unknown props are reported in a 404 propstat with their namespace", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+
+      body = """
+      <d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><x:bogus xmlns:x="urn:x"/></d:prop></d:propfind>
+      """
+
+      conn = authed_dav(context, "PROPFIND", contact_path(contact), body)
+      assert conn.status == 207
+
+      assert [_, not_found] =
+               Regex.run(~r{<d:propstat>((?:(?!</d:propstat>).)*404 Not Found)}s, conn.resp_body)
+
+      assert not_found =~ ~r{<(\w+):bogus xmlns:\1="urn:x"/>}
+      refute not_found =~ "getetag"
+    end
+
+    test "CDV-06: PROPPATCH echoes every prop with its own namespace", context do
+      body = """
+      <d:propertyupdate xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
+        <d:set><d:prop><cs:getctag>1</cs:getctag><x:color xmlns:x="urn:x">red</x:color></d:prop></d:set>
+      </d:propertyupdate>
+      """
+
+      conn = authed_dav(context, "PROPPATCH", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+      assert conn.resp_body =~ "<cs:getctag/>"
+      assert conn.resp_body =~ ~r{<(\w+):color xmlns:\1="urn:x"/>}
+      refute conn.resp_body =~ "<d:getctag/>"
     end
   end
 end

@@ -73,6 +73,15 @@ defmodule Kith.DAV.XMLParserTest do
       refute :getctag in props
     end
 
+    test "CDV-06: unknown props are returned with their namespace" do
+      body = """
+      <d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><x:bogus xmlns:x="urn:x"/><plain xmlns=""/></d:prop></d:propfind>
+      """
+
+      assert {:ok, {:prop, [:getetag, {"urn:x", "bogus"}, {"", "plain"}]}} =
+               XMLParser.parse_propfind(body)
+    end
+
     test "CDV-05: a body whose root is not DAV:propfind is an error" do
       assert {:error, :invalid_xml} =
                XMLParser.parse_propfind(~s(<x:propfind xmlns:x="urn:x"><x:allprop/></x:propfind>))

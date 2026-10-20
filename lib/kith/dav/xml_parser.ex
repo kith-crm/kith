@@ -15,7 +15,8 @@ defmodule Kith.DAV.XMLParser do
   Parses a PROPFIND request body.
 
   Returns `{:ok, :allprop}`, `{:ok, :propname}`, or `{:ok, {:prop, props}}`
-  where `props` is a list of atoms representing the requested properties.
+  where `props` lists the requested properties: an atom for each property the
+  server knows, `{namespace, local_name}` for any other.
 
   An empty body is treated as an allprop request per RFC 4918 Section 9.1.
   A body that is not well-formed UTF-8 XML returns `{:error, :invalid_xml}`.
@@ -143,17 +144,13 @@ defmodule Kith.DAV.XMLParser do
     {@cs, "getctag"} => :getctag
   }
 
-  # The known props named by the children of the `DAV:prop` elements found at
+  # The props named by the children of the `DAV:prop` elements found at
   # `depth` (2 inside `propfind`, 3 inside `propertyupdate/set|remove`).
+  # Known props become atoms; unknown ones stay `{namespace, local_name}`.
   defp requested_props(elements, depth) do
     elements
     |> children_of(depth, {@dav, "prop"})
-    |> Enum.flat_map(fn name ->
-      case Map.fetch(@known_props, name) do
-        {:ok, atom} -> [atom]
-        :error -> []
-      end
-    end)
+    |> Enum.map(&Map.get(@known_props, &1, &1))
     |> Enum.uniq()
   end
 

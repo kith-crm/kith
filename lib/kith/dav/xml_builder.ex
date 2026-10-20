@@ -77,19 +77,9 @@ defmodule Kith.DAV.XMLBuilder do
   def current_user_principal(href),
     do: "<d:current-user-principal><d:href>#{escape(href)}</d:href></d:current-user-principal>"
 
-  @doc "Builds a propstat element for protected properties that cannot be modified (403)."
-  def propstat_forbidden(prop_names) do
-    props = Enum.map_join(prop_names, "\n", fn name -> "<d:#{name}/>" end)
-
-    """
-    <d:propstat>
-    <d:prop>
-    #{props}
-    </d:prop>
-    <d:status>HTTP/1.1 403 Forbidden</d:status>
-    </d:propstat>
-    """
-  end
+  @doc "Builds an empty element for a property in an arbitrary namespace."
+  def empty_element("", name), do: "<#{name} xmlns=\"\"/>"
+  def empty_element(ns, name), do: "<x:#{name} xmlns:x=\"#{escape(ns)}\"/>"
 
   @doc "Builds a response element for a deleted resource in sync-collection (RFC 6578 §3.5)."
   def response_deleted(href) do
