@@ -263,7 +263,8 @@ defmodule KithWeb.DAV.ReportTest do
   # ── Invalid sync tokens ──────────────────────────────────────────────────
 
   describe "RFC 6578 §3 — invalid sync tokens" do
-    test "garbage sync token falls back to full sync",
+    # R3 / R26: an unknown token is 403 valid-sync-token (was a full-sync fallback)
+    test "garbage sync token is 403 valid-sync-token",
          %{account_id: account_id} = context do
       ContactsFixtures.contact_fixture(account_id, %{first_name: "FullSync"})
 
@@ -277,11 +278,12 @@ defmodule KithWeb.DAV.ReportTest do
 
       conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
 
-      assert conn.status == 207
-      assert conn.resp_body =~ "FullSync"
+      assert conn.status == 403
+      assert conn.resp_body =~ "<d:valid-sync-token/>"
+      refute conn.resp_body =~ "FullSync"
     end
 
-    test "out-of-range timestamp in sync token falls back to full sync",
+    test "out-of-range sync token is 403 valid-sync-token",
          %{account_id: account_id} = context do
       ContactsFixtures.contact_fixture(account_id, %{first_name: "RangeTest"})
 
@@ -295,8 +297,8 @@ defmodule KithWeb.DAV.ReportTest do
 
       conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
 
-      assert conn.status == 207
-      assert conn.resp_body =~ "RangeTest"
+      assert conn.status == 403
+      assert conn.resp_body =~ "<d:valid-sync-token/>"
     end
   end
 
@@ -487,6 +489,29 @@ defmodule KithWeb.DAV.ReportTest do
           true -> {href, {:other, rest}}
         end
       end)
+    end
+
+    test "CDV-47: an unknown, foreign, old-format or future sync token is 403 valid-sync-token",
+         context do
+      [_, rev, snapshot] = Regex.run(~r{/sync/(\d+)-(.+)\z}, initial_token(context))
+      [xmin, xmax, _] = String.split(snapshot, ":")
+      future_xmin = String.to_integer(xmax) + 1_000_000
+
+      for token <- [
+            "garbage",
+            "http://other.example/ns/sync/#{rev}-#{snapshot}",
+            "https://kith.app/ns/sync/1700000000",
+            "https://kith.app/ns/sync/#{String.to_integer(rev) + 1_000_000}-#{snapshot}",
+            "https://kith.app/ns/sync/#{rev}-#{future_xmin}:#{future_xmin}:",
+            "https://kith.app/ns/sync/#{rev}-#{xmax}:#{xmin}:"
+          ] do
+        conn = sync(context, token)
+        assert conn.status == 403, token
+        assert conn.resp_body =~ "<d:valid-sync-token/>"
+      end
+
+      # an empty token is still an initial sync
+      assert sync(context, "").status == 207
     end
 
     test "CDV-46: changes in the same second the token was issued are reported",

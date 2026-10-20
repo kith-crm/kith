@@ -403,31 +403,40 @@ defmodule Kith.DAV.CardDAVPlug do
     # this response misses (CDV-46).
     position = Contacts.dav_sync_position()
 
-    responses =
-      case parse_sync_token(client_token) do
-        nil ->
-          # Initial sync: every member, no removals
-          conn
-          |> list_contacts_for_dav()
-          |> Enum.map(&sync_contact_response(&1, props, version))
+    case parse_sync_token(client_token, position) do
+      :invalid ->
+        # R3 / RFC 6578 §3.2: never fall back to a full sync silently (CDV-47)
+        send_precondition_failed(conn, "<d:valid-sync-token/>")
 
-        since ->
-          # Incremental: every contact written since the token; a trashed or
-          # archived one is a removal (R5), shown as a bare 404 (RFC 6578 §3.5)
-          conn
-          |> account_id()
-          |> Contacts.list_contacts_changed_since(since)
-          |> Enum.map(fn
-            %Contact{deleted_at: nil, is_archived: false} = contact ->
-              sync_contact_response(contact, props, version)
+      since ->
+        responses = sync_responses(conn, since, props, version)
+        xml = XMLBuilder.multistatus(responses, sync_token: sync_token(position))
+        send_dav_response(conn, 207, xml)
+    end
+  end
 
-            contact ->
-              XMLBuilder.response_deleted(contact_href(contact))
-          end)
-      end
+  defp sync_responses(conn, since, props, version) do
+    case since do
+      :initial ->
+        # Initial sync: every member, no removals
+        conn
+        |> list_contacts_for_dav()
+        |> Enum.map(&sync_contact_response(&1, props, version))
 
-    xml = XMLBuilder.multistatus(responses, sync_token: sync_token(position))
-    send_dav_response(conn, 207, xml)
+      since ->
+        # Incremental: every contact written since the token; a trashed or
+        # archived one is a removal (R5), shown as a bare 404 (RFC 6578 §3.5)
+        conn
+        |> account_id()
+        |> Contacts.list_contacts_changed_since(since)
+        |> Enum.map(fn
+          %Contact{deleted_at: nil, is_archived: false} = contact ->
+            sync_contact_response(contact, props, version)
+
+          contact ->
+            XMLBuilder.response_deleted(contact_href(contact))
+        end)
+    end
   end
 
   defp sync_contact_response(contact, props, version) do
@@ -917,19 +926,26 @@ defmodule Kith.DAV.CardDAVPlug do
 
   defp generate_sync_token, do: sync_token(Contacts.dav_sync_position())
 
-  defp parse_sync_token(nil), do: nil
+  # `:initial` for no token, the position for a token this server issued,
+  # `:invalid` for anything else, including a position not reached yet.
+  defp parse_sync_token(nil, _current), do: :initial
 
-  defp parse_sync_token(token) do
+  defp parse_sync_token(token, {current_rev, current_snapshot}) do
+    [_xmin, current_xmax, _xip] = String.split(current_snapshot, ":")
+
     with @sync_token_prefix <> position <- token,
          [_, rev, xmin, xmax, xip] <-
            Regex.run(
              ~r/\A(\d{1,18})-(\d{1,19}):(\d{1,19}):((?:\d{1,19}(?:,\d{1,19})*)?)\z/,
              position
            ),
-         true <- valid_snapshot?(String.to_integer(xmin), String.to_integer(xmax), xip) do
-      {String.to_integer(rev), "#{xmin}:#{xmax}:#{xip}"}
+         {rev, xmin, xmax} =
+           {String.to_integer(rev), String.to_integer(xmin), String.to_integer(xmax)},
+         true <- valid_snapshot?(xmin, xmax, xip),
+         true <- rev <= current_rev and xmin <= String.to_integer(current_xmax) do
+      {rev, "#{xmin}:#{xmax}:#{xip}"}
     else
-      _ -> nil
+      _ -> :invalid
     end
   end
 
