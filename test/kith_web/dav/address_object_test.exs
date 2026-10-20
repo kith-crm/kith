@@ -1465,6 +1465,52 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-21: unstorable vCard data" do
+    defp card(lines),
+      do: Enum.join(["BEGIN:VCARD", "VERSION:3.0" | lines] ++ ["END:VCARD", ""], "\r\n")
+
+    test "CDV-21: values too long to store are a 4xx valid-address-data and create nothing",
+         %{account_id: account_id} = context do
+      long = String.duplicate("9", 400)
+
+      for {lines, i} <-
+            Enum.with_index([
+              ["N:Long;Tel;;;", "FN:Tel Long", "TEL:#{long}"],
+              ["N:Long;Adr;;;", "FN:Adr Long", "ADR:;;#{long};City;;;"],
+              ["N:Long;#{long};;;", "FN:Name Long"],
+              ["N:Bad;Utf;;;", "FN:Bad Utf", "EMAIL:a\xFFb@example.com"]
+            ]) do
+        conn = authed_dav(context, "PUT", "/dav/addressbooks/default/long-#{i}.vcf", card(lines))
+        assert conn.status in 400..499, "case #{i} -> #{conn.status}"
+        assert conn.resp_body =~ "valid-address-data"
+      end
+
+      assert Contacts.count_contacts(account_id) == 0
+    end
+
+    test "CDV-21: a rejected update leaves the contact and its children unchanged",
+         %{account_id: account_id} = context do
+      href = "/dav/addressbooks/default/keep.vcf"
+      ok = card(["N:Keep;Kim;;;", "FN:Kim Keep", "TEL:+15550001111"])
+      assert authed_dav(context, "PUT", href, ok).status == 201
+
+      bad = card(["N:Changed;Kim;;;", "FN:Kim Changed", "TEL:#{String.duplicate("9", 400)}"])
+      assert authed_dav(context, "PUT", href, bad).status in 400..499
+
+      body = authed_dav(context, "GET", href).resp_body
+      assert body =~ "N:Keep;Kim"
+      assert body =~ "+15550001111"
+      assert Contacts.count_contacts(account_id) == 1
+    end
+
+    test "CDV-21: an empty EMAIL or TEL value is skipped, not a 500", context do
+      href = "/dav/addressbooks/default/empty.vcf"
+      vcard = card(["N:Empty;Em;;;", "FN:Em Empty", "EMAIL;TYPE=INTERNET:", "TEL:"])
+      assert authed_dav(context, "PUT", href, vcard).status == 201
+      assert authed_dav(context, "GET", href).resp_body =~ "FN:Em Empty"
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

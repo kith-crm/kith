@@ -17,5 +17,7 @@ defmodule Kith.Contacts.ContactField do
     contact_field
     |> cast(attrs, [:value, :label, :contact_id, :account_id, :contact_field_type_id])
     |> validate_required([:value])
+    |> validate_length(:value, max: 255, count: :codepoints)
+    |> validate_length(:label, max: 255, count: :codepoints)
   end
 end

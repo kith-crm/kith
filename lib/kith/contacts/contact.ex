@@ -114,6 +114,7 @@ defmodule Kith.Contacts.Contact do
     |> validate_required([:first_name, :account_id])
     |> assoc_constraint(:account)
     |> compute_display_name()
+    |> validate_column_lengths()
     |> validate_first_met_through_account()
   end
 
@@ -151,6 +152,7 @@ defmodule Kith.Contacts.Contact do
     ])
     |> validate_required([:first_name])
     |> compute_display_name()
+    |> validate_column_lengths()
     |> validate_first_met_through_account()
   end
 
@@ -197,6 +199,25 @@ defmodule Kith.Contacts.Contact do
       true ->
         add_error(changeset, :first_met_through_id, "must be a contact in the same account")
     end
+  end
+
+  # varchar(255) columns: an over-long value is a changeset error, not a
+  # Postgres exception (CDV-21)
+  @varchar_fields [
+    :first_name,
+    :last_name,
+    :middle_name,
+    :display_name,
+    :nickname,
+    :occupation,
+    :company,
+    :first_met_where
+  ]
+
+  defp validate_column_lengths(changeset) do
+    Enum.reduce(@varchar_fields, changeset, fn field, cs ->
+      validate_length(cs, field, max: 255, count: :codepoints)
+    end)
   end
 
   defp compute_display_name(changeset) do

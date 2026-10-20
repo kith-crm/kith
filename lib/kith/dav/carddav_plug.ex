@@ -504,15 +504,25 @@ defmodule Kith.DAV.CardDAVPlug do
     existing = find_contact(conn, name)
 
     authorize(conn, if(existing, do: :update, else: :create), fn ->
-      case VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: aid) do
-        :error ->
-          xml = XMLBuilder.precondition_error("valid-address-data", "Invalid vCard format")
-          send_dav_response(conn, 422, xml)
+      parsed =
+        String.valid?(body) &&
+          VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: aid)
 
+      case parsed do
         {scalar_attrs, nested_data} ->
           put_contact(conn, {aid, name}, existing, scalar_attrs, nested_data)
+
+        _ ->
+          send_invalid_vcard(conn)
       end
     end)
+  end
+
+  # RFC 6352 §6.3.2.1: a vCard the server cannot store fails the
+  # CARDDAV:valid-address-data precondition
+  defp send_invalid_vcard(conn) do
+    xml = XMLBuilder.precondition_error("valid-address-data", "Invalid vCard format")
+    send_dav_response(conn, 422, xml)
   end
 
   defp put_contact(conn, {aid, name}, nil, scalar_attrs, nested_data) do
@@ -541,26 +551,26 @@ defmodule Kith.DAV.CardDAVPlug do
         insert_contact(conn, {aid, name}, scalar_attrs, nested_data)
 
       trashed ->
-        with {:ok, restored} <- Contacts.restore_contact(trashed),
-             {:ok, updated} <- Contacts.update_contact(restored, scalar_attrs),
-             {:ok, _} <- Contacts.replace_contact_children(updated, aid, nested_data) do
-          send_put_response(conn, 201, Contacts.touch_contact!(updated))
-        else
-          {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
-        end
+        write_contact(conn, 201, fn ->
+          restore_and_overwrite(trashed, aid, scalar_attrs, nested_data)
+        end)
     end
+  end
+
+  defp restore_and_overwrite(trashed, aid, scalar_attrs, nested_data) do
+    with {:ok, restored} <- Contacts.restore_contact(trashed),
+         do: overwrite_contact(restored, aid, scalar_attrs, nested_data)
   end
 
   defp insert_contact(conn, {aid, name}, scalar_attrs, nested_data) do
     identity = %{dav_resource_name: name, dav_uid: nested_data.uid}
 
-    with {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
-         {:ok, contact} <- Contacts.put_dav_identity(contact, identity),
-         {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data) do
-      send_put_response(conn, 201, Contacts.touch_contact!(contact))
-    else
-      {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
-    end
+    write_contact(conn, 201, fn ->
+      with {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
+           {:ok, contact} <- Contacts.put_dav_identity(contact, identity),
+           {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data),
+           do: {:ok, Contacts.touch_contact!(contact)}
+    end)
   end
 
   defp put_update_contact(conn, aid, contact, scalar_attrs, nested_data) do
@@ -569,12 +579,33 @@ defmodule Kith.DAV.CardDAVPlug do
         send_resp(conn, 412, "Precondition Failed")
 
       :ok ->
-        with {:ok, updated} <- Contacts.update_contact(contact, scalar_attrs),
-             {:ok, _} <- Contacts.replace_contact_children(updated, aid, nested_data) do
-          send_put_response(conn, 204, Contacts.touch_contact!(updated))
-        else
-          {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
+        write_contact(conn, 204, fn ->
+          overwrite_contact(contact, aid, scalar_attrs, nested_data)
+        end)
+    end
+  end
+
+  # PUT replaces the whole representation: scalars, then children, then a touch
+  defp overwrite_contact(contact, aid, scalar_attrs, nested_data) do
+    with {:ok, updated} <- Contacts.update_contact(contact, scalar_attrs),
+         {:ok, _} <- Contacts.replace_contact_children(updated, aid, nested_data),
+         do: {:ok, Contacts.touch_contact!(updated)}
+  end
+
+  # One PUT is one transaction: a vCard rejected half-way leaves no
+  # half-written contact behind (CDV-21).
+  defp write_contact(conn, status, fun) do
+    result =
+      Kith.Repo.transaction(fn ->
+        case fun.() do
+          {:ok, contact} -> contact
+          {:error, reason} -> Kith.Repo.rollback(reason)
         end
+      end)
+
+    case result do
+      {:ok, contact} -> send_put_response(conn, status, contact)
+      {:error, _} -> send_invalid_vcard(conn)
     end
   end
 

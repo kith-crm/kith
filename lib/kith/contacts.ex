@@ -1482,7 +1482,11 @@ defmodule Kith.Contacts do
       |> Repo.one()
 
     if field_type do
-      Enum.each(fields, fn %{value: value, label: label} ->
+      # A blank value (`EMAIL:`) is skipped; an unstorable one rolls back the
+      # caller's transaction instead of raising (CDV-21).
+      fields
+      |> Enum.reject(fn %{value: value} -> is_nil(value) or String.trim(value) == "" end)
+      |> Enum.each(fn %{value: value, label: label} ->
         %ContactField{}
         |> ContactField.changeset(%{
           value: value,
@@ -1491,8 +1495,15 @@ defmodule Kith.Contacts do
           account_id: account_id,
           contact_field_type_id: field_type.id
         })
-        |> Repo.insert!()
+        |> insert_or_rollback()
       end)
+    end
+  end
+
+  defp insert_or_rollback(changeset) do
+    case Repo.insert(changeset) do
+      {:ok, record} -> record
+      {:error, changeset} -> Repo.rollback(changeset)
     end
   end
 
