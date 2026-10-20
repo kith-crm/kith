@@ -1320,19 +1320,6 @@ defmodule Kith.Contacts do
     |> Repo.one()
   end
 
-  @doc """
-  The highest contact id the id sequence has handed out (any account). An id
-  above it may still be assigned to a future contact.
-  """
-  def max_issued_contact_id do
-    %{rows: [[id]]} =
-      Repo.query!(
-        "SELECT CASE WHEN is_called THEN last_value ELSE last_value - 1 END FROM contacts_id_seq"
-      )
-
-    id
-  end
-
   @doc "Stores the CardDAV resource name and vCard UID a client chose (R2)."
   def put_dav_identity(%Contact{} = contact, attrs) do
     contact

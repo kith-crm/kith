@@ -1598,13 +1598,16 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
-  describe "CDV-26: reserved kith-contact-N names (R20)" do
+  describe "CDV-26: client-held kith-contact-N names cannot shadow (R20)" do
     defp last_contact_id do
       [[v]] = Ecto.Adapters.SQL.query!(Kith.Repo, "SELECT last_value FROM contacts_id_seq").rows
       v
     end
 
-    test "CDV-26: a PUT-create at a future kith-contact-N.vcf is refused and cannot shadow N",
+    # R20 as revised by CDV-32: the client name is stored; contact N, inserted
+    # later by any path (here a raw insert with an explicit id), gets
+    # `kith-contact-N-k.vcf` from the insert trigger instead of shadowing.
+    test "CDV-26: a PUT-create at a future kith-contact-N.vcf cannot shadow contact N",
          %{account_id: account_id} = context do
       n = last_contact_id() + 10_000_000
       href = "/dav/addressbooks/default/kith-contact-#{n}.vcf"
@@ -1612,15 +1615,15 @@ defmodule KithWeb.DAV.AddressObjectTest do
       put =
         authed_dav(context, "PUT", href, build_vcard("Client", "Named", uid: "kith-contact-#{n}"))
 
-      assert put.status == 403
-      assert put.resp_body =~ "reserved-resource-name"
-      assert Contacts.count_contacts(account_id) == 0
+      assert put.status == 201
 
-      # Contact N appears later (UI, import): it owns its default href.
       Kith.Repo.insert!(%Kith.Contacts.Contact{id: n, account_id: account_id, first_name: "Ui"})
-      get = authed_dav(context, "GET", href)
-      assert get.status == 200
-      assert get.resp_body =~ "FN:Ui\r\n"
+      assert authed_dav(context, "GET", href).resp_body =~ "FN:Client Named\r\n"
+
+      alt = authed_dav(context, "GET", "/dav/addressbooks/default/kith-contact-#{n}-k.vcf")
+      assert alt.status == 200
+      assert alt.resp_body =~ "FN:Ui\r\n"
+      assert Contacts.count_contacts(account_id) == 2
     end
 
     test "CDV-26: an already-issued kith-contact-N.vcf name (another account's id) is accepted",

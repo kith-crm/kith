@@ -33,8 +33,9 @@ defmodule Kith.Contacts.Contact do
     field :immich_last_synced_at, :utc_datetime
     field :aliases, {:array, :string}, default: []
 
-    # R2: client-chosen CardDAV resource name and vCard UID (nil = kith defaults)
-    field :dav_resource_name, :string
+    # R2: client-chosen CardDAV resource name and vCard UID (nil = kith defaults).
+    # The name can also be set by a DB trigger at insert (R20), hence read back.
+    field :dav_resource_name, :string, read_after_writes: true
     field :dav_uid, :string
 
     # R4: set by a DB trigger on every write of the row; the ETag derives from it
