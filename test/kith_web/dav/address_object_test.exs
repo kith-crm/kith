@@ -1421,6 +1421,37 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-19: legacy text/x-vcard" do
+    defp put_with_type(context, path, content_type, body) do
+      build_conn()
+      |> basic_auth(context.user.email, dav_password())
+      |> put_req_header("content-type", content_type)
+      |> dispatch(KithWeb.Endpoint, "PUT", path, body)
+    end
+
+    test "CDV-19: PUT with text/x-vcard is accepted; application/json is 415", context do
+      vcard = build_vcard("Legacy", "Type")
+
+      assert put_with_type(context, "/dav/addressbooks/default/x1.vcf", "text/x-vcard", vcard).status ==
+               201
+
+      assert put_with_type(
+               context,
+               "/dav/addressbooks/default/x2.vcf",
+               "Text/X-VCard; charset=utf-8",
+               vcard
+             ).status == 201
+
+      assert put_with_type(
+               context,
+               "/dav/addressbooks/default/x3.vcf",
+               "application/json",
+               ~s({"fn": "Json"})
+             ).status ==
+               415
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

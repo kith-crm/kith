@@ -481,10 +481,17 @@ defmodule Kith.DAV.CardDAVPlug do
   # ── PUT ────────────────────────────────────────────────────────────────
 
   defp handle_put_contact(conn, name) do
-    # RFC 6352 §5.1: Content-Type MUST be text/vcard
-    content_type = get_req_header(conn, "content-type") |> List.first("")
+    # RFC 6352 §5.1: Content-Type MUST be text/vcard; the pre-RFC 6350
+    # text/x-vcard that older clients send is accepted too (CDV-19).
+    media_type =
+      get_req_header(conn, "content-type")
+      |> List.first("")
+      |> String.split(";")
+      |> hd()
+      |> String.trim()
+      |> String.downcase()
 
-    if String.starts_with?(content_type, "text/vcard") do
+    if media_type in ["text/vcard", "text/x-vcard"] do
       {:ok, body, conn} = read_body(conn)
       do_put_contact(conn, name, body)
     else
