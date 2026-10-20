@@ -479,27 +479,11 @@ defmodule KithWeb.DAV.AddressObjectTest do
       conn = authed_dav(context, "PUT", path, vcard)
       assert conn.status == 201
 
-      # The server assigns its own UID, so we need to find the contact
-      # via PROPFIND to get its actual path
-      conn_list =
-        build_conn()
-        |> basic_auth(context.user.email, dav_password())
-        |> put_req_header("depth", "1")
-        |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
-
-      # Extract the contact href from PROPFIND response
-      [href] =
-        Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
-          conn_list.resp_body,
-          capture: :all_but_first
-        )
-        |> List.flatten()
-
+      # R2: the resource is served at the href the client chose
       conn_get =
         build_conn()
         |> basic_auth(context.user.email, dav_password())
-        |> dav_request("GET", href)
+        |> dav_request("GET", path)
 
       assert conn_get.status == 200
       assert conn_get.resp_body =~ "jane@example.com"
@@ -1207,10 +1191,90 @@ defmodule KithWeb.DAV.AddressObjectTest do
   end
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # CardDAV e2e regressions — address-object CRUD (Task 4)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "CDV-12: client-chosen resource names (R2)" do
+    test "CDV-12: a PUT to <uuid>.vcf is served at that href and keeps its UID",
+         %{account_id: account_id} = context do
+      uuid = "6F1C2B0A-3D4E-4F50-8A9B-0C1D2E3F4A5B"
+      href = "/dav/addressbooks/default/#{uuid}.vcf"
+
+      put1 = authed_dav(context, "PUT", href, build_vcard("Ada", "Uuid", uid: uuid))
+      assert put1.status == 201
+      [etag] = get_resp_header(put1, "etag")
+
+      get = authed_dav(context, "GET", href)
+      assert get.status == 200
+      assert get.resp_body =~ "UID:#{uuid}\r\n"
+      assert get_resp_header(get, "etag") == [etag]
+
+      listing =
+        context
+        |> Map.put(:conn, put_req_header(build_conn(), "depth", "1"))
+        |> authed_dav("PROPFIND", "/dav/addressbooks/default/", propfind_body())
+
+      assert listing.resp_body =~ "<d:href>#{href}</d:href>"
+
+      count = Contacts.count_contacts(account_id)
+      put2 = authed_dav(context, "PUT", href, build_vcard("Ada", "Edited", uid: uuid))
+      assert put2.status == 204
+      assert Contacts.count_contacts(account_id) == count
+      assert authed_dav(context, "GET", href).resp_body =~ "Edited"
+
+      multiget =
+        authed_dav(context, "REPORT", "/dav/addressbooks/default/", multiget_body([href]))
+
+      assert multiget.resp_body =~ "<d:href>#{href}</d:href>"
+      assert multiget.resp_body =~ "Edited"
+
+      sync = authed_dav(context, "REPORT", "/dav/addressbooks/default/", sync_collection_body())
+      assert sync.resp_body =~ "<d:href>#{href}</d:href>"
+
+      assert authed_dav(context, "DELETE", href).status == 204
+      assert authed_dav(context, "GET", href).status == 404
+
+      old_token = "https://kith.app/ns/sync/#{DateTime.to_unix(DateTime.utc_now()) - 60}"
+
+      sync_body =
+        String.replace(
+          sync_collection_body(),
+          "<d:sync-token/>",
+          "<d:sync-token>#{old_token}</d:sync-token>"
+        )
+
+      deleted = authed_dav(context, "REPORT", "/dav/addressbooks/default/", sync_body)
+      assert deleted.resp_body =~ "<d:href>#{href}</d:href>"
+    end
+
+    test "CDV-12: a client name with a space is percent-encoded in hrefs", context do
+      href = "/dav/addressbooks/default/a%20b.vcf"
+      assert authed_dav(context, "PUT", href, build_vcard("Space", "Name")).status == 201
+      assert authed_dav(context, "GET", href).status == 200
+
+      listing =
+        context
+        |> Map.put(:conn, put_req_header(build_conn(), "depth", "1"))
+        |> authed_dav("PROPFIND", "/dav/addressbooks/default/", propfind_body())
+
+      assert listing.resp_body =~ "<d:href>#{href}</d:href>"
+    end
+
+    test "CDV-12: a UI contact keeps its kith-contact-N href and UID",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      get = authed_dav(context, "GET", contact_path(contact))
+      assert get.status == 200
+      assert get.resp_body =~ "UID:kith-contact-#{contact.id}\r\n"
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # Creates a contact via PUT and returns {href, conn} for the created resource
+  # Creates a contact via PUT and returns {href, conn} for the created resource.
+  # R2: the server keeps the client-chosen href, so href is the PUT path.
   defp put_and_find(context, vcard) do
     path = "/dav/addressbooks/default/kith-contact-new-#{System.unique_integer([:positive])}.vcf"
     conn = authed_dav(context, "PUT", path, vcard)
@@ -1222,14 +1286,8 @@ defmodule KithWeb.DAV.AddressObjectTest do
       |> put_req_header("depth", "1")
       |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
 
-    [href] =
-      Regex.scan(
-        ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
-        conn_list.resp_body,
-        capture: :all_but_first
-      )
-      |> List.flatten()
+    assert conn_list.resp_body =~ "<d:href>#{path}</d:href>"
 
-    {href, conn}
+    {path, conn}
   end
 end

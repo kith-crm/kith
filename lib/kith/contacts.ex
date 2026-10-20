@@ -1270,6 +1270,25 @@ defmodule Kith.Contacts do
   end
 
   @doc """
+  Gets the non-deleted contact a CardDAV client stored under resource `name`
+  (R2), or nil.
+  """
+  @spec get_contact_by_dav_name(integer(), String.t()) :: Contact.t() | nil
+  def get_contact_by_dav_name(account_id, name) when is_binary(name) do
+    Contact
+    |> scope_active(account_id)
+    |> where([c], c.dav_resource_name == ^name)
+    |> Repo.one()
+  end
+
+  @doc "Stores the CardDAV resource name and vCard UID a client chose (R2)."
+  def put_dav_identity(%Contact{} = contact, attrs) do
+    contact
+    |> Contact.dav_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
   Returns a stream of all non-deleted contacts for an account.
   Must be called inside a `Repo.transaction/1`.
   """

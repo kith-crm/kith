@@ -85,14 +85,14 @@ defmodule Kith.DAV.CardDAVPlug do
 
   defp dispatch(conn, "REPORT", ["dav", "addressbooks", "default"]), do: handle_report(conn)
 
-  defp dispatch(conn, "GET", ["dav", "addressbooks", "default", uid]),
-    do: handle_get_contact(conn, uid)
+  defp dispatch(conn, "GET", ["dav", "addressbooks", "default", raw]),
+    do: with_resource_name(conn, raw, &handle_get_contact/2)
 
-  defp dispatch(conn, "PUT", ["dav", "addressbooks", "default", uid]),
-    do: handle_put_contact(conn, uid)
+  defp dispatch(conn, "PUT", ["dav", "addressbooks", "default", raw]),
+    do: with_resource_name(conn, raw, &handle_put_contact/2)
 
-  defp dispatch(conn, "DELETE", ["dav", "addressbooks", "default", uid]),
-    do: handle_delete_contact(conn, uid)
+  defp dispatch(conn, "DELETE", ["dav", "addressbooks", "default", raw]),
+    do: with_resource_name(conn, raw, &handle_delete_contact/2)
 
   # RFC 4918 §8.2: PROPPATCH stub — live properties cannot be modified
   defp dispatch(conn, "PROPPATCH", ["dav", "addressbooks", "default"]),
@@ -114,6 +114,14 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   defp account_id(conn), do: conn.assigns.current_scope.account.id
+
+  # Hands the percent-decoded resource name (the last path segment) to `fun`.
+  defp with_resource_name(conn, raw, fun) do
+    case decode_resource_name(raw) do
+      {:ok, name} -> fun.(conn, name)
+      :error -> send_resp(conn, 404, "Not Found")
+    end
+  end
 
   # R6: writes go through Kith.Policy, so a viewer is read-only over DAV.
   defp authorize(conn, action, fun) do
@@ -262,18 +270,15 @@ defmodule Kith.DAV.CardDAVPlug do
       getlastmodified: XMLBuilder.getlastmodified(contact.updated_at)
     ]
 
-    XMLBuilder.response(
-      "/dav/addressbooks/default/kith-contact-#{contact.id}.vcf",
-      build_propstats(request_type, props)
-    )
+    XMLBuilder.response(contact_href(contact), build_propstats(request_type, props))
   end
 
   # ── Contact PROPFIND ───────────────────────────────────────────────────
 
   defp handle_contact_propfind(conn, request_type) do
-    uid = List.last(path_segments(conn.request_path))
+    raw = List.last(path_segments(conn.request_path))
 
-    case find_contact_by_uid(conn, uid) do
+    case decode_resource_name(raw) |> found_contact(conn) do
       nil ->
         send_resp(conn, 404, "Not Found")
 
@@ -319,9 +324,9 @@ defmodule Kith.DAV.CardDAVPlug do
 
     responses =
       Enum.map(hrefs, fn href ->
-        uid = href |> String.split("/") |> List.last()
+        raw = href |> String.trim() |> String.split("/") |> List.last()
 
-        case find_contact_by_uid(conn, uid) do
+        case decode_resource_name(raw) |> found_contact(conn) do
           nil ->
             XMLBuilder.response(href, [
               XMLBuilder.propstat([], "HTTP/1.1 404 Not Found")
@@ -365,9 +370,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
           removed =
             Enum.map(deleted, fn contact ->
-              XMLBuilder.response_deleted(
-                "/dav/addressbooks/default/kith-contact-#{contact.id}.vcf"
-              )
+              XMLBuilder.response_deleted(contact_href(contact))
             end)
 
           {active, removed}
@@ -382,15 +385,12 @@ defmodule Kith.DAV.CardDAVPlug do
     etag = compute_etag(contact)
     vcard = VCardAdapter.contact_to_vcard(contact, version: version, include_photo: false)
 
-    XMLBuilder.response(
-      "/dav/addressbooks/default/kith-contact-#{contact.id}.vcf",
-      [
-        XMLBuilder.propstat([
-          XMLBuilder.getetag(etag),
-          XMLBuilder.address_data(vcard)
-        ])
-      ]
-    )
+    XMLBuilder.response(contact_href(contact), [
+      XMLBuilder.propstat([
+        XMLBuilder.getetag(etag),
+        XMLBuilder.address_data(vcard)
+      ])
+    ])
   end
 
   # ── addressbook-query REPORT (RFC 6352 §8.6) ──────────────────────────
@@ -453,10 +453,10 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── GET ────────────────────────────────────────────────────────────────
 
-  defp handle_get_contact(conn, uid) do
+  defp handle_get_contact(conn, name) do
     version = requested_vcard_version(conn)
 
-    case find_contact_by_uid(conn, uid) do
+    case find_contact(conn, name) do
       nil ->
         send_resp(conn, 404, "Not Found")
 
@@ -474,21 +474,21 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── PUT ────────────────────────────────────────────────────────────────
 
-  defp handle_put_contact(conn, uid) do
+  defp handle_put_contact(conn, name) do
     # RFC 6352 §5.1: Content-Type MUST be text/vcard
     content_type = get_req_header(conn, "content-type") |> List.first("")
 
     if String.starts_with?(content_type, "text/vcard") do
       {:ok, body, conn} = read_body(conn)
-      do_put_contact(conn, uid, body)
+      do_put_contact(conn, name, body)
     else
       send_resp(conn, 415, "Unsupported Media Type")
     end
   end
 
-  defp do_put_contact(conn, uid, body) do
+  defp do_put_contact(conn, name, body) do
     aid = account_id(conn)
-    existing = find_contact_by_uid(conn, uid)
+    existing = find_contact(conn, name)
 
     authorize(conn, if(existing, do: :update, else: :create), fn ->
       case VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: aid) do
@@ -497,13 +497,16 @@ defmodule Kith.DAV.CardDAVPlug do
           send_dav_response(conn, 422, xml)
 
         {scalar_attrs, nested_data} ->
-          put_contact(conn, aid, existing, scalar_attrs, nested_data)
+          put_contact(conn, {aid, name}, existing, scalar_attrs, nested_data)
       end
     end)
   end
 
-  defp put_contact(conn, aid, nil, scalar_attrs, nested_data) do
+  defp put_contact(conn, {aid, name}, nil, scalar_attrs, nested_data) do
+    identity = %{dav_resource_name: name, dav_uid: nested_data.uid}
+
     with {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
+         {:ok, contact} <- Contacts.put_dav_identity(contact, identity),
          {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data) do
       contact = Contacts.touch_contact!(contact)
       etag = compute_etag(contact)
@@ -516,7 +519,7 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
-  defp put_contact(conn, aid, contact, scalar_attrs, nested_data) do
+  defp put_contact(conn, {aid, _name}, contact, scalar_attrs, nested_data) do
     # RFC 7232 §3.2: If-None-Match: * means "only if resource does NOT exist"
     if get_req_header(conn, "if-none-match") == ["*"] do
       send_resp(conn, 412, "Precondition Failed")
@@ -547,8 +550,8 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── DELETE ─────────────────────────────────────────────────────────────
 
-  defp handle_delete_contact(conn, uid) do
-    case find_contact_by_uid(conn, uid) do
+  defp handle_delete_contact(conn, name) do
+    case find_contact(conn, name) do
       nil ->
         send_resp(conn, 404, "Not Found")
 
@@ -608,16 +611,40 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
-  defp find_contact_by_uid(conn, uid) do
-    # UID format: "kith-contact-123.vcf"
-    case Regex.run(~r/kith-contact-(\d+)\.vcf/, uid) do
-      [_, id_str] ->
-        Contacts.get_contact(account_id(conn), String.to_integer(id_str))
+  # R2: a contact is found by the resource name a client stored for it, else by
+  # the default `kith-contact-<id>.vcf` name of a contact that has no stored name.
+  # `name` is already percent-decoded.
+  defp find_contact(conn, name) do
+    Contacts.get_contact_by_dav_name(account_id(conn), name) ||
+      find_contact_by_default_name(conn, name)
+  end
 
-      _ ->
-        nil
+  defp found_contact({:ok, name}, conn), do: find_contact(conn, name)
+  defp found_contact(:error, _conn), do: nil
+
+  defp find_contact_by_default_name(conn, name) do
+    with [_, id_str] <- Regex.run(~r/\Akith-contact-(\d{1,18})\.vcf\z/, name),
+         %Contact{dav_resource_name: nil} = contact <-
+           Contacts.get_contact(account_id(conn), String.to_integer(id_str)) do
+      contact
+    else
+      _ -> nil
     end
   end
+
+  defp decode_resource_name(raw) do
+    name = URI.decode(raw)
+    if String.valid?(name), do: {:ok, name}, else: :error
+  rescue
+    ArgumentError -> :error
+  end
+
+  # The one place a contact's href is built: its stored client name (R2), else
+  # the default name, percent-encoded as a single path segment.
+  defp contact_href(%{dav_resource_name: name}) when is_binary(name),
+    do: "/dav/addressbooks/default/" <> URI.encode(name, &URI.char_unreserved?/1)
+
+  defp contact_href(%{id: id}), do: "/dav/addressbooks/default/kith-contact-#{id}.vcf"
 
   defp list_contacts_for_dav(conn) do
     Contacts.list_contacts(account_id(conn), preload: Contacts.dav_preloads())
@@ -629,7 +656,7 @@ defmodule Kith.DAV.CardDAVPlug do
     Contact
     |> Kith.Scope.scope_active(account_id(conn))
     |> where([c], c.is_archived == false)
-    |> select([c], map(c, [:id, :updated_at]))
+    |> select([c], map(c, [:id, :updated_at, :dav_resource_name]))
     |> Kith.Repo.all()
   end
 

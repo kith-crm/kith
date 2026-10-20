@@ -33,6 +33,10 @@ defmodule Kith.Contacts.Contact do
     field :immich_last_synced_at, :utc_datetime
     field :aliases, {:array, :string}, default: []
 
+    # R2: client-chosen CardDAV resource name and vCard UID (nil = kith defaults)
+    field :dav_resource_name, :string
+    field :dav_uid, :string
+
     # First-met metadata
     field :middle_name, :string
     field :first_met_at, :date
@@ -145,6 +149,13 @@ defmodule Kith.Contacts.Contact do
     |> validate_required([:first_name])
     |> compute_display_name()
     |> validate_first_met_through_account()
+  end
+
+  @doc "Sets the CardDAV resource name and vCard UID a client chose (R2)."
+  def dav_changeset(contact, attrs) do
+    contact
+    |> cast(attrs, [:dav_resource_name, :dav_uid])
+    |> unique_constraint(:dav_resource_name, name: :contacts_account_id_dav_resource_name_index)
   end
 
   def soft_delete_changeset(contact) do
