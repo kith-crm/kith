@@ -630,4 +630,31 @@ defmodule Kith.VCard.SerializerTest do
     assert card =~ "BDAY:19900615\r\n"
     assert card =~ "REV:20261020T203000Z\r\n"
   end
+
+  test "CDV-85: category metadata survives association ordering changes" do
+    contact = %{
+      first_name: "Category",
+      last_name: "Order",
+      nickname: nil,
+      birthdate: nil,
+      company: nil,
+      occupation: nil,
+      description: nil,
+      tags: [%{name: "Friends, close"}, %{name: "Computing"}],
+      dav_vcard: %{
+        "properties" => [
+          %{
+            "name" => "CATEGORIES",
+            "head" => "CATEGORIES",
+            "value" => "Computing,Friends\\, close"
+          }
+        ]
+      }
+    }
+
+    assert Serializer.serialize(contact) =~ "CATEGORIES:Computing,Friends\\, close"
+    contact = %{contact | tags: [%{name: "Changed"}]}
+    assert Serializer.serialize(contact) =~ "CATEGORIES:Changed"
+    refute Serializer.serialize(contact) =~ "CATEGORIES:Computing"
+  end
 end

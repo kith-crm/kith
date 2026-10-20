@@ -202,6 +202,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | CDV-84 | medium | 4.0 telephone URI is stored with tel: prefix and emitted as4.0 URI syntax in3.0 GET | Live DAVx5-shaped TEL;TYPE=CELL;VALUE=uri:tel:+15550004444 PUT201 → GET3 same URI property; RFC2426 TEL requires phone-number. ExUnit RED18/1 native value incorrectly tel:+… . Normalize phone value, preserve URI metadata for4.0 and emit phone-number without VALUE=uri for3.0 | fixed |
 
+| CDV-85 | low | Unchanged category associations reorder the card after PUT-back | Final live V5 repeat changed CATEGORIES:Computing,Friends\, close to Friends\, close,Computing. ExUnit RED30/1 deterministically reverses native association order. Metadata now compares category sets while reusing the client property order; real native tag edits still replace it | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.

@@ -91,6 +91,10 @@ defmodule Kith.VCard.Metadata do
     end
   end
 
+  defp comparable("CATEGORIES", value) do
+    value |> Parser.split_components(",") |> Enum.map(&Parser.unescape/1) |> Enum.sort()
+  end
+
   defp comparable("TEL", value), do: value |> Parser.unescape() |> Parser.phone_value()
   defp comparable("ADR", value), do: value |> Parser.split_components(";") |> Enum.drop(1)
   defp comparable(_, value), do: Parser.unescape(value)
