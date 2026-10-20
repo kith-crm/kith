@@ -548,22 +548,33 @@ defmodule Kith.DAV.CardDAVPlug do
   # One PUT is one transaction (CDV-21). The target row is read FOR UPDATE and
   # the preconditions are evaluated on that locked row, so two writers holding
   # the same ETag cannot both win and their child sets cannot mix (CDV-24).
-  defp put_contact(conn, {aid, name}, scalar_attrs, nested_data) do
-    result =
-      Kith.Repo.transaction(fn ->
-        target = lock_put_target(conn, name)
+  defp put_contact(conn, target, scalar_attrs, nested_data, retry? \\ true) do
+    case put_transaction(conn, target, scalar_attrs, nested_data) do
+      {:ok, {status, contact}} ->
+        send_put_response(conn, status, contact)
 
-        case write_put_target(conn, aid, target, {scalar_attrs, nested_data}) do
-          {:ok, status, contact} -> {status, contact}
-          {:error, reason} -> Kith.Repo.rollback(reason)
-        end
-      end)
+      {:error, :precondition_failed} ->
+        send_resp(conn, 412, "Precondition Failed")
 
-    case result do
-      {:ok, {status, contact}} -> send_put_response(conn, status, contact)
-      {:error, :precondition_failed} -> send_resp(conn, 412, "Precondition Failed")
-      {:error, _} -> send_invalid_vcard(conn)
+      # A concurrent PUT created the same name first (unique index): run the
+      # PUT again, now against that contact, as an update (CDV-25).
+      {:error, %Ecto.Changeset{errors: [{:dav_resource_name, _} | _]}} when retry? ->
+        put_contact(conn, target, scalar_attrs, nested_data, false)
+
+      {:error, _} ->
+        send_invalid_vcard(conn)
     end
+  end
+
+  defp put_transaction(conn, {aid, name}, scalar_attrs, nested_data) do
+    Kith.Repo.transaction(fn ->
+      target = lock_put_target(conn, name)
+
+      case write_put_target(conn, aid, target, {scalar_attrs, nested_data}) do
+        {:ok, status, contact} -> {status, contact}
+        {:error, reason} -> Kith.Repo.rollback(reason)
+      end
+    end)
   end
 
   # `{:visible, contact}`, `{:trashed, contact}` or `{:missing, name}`; a found

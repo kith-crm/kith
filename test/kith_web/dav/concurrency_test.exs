@@ -104,4 +104,44 @@ defmodule KithWeb.DAV.ConcurrencyTest do
       assert tels(account_id, href) == [winner]
     end
   end
+
+  describe "CDV-25: concurrent creates of one name" do
+    # Another writer creates `name` and holds the transaction open while the PUT
+    # runs, then commits: the PUT's insert hits the unique index.
+    defp put_during_create(user, account_id, name, headers) do
+      Sandbox.unboxed_run(Repo, fn ->
+        {:ok, task} =
+          Repo.transaction(fn ->
+            {:ok, c} = Contacts.create_contact(account_id, %{"first_name" => "First"})
+            {:ok, _} = Contacts.put_dav_identity(c, %{dav_resource_name: name})
+
+            task =
+              Task.async(fn -> dav_put(user, @book <> name, card("+15553333333"), headers) end)
+
+            Process.sleep(500)
+            task
+          end)
+
+        Task.await(task, 10_000)
+      end)
+    end
+
+    defp count(account_id),
+      do: Sandbox.unboxed_run(Repo, fn -> Contacts.count_contacts(account_id) end)
+
+    test "CDV-25: the losing unconditional create becomes an update of the winner",
+         %{user: user, account_id: account_id} do
+      assert put_during_create(user, account_id, "race.vcf", []).status == 204
+      assert count(account_id) == 1
+      assert tels(account_id, @book <> "race.vcf") == ["+15553333333"]
+    end
+
+    test "CDV-25: the losing If-None-Match: * create is 412",
+         %{user: user, account_id: account_id} do
+      assert put_during_create(user, account_id, "race2.vcf", [{"if-none-match", "*"}]).status ==
+               412
+
+      assert count(account_id) == 1
+    end
+  end
 end
