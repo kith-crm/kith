@@ -1289,6 +1289,26 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-14: If-Match lists and weak tags" do
+    test "CDV-14: an If-Match list matches any strong tag; W/ tags and non-members fail",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Kay"})
+      [etag] = authed_dav(context, "GET", contact_path(contact)) |> get_resp_header("etag")
+
+      put = fn if_match, first ->
+        build_conn()
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("if-match", if_match)
+        |> dav_request("PUT", contact_path(contact), build_vcard(first, "List"))
+      end
+
+      assert put.("W/#{etag}", "Weak").status == 412
+      assert put.(~s("a", "b"), "None").status == 412
+      assert put.(~s("a", #{etag}), "Listed").status == 204
+      assert Contacts.get_contact(account_id, contact.id).first_name == "Listed"
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

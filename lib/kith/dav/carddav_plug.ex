@@ -598,18 +598,28 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
-  # RFC 7232 §3.1: If-Match precondition check
+  # RFC 7232 §3.1: If-Match is `*` or a list of entity tags, compared strongly:
+  # a weak `W/` tag never matches (CDV-14).
   defp check_if_match(conn, contact) do
-    case get_req_header(conn, "if-match") |> List.first() do
-      nil ->
+    case get_req_header(conn, "if-match") do
+      [] ->
         :ok
 
-      "*" ->
-        :ok
+      values ->
+        header = Enum.join(values, ",")
+        strong = {false, compute_etag(contact)}
 
-      if_match ->
-        if if_match == "\"#{compute_etag(contact)}\"", do: :ok, else: :precondition_failed
+        if String.trim(header) == "*" or strong in entity_tags(header),
+          do: :ok,
+          else: :precondition_failed
     end
+  end
+
+  # RFC 7232 §2.3: `entity-tag = [ W/ ] DQUOTE *etagc DQUOTE`, comma-separated.
+  defp entity_tags(header) do
+    ~r{(W/)?"([^"]*)"}
+    |> Regex.scan(header)
+    |> Enum.map(fn [_, weak, tag] -> {weak != "", tag} end)
   end
 
   # R2: a contact is found by the resource name a client stored for it, else by
