@@ -19,7 +19,10 @@ defmodule Kith.VCard.Metadata do
       |> Enum.map(&render/1)
 
     {body, [ending]} = Enum.split(lines, -1)
-    Enum.map(body ++ extras ++ [ending], &convert(&1, version))
+
+    Enum.map(body ++ extras ++ [ending], fn line ->
+      line |> convert(version) |> declare_identifier_type(version)
+    end)
   end
 
   defp restore("FN:" <> _ = line, properties) do
@@ -107,6 +110,20 @@ defmodule Kith.VCard.Metadata do
   end
 
   defp value(line), do: line |> String.split(":", parts: 2) |> List.last()
+
+  @doc false
+  def uri?(value), do: Regex.match?(~r/\A[A-Za-z][A-Za-z0-9+.-]*:[^\s\\]*\z/, value)
+
+  defp declare_identifier_type(line, :v40) do
+    {name, value} = identity(line)
+    [head, _] = String.split(line, ":", parts: 2)
+
+    if name in ["UID", "RELATED"] and not uri?(value) and not Regex.match?(~r/;VALUE=/i, head),
+      do: head <> ";VALUE=text:" <> value,
+      else: line
+  end
+
+  defp declare_identifier_type(line, _version), do: line
 
   # Translate the preference syntax when the client changes vCard versions.
   defp convert("RELATED" <> rest, :v30), do: convert("X-KITH-RELATED" <> rest, :v30)

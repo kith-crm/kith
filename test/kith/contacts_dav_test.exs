@@ -245,7 +245,7 @@ defmodule Kith.ContactsDAVTest do
         version: :v40
       )
 
-    assert card =~ "RELATED;TYPE=friend:custom-related-uid"
+    assert card =~ "RELATED;TYPE=friend;VALUE=text:custom-related-uid"
     {_attrs, parsed} = Kith.DAV.VCardAdapter.vcard_to_attrs(card, account_id: aid)
     assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, parsed)
     assert [%{id: id}] = Contacts.list_relationships(contact.id)
@@ -292,7 +292,22 @@ defmodule Kith.ContactsDAVTest do
         version: :v40
       )
 
-    assert card =~ "RELATED;TYPE=friend:#{target.dav_uid}"
+    assert card =~ "RELATED;TYPE=friend;VALUE=text:#{target.dav_uid}"
+  end
+
+  test "CDV-83: text UIDs are escaped, folded and declared as text in 4.0", %{contact: contact} do
+    uid = String.duplicate("客", 40) <> ";opaque\nFN:Injected"
+    {:ok, contact} = Contacts.put_dav_identity(contact, %{dav_uid: uid})
+
+    for version <- [:v30, :v40] do
+      card = Kith.DAV.VCardAdapter.contact_to_vcard(contact, version: version)
+      refute card |> String.replace("\r\n", "") |> String.contains?("\n")
+      for line <- String.split(card, "\r\n"), do: assert(byte_size(line) <= 75)
+      assert length(Regex.scan(~r/^FN:/m, card)) == 1
+      if version == :v40, do: assert(card =~ "UID;VALUE=text:")
+      assert {:ok, [parsed]} = Kith.VCard.Parser.parse(card)
+      assert parsed.uid == uid
+    end
   end
 
   describe "touch_contact!/1" do

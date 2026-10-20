@@ -28,8 +28,7 @@ defmodule Kith.DAV.VCardAdapter do
     contact = Repo.preload(contact, Contacts.dav_preloads())
     contact = if include_photo, do: maybe_load_avatar_data(contact), else: contact
 
-    vcard = Serializer.serialize(contact, version: version)
-    inject_uid(vcard, contact, version)
+    Serializer.serialize(contact, version: version, include_uid: true)
   end
 
   @doc """
@@ -92,13 +91,6 @@ defmodule Kith.DAV.VCardAdapter do
   end
 
   # ── Private ────────────────────────────────────────────────────────────
-
-  # The resource and RELATED use exactly the same client-chosen/default UID.
-  defp inject_uid(vcard, contact, version) do
-    v = if version == :v40, do: "4.0", else: "3.0"
-    uid = Serializer.uid_for(contact, version)
-    String.replace(vcard, "VERSION:#{v}\r\n", "VERSION:#{v}\r\nUID:#{uid}\r\n")
-  end
 
   defp maybe_strip_nils(attrs, opts) do
     if Keyword.get(opts, :strip_nils, true) do

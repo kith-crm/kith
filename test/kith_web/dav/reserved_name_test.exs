@@ -75,8 +75,8 @@ defmodule KithWeb.DAV.ReservedNameTest do
       conn = build_conn() |> basic_auth(context.user.email, dav_password())
       conn = if accept, do: put_req_header(conn, "accept", accept), else: conn
       body = dav_request(conn, "GET", href).resp_body
-      [line] = Regex.run(~r/^UID:[^\r]*/m, body)
-      line
+      {:ok, [parsed]} = Kith.VCard.Parser.parse(body)
+      "UID:" <> parsed.uid
     end
 
     test "CDV-38: a <uuid>.vcf carrying UID:kith-contact-N (plain or urn:uuid) leaves contact N a distinct UID",

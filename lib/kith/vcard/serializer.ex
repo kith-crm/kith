@@ -33,6 +33,7 @@ defmodule Kith.VCard.Serializer do
     [
       "BEGIN:VCARD",
       version_line(version),
+      uid_line(contact, version, Keyword.get(opts, :include_uid, false)),
       fn_line(contact),
       n_line(contact),
       nickname_line(contact),
@@ -67,6 +68,19 @@ defmodule Kith.VCard.Serializer do
   def uid_for(%{dav_uid: uid}, _version) when is_binary(uid), do: uid
   def uid_for(%{id: id}, :v30), do: "kith-contact-#{id}"
   def uid_for(%{id: id}, :v40), do: "urn:uuid:kith-contact-#{id}"
+
+  defp uid_line(_contact, _version, false), do: nil
+
+  defp uid_line(contact, version, true),
+    do: identifier_line("UID", uid_for(contact, version), version)
+
+  defp identifier_line(name, value, :v40) do
+    if Metadata.uri?(value),
+      do: name <> ":" <> value,
+      else: name <> ";VALUE=text:" <> escape(value)
+  end
+
+  defp identifier_line(name, value, :v30), do: name <> ":" <> escape(value)
 
   # ── Version ───────────────────────────────────────────────────────────
 
@@ -201,7 +215,7 @@ defmodule Kith.VCard.Serializer do
     Enum.map(rels, fn rel ->
       type = relationship_type_to_vcard(rel.relationship_type.name)
       uid = rel.related_contact |> Map.put_new(:id, rel.related_contact_id) |> uid_for(:v40)
-      "RELATED;TYPE=#{type}:#{uid}"
+      identifier_line("RELATED;TYPE=#{type}", uid, :v40)
     end)
   end
 

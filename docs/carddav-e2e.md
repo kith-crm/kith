@@ -198,6 +198,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | CDV-82 | medium | Byte-different negotiated representations share a strong ETag and omit Vary Accept | GET3/GET4 bytes differ but same strong tag; GET4 If-None-Match GET3 tag returns304. ExUnit RED 99/1 (t3==t4). Version-specific GET/REPORT validators and Vary Accept; current 3.0/4.0 tags both usable for conditional writes, stale tags fail | fixed |
 
+| CDV-83 | high | UID bypasses escaping/folding and 4.0 text UID lacks VALUE=text | Live valid text UID of 40 CJK characters plus escaped newline PUT201 → GET4 physical line143 bytes, bare LF and injected FN. ExUnit RED 17/1. UID now enters normal serializer folding/escaping; non-URI identifiers (UID/RELATED) declare VALUE=text in4.0; parser returns identical semantic UID | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.
@@ -234,5 +236,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 - R36 — Preference-only `TYPE=PREF` has no native field label and must match an unlabeled native field when reapplying metadata (CDV-78). Thunderbird live RED lost TYPE=PREF after identical PUT, ExUnit RED 28/1 — PREF is a preference marker in 3.0, not a display label — cost if wrong: none.
 
 - R37 — Strong validators identify the serialized version: 3.0 keeps the original revision hash; 4.0 hashes revision plus version. GET varies on Accept; REPORT getetag corresponds to its requested address-data version. Conditional writes accept either current representation tag (and reject both after a write) — RFC7232 strong validation / RFC6352 negotiated address data — cost if wrong: one4.0 revalidation download after upgrade.
+
+- R38 — Text UIDs and RELATED identifiers in4.0 declare VALUE=text; URI identifiers retain URI form. UID is serialized with all other properties so escaping and UTF8 folding apply. CDV38 reserved-name test compares parsed UID values across versions, and CDV80 expects the4.0 text parameter — RFC6350 §6.7.6/§6.6.6 — cost if wrong: none; UID values stay unchanged.
 
 ## Real-client smoke
