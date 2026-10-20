@@ -65,11 +65,17 @@ defmodule Kith.DAV.XMLParser do
   Returns one of
   - `{:ok, {:multiget, %{hrefs: hrefs, version: version}}}`
   - `{:ok, {:sync_collection, %{token: token_or_nil, version: version}}}`
-  - `{:ok, {:query, %{filters: filters, version: version}}}`
+  - `{:ok, {:query, %{filter: filter, limit: limit, version: version}}}`
   - `{:ok, {:unsupported, {namespace, local_name}}}` for any other root
   - `{:error, :invalid_xml}` for a body that is not well-formed UTF-8 XML
 
-  `filters` is a list of `%{property: name, match: text, match_type: type}`.
+  `filter` is the `CARDDAV:filter` (RFC 6352 §10.5) as
+  `%{test: test, prop_filters: [prop_filter]}`, each prop filter
+  `%{name: name, test: test, is_not_defined: boolean, text_matches: [text_match],
+  param_filters: [%{name: name, is_not_defined: boolean, text_match: text_match | nil}]}`
+  and each text match `%{text: text, collation: c, negate: boolean, match_type: t}`.
+  Attribute defaults are applied, values are not validated. `limit` is the
+  `CARDDAV:limit/nresults` text, or nil.
   Element prefixes don't matter, only namespaces (CDV-40).
   """
   def parse_report(body) do
@@ -95,21 +101,58 @@ defmodule Kith.DAV.XMLParser do
   end
 
   defp report_request(%{ns: @carddav, name: "addressbook-query"} = root) do
-    filters =
-      for %{ns: @carddav, name: "filter"} = filter <- root.children,
-          %{ns: @carddav, name: "prop-filter"} = prop_filter <- filter.children,
-          %{ns: @carddav, name: "text-match"} = match <- prop_filter.children do
-        %{
-          property: String.upcase(Map.get(prop_filter.attrs, "name", "")),
-          match: String.trim(text(match)),
-          match_type: Map.get(match.attrs, "match-type", "contains")
-        }
+    filter =
+      case child(root, @carddav, "filter") do
+        nil -> %{test: "anyof", prop_filters: []}
+        el -> %{test: Map.get(el.attrs, "test", "anyof"), prop_filters: prop_filters(el)}
       end
 
-    {:query, %{filters: filters, version: requested_version(root)}}
+    {:query, %{filter: filter, limit: limit(root), version: requested_version(root)}}
   end
 
   defp report_request(root), do: {:unsupported, {root.ns, root.name}}
+
+  defp prop_filters(filter) do
+    for %{ns: @carddav, name: "prop-filter"} = el <- filter.children do
+      %{
+        name: el.attrs |> Map.get("name", "") |> String.upcase(),
+        test: Map.get(el.attrs, "test", "anyof"),
+        is_not_defined: child(el, @carddav, "is-not-defined") != nil,
+        text_matches:
+          for(%{ns: @carddav, name: "text-match"} = tm <- el.children, do: text_match(tm)),
+        param_filters:
+          for(%{ns: @carddav, name: "param-filter"} = pf <- el.children, do: param_filter(pf))
+      }
+    end
+  end
+
+  defp param_filter(el) do
+    %{
+      name: el.attrs |> Map.get("name", "") |> String.upcase(),
+      is_not_defined: child(el, @carddav, "is-not-defined") != nil,
+      text_match:
+        case child(el, @carddav, "text-match") do
+          nil -> nil
+          tm -> text_match(tm)
+        end
+    }
+  end
+
+  defp text_match(el) do
+    %{
+      text: String.trim(text(el)),
+      collation: Map.get(el.attrs, "collation", "i;unicode-casemap"),
+      negate: Map.get(el.attrs, "negate-condition", "no") == "yes",
+      match_type: Map.get(el.attrs, "match-type", "contains")
+    }
+  end
+
+  defp limit(root) do
+    with %{} = limit <- child(root, @carddav, "limit"),
+         %{} = nresults <- child(limit, @carddav, "nresults") do
+      String.trim(text(nresults))
+    end
+  end
 
   # The vCard version asked for by `DAV:prop/CARDDAV:address-data@version`.
   defp requested_version(root) do

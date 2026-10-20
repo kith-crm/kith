@@ -97,6 +97,21 @@ defmodule Kith.DAV.XMLBuilder do
     """
   end
 
+  @doc """
+  The response for the request-URI when a REPORT's results were truncated at
+  the client's limit (RFC 6352 §8.6.1, RFC 5323 §5.17).
+  """
+  def truncated_response(href) do
+    """
+    <d:response>
+    <d:href>#{escape(href)}</d:href>
+    <d:status>HTTP/1.1 507 Insufficient Storage</d:status>
+    <d:error><d:number-of-matches-within-limits/></d:error>
+    <d:responsedescription>Only the first matching results were returned</d:responsedescription>
+    </d:response>
+    """
+  end
+
   @doc "Builds a DAV precondition error response (RFC 6352 §10)."
   def precondition_error(precondition, message) do
     error_body("<card:#{precondition}/>", message)

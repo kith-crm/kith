@@ -452,6 +452,128 @@ defmodule KithWeb.DAV.ReportTest do
   # ── CardDAV e2e regressions (Task 5) ────────────────────────────────────
 
   describe "CardDAV e2e regressions — REPORT" do
+    defp put_card(context, name, card) do
+      conn = authed_dav(context, "PUT", "/dav/addressbooks/default/#{name}.vcf", card)
+      assert conn.status == 201
+      "/dav/addressbooks/default/#{name}.vcf"
+    end
+
+    defp query(context, filter, opts \\ []) do
+      test_attr = if opts[:test], do: ~s( test="#{opts[:test]}"), else: ""
+
+      limit =
+        if opts[:limit],
+          do: "<C:limit><C:nresults>#{opts[:limit]}</C:nresults></C:limit>",
+          else: ""
+
+      body =
+        ~s(<C:addressbook-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">) <>
+          ~s(<D:prop><D:getetag/></D:prop><C:filter#{test_attr}>#{filter}</C:filter>#{limit}) <>
+          "</C:addressbook-query>"
+
+      authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+    end
+
+    defp query_hrefs(context, filter, opts \\ []) do
+      conn = query(context, filter, opts)
+      assert conn.status == 207, conn.resp_body
+
+      Regex.scan(~r{<d:href>([^<]+)</d:href>}, conn.resp_body, capture: :all_but_first)
+      |> List.flatten()
+      |> Enum.sort()
+    end
+
+    defp tm(prop, text, attrs \\ ""),
+      do:
+        ~s(<C:prop-filter name="#{prop}"><C:text-match #{attrs}>#{text}</C:text-match></C:prop-filter>)
+
+    test "CDV-43: addressbook-query honours match-type, negate-condition, test, is-not-defined and param-filter",
+         context do
+      a =
+        put_card(
+          context,
+          "qa",
+          build_vcard("Qalpha", "Smith", email: "qa@example.test", phone: "+1 555 0001111")
+        )
+
+      b = put_card(context, "qb", build_vcard("Qbeta", "Jones", email: "qb@example.test"))
+      c = put_card(context, "qc", build_vcard("Qgamma", "Brown"))
+
+      assert query_hrefs(context, tm("FN", "Qalpha Smith", ~s(match-type="equals"))) == [a]
+      assert query_hrefs(context, tm("FN", "qal", ~s(match-type="starts-with"))) == [a]
+      assert query_hrefs(context, tm("FN", "JONES", ~s(match-type="ends-with"))) == [b]
+      assert query_hrefs(context, tm("EMAIL", "qa@", ~s(match-type="starts-with"))) == [a]
+      assert query_hrefs(context, tm("TEL", "0001111")) == [a]
+
+      assert query_hrefs(context, tm("FN", "Qalpha", ~s(negate-condition="yes"))) ==
+               Enum.sort([b, c])
+
+      assert query_hrefs(
+               context,
+               ~s(<C:prop-filter name="EMAIL"><C:is-not-defined/></C:prop-filter>)
+             ) ==
+               [c]
+
+      assert query_hrefs(context, ~s(<C:prop-filter name="EMAIL"/>)) == Enum.sort([a, b])
+
+      # served as a bare `TEL:` line, so TYPE is not defined on it
+      param = fn inner ->
+        query_hrefs(
+          context,
+          ~s(<C:prop-filter name="TEL" test="allof"><C:param-filter name="TYPE">#{inner}</C:param-filter></C:prop-filter>)
+        )
+      end
+
+      assert param.("<C:is-not-defined/>") == [a]
+      assert param.(~s(<C:text-match>cell</C:text-match>)) == []
+
+      either =
+        tm("FN", "Qalpha Smith", ~s(match-type="equals")) <>
+          tm("FN", "Qbeta Jones", ~s(match-type="equals"))
+
+      # RFC 6352 §10.5: the filter's test defaults to anyof
+      assert query_hrefs(context, either) == Enum.sort([a, b])
+      assert query_hrefs(context, either, test: "anyof") == Enum.sort([a, b])
+      assert query_hrefs(context, either, test: "allof") == []
+      assert query_hrefs(context, tm("FN", "Q") <> tm("EMAIL", "qb@"), test: "allof") == [b]
+
+      # an unknown property is simply not defined
+      assert query_hrefs(context, tm("X-UNKNOWN", "Q")) == []
+    end
+
+    test "CDV-43: addressbook-query truncates at card:limit with a 507 for the collection",
+         context do
+      for n <- 1..3, do: put_card(context, "lim#{n}", build_vcard("Limit#{n}", "Many"))
+
+      conn = query(context, tm("FN", "Limit"), limit: 2)
+      assert conn.status == 207
+      assert count_responses(conn.resp_body) == 3
+
+      assert conn.resp_body =~
+               ~r{<d:href>/dav/addressbooks/default/</d:href>\s*<d:status>HTTP/1.1 507 Insufficient Storage</d:status>}
+
+      assert conn.resp_body =~ "<d:number-of-matches-within-limits/>"
+
+      conn = query(context, tm("FN", "Limit"), limit: 5)
+      assert count_responses(conn.resp_body) == 3
+      refute conn.resp_body =~ "507"
+    end
+
+    test "CDV-43: unsupported query filters are 403, not match-all", context do
+      put_card(context, "unsup", build_vcard("Un", "Supported"))
+
+      conn = query(context, tm("FN", "x", ~s(match-type="regex")))
+      assert conn.status == 403
+      assert conn.resp_body =~ "<card:supported-filter/>"
+
+      conn = query(context, tm("FN", "x", ~s(collation="x-bogus")))
+      assert conn.status == 403
+      assert conn.resp_body =~ "<card:supported-collation/>"
+
+      assert query(context, tm("FN", "x"), test: "sometimes").status == 403
+      assert query(context, tm("FN", "Un", ~s(collation="i;ascii-casemap"))).status == 207
+    end
+
     test "CDV-42: a missing multiget href is a response with a bare 404 status, no propstat",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Present"})

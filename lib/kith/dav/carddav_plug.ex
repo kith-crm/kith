@@ -23,7 +23,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   alias Kith.Contacts
   alias Kith.Contacts.Contact
-  alias Kith.DAV.{Auth, VCardAdapter, XMLBuilder, XMLParser}
+  alias Kith.DAV.{AddressQuery, Auth, VCardAdapter, XMLBuilder, XMLParser}
 
   @behaviour Plug
 
@@ -448,59 +448,64 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── addressbook-query REPORT (RFC 6352 §8.6) ──────────────────────────
 
-  defp handle_addressbook_query_report(conn, %{filters: filters, version: version}) do
-    contacts = list_contacts_for_dav(conn)
+  # RFC 6352 §8.6: the filter is evaluated on the vCard each member is served
+  # as; an unsupported filter or collation is a 403 precondition rather than a
+  # silent match-all, and CARDDAV:limit truncates with a 507 for the
+  # collection (§8.6.1) (CDV-43).
+  defp handle_addressbook_query_report(conn, %{filter: filter, limit: limit, version: version}) do
+    with :ok <- AddressQuery.validate(filter),
+         {:ok, limit} <- parse_limit(limit) do
+      matching =
+        conn
+        |> list_contacts_for_dav()
+        |> Stream.map(
+          &{&1, VCardAdapter.contact_to_vcard(&1, version: version, include_photo: false)}
+        )
+        |> Stream.filter(fn {_contact, vcard} -> AddressQuery.matches?(vcard, filter) end)
+        |> then(&if(limit, do: Enum.take(&1, limit + 1), else: Enum.to_list(&1)))
 
-    matching =
-      Enum.filter(contacts, fn contact ->
-        Enum.all?(filters, &contact_matches_filter?(contact, &1))
-      end)
+      {matching, truncated?} =
+        if limit && length(matching) > limit,
+          do: {Enum.take(matching, limit), true},
+          else: {matching, false}
 
-    responses = Enum.map(matching, &sync_contact_response(&1, version))
-    send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
+      responses = Enum.map(matching, fn {contact, vcard} -> member_response(contact, vcard) end)
+
+      responses =
+        if truncated?,
+          do: responses ++ [XMLBuilder.truncated_response("/dav/addressbooks/default/")],
+          else: responses
+
+      send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
+    else
+      {:error, :supported_collation} ->
+        send_precondition_failed(conn, "<card:supported-collation/>")
+
+      {:error, :supported_filter} ->
+        send_precondition_failed(conn, "<card:supported-filter/>")
+
+      {:error, :bad_limit} ->
+        send_resp(conn, 400, "Bad Request")
+    end
   end
 
-  defp contact_matches_filter?(contact, %{property: prop, match: text, match_type: type}) do
-    value = contact_property_value(contact, prop)
-    match_text(value, text, type)
+  defp parse_limit(nil), do: {:ok, nil}
+
+  defp parse_limit(text) do
+    case Integer.parse(text) do
+      {n, ""} when n > 0 -> {:ok, n}
+      _ -> {:error, :bad_limit}
+    end
   end
 
-  defp contact_property_value(contact, "FN") do
-    [contact.first_name, contact.last_name]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.join(" ")
+  defp member_response(contact, vcard) do
+    XMLBuilder.response(contact_href(contact), [
+      XMLBuilder.propstat([
+        XMLBuilder.getetag(compute_etag(contact)),
+        XMLBuilder.address_data(vcard)
+      ])
+    ])
   end
-
-  defp contact_property_value(contact, "N") do
-    [contact.last_name, contact.first_name] |> Enum.reject(&is_nil/1) |> Enum.join(";")
-  end
-
-  defp contact_property_value(contact, prop) when prop in ["EMAIL", "TEL"] do
-    protocol = if prop == "EMAIL", do: "mailto", else: "tel"
-
-    contact.contact_fields
-    |> Enum.filter(fn cf ->
-      cf.contact_field_type.protocol &&
-        String.starts_with?(cf.contact_field_type.protocol, protocol)
-    end)
-    |> Enum.map_join("\n", & &1.value)
-  end
-
-  defp contact_property_value(_contact, _prop), do: ""
-
-  defp match_text(value, text, "contains"),
-    do: String.contains?(String.downcase(value), String.downcase(text))
-
-  defp match_text(value, text, "starts-with"),
-    do: String.starts_with?(String.downcase(value), String.downcase(text))
-
-  defp match_text(value, text, "ends-with"),
-    do: String.ends_with?(String.downcase(value), String.downcase(text))
-
-  defp match_text(value, text, "equals"), do: String.downcase(value) == String.downcase(text)
-
-  defp match_text(value, text, _),
-    do: String.contains?(String.downcase(value), String.downcase(text))
 
   # ── GET ────────────────────────────────────────────────────────────────
 
