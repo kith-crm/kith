@@ -11,6 +11,19 @@ end
 
 config :kith, KithWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+# Outbound request budget for the Monica API importer, per minute. Set it a
+# call or two below Monica's own RATE_LIMIT_PER_MINUTE_API. Unset keeps the
+# config.exs default (55), so test.exs is preserved.
+if monica_limit = System.get_env("MONICA_RATE_LIMIT_PER_MINUTE") do
+  case Integer.parse(monica_limit) do
+    {n, ""} when n > 0 ->
+      config :kith, :monica_rate_limit, n
+
+    _ ->
+      raise "MONICA_RATE_LIMIT_PER_MINUTE must be a positive integer, got: #{inspect(monica_limit)}"
+  end
+end
+
 # Feature flags
 config :kith,
   disable_signup: System.get_env("DISABLE_SIGNUP") == "true",
@@ -182,10 +195,7 @@ if config_env() == :prod do
         region: System.get_env("AWS_REGION", "us-east-1")
 
       if endpoint = System.get_env("AWS_S3_ENDPOINT") do
-        config :ex_aws, :s3,
-          scheme: "http://",
-          host: URI.parse(endpoint).host,
-          port: URI.parse(endpoint).port
+        config :ex_aws, :s3, Kith.ConfigHelpers.s3_endpoint_config(endpoint)
       end
 
       config :kith, Kith.Storage,
@@ -222,12 +232,38 @@ if config_env() == :prod do
   # `:prod`. Test env is pinned to `testing: :manual` in `config/test.exs`.
   case System.get_env("KITH_MODE", "web") do
     "worker" ->
+      # `OBAN_PRUNER_MAX_AGE_DAYS` (whole days) is how long terminal `oban_jobs`
+      # rows are kept. Empty, non-numeric, or sub-1 values fall back to the
+      # 7-day default so a stray override can't near-instantly prune. The
+      # effective value is logged at boot by `Kith.Application`.
+      oban_pruner_max_age_days = System.get_env("OBAN_PRUNER_MAX_AGE_DAYS", "7")
+
+      oban_pruner_max_age_seconds =
+        case Integer.parse(String.trim(oban_pruner_max_age_days)) do
+          {days, ""} when days >= 1 -> days * 24 * 60 * 60
+          _ -> 7 * 24 * 60 * 60
+        end
+
+      # `OBAN_LIFELINE_RESCUE_AFTER_MINUTES` is how long a job may sit `executing`
+      # before Lifeline treats it as orphaned by a restart and re-queues it. Keep
+      # it above the longest worker timeout (30 min); smaller or invalid values
+      # fall back to 60 so a stray override can't re-run jobs that are still live.
+      oban_lifeline_rescue_after_minutes =
+        case Integer.parse(
+               String.trim(System.get_env("OBAN_LIFELINE_RESCUE_AFTER_MINUTES", "60"))
+             ) do
+          {minutes, ""} when minutes > 30 -> minutes
+          _ -> 60
+        end
+
       config :kith, Oban,
         plugins: [
-          {Oban.Plugins.Pruner, max_age: Kith.ConfigHelpers.oban_pruner_max_age_seconds()},
+          {Oban.Plugins.Pruner, max_age: oban_pruner_max_age_seconds},
+          {Oban.Plugins.Lifeline,
+           rescue_after: :timer.minutes(oban_lifeline_rescue_after_minutes)},
           {Oban.Plugins.Cron,
            crontab: [
-             {"0 2 * * *", Kith.Workers.ReminderSchedulerWorker},
+             {"0 * * * *", Kith.Workers.ReminderDispatcher},
              {"0 3 * * *", Kith.Workers.ContactPurgeWorker},
              {"0 4 * * 0", Kith.Workers.DuplicateDetectionWorker},
              {"0 5 * * 0", Kith.Workers.ImportFileCleanupWorker},
@@ -309,8 +345,21 @@ if config_env() == :prod do
 
   config :kith, metrics_token: metrics_token
 
-  # Structured JSON logging in production
+  # `LOG_LEVEL=debug` turns on the importer workers' per-request and per-contact
+  # debug lines (see `MonicaMiscDataWorker`) without a rebuild. Anything other
+  # than debug/info/warning/error keeps the `:info` set in config/prod.exs.
+  case System.get_env("LOG_LEVEL") do
+    level when level in ~w(debug info warning error) ->
+      config :logger, level: String.to_existing_atom(level)
+
+    _ ->
+      :ok
+  end
+
+  # Structured JSON logging in production. `import_id` and `worker` are set by
+  # the Monica import workers, so a log line says which import it belongs to.
   config :logger, :default_handler,
     formatter:
-      {LoggerJSON.Formatters.Basic, metadata: [:request_id, :user_id, :account_id, :reason]}
+      {LoggerJSON.Formatters.Basic,
+       metadata: [:request_id, :user_id, :account_id, :reason, :import_id, :worker]}
 end

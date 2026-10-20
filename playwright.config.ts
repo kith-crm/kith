@@ -14,13 +14,13 @@ export default defineConfig({
     {
       name: "smoke",
       testDir: "./e2e",
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], channel: "chromium" },
     },
     {
       name: "e2e",
       testDir: "./test/playwright",
       testMatch: "**/*.spec.ts",
-      use: { ...devices["Desktop Chrome"] },
+      use: { ...devices["Desktop Chrome"], channel: "chromium" },
     },
   ],
 });

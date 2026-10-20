@@ -243,7 +243,7 @@ defmodule KithWeb.ContactLive.Show do
     today = Date.utc_today()
     years = today.year - birthdate.year
 
-    if Date.compare(Date.new!(today.year, birthdate.month, birthdate.day), today) == :gt do
+    if Date.compare(Kith.TimeHelper.anniversary_in_year(birthdate, today.year), today) == :gt do
       years - 1
     else
       years
@@ -263,12 +263,12 @@ defmodule KithWeb.ContactLive.Show do
 
       birthdate ->
         today = Date.utc_today()
-        this_year = Date.new!(today.year, birthdate.month, birthdate.day)
+        this_year = Kith.TimeHelper.anniversary_in_year(birthdate, today.year)
 
         next_birthday =
           if Date.compare(this_year, today) in [:gt, :eq],
             do: this_year,
-            else: Date.new!(today.year + 1, birthdate.month, birthdate.day)
+            else: Kith.TimeHelper.anniversary_in_year(birthdate, today.year + 1)
 
         days = Date.diff(next_birthday, today)
 

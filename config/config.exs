@@ -16,6 +16,7 @@ config :ex_cldr, default_backend: Kith.Cldr
 
 # Outbound rate limit for Monica API calls. One below the documented
 # default of 60 req/min leaves a one-call safety margin.
+# Override with the MONICA_RATE_LIMIT_PER_MINUTE env var (config/runtime.exs).
 config :kith, :monica_rate_limit, 55
 
 config :kith, :scopes,
@@ -51,11 +52,23 @@ config :kith, Oban,
     purge: 1
   ],
   plugins: [
-    {Oban.Plugins.Pruner,
-     max_age: String.to_integer(System.get_env("OBAN_PRUNER_MAX_AGE_DAYS", "7")) * 24 * 60 * 60},
+    # Terminal `oban_jobs` retention: 7 days. `:prod` overrides this whole
+    # `plugins:` list at boot from `config/runtime.exs`, where the worker
+    # container reads `OBAN_PRUNER_MAX_AGE_DAYS`; only `:dev`/`:test` use this
+    # line, so a plain literal is enough. Keep the 7 in sync with runtime.exs.
+    {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60},
+    # Re-queues jobs whose process died without finishing (a container restart
+    # or deploy mid-job leaves the row `executing` forever otherwise). Must stay
+    # above the longest worker `timeout/1` (30 min) or it re-runs live jobs.
+    # `:prod` re-declares this list in config/runtime.exs, keep both in sync.
+    {Oban.Plugins.Lifeline,
+     rescue_after:
+       :timer.minutes(
+         String.to_integer(System.get_env("OBAN_LIFELINE_RESCUE_AFTER_MINUTES", "60"))
+       )},
     {Oban.Plugins.Cron,
      crontab: [
-       {"0 2 * * *", Kith.Workers.ReminderSchedulerWorker},
+       {"0 * * * *", Kith.Workers.ReminderDispatcher},
        {"0 3 * * *", Kith.Workers.ContactPurgeWorker},
        {"0 4 * * 0", Kith.Workers.DuplicateDetectionWorker},
        {"0 5 * * 0", Kith.Workers.ImportFileCleanupWorker},

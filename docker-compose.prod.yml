@@ -192,6 +192,8 @@ services:
       IMMICH_API_KEY: ${IMMICH_API_KEY:-}
       IMMICH_SYNC_INTERVAL_HOURS: ${IMMICH_SYNC_INTERVAL_HOURS:-24}
       METRICS_TOKEN: ${METRICS_TOKEN}
+      # Monica API import throttle (requests/min); imports run in this container
+      MONICA_RATE_LIMIT_PER_MINUTE: ${MONICA_RATE_LIMIT_PER_MINUTE:-55}
     volumes:
       - uploads:/app/uploads
     deploy:

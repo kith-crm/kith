@@ -22,6 +22,12 @@ defmodule Kith.StorageTest do
     end
   end
 
+  describe "csp_img_src/0" do
+    test "is empty for the local backend (served from the app origin)" do
+      assert Storage.csp_img_src() == ""
+    end
+  end
+
   describe "content_type/1" do
     test "detects image MIME types" do
       assert Storage.content_type("photo.jpg") == "image/jpeg"

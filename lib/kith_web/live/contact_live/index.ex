@@ -6,6 +6,7 @@ defmodule KithWeb.ContactLive.Index do
   alias Kith.DuplicateDetection
   alias Kith.Policy
   alias Kith.Workers.DuplicateDetectionWorker
+  alias KithWeb.ContactLive.SectionNav
 
   @sort_options %{
     "name_asc" => %{order_by: [:display_name], order_directions: [:asc]},
