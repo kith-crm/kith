@@ -1269,6 +1269,26 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-13: unsafe resource names" do
+    test "CDV-13: dot segments, encoded slashes, control characters and bad escapes are refused",
+         %{account_id: account_id} = context do
+      long = String.duplicate("a", 252) <> ".vcf"
+
+      for segment <-
+            ["..", "%2E%2E", ".", "a%2Fb.vcf", "a%5Cb.vcf", "a%00b.vcf", "a%0Ab.vcf"] ++
+              ["%ZZ.vcf", "%FF.vcf", long] do
+        path = "/dav/addressbooks/default/" <> segment
+        put = authed_dav(context, "PUT", path, build_vcard("Evil", "Name"))
+        assert put.status in 400..499, "PUT #{segment} -> #{put.status}"
+
+        get = build_conn() |> basic_auth(context.user.email, dav_password())
+        assert dav_request(get, "GET", path).status in 400..499
+      end
+
+      assert Contacts.count_contacts(account_id) == 0
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════

@@ -116,10 +116,11 @@ defmodule Kith.DAV.CardDAVPlug do
   defp account_id(conn), do: conn.assigns.current_scope.account.id
 
   # Hands the percent-decoded resource name (the last path segment) to `fun`.
+  # A name that cannot be a member of the book is a 400 (CDV-13).
   defp with_resource_name(conn, raw, fun) do
     case decode_resource_name(raw) do
       {:ok, name} -> fun.(conn, name)
-      :error -> send_resp(conn, 404, "Not Found")
+      :error -> send_resp(conn, 400, "Bad Request")
     end
   end
 
@@ -632,11 +633,16 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
+  # A resource name is one well-escaped path segment that decodes to valid UTF-8
+  # of at most 255 bytes, with no slash, backslash or control character, and is
+  # not a dot segment (CDV-13).
   defp decode_resource_name(raw) do
-    name = URI.decode(raw)
-    if String.valid?(name), do: {:ok, name}, else: :error
-  rescue
-    ArgumentError -> :error
+    name = if String.match?(raw, ~r/\A(?:[^%]|%[0-9A-Fa-f]{2})*\z/), do: URI.decode(raw)
+
+    if is_binary(name) and String.valid?(name) and byte_size(name) <= 255 and
+         name not in [".", ".."] and not String.match?(name, ~r{[/\\\x00-\x1f\x7f]}),
+       do: {:ok, name},
+       else: :error
   end
 
   # The one place a contact's href is built: its stored client name (R2), else
