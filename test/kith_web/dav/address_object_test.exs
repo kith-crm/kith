@@ -1234,7 +1234,11 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert authed_dav(context, "DELETE", href).status == 204
       assert authed_dav(context, "GET", href).status == 404
 
-      old_token = "https://kith.app/ns/sync/#{DateTime.to_unix(DateTime.utc_now()) - 60}"
+      # R25: a token is a sync position, not a forgeable timestamp
+      [old_token] =
+        Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, sync.resp_body,
+          capture: :all_but_first
+        )
 
       sync_body =
         String.replace(

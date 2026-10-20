@@ -1805,30 +1805,59 @@ defmodule Kith.Contacts do
   end
 
   @doc """
-  Lists contacts modified since the given timestamp.
-  Used by CardDAV sync-collection REPORT for incremental sync.
+  The current CardDAV sync position, `{revision, snapshot}`: the last value
+  drawn from `contacts_dav_revision_seq` and the current Postgres snapshot (as
+  text). Take it *before* reading the contacts a sync response lists, so that
+  every write visible in the snapshot is in that response (R3, CDV-46).
   """
-  def list_contacts_modified_since(account_id, %DateTime{} = since) do
-    Contact
-    |> scope_active(account_id)
-    |> where([c], c.updated_at > ^since and c.is_archived == false)
-    |> preload(^dav_preloads())
-    |> Repo.all()
+  def dav_sync_position do
+    %{rows: [[revision, snapshot, own_xid]]} =
+      Repo.query!("""
+      SELECT (SELECT last_value FROM contacts_dav_revision_seq),
+             pg_current_snapshot()::text,
+             pg_current_xact_id_if_assigned()::text
+      """)
+
+    {revision, without_own_xid(snapshot, own_xid)}
+  end
+
+  # Postgres' snapshot never counts the caller's own transaction as visible
+  # (its xid is >= xmax or in the in-progress list), yet the caller sees its own
+  # writes, so they count as seen: xmax is moved past the own xid and any xid
+  # skipped over is listed as in progress (conservative). Only matters when the
+  # position is taken inside a writing transaction, e.g. in tests.
+  defp without_own_xid(snapshot, nil), do: snapshot
+
+  defp without_own_xid(snapshot, own_xid) do
+    [xmin, xmax, xip] = snapshot |> String.split(":") |> Enum.map(&String.trim/1)
+    {xmax, own} = {String.to_integer(xmax), String.to_integer(own_xid)}
+    xips = xip |> String.split(",", trim: true) |> Enum.map(&String.to_integer/1)
+
+    {xmax, xips} =
+      if own >= xmax and own - xmax < 1000,
+        do: {own + 1, xips ++ Enum.to_list(xmax..(own - 1)//1)},
+        else: {xmax, xips}
+
+    "#{xmin}:#{xmax}:#{xips |> List.delete(own) |> Enum.join(",")}"
   end
 
   @doc """
-  Lists contacts soft-deleted, or archived, since the given timestamp.
-  Used by CardDAV sync-collection REPORT to report deletions: an archived
-  contact is hidden from DAV (R5).
+  Lists every contact of the account written since the sync position
+  `{revision, snapshot}`, hidden ones (trashed, archived) included: a write
+  drew a newer revision, or its transaction was not visible in the snapshot
+  (still in flight when the position was taken). Used by CardDAV
+  sync-collection; an unchanged contact may be listed again, a changed one is
+  never missed (R3).
   """
-  def list_contacts_deleted_since(account_id, %DateTime{} = since) do
+  def list_contacts_changed_since(account_id, {revision, snapshot}) do
     Contact
     |> scope_to_account(account_id)
     |> where(
       [c],
-      (not is_nil(c.deleted_at) and c.deleted_at > ^since) or
-        (c.is_archived and c.updated_at > ^since)
+      c.dav_revision > ^revision or
+        fragment("NOT pg_visible_in_snapshot(dav_xid, ?::text::pg_snapshot)", ^snapshot)
     )
+    |> preload(^dav_preloads())
     |> Repo.all()
   end
 

@@ -489,6 +489,24 @@ defmodule KithWeb.DAV.ReportTest do
       end)
     end
 
+    test "CDV-46: changes in the same second the token was issued are reported",
+         %{account_id: account_id} = context do
+      edited = ContactsFixtures.contact_fixture(account_id, %{first_name: "Edited"})
+      trashed = ContactsFixtures.contact_fixture(account_id, %{first_name: "Trashed"})
+      _quiet = ContactsFixtures.contact_fixture(account_id, %{first_name: "Quiet"})
+
+      token = initial_token(context)
+      {:ok, _} = Contacts.update_contact(edited, %{first_name: "EditedAgain"})
+      {:ok, _} = Contacts.soft_delete_contact(trashed)
+      created = ContactsFixtures.contact_fixture(account_id, %{first_name: "Created"})
+
+      assert sync_changes(sync(context, token)) == %{
+               contact_path(edited) => :present,
+               contact_path(trashed) => :removed,
+               contact_path(created) => :present
+             }
+    end
+
     test "CDV-45: incremental sync reports archiving as a removal and unarchiving as an addition",
          %{account_id: account_id} = context do
       to_archive = ContactsFixtures.contact_fixture(account_id, %{first_name: "ToArchive"})
