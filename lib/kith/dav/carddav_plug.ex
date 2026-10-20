@@ -438,8 +438,14 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   # A hard delete since the token cannot be reported (R3, CDV-48)
+  # Anything the snapshot cast still refuses is an invalid token, not a 500.
   defp check_sync_floor({_rev, _snapshot} = since, conn) do
     if Contacts.dav_sync_position_valid?(account_id(conn), since), do: since, else: :invalid
+  rescue
+    e in Postgrex.Error ->
+      if e.postgres[:code] == :invalid_text_representation,
+        do: :invalid,
+        else: reraise(e, __STACKTRACE__)
   end
 
   defp check_sync_floor(since, _conn), do: since
@@ -978,12 +984,13 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
-  # The bounds `pg_snapshot` input accepts: xmin <= xip < xmax, ascending.
+  # The bounds `pg_snapshot` input accepts: 1 <= xmin <= xip < xmax, strictly
+  # ascending, and a sane number of in-progress xids (CDV-52).
   defp valid_snapshot?(xmin, xmax, xip) do
     xips = if xip == "", do: [], else: xip |> String.split(",") |> Enum.map(&String.to_integer/1)
 
-    xmin <= xmax and xmax < 0x7FFFFFFFFFFFFFFF and xips == Enum.sort(xips) and
-      Enum.all?(xips, &(&1 >= xmin and &1 < xmax))
+    xmin >= 1 and xmin <= xmax and xmax < 0x7FFFFFFFFFFFFFFF and length(xips) <= 1000 and
+      xips == xips |> Enum.uniq() |> Enum.sort() and Enum.all?(xips, &(&1 >= xmin and &1 < xmax))
   end
 
   defp addressbook_response(conn, request_type) do

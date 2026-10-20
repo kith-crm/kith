@@ -401,6 +401,9 @@ test.describe("sync-collection", () => {
       "http://other.example/ns/sync/12345",
       "https://kith.app/ns/sync/1700000000",
       "https://kith.app/ns/sync/99999999999999999999",
+      // CDV-52: snapshots Postgres itself rejects
+      "https://kith.app/ns/sync/0-0:0:",
+      "https://kith.app/ns/sync/0-0:5:",
     ]) {
       const res = await sync(request, bad);
       expect(res.status, `${bad}: ${res.body.slice(0, 300)}`).toBe(403);

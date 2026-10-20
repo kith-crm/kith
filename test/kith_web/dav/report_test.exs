@@ -586,6 +586,20 @@ defmodule KithWeb.DAV.ReportTest do
       assert count_responses(conn.resp_body) == 3
     end
 
+    test "CDV-52: crafted sync tokens Postgres would reject are 403, never 500", context do
+      for token <- [
+            "https://kith.app/ns/sync/0-0:0:",
+            "https://kith.app/ns/sync/0-0:5:",
+            "https://kith.app/ns/sync/0-1:5:0",
+            "https://kith.app/ns/sync/0-3:5:3,3",
+            "https://kith.app/ns/sync/0-1:100000:" <> Enum.map_join(1..20_000, ",", &to_string/1)
+          ] do
+        conn = sync(context, token)
+        assert conn.status == 403, String.slice(token, 0, 60)
+        assert conn.resp_body =~ "<d:valid-sync-token/>"
+      end
+    end
+
     test "CDV-47: an unknown, foreign, old-format or future sync token is 403 valid-sync-token",
          context do
       [_, rev, snapshot] = Regex.run(~r{/sync/(\d+)-(.+)\z}, initial_token(context))
