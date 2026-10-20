@@ -4,7 +4,7 @@ defmodule Kith.DAV.XMLParser do
 
   PROPFIND and PROPPATCH bodies are parsed with OTP's namespace-aware xmerl
   SAX parser, so element prefixes (`d:`, `D:`, Apple's `A:`, a default
-  `xmlns="DAV:"`) don't matter. REPORT bodies still use regex extraction.
+  `xmlns="DAV:"`) don't matter. REPORT bodies are parsed the same way (CDV-40).
   """
 
   @dav "DAV:"
@@ -60,67 +60,71 @@ defmodule Kith.DAV.XMLParser do
   end
 
   @doc """
-  Extracts href elements from an addressbook-multiget REPORT body.
+  Parses a REPORT body and identifies the report by its root element.
 
-  Returns `{:ok, hrefs}` where hrefs is a list of URI strings.
+  Returns one of
+  - `{:ok, {:multiget, %{hrefs: hrefs, version: version}}}`
+  - `{:ok, {:sync_collection, %{token: token_or_nil, version: version}}}`
+  - `{:ok, {:query, %{filters: filters, version: version}}}`
+  - `{:ok, {:unsupported, {namespace, local_name}}}` for any other root
+  - `{:error, :invalid_xml}` for a body that is not well-formed UTF-8 XML
+
+  `filters` is a list of `%{property: name, match: text, match_type: type}`.
+  Element prefixes don't matter, only namespaces (CDV-40).
   """
-  def parse_addressbook_multiget(body) do
-    hrefs =
-      Regex.scan(~r/<[dD]:href[^>]*>([^<]+)<\/[dD]:href>/i, body)
-      |> Enum.map(fn [_, href] -> String.trim(href) end)
-
-    {:ok, hrefs}
+  def parse_report(body) do
+    case parse_tree(body || "") do
+      {:ok, root} -> {:ok, report_request(root)}
+      :error -> {:error, :invalid_xml}
+    end
   end
 
-  @doc """
-  Extracts the sync-token from a sync-collection REPORT body.
+  defp report_request(%{ns: @carddav, name: "addressbook-multiget"} = root) do
+    hrefs = for %{ns: @dav, name: "href"} = el <- root.children, do: String.trim(text(el))
+    {:multiget, %{hrefs: hrefs, version: requested_version(root)}}
+  end
 
-  Returns `{:ok, token}` where token may be nil for an initial sync.
-  """
-  def parse_sync_collection(body) do
+  defp report_request(%{ns: @dav, name: "sync-collection"} = root) do
     token =
-      case Regex.run(~r/<[dD]:sync-token[^>]*>([^<]*)<\/[dD]:sync-token>/i, body) do
-        [_, token] when token != "" -> token
-        _ -> nil
+      case child(root, @dav, "sync-token") do
+        nil -> nil
+        el -> el |> text() |> String.trim() |> then(&if(&1 == "", do: nil, else: &1))
       end
 
-    {:ok, token}
+    {:sync_collection, %{token: token, version: requested_version(root)}}
   end
 
-  @doc """
-  Parses an addressbook-query REPORT body.
-
-  Returns `{:ok, filters}` where filters is a list of
-  `%{property: name, match: text, match_type: type}` maps.
-
-  Supports basic text-match on FN, EMAIL, TEL properties.
-  """
-  def parse_addressbook_query(body) do
+  defp report_request(%{ns: @carddav, name: "addressbook-query"} = root) do
     filters =
-      Regex.scan(
-        ~r/<card:prop-filter\s+name="([^"]+)"[^>]*>.*?<card:text-match[^>]*>([^<]+)<\/card:text-match>.*?<\/card:prop-filter>/si,
-        body
-      )
-      |> Enum.map(fn [full_match, prop_name, text] ->
-        match_type =
-          case Regex.run(~r/match-type="([^"]+)"/, full_match) do
-            [_, type] -> type
-            _ -> "contains"
-          end
+      for %{ns: @carddav, name: "filter"} = filter <- root.children,
+          %{ns: @carddav, name: "prop-filter"} = prop_filter <- filter.children,
+          %{ns: @carddav, name: "text-match"} = match <- prop_filter.children do
+        %{
+          property: String.upcase(Map.get(prop_filter.attrs, "name", "")),
+          match: String.trim(text(match)),
+          match_type: Map.get(match.attrs, "match-type", "contains")
+        }
+      end
 
-        %{property: String.upcase(prop_name), match: String.trim(text), match_type: match_type}
-      end)
-
-    {:ok, filters}
+    {:query, %{filters: filters, version: requested_version(root)}}
   end
 
-  @doc "Extracts the requested vCard version from an address-data element in a REPORT body."
-  def parse_requested_vcard_version(body) do
-    case Regex.run(~r{address-data[^>]*version="([^"]+)"}, body) do
-      [_, "4.0"] -> :v40
+  defp report_request(root), do: {:unsupported, {root.ns, root.name}}
+
+  # The vCard version asked for by `DAV:prop/CARDDAV:address-data@version`.
+  defp requested_version(root) do
+    with %{} = prop <- child(root, @dav, "prop"),
+         %{attrs: %{"version" => "4.0"}} <- child(prop, @carddav, "address-data") do
+      :v40
+    else
       _ -> :v30
     end
   end
+
+  defp child(%{children: children}, ns, name),
+    do: Enum.find(children, &(&1.ns == ns and &1.name == name))
+
+  defp text(%{text: text}), do: text
 
   # ── Private ────────────────────────────────────────────────────────────
 
@@ -192,4 +196,43 @@ defmodule Kith.DAV.XMLParser do
 
   defp sax_event({:endElement, _uri, _local, _qname}, _loc, {depth, acc}), do: {depth - 1, acc}
   defp sax_event(_event, _loc, state), do: state
+
+  # Namespace-aware parse into a tree of
+  # `%{ns: uri, name: local, attrs: %{local => value}, children: [...], text: text}`
+  # (strings only, so no atoms are created). Same safety rules as `parse_xml/1`.
+  defp parse_tree(body) do
+    opts = [event_fun: &tree_event/3, event_state: [], external_entities: :none]
+
+    case :xmerl_sax_parser.stream(body, [:disallow_entities | opts]) do
+      {:ok, [%{} = root], rest} ->
+        if String.trim(to_string(rest)) == "", do: {:ok, root}, else: :error
+
+      _ ->
+        :error
+    end
+  catch
+    _, _ -> :error
+  end
+
+  defp tree_event({:startElement, uri, local, _qname, attrs}, _loc, stack) do
+    attrs =
+      Map.new(attrs, fn {_uri, _prefix, name, value} -> {to_string(name), to_string(value)} end)
+
+    node = %{ns: to_string(uri), name: to_string(local), attrs: attrs, children: [], text: ""}
+    [node | stack]
+  end
+
+  defp tree_event({:characters, chars}, _loc, [node | rest]),
+    do: [%{node | text: node.text <> to_string(chars)} | rest]
+
+  defp tree_event({:endElement, _uri, _local, _qname}, _loc, [node | rest]) do
+    node = %{node | children: Enum.reverse(node.children)}
+
+    case rest do
+      [parent | above] -> [%{parent | children: [node | parent.children]} | above]
+      [] -> [node]
+    end
+  end
+
+  defp tree_event(_event, _loc, stack), do: stack
 end

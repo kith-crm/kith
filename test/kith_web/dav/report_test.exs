@@ -358,14 +358,16 @@ defmodule KithWeb.DAV.ReportTest do
   # ── Unsupported REPORT types ────────────────────────────────────────────
 
   describe "RFC 6352 — unsupported REPORT types" do
-    test "server MUST return 400 for unrecognized REPORT type", context do
+    # R24: RFC 3253 §3.6 DAV:supported-report precondition (was a plain 400)
+    test "server MUST return 403 supported-report for unrecognized REPORT type", context do
       body = """
       <?xml version="1.0" encoding="UTF-8"?>
       <d:unknown-report xmlns:d="DAV:"/>
       """
 
       conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
-      assert conn.status == 400
+      assert conn.status == 403
+      assert conn.resp_body =~ "<d:supported-report/>"
     end
   end
 
@@ -458,6 +460,73 @@ defmodule KithWeb.DAV.ReportTest do
           padding <> "</card:addressbook-multiget>"
 
       assert authed_dav(context, "REPORT", "/dav/addressbooks/default/", body).status == 413
+    end
+
+    test "CDV-40: REPORT is dispatched on its namespaced root element, any prefix",
+         %{account_id: account_id} = context do
+      named = ContactsFixtures.contact_fixture(account_id, %{first_name: "sync-collection"})
+      other = ContactsFixtures.contact_fixture(account_id, %{first_name: "Other"})
+
+      # A query whose text-match mentions another report is still a query
+      query = """
+      <C:addressbook-query xmlns:A="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+        <A:prop><A:getetag/></A:prop>
+        <C:filter><C:prop-filter name="FN">
+          <C:text-match>sync-collection</C:text-match>
+        </C:prop-filter></C:filter>
+      </C:addressbook-query>
+      """
+
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", query)
+      assert conn.status == 207
+      refute conn.resp_body =~ "sync-token"
+      assert conn.resp_body =~ contact_path(named)
+      refute conn.resp_body =~ contact_path(other)
+
+      # multiget with Apple's A: prefix for DAV: and with default namespaces
+      for body <- [
+            ~s(<B:addressbook-multiget xmlns:A="DAV:" xmlns:B="urn:ietf:params:xml:ns:carddav">) <>
+              ~s(<A:prop><A:getetag/><B:address-data/></A:prop>) <>
+              ~s(<A:href>#{contact_path(named)}</A:href></B:addressbook-multiget>),
+            ~s(<addressbook-multiget xmlns="urn:ietf:params:xml:ns:carddav">) <>
+              ~s(<prop xmlns="DAV:"><getetag/></prop>) <>
+              ~s(<href xmlns="DAV:">#{contact_path(named)}</href></addressbook-multiget>)
+          ] do
+        conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+        assert conn.status == 207
+        assert count_responses(conn.resp_body) == 1
+        assert conn.resp_body =~ contact_path(named)
+        assert conn.resp_body =~ "200 OK"
+      end
+
+      # a multiget href that only looks like DAV:href is not one
+      fake =
+        ~s(<card:addressbook-multiget xmlns:d="urn:not-dav" xmlns:card="urn:ietf:params:xml:ns:carddav">) <>
+          ~s(<d:href>#{contact_path(named)}</d:href></card:addressbook-multiget>)
+
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", fake)
+      assert conn.status == 207
+      assert count_responses(conn.resp_body) == 0
+    end
+
+    test "CDV-40: an unknown REPORT is 403 supported-report; malformed XML is 400", context do
+      unknown = ~s(<?xml version="1.0"?><d:unknown-report xmlns:d="DAV:"/>)
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", unknown)
+      assert conn.status == 403
+      assert conn.resp_body =~ "supported-report"
+
+      # right local name, wrong namespace
+      wrong_ns = ~s(<x:sync-collection xmlns:x="urn:x"><x:sync-token/></x:sync-collection>)
+      assert authed_dav(context, "REPORT", "/dav/addressbooks/default/", wrong_ns).status == 403
+
+      for body <- [
+            ~s(<card:addressbook-multiget xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:href>x</d:prop>),
+            "",
+            "hello"
+          ] do
+        conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+        assert conn.status == 400, inspect(body)
+      end
     end
   end
 end

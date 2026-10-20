@@ -348,26 +348,26 @@ defmodule Kith.DAV.CardDAVPlug do
   # The body goes through the same capped reader as PUT/PROPFIND (R8, CDV-39).
   defp handle_report(conn), do: with_body(conn, &report/2)
 
+  # The report is identified by its namespaced root element, not by a
+  # substring of the body (CDV-40). RFC 3253 §3.6: an unknown report is a 403
+  # with the DAV:supported-report precondition; malformed XML is a 400.
   defp report(conn, body) do
-    cond do
-      String.contains?(body, "addressbook-multiget") ->
-        handle_multiget_report(conn, body)
-
-      String.contains?(body, "sync-collection") ->
-        handle_sync_collection_report(conn, body)
-
-      String.contains?(body, "addressbook-query") ->
-        handle_addressbook_query_report(conn, body)
-
-      true ->
-        send_resp(conn, 400, "Unsupported REPORT type")
+    case XMLParser.parse_report(body) do
+      {:ok, {:multiget, request}} -> handle_multiget_report(conn, request)
+      {:ok, {:sync_collection, request}} -> handle_sync_collection_report(conn, request)
+      {:ok, {:query, request}} -> handle_addressbook_query_report(conn, request)
+      {:ok, {:unsupported, _root}} -> send_precondition_failed(conn, "<d:supported-report/>")
+      {:error, _} -> send_resp(conn, 400, "Bad Request")
     end
   end
 
-  defp handle_multiget_report(conn, body) do
-    {:ok, hrefs} = XMLParser.parse_addressbook_multiget(body)
-    version = XMLParser.parse_requested_vcard_version(body)
+  defp send_precondition_failed(conn, condition) do
+    conn
+    |> put_resp_content_type("application/xml")
+    |> send_resp(403, XMLBuilder.error_body(condition, "Precondition failed"))
+  end
 
+  defp handle_multiget_report(conn, %{hrefs: hrefs, version: version}) do
     responses =
       Enum.map(hrefs, fn href ->
         raw = href |> String.trim() |> String.split("/") |> List.last()
@@ -395,9 +395,7 @@ defmodule Kith.DAV.CardDAVPlug do
     send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
   end
 
-  defp handle_sync_collection_report(conn, body) do
-    {:ok, client_token} = XMLParser.parse_sync_collection(body)
-    version = XMLParser.parse_requested_vcard_version(body)
+  defp handle_sync_collection_report(conn, %{token: client_token, version: version}) do
     aid = account_id(conn)
 
     {active_responses, deleted_responses} =
@@ -441,9 +439,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   # ── addressbook-query REPORT (RFC 6352 §8.6) ──────────────────────────
 
-  defp handle_addressbook_query_report(conn, body) do
-    {:ok, filters} = XMLParser.parse_addressbook_query(body)
-    version = XMLParser.parse_requested_vcard_version(body)
+  defp handle_addressbook_query_report(conn, %{filters: filters, version: version}) do
     contacts = list_contacts_for_dav(conn)
 
     matching =
