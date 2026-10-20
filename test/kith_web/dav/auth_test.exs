@@ -66,4 +66,61 @@ defmodule KithWeb.DAV.AuthTest do
       assert conn.status == 401
     end
   end
+
+  describe "R7 — brute-force protection" do
+    defp propfind_as(email, password) do
+      build_conn()
+      |> basic_auth(email, password)
+      |> dav_request("PROPFIND", "/dav/")
+    end
+
+    defp fail_times(email, n) do
+      for i <- 1..n do
+        assert propfind_as(email, "wrong-#{i}").status == 401
+      end
+    end
+
+    test "CDV-10: the 11th failed attempt for one IP+email is 429 with Retry-After" do
+      email = "cdv10-#{System.unique_integer([:positive])}@example.com"
+      fail_times(email, 10)
+
+      conn = propfind_as(email, "wrong-11")
+      assert conn.status == 429
+      [retry_after] = get_resp_header(conn, "retry-after")
+      assert String.to_integer(retry_after) in 1..300
+    end
+
+    test "CDV-10: a locked IP+email stays locked even with the right password", %{user: user} do
+      fail_times(user.email, 10)
+      assert propfind_as(user.email, dav_password()).status == 429
+      assert propfind_as(String.upcase(user.email), dav_password()).status == 429
+    end
+
+    test "CDV-10: another email from the same IP is unaffected" do
+      locked = "cdv10-#{System.unique_integer([:positive])}@example.com"
+      fail_times(locked, 10)
+      assert propfind_as(locked, "wrong-11").status == 429
+      other = Kith.AccountsFixtures.user_fixture()
+      assert propfind_as(other.email, dav_password()).status == 207
+    end
+
+    test "CDV-10: requests without parseable credentials are never throttled" do
+      for header <- [nil, "Bearer x", "Basic !!!", "Basic " <> Base.encode64("no-colon")],
+          _ <- 1..11 do
+        conn =
+          if header, do: put_req_header(build_conn(), "authorization", header), else: build_conn()
+
+        assert dav_request(conn, "PROPFIND", "/dav/").status == 401
+      end
+    end
+
+    test "CDV-10: successes are never throttled and reset the failure count", %{user: user} do
+      for _ <- 1..15, do: assert(propfind_as(user.email, dav_password()).status == 207)
+
+      fail_times(user.email, 9)
+      assert propfind_as(user.email, dav_password()).status == 207
+      fail_times(user.email, 10)
+      assert propfind_as(user.email, "wrong").status == 429
+    end
+  end
 end
