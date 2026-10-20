@@ -190,6 +190,8 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | CDV-78 | low | Preference-only EMAIL preference disappears on identical PUT-back | Separate defect introduced by CDV-58 metadata native-label comparison: Thunderbird GET 3.0 TYPE=PREF → identical PUT 204 → GET EMAIL without preference. Live RED v5-live-red.txt; ExUnit RED 28/1. TYPE=PREF now matches an unlabeled native field; parameters retained | fixed |
 
+| CDV-79 | high | PUT-back deletes Kith-only fields and rebuilds unchanged native rows, losing field types and address coordinates | API adds native protocol-less field, DAV GET 200, identical original PUT 204, API field list empty. ExUnit RED 15/1 (native field gone). Replacement now keeps native-only fields, matches unchanged DAV fields/addresses once, preserves their ids/types/coordinates, deletes only missing represented rows | fixed |
+
 ## Rulings I made
 
 - R11 — A PROPFIND on `/dav/addressbooks/` without a `Depth` header keeps listing the child book (treated as Depth 1), and the address book keeps defaulting to Depth 0, rather than treating a missing header as `infinity` -> 403 — RFC 4918 §9.1 says missing = infinity, but rejecting it would break clients that omit the header, and both trees are finite — cost if wrong: a strict client sees one extra response.

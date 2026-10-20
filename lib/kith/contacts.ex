@@ -1560,16 +1560,18 @@ defmodule Kith.Contacts do
   """
   def replace_contact_children(contact, account_id, nested_data) do
     Repo.transaction(fn ->
-      from(cf in ContactField, where: cf.contact_id == ^contact.id) |> Repo.delete_all()
-      from(a in Address, where: a.contact_id == ^contact.id) |> Repo.delete_all()
-
+      # Keep native-only fields and unchanged rows (including native type ids
+      # and address geocoding) that a DAV client cannot reconstruct.
+      nested_data = reconcile_dav_fields(contact, nested_data)
       create_imported_contact_fields(contact, account_id, nested_data.emails, "mailto")
       create_imported_contact_fields(contact, account_id, nested_data.phones, "tel")
       create_imported_contact_fields(contact, account_id, nested_data.urls, "https")
 
-      Enum.each(nested_data.addresses, fn addr ->
-        insert_address!(addr, contact.id, account_id)
-      end)
+      addresses = from(a in Address, where: a.contact_id == ^contact.id) |> Repo.all()
+
+      nested_data.addresses
+      |> retain_dav_entries(addresses, &same_dav_address?/2)
+      |> Enum.each(&insert_address!(&1, contact.id, account_id))
 
       # Tags (CATEGORIES)
       if Map.has_key?(nested_data, :categories) do
@@ -1601,6 +1603,69 @@ defmodule Kith.Contacts do
       end
 
       :ok
+    end)
+  end
+
+  defp reconcile_dav_fields(contact, data) do
+    fields =
+      from(cf in ContactField,
+        where: cf.contact_id == ^contact.id,
+        preload: [:contact_field_type]
+      )
+      |> Repo.all()
+
+    Enum.reduce(fields, data, fn field, data ->
+      case dav_field_kind(field.contact_field_type) do
+        nil ->
+          data
+
+        kind ->
+          Map.put(
+            data,
+            kind,
+            retain_dav_entries(Map.get(data, kind, []), [field], &same_dav_field?/2)
+          )
+      end
+    end)
+  end
+
+  defp dav_field_kind(%{protocol: protocol, vcard_label: label}) do
+    case protocol do
+      p when p in ["mailto", "mailto:"] -> :emails
+      p when p in ["tel", "tel:"] -> :phones
+      p when p in ["http", "http://", "https", "https://"] -> :urls
+      _ -> if label == "IMPP", do: :impp
+    end
+  end
+
+  defp same_dav_field?(field, entry),
+    do: field.value == entry.value and dav_label(field.label) == dav_label(entry.label)
+
+  defp dav_label(label) do
+    case String.downcase(label || "") do
+      "mobile" -> "cell"
+      "personal" -> "home"
+      "business" -> "work"
+      other -> other
+    end
+  end
+
+  defp same_dav_address?(address, entry) do
+    Enum.all?([:label, :line1, :line2, :city, :province, :postal_code, :country], fn key ->
+      Map.get(address, key) == Map.get(entry, key)
+    end)
+  end
+
+  defp retain_dav_entries(incoming, existing, matches?) do
+    Enum.reduce(existing, incoming, fn record, incoming ->
+      case Enum.find_index(incoming, &matches?.(record, &1)) do
+        nil ->
+          Repo.delete!(record)
+          incoming
+
+        index ->
+          List.delete_at(incoming, index)
+      end
     end)
   end
 

@@ -178,6 +178,47 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
+  test "CDV-79: GET PUT-back preserves native fields and address metadata", %{
+    contact: contact,
+    account_id: aid
+  } do
+    {:ok, type} = Contacts.create_contact_field_type(aid, %{name: "Native secret"})
+
+    {:ok, secret} =
+      Contacts.create_contact_field(contact, %{
+        contact_field_type_id: type.id,
+        value: "Native-only value"
+      })
+
+    email_type = Kith.Repo.get_by!(Contacts.ContactFieldType, protocol: "mailto:")
+
+    {:ok, email} =
+      Contacts.create_contact_field(contact, %{
+        contact_field_type_id: email_type.id,
+        value: "a@example.test",
+        label: "Home"
+      })
+
+    address =
+      %Contacts.Address{}
+      |> Contacts.Address.changeset(%{
+        contact_id: contact.id,
+        account_id: aid,
+        line1: "Street",
+        latitude: 31.9,
+        longitude: 35.2
+      })
+      |> Kith.Repo.insert!()
+
+    card = Kith.DAV.VCardAdapter.contact_to_vcard(contact)
+    {_attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(card)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    assert Kith.Repo.get(Contacts.ContactField, secret.id).value == "Native-only value"
+    assert Kith.Repo.get(Contacts.ContactField, email.id).value == "a@example.test"
+    assert Kith.Repo.get(Contacts.Address, address.id).latitude == 31.9
+    assert length(Contacts.list_contact_fields(contact.id)) == 2
+  end
+
   describe "touch_contact!/1" do
     test "bumps updated_at", %{contact: contact} do
       old_updated_at = contact.updated_at
