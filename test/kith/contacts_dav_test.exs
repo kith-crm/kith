@@ -739,4 +739,114 @@ defmodule Kith.ContactsDAVTest do
       assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
     end
   end
+
+  # R4 / Review Focus 4: every write of a DAV-visible child, whatever path made
+  # it (LiveView components, REST API, imports, raw SQL), must move the parent
+  # contact's ETag revision and its commit-ordered sync position.
+  describe "CDV-97: child writes outside DAV change the ETag and sync (R4)" do
+    defp dav_revision(contact_id) do
+      Kith.Repo.one!(from c in "contacts", where: c.id == ^contact_id, select: c.dav_revision)
+    end
+
+    defp phone_type do
+      Kith.Repo.one!(from t in Contacts.ContactFieldType, where: t.protocol == "tel:", limit: 1)
+    end
+
+    defp assert_dav_bump(contact, label, fun) do
+      %{seq: seq} = Contacts.dav_sync_state(contact.account_id)
+      before = dav_revision(contact.id)
+      result = fun.()
+
+      assert dav_revision(contact.id) != before, "#{label}: ETag revision unchanged"
+
+      changed =
+        contact.account_id |> Contacts.list_contacts_changed_since(seq) |> Enum.map(& &1.id)
+
+      assert contact.id in changed, "#{label}: not reported by incremental sync"
+      result
+    end
+
+    test "CDV-97: contact field create, update and delete", %{contact: contact} do
+      phone = phone_type()
+
+      {:ok, field} =
+        assert_dav_bump(contact, "create", fn ->
+          Contacts.create_contact_field(contact, %{
+            contact_field_type_id: phone.id,
+            value: "+15550100001"
+          })
+        end)
+
+      {:ok, field} =
+        assert_dav_bump(contact, "update", fn ->
+          Contacts.update_contact_field(field, %{value: "+15550100002"})
+        end)
+
+      assert_dav_bump(contact, "delete", fn -> Contacts.delete_contact_field(field) end)
+    end
+
+    test "CDV-97: address create, update and delete", %{contact: contact} do
+      {:ok, address} =
+        assert_dav_bump(contact, "create", fn ->
+          Contacts.create_address(contact, %{line1: "1 Main St", city: "Springfield"})
+        end)
+
+      {:ok, address} =
+        assert_dav_bump(contact, "update", fn ->
+          Contacts.update_address(address, %{line1: "2 Main St"})
+        end)
+
+      assert_dav_bump(contact, "delete", fn -> Contacts.delete_address(address) end)
+    end
+
+    test "CDV-97: tag and untag", %{contact: contact, account_id: aid} do
+      {:ok, tag} = Contacts.create_tag(aid, %{"name" => "CDV-97 tag"})
+      assert_dav_bump(contact, "tag", fn -> Contacts.tag_contact(contact, tag) end)
+      assert_dav_bump(contact, "untag", fn -> Contacts.untag_contact(contact, tag) end)
+    end
+
+    test "CDV-97: relationship create and delete, and a hard delete of its target",
+         %{contact: contact, account_id: aid} do
+      [type | _] = Contacts.list_relationship_types(aid)
+      other = contact_fixture(aid, %{first_name: "Target"})
+
+      {:ok, rel} =
+        assert_dav_bump(contact, "create", fn ->
+          Contacts.create_relationship(contact, %{
+            related_contact_id: other.id,
+            relationship_type_id: type.id
+          })
+        end)
+
+      assert_dav_bump(contact, "delete", fn -> Contacts.delete_relationship(rel) end)
+
+      {:ok, _} =
+        Contacts.create_relationship(contact, %{
+          related_contact_id: other.id,
+          relationship_type_id: type.id
+        })
+
+      assert_dav_bump(contact, "target purge", fn -> Contacts.hard_delete_contact(other) end)
+    end
+
+    test "CDV-97: avatar set and clear", %{contact: contact} do
+      photo = photo_fixture(contact)
+
+      {:ok, contact} =
+        assert_dav_bump(contact, "set", fn -> Contacts.set_avatar(contact, photo) end)
+
+      assert_dav_bump(contact, "clear", fn -> Contacts.clear_avatar(contact) end)
+    end
+
+    test "CDV-97: a raw SQL child write cannot bypass the bump", %{contact: contact} do
+      phone = phone_type()
+
+      assert_dav_bump(contact, "raw insert", fn ->
+        Kith.Repo.query!(
+          "INSERT INTO contact_fields (contact_id, account_id, contact_field_type_id, value, inserted_at, updated_at) VALUES ($1, $2, $3, '+15550100003', now(), now())",
+          [contact.id, contact.account_id, phone.id]
+        )
+      end)
+    end
+  end
 end
