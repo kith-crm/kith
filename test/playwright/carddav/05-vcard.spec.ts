@@ -246,6 +246,18 @@ test("CDV-94: Apple-renumbered related names stay native and go with the relatio
   for (const version of ["3.0", "4.0"])
     expect((await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } })).body).not.toMatch(/X-ABRELATEDNAMES|Friend|RELATED/);
 });
+test("CDV-95: a BOM, trailing blanks on BEGIN/END and lone-CR line endings are accepted", async ({ request }) => {
+  const bodies: Record<string, (b: string) => string> = {
+    bom: (b) => "\uFEFF" + b,
+    blank: (b) => b.replace("BEGIN:VCARD\r\n", "BEGIN:VCARD\t\r\n").replace("END:VCARD\r\n", "END:VCARD \r\n"),
+    cr: (b) => b.replace(/\r\n/g, "\r"),
+  };
+  for (const [name, shape] of Object.entries(bodies)) {
+    const href = `${BOOK}${prefix}-delim-${name}.vcf`; created.push(href);
+    expect((await put(request, href, shape(vcard({ fn: `${prefix} Delim ${name}`, email: `${name}@example.test` })))).status).toBe(201);
+    expect(unfold((await dav(request, "GET", href)).body)).toContain(`${name}@example.test`);
+  }
+});
 test("V3: unicode survives multiget and the web contact page", async ({ request, page }) => {
   const href = `${BOOK}${prefix}-unicode-folding.vcf`;
   const card = await reportCard(request, href);

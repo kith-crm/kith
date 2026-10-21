@@ -32,7 +32,8 @@ defmodule Kith.VCard.Parser do
   def parse(data) when is_binary(data) do
     # A fold can bisect a UTF-8 code point (RFC 6350 §3.2). Restore bytes
     # before validating encoding; genuinely malformed input remains rejected.
-    data = data |> normalize_line_endings() |> unfold_lines()
+    data =
+      data |> String.replace_prefix("\uFEFF", "") |> normalize_line_endings() |> unfold_lines()
 
     if String.valid?(data) do
       contacts = data |> split_vcards() |> Enum.map(&parse_vcard/1) |> Enum.reject(&is_nil/1)
@@ -60,7 +61,8 @@ defmodule Kith.VCard.Parser do
   defp split_vcards(data) do
     # Delimiters count only as whole lines: an escaped AGENT value may contain
     # "BEGIN:VCARD…END:VCARD" text (CDV-91).
-    ~r/^BEGIN:VCARD\n(.*?)^END:VCARD$/msi
+    # A delimiter line may carry trailing blanks (CDV-95).
+    ~r/^[ \t]*BEGIN:VCARD[ \t]*\n(.*?)^[ \t]*END:VCARD[ \t]*$/msi
     |> Regex.scan(data, capture: :all_but_first)
     |> Enum.map(&List.first/1)
     |> Enum.reject(&is_nil/1)

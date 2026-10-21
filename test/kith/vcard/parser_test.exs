@@ -527,4 +527,37 @@ defmodule Kith.VCard.ParserTest do
 
     assert second.display_name == "Second"
   end
+
+  describe "CDV-95: card delimiters tolerate a BOM, trailing blanks and any line ending" do
+    test "a BOM-prefixed two-card file keeps both cards" do
+      data =
+        "\uFEFFBEGIN:VCARD\r\nVERSION:3.0\r\nFN:First\r\nEND:VCARD\r\nBEGIN:VCARD\r\nVERSION:3.0\r\nFN:Second\r\nEND:VCARD\r\n"
+
+      assert {:ok, [a, b]} = Parser.parse(data)
+      assert {a.display_name, b.display_name} == {"First", "Second"}
+    end
+
+    test "trailing spaces and tabs on BEGIN and END do not merge cards" do
+      data =
+        "BEGIN:VCARD \r\nVERSION:3.0\r\nFN:A\r\nEND:VCARD \r\nBEGIN:VCARD\t\r\nVERSION:3.0\r\nFN:B\r\nEND:VCARD\t\r\n"
+
+      assert {:ok, [a, b]} = Parser.parse(data)
+      assert {a.display_name, b.display_name} == {"A", "B"}
+    end
+
+    test "CRLF, LF and lone CR line endings, mixed" do
+      data = "BEGIN:VCARD\rVERSION:3.0\nFN:Mixed\r\nEMAIL:m@example.test\rEND:VCARD\n"
+      assert {:ok, [card]} = Parser.parse(data)
+      assert card.display_name == "Mixed"
+      assert [%{value: "m@example.test"}] = card.emails
+    end
+
+    test "an escaped AGENT vCard still does not end the card" do
+      data =
+        "\uFEFFBEGIN:VCARD\r\nVERSION:3.0\r\nFN:Agent Card\r\nAGENT:BEGIN:VCARD\\nEND:VCARD\r\nNOTE:after\r\nEND:VCARD \r\n"
+
+      assert {:ok, [card]} = Parser.parse(data)
+      assert card.description == "after"
+    end
+  end
 end
