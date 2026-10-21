@@ -1300,6 +1300,34 @@ defmodule Kith.Contacts do
   end
 
   @doc """
+  The non-deleted contacts of the account stored under the CardDAV resource
+  `names`, as `%{name => contact}`, in one query.
+  """
+  def get_contacts_by_dav_names(_account_id, []), do: %{}
+
+  def get_contacts_by_dav_names(account_id, names) when is_list(names) do
+    Contact
+    |> scope_active(account_id)
+    |> where([c], c.dav_resource_name in ^names)
+    |> Repo.all()
+    |> Map.new(&{&1.dav_resource_name, &1})
+  end
+
+  @doc "The non-deleted contacts of the account with the given ids, as `%{id => contact}`."
+  def get_active_contacts_by_ids(_account_id, []), do: %{}
+
+  def get_active_contacts_by_ids(account_id, ids) when is_list(ids) do
+    Contact
+    |> scope_active(account_id)
+    |> where([c], c.id in ^ids)
+    |> Repo.all()
+    |> Map.new(&{&1.id, &1})
+  end
+
+  @doc "Preloads everything a contact's vCard shows, for a list in one pass."
+  def preload_for_dav(contacts), do: Repo.preload(contacts, dav_preloads())
+
+  @doc """
   Gets the visible (neither trashed nor archived) contact whose stored CardDAV
   vCard UID is `uid`, or nil.
   """

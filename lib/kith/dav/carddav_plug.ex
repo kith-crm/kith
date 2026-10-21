@@ -402,12 +402,18 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   defp handle_multiget_report(conn, %{hrefs: hrefs} = request) do
-    responses = Enum.map(hrefs, &multiget_response(conn, &1, request))
+    contacts = multiget_contacts(conn, hrefs)
+
+    responses =
+      Enum.map(hrefs, fn href ->
+        multiget_response(Map.get(contacts, multiget_name(href)), href, request)
+      end)
+
     send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
   end
 
-  defp multiget_response(conn, href, %{props: props, version: version}) do
-    case multiget_contact(conn, href) do
+  defp multiget_response(contact, href, %{props: props, version: version}) do
+    case contact do
       # RFC 6352 §8.7: a missing member is a bare 404 status (CDV-42)
       nil ->
         XMLBuilder.status_response(href, "HTTP/1.1 404 Not Found")
@@ -422,12 +428,53 @@ defmodule Kith.DAV.CardDAVPlug do
   # A multiget href (absolute URL or path, any equivalent percent-encoding)
   # names a member only if its path is in this address book; the response then
   # carries the member's own href, so every spelling gives one result (CDV-41).
-  defp multiget_contact(conn, href) do
+  defp multiget_name(href) do
     with %URI{path: path} when is_binary(path) <- URI.parse(href),
-         ["dav", "addressbooks", "default", raw] <- path_segments(path) do
-      raw |> decode_resource_name() |> found_contact(conn)
+         ["dav", "addressbooks", "default", raw] <- path_segments(path),
+         {:ok, name} <- decode_resource_name(raw) do
+      name
     else
       _ -> nil
+    end
+  end
+
+  # Resolves every href with one query per kind and one preload pass, however
+  # many hrefs there are (a per-href lookup was an N+1, CDV-106). Returns
+  # `%{resource name => contact}`; names that resolve to nothing are absent.
+  defp multiget_contacts(conn, hrefs) do
+    aid = account_id(conn)
+    names = hrefs |> Enum.map(&multiget_name/1) |> Enum.reject(&is_nil/1) |> Enum.uniq()
+    by_name = Contacts.get_contacts_by_dav_names(aid, names)
+
+    default_ids =
+      for name <- names, not is_map_key(by_name, name), id = default_name_id(name), do: id
+
+    by_id = Contacts.get_active_contacts_by_ids(aid, default_ids)
+
+    resolved =
+      for name <- names,
+          contact = multiget_resolve(name, by_name, by_id),
+          do: {name, contact}
+
+    {names, contacts} = Enum.unzip(resolved)
+    names |> Enum.zip(Contacts.preload_for_dav(contacts)) |> Map.new()
+  end
+
+  # Same precedence as `find_contact/2`: a stored name wins, even if the
+  # contact is archived (then it is hidden, R5); otherwise the default name.
+  defp multiget_resolve(name, by_name, by_id) do
+    case Map.fetch(by_name, name) do
+      {:ok, %Contact{is_archived: false} = contact} ->
+        contact
+
+      {:ok, _archived} ->
+        nil
+
+      :error ->
+        case Map.get(by_id, default_name_id(name)) do
+          %Contact{dav_resource_name: nil, is_archived: false} = contact -> contact
+          _ -> nil
+        end
     end
   end
 
@@ -939,10 +986,17 @@ defmodule Kith.DAV.CardDAVPlug do
   # Only the canonical id (no leading zeros) resolves, so a contact has one
   # default href; `kith-contact-05.vcf` is an ordinary client name (CDV-34).
   defp default_name_contact(name, get) do
-    with [_, id_str] <- Regex.run(~r/\Akith-contact-([1-9]\d{0,17})\.vcf\z/, name),
-         %Contact{dav_resource_name: nil} = contact <- get.(String.to_integer(id_str)) do
+    with id when is_integer(id) <- default_name_id(name),
+         %Contact{dav_resource_name: nil} = contact <- get.(id) do
       contact
     else
+      _ -> nil
+    end
+  end
+
+  defp default_name_id(name) do
+    case Regex.run(~r/\Akith-contact-([1-9]\d{0,17})\.vcf\z/, name) do
+      [_, id_str] -> String.to_integer(id_str)
       _ -> nil
     end
   end
