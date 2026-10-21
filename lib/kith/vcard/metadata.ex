@@ -27,7 +27,11 @@ defmodule Kith.VCard.Metadata do
       |> MapSet.delete(nil)
 
     lines = renumber_related(lines, properties, related_groups)
-    {lines, _unused} = Enum.map_reduce(lines, properties, &restore/2)
+    # Retained properties are indexed by what a native line must equal to take
+    # one over, so each line is a lookup, not a scan of every retained property
+    # (a card of n lines was O(n^2), CDV-109).
+    index = Enum.group_by(properties, &retained_key/1)
+    {lines, _unused} = Enum.map_reduce(lines, index, &restore(&1, properties, &2))
     emitted = MapSet.new(lines)
     emitted_groups = MapSet.new(lines, &group/1)
 
@@ -403,33 +407,38 @@ defmodule Kith.VCard.Metadata do
     end
   end
 
-  defp restore("FN:" <> _ = line, properties), do: {restore_fn(line, properties), properties}
+  defp restore("FN:" <> _ = line, properties, index),
+    do: {restore_fn(line, properties), index}
 
-  defp restore("N:" <> current, properties),
-    do: {restore_n(current, properties), properties}
+  defp restore("N:" <> current, properties, index),
+    do: {restore_n(current, properties), index}
 
-  defp restore("ORG:" <> company = line, properties),
-    do: {restore_org(company, line, properties), properties}
+  defp restore("ORG:" <> company = line, properties, index),
+    do: {restore_org(company, line, properties), index}
 
-  defp restore(line, properties) do
+  defp restore(line, _properties, index) do
     {name, val} = identity(line)
-    restore_property(line, name, val, properties)
+    restore_property(line, name, val, index)
   end
 
-  defp restore_property(line, name, _val, properties)
+  defp restore_property(line, name, _val, index)
        when name in ["X-ABRELATEDNAMES", "X-ABLABEL"],
-       do: {line, properties}
+       do: {line, index}
 
-  defp restore_property(line, name, val, properties) do
-    match =
-      Enum.find(properties, fn property ->
-        native_name(property["name"]) == name and
-          comparable(name, property["value"]) == comparable(name, val) and
-          property_type(property) == type(line)
-      end)
+  # Each retained property decorates at most one native line: the first
+  # unused one that matches, in the order it was retained.
+  defp restore_property(line, name, val, index) do
+    key = {name, comparable(name, val), type(line)}
 
-    # Each retained property decorates at most one native line.
-    if match, do: {render(match), List.delete(properties, match)}, else: {line, properties}
+    case Map.get(index, key) do
+      [match | rest] -> {render(match), Map.put(index, key, rest)}
+      _ -> {line, index}
+    end
+  end
+
+  defp retained_key(property) do
+    name = native_name(property["name"])
+    {name, comparable(name, property["value"]), property_type(property)}
   end
 
   defp restore_fn(line, properties) do
