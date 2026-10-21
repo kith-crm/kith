@@ -103,14 +103,14 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 
 | Case | Result |
 |---|---|
-| V1 | fixed CDV-51, CDV-58–76, CDV-78, CDV-80, CDV-81, CDV-83–86, CDV-89, CDV-91–93 (CDV-82 reversed by CDV-90); all six fixtures survive both versions with valid framing, escaping, folds and value syntax; each fixture has a 3.0/4.0 values table covering every property it carries, and `valid()` rejects the other version's properties and parameters |
-| V2 | fixed CDV-74, CDV-76, CDV-78–80, CDV-85, CDV-86, CDV-87, CDV-89; identical GET/PUT/GET stable apart from REV (Apple social profile over three PUT-backs); no duplicated fields/addresses/tags; natively deleted children stay deleted |
+| V1 | fixed CDV-51, CDV-58–76, CDV-78, CDV-80, CDV-81, CDV-83–86, CDV-89, CDV-91–96 (CDV-82 reversed by CDV-90); all six fixtures survive both versions with valid framing, escaping, folds and value syntax; each fixture has a 3.0/4.0 values table covering every property it carries, and `valid()` rejects the other version's properties and parameters |
+| V2 | fixed CDV-74, CDV-76, CDV-78–80, CDV-85, CDV-86, CDV-87, CDV-89, CDV-94, CDV-96; identical GET/PUT/GET stable apart from REV (Apple social profile over three PUT-backs); no duplicated fields/addresses/tags; natively deleted children stay deleted |
 | V3 | fixed CDV-75, CDV-76; CJK, emoji, Arabic and Hebrew pass GET, multiget XML and browser contact-page checks |
 | V4 | pass; 1820-byte PNG is the visible native avatar; GET and multiget include PHOTO, sync deliberately omits it |
-| V5 | fixed CDV-79, CDV-80, CDV-85, CDV-88 (relationships to archived/trashed targets); photo-free sync PUT-back and 4.0 PUT-back preserve avatar, tags, relationship ids, notes, native reminder, custom native field, favorite and first-met metadata |
-| V6 | fixed CDV-58–72, CDV-92; one log row per dropped fixture property, shared preservation mechanism; properties one version cannot express are dropped from that version only (R43); no Task6 product decisions |
+| V5 | fixed CDV-79, CDV-80, CDV-85, CDV-88 (relationships to archived/trashed targets), CDV-96 (other-version PUT-back keeps what it cannot express); photo-free sync PUT-back and 4.0 PUT-back preserve avatar, tags, relationship ids, notes, native reminder, custom native field, favorite and first-met metadata |
+| V6 | fixed CDV-58–72, CDV-92, CDV-96; one log row per dropped fixture property, shared preservation mechanism; properties one version cannot express are dropped from that version only (R43); no Task6 product decisions |
 
-All six fixtures (`v30-full`, `v40-full`, `apple-ios`, `davx5-android`, `thunderbird`, `unicode-folding`) pass both GET versions and identical PUT-back. The spec also checks the single version-independent validator and conditional writes (CDV-90), safe text UID serialization and the fix-round-1 regressions CDV-86–93 (18 live tests total).
+All six fixtures (`v30-full`, `v40-full`, `apple-ios`, `davx5-android`, `thunderbird`, `unicode-folding`) pass both GET versions and identical PUT-back. The spec also checks the single version-independent validator and conditional writes (CDV-90), safe text UID serialization and the fix-round regressions CDV-86–96 (21 live tests total).
 
 PHOTO policy: multiget is a complete card like GET; sync omits potentially large PHOTO. A subsequent sync PUT-back keeps the stored avatar. Native-only data is created through the authenticated API for V5 and verified afterwards; browser checks are limited to Unicode and avatar rendering.
 
