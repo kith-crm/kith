@@ -50,7 +50,7 @@ export PLAYWRIGHT_BASE_URL=http://127.0.0.1:$PORT
 export DAV_SERVER_PID_FILE=$PID_FILE
 EOF
 if [ -n "${PLAYWRIGHT_CHROMIUM_EXECUTABLE:-}" ]; then
-  echo "export PLAYWRIGHT_CHROMIUM_EXECUTABLE=$PLAYWRIGHT_CHROMIUM_EXECUTABLE" >> "$ENV_FILE"
+  printf 'export PLAYWRIGHT_CHROMIUM_EXECUTABLE=%q\n' "$PLAYWRIGHT_CHROMIUM_EXECUTABLE" >> "$ENV_FILE"
 fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
@@ -59,16 +59,28 @@ mix ecto.create
 mix ecto.migrate
 mix run test/playwright/carddav_seed.exs
 
-# The browser specs need the compiled CSS. On recent macOS the downloaded
-# tailwind binary can carry a signature the kernel rejects (SIGKILL, exit 137);
-# an ad-hoc signature makes it runnable without changing the pinned version.
-mix tailwind.install --if-missing
-for bin in _build/tailwind-*; do
-  if [ "$(uname)" = Darwin ] && ! codesign -v "$bin" > /dev/null 2>&1; then
-    codesign --force --sign - "$bin"
+# The browser specs need the compiled CSS; the DAV-only specs do not, so a
+# failed asset build only warns. On recent macOS the downloaded tailwind binary
+# can carry a signature the kernel rejects (SIGKILL, exit 137); an ad-hoc
+# signature makes it runnable without changing the pinned version.
+# `assets/vendor/heroicons.js` is gitignored; `mix assets.vendor` (part of
+# `mix setup`) generates it from deps/heroicons without network access.
+build_assets() {
+  mix assets.vendor || return 1
+  mix tailwind.install --if-missing || return 1
+  for bin in _build/tailwind-*; do
+    if [ "$(uname)" = Darwin ] && ! codesign -v "$bin" > /dev/null 2>&1; then
+      codesign --force --sign - "$bin" || return 1
+    fi
+  done
+  mix assets.build
+}
+if ! build_assets; then
+  echo "WARN: asset build failed; /assets/css/app.css will 404 and browser specs may fail." >&2
+  if [ ! -f assets/vendor/heroicons.js ]; then
+    echo "WARN: assets/vendor/heroicons.js is missing; generate it with 'mix assets.vendor' (needs deps/heroicons from 'mix deps.get'), then 'mix assets.build'." >&2
   fi
-done
-mix assets.build
+fi
 
 nohup mix phx.server > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"
