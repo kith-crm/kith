@@ -684,6 +684,38 @@ defmodule Kith.ContactsDAVTest do
     assert related == Enum.sort([upper.id, lower.id])
   end
 
+  test "CDV-110: RELATED resolves a non-ASCII text UID and a mixed-case UUID", %{
+    contact: contact,
+    account_id: aid
+  } do
+    # Postgres lower('İSTANBUL') and String.downcase('İSTANBUL') disagree, so the
+    # case fold must happen in SQL on both sides.
+    istanbul = contact_fixture(aid)
+    {:ok, _} = Contacts.put_dav_identity(istanbul, %{dav_uid: "İSTANBUL-uid"})
+    sigma = contact_fixture(aid)
+    {:ok, _} = Contacts.put_dav_identity(sigma, %{dav_uid: "ΟΔΥΣΣΕΥΣ-uid"})
+    mixed = contact_fixture(aid)
+
+    {:ok, _} =
+      Contacts.put_dav_identity(mixed, %{dav_uid: "urn:uuid:AbCdEf01-2345-4678-89aB-cDeF01234567"})
+
+    body =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Fold;Fay;;;\r\nFN:Fay Fold\r\n" <>
+        "RELATED;TYPE=friend;VALUE=text:İSTANBUL-uid\r\n" <>
+        "RELATED;TYPE=sibling;VALUE=text:ΟΔΥΣΣΕΥΣ-uid\r\n" <>
+        "RELATED;TYPE=parent:urn:uuid:abcdef01-2345-4678-89ab-cdef01234567\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, body)
+
+    related =
+      contact.id
+      |> Contacts.list_relationships()
+      |> Enum.map(& &1.related_contact_id)
+      |> Enum.sort()
+
+    assert related == Enum.sort([istanbul.id, sigma.id, mixed.id])
+  end
+
   defp dav_put(contact, aid, body) do
     {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
     {:ok, contact} = Contacts.update_contact(contact, attrs)

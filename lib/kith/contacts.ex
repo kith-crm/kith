@@ -1841,6 +1841,8 @@ defmodule Kith.Contacts do
   # The case-folded comparison is what the expression index
   # `contacts_account_id_dav_uid_bare_index` answers (CDV-105); a text UID then
   # also has to match exactly, which can only narrow the indexed candidates.
+  # The fold runs in SQL on both sides: Postgres `lower/1` and
+  # `String.downcase/1` disagree on e.g. `İ` and a final sigma (CDV-110).
   @doc false
   def related_contact_query(account_id, uid) do
     bare = String.replace(uid, ~r/\Aurn:uuid:/i, "")
@@ -1850,7 +1852,7 @@ defmodule Kith.Contacts do
         where: c.account_id == ^account_id and not is_nil(c.dav_uid),
         where:
           fragment("lower(regexp_replace(?, '^urn:uuid:', '', 'i'))", c.dav_uid) ==
-            ^String.downcase(bare),
+            fragment("lower(?)", ^bare),
         order_by: [
           desc: c.dav_uid == ^uid,
           asc: c.is_archived,
