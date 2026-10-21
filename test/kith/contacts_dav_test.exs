@@ -849,4 +849,73 @@ defmodule Kith.ContactsDAVTest do
       end)
     end
   end
+
+  describe "CDV-98: renaming a record a card shows by name changes the card's ETag and sync" do
+    test "CDV-98: tag rename", %{contact: contact, account_id: aid} do
+      {:ok, tag} = Contacts.create_tag(aid, %{"name" => "Before"})
+      Contacts.tag_contact(contact, tag)
+      quiet = contact_fixture(aid)
+
+      assert_dav_bump(contact, "tag rename", fn ->
+        {:ok, _} = Contacts.update_tag(tag, %{"name" => "After"})
+      end)
+
+      # A change the card does not show (the colour) and untagged contacts stay quiet.
+      %{seq: seq} = Contacts.dav_sync_state(aid)
+
+      {:ok, _} =
+        Contacts.update_tag(Kith.Repo.get!(Contacts.Tag, tag.id), %{"color" => "#000000"})
+
+      assert [] == Contacts.list_contacts_changed_since(aid, seq)
+
+      {:ok, _} = Contacts.update_tag(Kith.Repo.get!(Contacts.Tag, tag.id), %{"name" => "Again"})
+      changed = aid |> Contacts.list_contacts_changed_since(seq) |> Enum.map(& &1.id)
+      assert contact.id in changed
+      refute quiet.id in changed
+    end
+
+    test "CDV-98: gender rename", %{contact: contact, account_id: aid} do
+      {:ok, gender} = Contacts.create_gender(aid, %{name: "Custom"})
+      {:ok, contact} = Contacts.update_contact(contact, %{gender_id: gender.id})
+
+      assert_dav_bump(contact, "gender rename", fn ->
+        {:ok, _} = Contacts.update_gender(gender, %{name: "Renamed"})
+      end)
+    end
+
+    test "CDV-98: contact field type protocol and vCard label changes",
+         %{contact: contact, account_id: aid} do
+      {:ok, type} = Contacts.create_contact_field_type(aid, %{name: "Pager"})
+
+      {:ok, _} =
+        Contacts.create_contact_field(contact, %{contact_field_type_id: type.id, value: "12345"})
+
+      type =
+        assert_dav_bump(contact, "protocol", fn ->
+          {:ok, type} = Contacts.update_contact_field_type(type, %{protocol: "tel"})
+          type
+        end)
+
+      assert_dav_bump(contact, "vcard_label", fn ->
+        {:ok, _} = Contacts.update_contact_field_type(type, %{vcard_label: "X-PAGER"})
+      end)
+    end
+
+    test "CDV-98: relationship type rename", %{contact: contact, account_id: aid} do
+      {:ok, type} =
+        Contacts.create_relationship_type(aid, %{name: "Mentor", reverse_name: "Mentee"})
+
+      other = contact_fixture(aid)
+
+      {:ok, _} =
+        Contacts.create_relationship(contact, %{
+          related_contact_id: other.id,
+          relationship_type_id: type.id
+        })
+
+      assert_dav_bump(contact, "relationship type rename", fn ->
+        {:ok, _} = Contacts.update_relationship_type(type, %{name: "Spouse"})
+      end)
+    end
+  end
 end
