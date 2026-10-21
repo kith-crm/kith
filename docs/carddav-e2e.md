@@ -126,6 +126,26 @@ Deploy `20261020220000_add_contact_dav_vcard` before the updated code. Existing 
 
 Browser environment concern (resolved in Task 7, R46): `/assets/css/app.css` returned 404 because `mix tailwind kith` exited with 137 (macOS rejected the tailwind binary signature) and `assets/vendor/heroicons.js` was missing. See How to run.
 
+### 06-ui-crossover
+
+| Case | Result |
+|---|---|
+| U1 | pass; a UI-created contact is in Depth 1, the incremental sync (with its GET ETag) and GET with the UI's FN/N; the ctag moves |
+| U2 | pass; a UI rename and a UI birthday each change ETag, ctag and sync; GET shows `FN`, 3.0 `BDAY:1984-07-09`, 4.0 `BDAY:19840709` |
+| U3 | fixed CDV-97; phone, email, address, tag added in the UI and the phone deleted again: each step changes ETag, ctag and sync, and GET matches the UI. U3b (tag renamed in Settings): fixed CDV-98. U3c (relationship target renamed in the UI): fixed CDV-99 (precondition: `RELATED:urn:uuid:` to a bare-UID card), CDV-100. U3d (UI deletes on an Apple-decorated card): pass; the deleted TEL, its `X-ABLabel` and the removed CATEGORIES stay gone, also after an identical PUT-back (CDV-87 via the UI) |
+| U4 | pass; a DAV PUT (name, note, phone) shows after a browser reload |
+| U5 | pass; UI trash → GET 404, absent from Depth 1, sync 404; UI restore from Trash → same href, sync reports it |
+| U6 | pass (with CDV-97); UI merge of A into B (both Apple-decorated with `item1.` groups): A's href 404 in GET/Depth 1/sync, B keeps its href and UID, gets a new ETag and A's phone, exactly one TEL and one EMAIL, B's retained `X-B-ONLY` kept, no colliding `item1.` group; an identical PUT-back of B duplicates nothing |
+| U7 | pass; UI archive is a sync 404 (ctag moves), UI unarchive a sync addition at the same href (R5) |
+| U8 | pass; DAV DELETE → the contact is in the UI Trash; a UI restore brings it back at `<uuid>.vcf` with its UID, reported by sync |
+| U9 | pass; a contact PUT to `<uuid>.vcf` and renamed, then given an email, in the UI is served at `<uuid>.vcf` with its UID; `kith-contact-N.vcf` stays 404 (R2) |
+
+The spec drives one logged-in Chromium page (`dav-admin@carddav.test`) and checks every write from the DAV side with a fresh sync token, ctag and GET ETag. Children covered in ExUnit (`test/kith/contacts_dav_test.exs`, CDV-97/98/100): contact fields, addresses, tags, relationships (including a target's hard delete), avatar, a raw SQL child insert, tag/gender/field-type/relationship-type renames, and target rename/UID change. The UI relationship and avatar components call the same context functions.
+
+Run `source /tmp/kith-carddav-e2e.env && npx playwright test --project=e2e test/playwright/carddav/06-ui-crossover.spec.ts --workers=1` (with `PLAYWRIGHT_CHROMIUM_EXECUTABLE` where needed, R46).
+
+Deploy the three Task 7 migrations (`20261021120000`, `20261021130000`, `20261021140000`) with the code. They only add triggers; rollback drops them and brings back the CDV-97/98/100 staleness.
+
 ## Bug log
 
 | ID | Severity | Summary | Request / response | Status |
