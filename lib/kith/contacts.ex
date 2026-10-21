@@ -1788,17 +1788,27 @@ defmodule Kith.Contacts do
   # Any contact of the account, hidden ones included (see R41). A 4.0 RELATED
   # names its target as `urn:uuid:<x>` while the target's own card may carry
   # the bare `UID:<x>` (or the other way round); both forms name the same
-  # contact, an exact match first (CDV-99, R49).
+  # contact, an exact match first (CDV-99, R49). The URN scheme and a UUID's
+  # hex digits compare case-insensitively (RFC 8141 §3.1, RFC 4122 §3); any
+  # other text UID keeps its exact value (CDV-102).
   defp related_contact_by_uid(account_id, uid) do
-    alternate =
-      case Regex.run(~r/\Aurn:uuid:(.+)\z/i, uid) do
-        [_, bare] -> bare
-        nil -> "urn:uuid:" <> uid
+    bare = String.replace(uid, ~r/\Aurn:uuid:/i, "")
+
+    same_uid =
+      if Regex.match?(~r/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i, bare) do
+        dynamic(
+          [c],
+          fragment("lower(regexp_replace(?, '^urn:uuid:', '', 'i'))", c.dav_uid) ==
+            ^String.downcase(bare)
+        )
+      else
+        dynamic([c], fragment("regexp_replace(?, '^urn:uuid:', '', 'i')", c.dav_uid) == ^bare)
       end
 
     by_uid =
       from(c in Contact,
-        where: c.account_id == ^account_id and c.dav_uid in ^[uid, alternate],
+        where: c.account_id == ^account_id and not is_nil(c.dav_uid),
+        where: ^same_uid,
         order_by: [
           desc: c.dav_uid == ^uid,
           asc: c.is_archived,

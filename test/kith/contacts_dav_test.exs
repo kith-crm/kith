@@ -649,6 +649,41 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
+  test "CDV-102: RELATED matches the urn:uuid prefix and UUID hex case-insensitively", %{
+    contact: contact,
+    account_id: aid
+  } do
+    upper = contact_fixture(aid)
+
+    {:ok, _} =
+      Contacts.put_dav_identity(upper, %{dav_uid: "urn:uuid:1A2B3C4D-5E6F-4A1B-8C2D-3E4F5A6B7C8D"})
+
+    lower = contact_fixture(aid)
+
+    {:ok, _} =
+      Contacts.put_dav_identity(lower, %{dav_uid: "9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f"})
+
+    text = contact_fixture(aid)
+    {:ok, _} = Contacts.put_dav_identity(text, %{dav_uid: "Kith-Text-Uid"})
+
+    body =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Case;Cy;;;\r\nFN:Cy Case\r\n" <>
+        "RELATED;TYPE=friend:URN:UUID:1a2b3c4d-5e6f-4a1b-8c2d-3e4f5a6b7c8d\r\n" <>
+        "RELATED;TYPE=sibling:urn:uuid:9F8E7D6C-5B4A-4C3D-8E2F-1A0B9C8D7E6F\r\n" <>
+        "RELATED;TYPE=parent:URN:UUID:kith-text-uid\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, body)
+
+    related =
+      contact.id
+      |> Contacts.list_relationships()
+      |> Enum.map(& &1.related_contact_id)
+      |> Enum.sort()
+
+    # a text UID keeps its exact value: only the URN scheme is case-insensitive
+    assert related == Enum.sort([upper.id, lower.id])
+  end
+
   defp dav_put(contact, aid, body) do
     {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
     {:ok, contact} = Contacts.update_contact(contact, attrs)
