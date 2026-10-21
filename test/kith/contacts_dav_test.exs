@@ -905,6 +905,35 @@ defmodule Kith.ContactsDAVTest do
       assert_dav_bump(contact, "clear", fn -> Contacts.clear_avatar(contact) end)
     end
 
+    test "CDV-97: a merge reparent moves both the loser's and the survivor's ETag",
+         %{contact: survivor, account_id: aid} do
+      loser = contact_fixture(aid)
+
+      {:ok, _} =
+        Contacts.create_contact_field(loser, %{
+          contact_field_type_id: phone_type().id,
+          value: "+15550100009"
+        })
+
+      {:ok, _} = Contacts.create_address(loser, %{line1: "9 Loser Lane"})
+      %{seq: seq} = Contacts.dav_sync_state(aid)
+      before = {dav_revision(survivor.id), dav_revision(loser.id)}
+
+      # The statement `Kith.Contacts.Merge.remap_excluding/5` runs for each child schema
+      for schema <- [Contacts.ContactField, Contacts.Address] do
+        from(r in schema, where: r.contact_id in ^[loser.id])
+        |> Kith.Repo.update_all(set: [contact_id: survivor.id])
+      end
+
+      {survivor_before, loser_before} = before
+      assert dav_revision(survivor.id) != survivor_before
+      assert dav_revision(loser.id) != loser_before
+
+      changed = aid |> Contacts.list_contacts_changed_since(seq) |> Enum.map(& &1.id)
+      assert survivor.id in changed
+      assert loser.id in changed
+    end
+
     test "CDV-97: a raw SQL child write cannot bypass the bump", %{contact: contact} do
       phone = phone_type()
 
