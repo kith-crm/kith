@@ -77,11 +77,51 @@ unconfirmed |> Ecto.Changeset.change(confirmed_at: nil) |> Repo.update!()
 if System.get_env("PERF") == "1" do
   perf = ensure_user.("dav-perf@carddav.test") |> confirm.()
 
-  have =
-    Repo.aggregate(
-      from(c in Contact, where: c.account_id == ^perf.account_id),
-      :count
+  perf_count = String.to_integer(System.get_env("PERF_COUNT", "2000"))
+  account_id = perf.account_id
+
+  # Seeded contacts are `Perf<i> Contact`, i in 1..perf_count. Re-running is
+  # idempotent: missing contacts are created and missing children (fields,
+  # address, tag) are backfilled, whether the contact is new or came from an
+  # earlier seed. Other contacts of the account (probe leftovers) are ignored.
+  existing =
+    from(c in Contact,
+      where:
+        c.account_id == ^account_id and c.last_name == "Contact" and like(c.first_name, "Perf%"),
+      select: {c.first_name, c}
     )
+    |> Repo.all()
+    |> Map.new()
+
+  trashed = for {name, c} <- existing, c.deleted_at != nil or c.is_archived, do: name
+
+  if trashed != [] do
+    raise "carddav_seed: #{length(trashed)} seeded perf contacts are trashed or archived " <>
+            "(e.g. #{hd(trashed)}); reseed from scratch with " <>
+            "`scripts/carddav-e2e/down.sh && PERF=1 scripts/carddav-e2e/up.sh` on a fresh database"
+  end
+
+  with_children = fn table ->
+    from(r in table,
+      where: r.account_id == ^account_id or is_nil(r.account_id),
+      select: r.contact_id
+    )
+    |> Repo.all()
+    |> MapSet.new()
+  end
+
+  has_fields = with_children.("contact_fields")
+  has_address = with_children.("addresses")
+
+  has_tag =
+    from(ct in "contact_tags",
+      join: c in Contact,
+      on: c.id == ct.contact_id,
+      where: c.account_id == ^account_id,
+      select: ct.contact_id
+    )
+    |> Repo.all()
+    |> MapSet.new()
 
   # Each contact: 2 fields (email + phone), 1 address, 1 tag. Goes through the
   # app's insert paths, so it also measures the child -> parent DAV triggers.
@@ -100,42 +140,62 @@ if System.get_env("PERF") == "1" do
     end
 
   started = System.monotonic_time(:millisecond)
-  perf_count = String.to_integer(System.get_env("PERF_COUNT", "2000"))
 
-  for i <- (have + 1)..perf_count//1 do
-    {:ok, contact} =
-      Contacts.create_contact(perf.account_id, %{
-        first_name: "Perf#{i}",
-        last_name: "Contact",
-        display_name: "Perf#{i} Contact"
-      })
+  for i <- 1..perf_count//1 do
+    contact =
+      case Map.fetch(existing, "Perf#{i}") do
+        {:ok, contact} ->
+          contact
 
-    {:ok, _} =
-      Contacts.create_contact_field(contact, %{
-        value: "perf#{i}@example.test",
-        contact_field_type_id: email_type.id
-      })
+        :error ->
+          {:ok, contact} =
+            Contacts.create_contact(account_id, %{
+              first_name: "Perf#{i}",
+              last_name: "Contact",
+              display_name: "Perf#{i} Contact"
+            })
 
-    {:ok, _} =
-      Contacts.create_contact_field(contact, %{
-        value: "+1555#{String.pad_leading("#{i}", 7, "0")}",
-        contact_field_type_id: phone_type.id
-      })
+          contact
+      end
 
-    {:ok, _} =
-      Contacts.create_address(contact, %{
-        line1: "#{i} Perf Street",
-        city: "Perfville",
-        country: "US"
-      })
+    unless MapSet.member?(has_fields, contact.id) do
+      {:ok, _} =
+        Contacts.create_contact_field(contact, %{
+          value: "perf#{i}@example.test",
+          contact_field_type_id: email_type.id
+        })
 
-    Contacts.tag_contact(contact, tag)
+      {:ok, _} =
+        Contacts.create_contact_field(contact, %{
+          value: "+1555#{String.pad_leading("#{i}", 7, "0")}",
+          contact_field_type_id: phone_type.id
+        })
+    end
+
+    unless MapSet.member?(has_address, contact.id) do
+      {:ok, _} =
+        Contacts.create_address(contact, %{
+          line1: "#{i} Perf Street",
+          city: "Perfville",
+          country: "US"
+        })
+    end
+
+    unless MapSet.member?(has_tag, contact.id), do: Contacts.tag_contact(contact, tag)
   end
+
+  # Leftovers of the near-cap card test (07-perf.spec.ts soft-deletes it).
+  {removed, _} =
+    Repo.delete_all(
+      from(c in Contact,
+        where: c.account_id == ^account_id and like(c.dav_resource_name, "cdv-perf-%")
+      )
+    )
 
   elapsed = System.monotonic_time(:millisecond) - started
 
   IO.puts(
-    "==> carddav seed: perf account has #{perf_count} contacts (seeded #{max(perf_count - have, 0)} in #{elapsed} ms)"
+    "==> carddav seed: perf account has #{perf_count} contacts (#{map_size(existing)} already there, #{removed} probe leftovers removed, #{elapsed} ms)"
   )
 end
 

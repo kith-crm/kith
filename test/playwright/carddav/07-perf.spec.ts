@@ -89,20 +89,27 @@ test.describe("PERF account E: request budgets", () => {
     expect(Buffer.byteLength(card)).toBeLessThan(1048576);
 
     const headers = { "Content-Type": "text/vcard; charset=utf-8" };
-    for (const method of ["PUT", "PUT"]) {
-      const t0 = performance.now();
-      const res = await dav(request, method, name, { user: "perf", headers, body: card });
-      const ms = performance.now() - t0;
-      console.log(`${method} ${Buffer.byteLength(card)} bytes: ${Math.round(ms)} ms`);
-      expect([201, 204], res.body.slice(0, 200)).toContain(res.status);
+    // DELETE only moves the card to the trash; `PERF=1 mix run test/playwright/carddav_seed.exs`
+    // removes the leftovers (`cdv-perf-*`) for good. The finally block makes sure a failing
+    // assertion never leaves a live 1 MiB card in account E.
+    try {
+      for (const method of ["PUT", "PUT"]) {
+        const t0 = performance.now();
+        const res = await dav(request, method, name, { user: "perf", headers, body: card });
+        const ms = performance.now() - t0;
+        console.log(`${method} ${Buffer.byteLength(card)} bytes: ${Math.round(ms)} ms`);
+        expect([201, 204], res.body.slice(0, 200)).toContain(res.status);
+        expect(ms).toBeLessThan(5000);
+      }
+      const t1 = performance.now();
+      const got = await dav(request, "GET", name, { user: "perf" });
+      const ms = performance.now() - t1;
+      console.log(`GET: ${Math.round(ms)} ms`);
+      expect(got.status).toBe(200);
       expect(ms).toBeLessThan(5000);
+    } finally {
+      const del = await dav(request, "DELETE", name, { user: "perf" });
+      expect([204, 404], del.body.slice(0, 200)).toContain(del.status);
     }
-    const t1 = performance.now();
-    const got = await dav(request, "GET", name, { user: "perf" });
-    const ms = performance.now() - t1;
-    console.log(`GET: ${Math.round(ms)} ms`);
-    expect(got.status).toBe(200);
-    expect(ms).toBeLessThan(5000);
-    await dav(request, "DELETE", name, { user: "perf" });
   });
 });
