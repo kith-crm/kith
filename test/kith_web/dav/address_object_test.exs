@@ -1484,6 +1484,25 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
+  describe "CDV-112: cards with no given name" do
+    test "CDV-112: single-name, FN-only and organisation cards are stored and served",
+         context do
+      for {name, lines, fn_line} <- [
+            {"family-only", ["N:Cher;;;;", "FN:Cher"], "FN:Cher"},
+            {"fn-only", ["FN:Madonna"], "FN:Madonna"},
+            {"org-only", ["N:;;;;", "FN:Acme Corp", "ORG:Acme Corp"], "FN:Acme Corp"}
+          ] do
+        href = "/dav/addressbooks/default/cdv112-#{name}.vcf"
+        conn = authed_dav(context, "PUT", href, card(lines))
+        assert conn.status == 201, "#{name} -> #{conn.status}"
+
+        conn = authed_dav(context, "GET", href)
+        assert conn.status == 200
+        assert conn.resp_body =~ fn_line, "#{name}: #{conn.resp_body}"
+      end
+    end
+  end
+
   describe "CDV-21: unstorable vCard data" do
     defp card(lines),
       do: Enum.join(["BEGIN:VCARD", "VERSION:3.0" | lines] ++ ["END:VCARD", ""], "\r\n")

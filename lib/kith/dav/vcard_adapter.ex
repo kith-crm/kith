@@ -58,10 +58,30 @@ defmodule Kith.DAV.VCardAdapter do
     {scalar_attrs, nested_data}
   end
 
+  # Kith requires a first name, but a card may legitimately carry only a family
+  # name (`N:Cher;;;;`), only FN, or only an organisation (CDV-112): fill the
+  # first name from the best available value instead of rejecting the card.
+  defp name_attrs(parsed) do
+    if blank?(parsed.first_name) do
+      if blank?(parsed.last_name) do
+        {Enum.find([parsed.display_name, parsed.company, parsed.nickname], &(not blank?(&1))),
+         parsed.last_name}
+      else
+        {parsed.last_name, nil}
+      end
+    else
+      {parsed.first_name, parsed.last_name}
+    end
+  end
+
+  defp blank?(value), do: value in [nil, ""] or String.trim(value) == ""
+
   defp build_scalar_attrs(parsed) do
+    {first_name, last_name} = name_attrs(parsed)
+
     %{
-      "first_name" => parsed.first_name,
-      "last_name" => parsed.last_name,
+      "first_name" => first_name,
+      "last_name" => last_name,
       "middle_name" => parsed.middle_name,
       "nickname" => parsed.nickname,
       "company" => parsed.company,
