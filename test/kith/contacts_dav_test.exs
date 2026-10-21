@@ -617,6 +617,38 @@ defmodule Kith.ContactsDAVTest do
     assert dav_get(contact, :v30) == three
   end
 
+  test "CDV-99: RELATED urn:uuid:<x> resolves a contact whose UID is the bare <x>, and back", %{
+    contact: contact,
+    account_id: aid
+  } do
+    bare = contact_fixture(aid)
+    {:ok, _} = Contacts.put_dav_identity(bare, %{dav_uid: "6f1c0a52-3c9e-4f7a-9b1d-2a5e8c7d0b99"})
+    urn = contact_fixture(aid)
+
+    {:ok, _} =
+      Contacts.put_dav_identity(urn, %{dav_uid: "urn:uuid:0c2d4e6f-8a9b-4c1d-8e2f-3a4b5c6d7e8f"})
+
+    body =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Owner;Olga;;;\r\nFN:Olga Owner\r\n" <>
+        "RELATED;TYPE=friend:urn:uuid:6f1c0a52-3c9e-4f7a-9b1d-2a5e8c7d0b99\r\n" <>
+        "RELATED;TYPE=sibling;VALUE=text:0c2d4e6f-8a9b-4c1d-8e2f-3a4b5c6d7e8f\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, body)
+
+    related =
+      contact.id
+      |> Contacts.list_relationships()
+      |> Enum.map(& &1.related_contact_id)
+      |> Enum.sort()
+
+    assert related == Enum.sort([bare.id, urn.id])
+
+    for version <- [:v30, :v40] do
+      contact = dav_put(contact, aid, dav_get(contact, version))
+      assert length(Contacts.list_relationships(contact.id)) == 2
+    end
+  end
+
   defp dav_put(contact, aid, body) do
     {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
     {:ok, contact} = Contacts.update_contact(contact, attrs)

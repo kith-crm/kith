@@ -1785,12 +1785,25 @@ defmodule Kith.Contacts do
         String.downcase(type)
   end
 
-  # Any contact of the account, hidden ones included (see R41)
+  # Any contact of the account, hidden ones included (see R41). A 4.0 RELATED
+  # names its target as `urn:uuid:<x>` while the target's own card may carry
+  # the bare `UID:<x>` (or the other way round); both forms name the same
+  # contact, an exact match first (CDV-99, R49).
   defp related_contact_by_uid(account_id, uid) do
+    alternate =
+      case Regex.run(~r/\Aurn:uuid:(.+)\z/i, uid) do
+        [_, bare] -> bare
+        nil -> "urn:uuid:" <> uid
+      end
+
     by_uid =
       from(c in Contact,
-        where: c.account_id == ^account_id and c.dav_uid == ^uid,
-        order_by: [asc: c.is_archived, asc_nulls_first: c.deleted_at],
+        where: c.account_id == ^account_id and c.dav_uid in ^[uid, alternate],
+        order_by: [
+          desc: c.dav_uid == ^uid,
+          asc: c.is_archived,
+          asc_nulls_first: c.deleted_at
+        ],
         limit: 1
       )
       |> Repo.one()
