@@ -676,6 +676,9 @@ defmodule Kith.DAV.CardDAVPlug do
       {:error, :precondition_failed} ->
         send_resp(conn, 412, "Precondition Failed")
 
+      {:error, :transient_conflict} ->
+        conn |> put_resp_header("retry-after", "1") |> send_resp(503, "Service Unavailable")
+
       # A concurrent writer took the UID first: the visible-UID unique index
       # stands in for the check (CDV-36)
       {:error, %Ecto.Changeset{errors: [{:dav_uid, _} | _]} = changeset} ->
@@ -709,7 +712,24 @@ defmodule Kith.DAV.CardDAVPlug do
     send_dav_response(conn, 409, xml)
   end
 
-  defp put_transaction(conn, {aid, name}, scalar_attrs, nested_data) do
+  # A PUT can deadlock with a concurrent writer of a related contact: renaming
+  # A locks A, then touches the contacts owning a relationship to A (CDV-100),
+  # while the other writer holds one of those and wants A. Postgres aborts one
+  # side; the aborted PUT is replayed once, then answered 503 (CDV-101, R51).
+  @transient_codes [:deadlock_detected, :serialization_failure]
+
+  defp put_transaction(conn, target, scalar_attrs, nested_data, attempts \\ 2) do
+    run_put_transaction(conn, target, scalar_attrs, nested_data)
+  rescue
+    e in Postgrex.Error ->
+      cond do
+        e.postgres[:code] not in @transient_codes -> reraise e, __STACKTRACE__
+        attempts > 1 -> put_transaction(conn, target, scalar_attrs, nested_data, attempts - 1)
+        true -> {:error, :transient_conflict}
+      end
+  end
+
+  defp run_put_transaction(conn, {aid, name}, scalar_attrs, nested_data) do
     Kith.Repo.transaction(fn ->
       target = lock_put_target(conn, name)
 

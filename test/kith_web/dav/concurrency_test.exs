@@ -366,4 +366,67 @@ defmodule KithWeb.DAV.ConcurrencyTest do
       assert {[], ^next} = sync(user, next)
     end
   end
+
+  describe "CDV-101: a deadlock with a concurrent writer is retried, never a 500" do
+    defp related_card(first, uid, related_uid) do
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Lock;#{first};;;\r\nFN:#{first} Lock\r\nUID:#{uid}\r\n" <>
+        "RELATED;TYPE=friend:urn:uuid:#{related_uid}\r\nEND:VCARD\r\n"
+    end
+
+    defp wait_for_lock_waiter(tries \\ 100) do
+      %{rows: [[n]]} =
+        Repo.query!(
+          "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'"
+        )
+
+      cond do
+        n > 0 -> :ok
+        tries == 0 -> flunk("the PUT never blocked")
+        true -> Process.sleep(20) && wait_for_lock_waiter(tries - 1)
+      end
+    end
+
+    test "CDV-101: a PUT renaming A while another transaction holds B and then writes A",
+         %{user: user, account_id: account_id} do
+      assert dav_put(user, @book <> "dl-a.vcf", build_vcard("Ann", "Lock", uid: "dl-a")).status ==
+               201
+
+      assert dav_put(user, @book <> "dl-b.vcf", related_card("Bob", "dl-b", "dl-a")).status ==
+               201
+
+      [a, b] =
+        Sandbox.unboxed_run(Repo, fn ->
+          Enum.map(~w(dl-a.vcf dl-b.vcf), &Contacts.get_contact_by_dav_name(account_id, &1))
+        end)
+
+      parent = self()
+
+      # Holds B, waits until the PUT blocks on B (in the CDV-100 trigger, while
+      # it holds A), then writes A. Its long deadlock_timeout makes the PUT the
+      # transaction Postgres aborts.
+      other =
+        Task.async(fn ->
+          Sandbox.unboxed_run(Repo, fn ->
+            Repo.transaction(fn ->
+              Repo.query!("SET LOCAL deadlock_timeout = '10s'")
+              Repo.query!("UPDATE contacts SET favorite = true WHERE id = $1", [b.id])
+              send(parent, :b_locked)
+              wait_for_lock_waiter()
+              Repo.query!("UPDATE contacts SET favorite = true WHERE id = $1", [a.id])
+            end)
+          end)
+        end)
+
+      assert_receive :b_locked, 5_000
+      put = dav_put(user, @book <> "dl-a.vcf", build_vcard("Anna", "Lock", uid: "dl-a"))
+      assert {:ok, _} = Task.await(other, 15_000)
+
+      assert put.status in [204, 503]
+      if put.status == 503, do: assert(get_resp_header(put, "retry-after") != [])
+      assert put.status == 204
+
+      body = dav_get(user, @book <> "dl-a.vcf").resp_body
+      assert body =~ "FN:Anna Lock\r\n"
+    end
+  end
 end
