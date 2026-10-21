@@ -118,6 +118,60 @@ defmodule KithWeb.DAV.AuthTest do
       assert {_, 207} = timed_propfind(user.email, "AnotherP@ssw0rd-123")
     end
 
+    test "CDV-111: the cached digest cannot be recomputed from the hash and the password",
+         %{user: user} do
+      user = slow_hash_user(user)
+      assert {_, 207} = timed_propfind(user.email, dav_password())
+
+      {:ok, keys} = Cachex.keys(:kith_cache)
+
+      plain =
+        {:verified_password, :crypto.hash(:sha256, [user.hashed_password, 0, dav_password()])}
+
+      assert Enum.any?(keys, &match?({:verified_password, _}, &1)), "login was not cached"
+      refute plain in keys
+    end
+
+    test "CDV-103: deleting the user stops a cached login", %{user: user} do
+      user = slow_hash_user(user)
+      assert {_, 207} = timed_propfind(user.email, dav_password())
+
+      Kith.Repo.delete_all(from(u in Kith.Accounts.User, where: u.id == ^user.id))
+
+      assert {_, 401} = timed_propfind(user.email, dav_password())
+    end
+
+    test "R6: a role change takes effect on the next request despite a cached login",
+         %{user: user} do
+      user = slow_hash_user(user)
+
+      put = fn ->
+        build_conn()
+        |> basic_auth(user.email, dav_password())
+        |> dav_request(
+          "PUT",
+          "/dav/addressbooks/default/role-#{user.id}.vcf",
+          build_vcard("Role", "Check")
+        )
+        |> Map.fetch!(:status)
+      end
+
+      set_role = fn role ->
+        Kith.Repo.update_all(from(u in Kith.Accounts.User, where: u.id == ^user.id),
+          set: [role: role]
+        )
+      end
+
+      set_role.("viewer")
+      assert put.() == 403
+      set_role.("editor")
+      assert put.() in [201, 204]
+      set_role.("viewer")
+      assert put.() == 403
+      set_role.("admin")
+      assert put.() in [201, 204]
+    end
+
     test "CDV-103: unconfirming the user stops a cached login", %{user: user} do
       user = slow_hash_user(user)
       assert {_, 207} = timed_propfind(user.email, dav_password())

@@ -48,8 +48,8 @@ defmodule Kith.Accounts do
   a few minutes so a chatty client (CardDAV sends Basic credentials on every
   request) does not pay the deliberately slow password hash each time (CDV-103).
 
-  The remembered entry is keyed by a digest of the user's current
-  `hashed_password` and the password, so changing the password invalidates it.
+  The remembered entry is keyed by an HMAC (random per-boot key) of the user's
+  current `hashed_password` and the password, so changing the password invalidates it.
   The user row is read on every call, so confirmation and deletion are always
   current. Only successes are remembered; a wrong password always pays the full
   hash.
@@ -60,7 +60,7 @@ defmodule Kith.Accounts do
 
     case user do
       %User{hashed_password: hashed} when is_binary(hashed) and byte_size(password) > 0 ->
-        key = {:verified_password, :crypto.hash(:sha256, [hashed, 0, password])}
+        key = {:verified_password, verified_password_digest(hashed, password)}
 
         if verified_password_cached?(key),
           do: user,
@@ -69,6 +69,35 @@ defmodule Kith.Accounts do
       _ ->
         if User.valid_password?(user, password), do: user
     end
+  end
+
+  # HMAC under a random per-boot key that lives only in this node's memory: the
+  # cached digest cannot be tested against guesses offline, even by someone who
+  # holds both the cache contents and `users.hashed_password` (CDV-111).
+  defp verified_password_digest(hashed, password) do
+    :crypto.mac(:hmac, :sha256, verified_password_key(), [hashed, 0, password])
+  end
+
+  defp verified_password_key do
+    case :persistent_term.get({__MODULE__, :verified_password_key}, nil) do
+      nil -> init_verified_password_key()
+      key -> key
+    end
+  end
+
+  # Called at boot (`Kith.Application`); lazily here as a fallback. The first
+  # writer wins so concurrent first logins agree on one key.
+  @doc false
+  def init_verified_password_key do
+    :global.trans({{__MODULE__, :verified_password_key}, self()}, fn ->
+      persistent_key = {__MODULE__, :verified_password_key}
+
+      with nil <- :persistent_term.get(persistent_key, nil) do
+        key = :crypto.strong_rand_bytes(32)
+        :persistent_term.put(persistent_key, key)
+        key
+      end
+    end)
   end
 
   defp verified_password_cached?(key), do: match?({:ok, true}, Cachex.get(:kith_cache, key))
