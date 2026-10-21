@@ -100,8 +100,9 @@ if System.get_env("PERF") == "1" do
     end
 
   started = System.monotonic_time(:millisecond)
+  perf_count = String.to_integer(System.get_env("PERF_COUNT", "2000"))
 
-  for i <- (have + 1)..2000//1 do
+  for i <- (have + 1)..perf_count//1 do
     {:ok, contact} =
       Contacts.create_contact(perf.account_id, %{
         first_name: "Perf#{i}",
@@ -134,7 +135,7 @@ if System.get_env("PERF") == "1" do
   elapsed = System.monotonic_time(:millisecond) - started
 
   IO.puts(
-    "==> carddav seed: perf account has 2000 contacts (seeded #{max(2000 - have, 0)} in #{elapsed} ms)"
+    "==> carddav seed: perf account has #{perf_count} contacts (seeded #{max(perf_count - have, 0)} in #{elapsed} ms)"
   )
 end
 

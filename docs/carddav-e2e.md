@@ -10,7 +10,7 @@ scripts/carddav-e2e/down.sh               # stop the server
 MIX_TEST_PARTITION=_carddav mix test      # ExUnit, DB kith_test_carddav
 ```
 
-`PERF=1 scripts/carddav-e2e/up.sh` additionally seeds account E (2000 contacts).
+`PERF=1 scripts/carddav-e2e/up.sh` additionally seeds account E (2000 contacts, each with 2 fields, 1 address and 1 tag; `PERF_COUNT=n` seeds more for scaling checks, delete the extras afterwards).
 
 Browser specs (05, 06) need a launchable Chromium and the compiled CSS (R46):
 
@@ -30,6 +30,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | 04-reports | R1-R4, Q1-Q2, S1-S8 | 14 | 0 | CDV-39..50; review fix rounds CDV-52..56; CDV-51 open (Task 6) |
 | 05-vcard | V1-V6 | 21 | 0 | six fixtures × both versions plus fix-round regressions; CDV-51, CDV-57..96 (CDV-82 reversed by CDV-90) |
 | 06-ui-crossover | U1-U9, U3b-U3d | 12 | 0 | real Chromium; CDV-97..100; fix round 1 CDV-101, CDV-102 (ExUnit) |
+| 07-perf | budgets x5, near-cap card | 6 | 0 | account E (2000 contacts); CDV-103..109; query counts in `query_count_test.exs`, plan guards in `dav_index_plan_test.exs` |
 
 ### 01-discovery
 
@@ -148,6 +149,28 @@ The spec drives one logged-in Chromium page (`dav-admin@carddav.test`) and check
 Run `source /tmp/kith-carddav-e2e.env && npx playwright test --project=e2e test/playwright/carddav/06-ui-crossover.spec.ts --workers=1` (with `PLAYWRIGHT_CHROMIUM_EXECUTABLE` where needed, R46).
 
 Deploy the three Task 7 migrations (`20261021120000`, `20261021130000`, `20261021140000`) with the code. They only add triggers; rollback drops them and brings back the CDV-97/98/100 staleness.
+
+### 07-perf
+
+Median of 3 runs after one warm-up request, as account E (`dav-perf@carddav.test`), 2000 contacts. "Before" is the first run of the spec on a fresh seed; "after" is the final run. Both include the 4517 dev server on this laptop, so only the ratios matter.
+
+| Request | Budget | Before | After | Result |
+|---|---|---|---|---|
+| PROPFIND Depth 1 | < 1.5 s | 323 ms | 103 ms | pass (CDV-103) |
+| initial sync-collection (getetag) | < 6 s | 363 ms | 148 ms | pass (CDV-103) |
+| initial sync-collection (getetag + address-data) | < 6 s | 664 ms | 470 ms | pass (CDV-103) |
+| multiget of 200 hrefs | < 2 s | 652 ms | 122 ms | pass (CDV-103, CDV-106) |
+| addressbook-query matching 1 contact | < 1.5 s | 638 ms | 438 ms | pass (CDV-103) |
+| single GET | < 200 ms | 304 ms (miss) | 83 ms | fixed CDV-103 |
+| PUT / GET of a 988 KB card (50 000 EMAIL + 10 000 `X-` lines) | < 5 s | PUT 500 after 16 s (EMAIL/TEL part) | PUT 2.7 s then 1.2 s, GET 1.9 s | fixed CDV-107..109 |
+
+The ~300 ms PBKDF2 hash was the floor under every row (CDV-103). Measured and not a CDV:
+
+- **addressbook-query and initial sync with address-data are O(contacts).** They load every contact with its preloads, render each vCard and filter in Elixir (the filter runs on the vCard as served, so it cannot be pushed to SQL without changing behaviour). Measured at 10 000 contacts (account E temporarily grown with `PERF_COUNT=10000`, then trimmed back): PROPFIND Depth 1 168 ms, sync (getetag) 416 ms, sync with address-data 2.8 s, multiget of 200 128 ms, addressbook-query matching 1 1.85 s (0.18 ms per contact; over the 1.5 s budget only at 5x the budgeted size). Recommendation: a SQL prefilter on `display_name`/field values when an account passes ~8 000 contacts.
+- **Incremental sync** is one indexed range scan of `contact_dav_changes` per account (`seq > token`); the change log is not touched by reads. An initial sync and the nightly-purge full resync (R3) cost the same as the initial sync above.
+- **Seeding 2000 contacts** (create_contact + 2 fields + address + tag, through the app's insert paths, `PERF=1 mix run test/playwright/carddav_seed.exs`): 12.1 s with SQL debug logging on stdout (6 ms per contact); the 8 000 more for the 10 000 run took 44.5 s (5.6 ms per contact), so seeding is linear since CDV-104. Without the stdout logging, the same pattern measured in a rolled-back transaction: 4.0-4.1 s with the CDV-97/98/100 child triggers disabled and 4.6-5.0 s with them (+0.2-0.5 ms per contact, +12-23 %); 4000 fields on one contact row by row cost 1.9 s without and 3.0 s with them. The statement-level design (R47) is not a cliff.
+- **PUT of a card replacing thousands of existing values** (`retain_dav_entries/3` compares each existing row with the incoming list): 20 000 EMAIL lines PUT again takes 0.5 s; a near-cap card 1.2 s. Quadratic in theory, not reachable within the 1 MiB cap.
+- **N+1** counts (`query_count_test.exs`, 5 vs 50 contacts, each with 2 fields, an address and a tag): sync-collection (with and without address-data), addressbook-query and PROPFIND Depth 1 were already constant; multiget was not (CDV-106).
 
 ## Bug log
 
