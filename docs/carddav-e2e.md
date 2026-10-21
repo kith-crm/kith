@@ -31,6 +31,7 @@ Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpe
 | 05-vcard | V1-V6 | 21 | 0 | six fixtures × both versions plus fix-round regressions; CDV-51, CDV-57..96 (CDV-82 reversed by CDV-90) |
 | 06-ui-crossover | U1-U9, U3b-U3d | 12 | 0 | real Chromium; CDV-97..100; fix round 1 CDV-101, CDV-102 (ExUnit) |
 | 07-perf | budgets x5, near-cap card | 6 | 0 | account E (2000 contacts); CDV-103..109; query counts in `query_count_test.exs`, plan guards in `dav_index_plan_test.exs` |
+| 08-vdirsyncer-smoke | steps 0-4 (`scripts/carddav-e2e/vdirsyncer-smoke.sh`, not Playwright) | 5 | 0 | real client, account B; CDV-112 found and fixed; steps 2 and 3 carry explicit expectations |
 
 ### 01-discovery
 
@@ -395,9 +396,9 @@ The ~300 ms PBKDF2 hash was the floor under every row (CDV-103). Measured and no
 
 vdirsyncer 0.21.0 (Python 3.15, installed with `python3 -I -m pip` in a `mktemp -d` venv; no install problems) against the live server, via `scripts/carddav-e2e/vdirsyncer-smoke.sh` (run `source /tmp/kith-carddav-e2e.env` first).
 
-Account: **B (`dav-other@carddav.test`)** — a small address book, so the run is fast and the server/local comparison is deterministic. Account A holds the many `cdv-…` contacts of other specs, and the script would have to sync them all. Test cards carry a `vds-<epoch>` UID/FN prefix; only those are compared, and the script DELETEs its own cards at exit. It uses the right credentials throughout (no deliberate failed logins) and passes the password through a curl config file and `printenv`, never printing it.
+Account: **B (`dav-other@carddav.test`)** — a small address book, so the run is fast and the server/local comparison is deterministic. Account A holds the many `cdv-…` contacts of other specs, and the script would have to sync them all. Test cards carry a `vds-<epoch>` UID/FN prefix; only those are compared, and the script DELETEs its own cards at exit (a DAV DELETE only moves a contact to Kith's 30-day trash, so they remain trashed until purged; they are gone from DAV and from the UI lists). It uses the right credentials throughout (no deliberate failed logins) and passes the password through a curl config file and `printenv`, never printing it.
 
-Storage pair: `carddav` (`http://127.0.0.1:4517/dav/`, discovery finds the `default` book, "Kith Contacts") against `filesystem` (`fileext = ".vcf"`), `conflict_resolution = "a wins"`. After each step the script lists the server (PROPFIND Depth 1 + GET per href) and the local directory, and diffs `UID|FN` of the run's cards.
+Storage pair: `carddav` (`http://127.0.0.1:4517/dav/`, discovery finds the `default` book, "Kith Contacts") against `filesystem` (`fileext = ".vcf"`), `conflict_resolution = "a wins"`. After each step the script lists the server (PROPFIND Depth 1 + GET per href) and the local directory, and diffs `UID|FN` of the run's cards. Agreement alone could hold vacuously, so steps 1-4 also assert expectations: the card count; step 2: Bravo absent on both sides, Alpha edited, the UUID-named add on the server with its UID and at `/dav/addressbooks/default/<uuid>.vcf`; step 3: the local file shows `ServerEdit`; step 4: the server holds `LocalWins`. Every HTTP call uses `curl -f` and aborts on a non-2xx (a 401, 5xx or refused connection can no longer produce an empty, agreeing state). Mutation check: skipping the local delete, skipping the server PUT, and pointing at a wrong book path each make the script exit 1.
 
 | Step | Result |
 |---|---|
