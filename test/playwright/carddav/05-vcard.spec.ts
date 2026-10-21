@@ -230,6 +230,22 @@ test("CDV-93: a native rename drops the retained N prefix and suffix", async ({ 
     expect(card).toContain(`FN:${prefix} Grace Hopper\r\n`);
   }
 });
+test("CDV-94: Apple-renumbered related names stay native and go with the relationship", async ({ request }) => {
+  const href = `${BOOK}${prefix}-renumbered.vcf`; created.push(href);
+  const body = `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${prefix}-renumbered\r\nN:Owner;${prefix} Renum;;;\r\nFN:${prefix} Renum Owner\r\nRELATED;TYPE=friend:urn:uuid:${prefix}-friend\r\nEND:VCARD\r\n`;
+  expect((await put(request, href, body)).status).toBe(201);
+  const id = await contactId(request, prefix + " Renum");
+  const g = (await dav(request, "GET", href)).body;
+  expect(g).toMatch(/^item\d+\.X-ABRELATEDNAMES:/m);
+  expect((await put(request, href, g.replace(/^item\d+\./gm, "item1."))).status).toBe(204);
+  const again = unfold((await dav(request, "GET", href)).body);
+  expect(again.match(/X-ABRELATEDNAMES/g)).toHaveLength(1);
+  expect(again.match(/_\$!<Friend>!\$_/g)).toHaveLength(1);
+  for (const rel of (await api(request, "GET", `/api/contacts/${id}/relationships`)).data)
+    await api(request, "DELETE", `/api/relationships/${rel.id}`, undefined, 204);
+  for (const version of ["3.0", "4.0"])
+    expect((await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } })).body).not.toMatch(/X-ABRELATEDNAMES|Friend|RELATED/);
+});
 test("V3: unicode survives multiget and the web contact page", async ({ request, page }) => {
   const href = `${BOOK}${prefix}-unicode-folding.vcf`;
   const card = await reportCard(request, href);

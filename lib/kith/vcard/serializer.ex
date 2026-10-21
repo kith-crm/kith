@@ -206,7 +206,7 @@ defmodule Kith.VCard.Serializer do
     Enum.flat_map(rels, fn rel ->
       name = display_name_for_related(rel.related_contact)
       label = map_relationship_to_label(rel.relationship_type.name)
-      group = "kithrel#{rel.id}"
+      group = "item#{rel.id}"
       ["#{group}.X-ABRELATEDNAMES:#{escape(name)}", "#{group}.X-ABLabel:#{label}"]
     end)
   end

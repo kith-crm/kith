@@ -522,6 +522,44 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
+  test "CDV-94: Apple-renumbered related names are native, whatever their group", %{
+    contact: contact,
+    account_id: aid
+  } do
+    target = contact_fixture(aid)
+    {:ok, _} = Contacts.put_dav_identity(target, %{dav_uid: "urn:uuid:cdv94-target"})
+
+    body =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Apple;Ann;;;\r\nFN:Ann Apple\r\nRELATED;TYPE=friend:urn:uuid:cdv94-target\r\nitem1.EMAIL:ann@example.test\r\nitem1.X-ABLabel:_$!<Home>!$_\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, body)
+    [relationship] = Contacts.list_relationships(contact.id)
+    card = dav_get(contact, :v30)
+    assert card =~ "item#{relationship.id}.X-ABRELATEDNAMES:"
+    assert card =~ "item#{relationship.id}.X-ABLabel:_$!<Friend>!$_\r\n"
+
+    # iOS rebuilds the card and renumbers every group item1..N
+    renumbered =
+      card
+      |> String.replace("item1.", "item2.")
+      |> String.replace("item#{relationship.id}.", "item1.")
+
+    contact = dav_put(contact, aid, renumbered)
+    again = dav_get(contact, :v30)
+    assert length(Regex.scan(~r/X-ABRELATEDNAMES/, again)) == 1
+    assert length(Regex.scan(~r/_\$!<Friend>!\$_/, again)) == 1
+    assert again =~ "item2.X-ABLabel:_$!<Home>!$_\r\n"
+
+    {:ok, _} = Contacts.delete_relationship(relationship)
+
+    for version <- [:v30, :v40] do
+      card = dav_get(contact, version)
+      refute card =~ "X-ABRELATEDNAMES"
+      refute card =~ "Friend"
+      assert card =~ "item2.X-ABLabel:_$!<Home>!$_\r\n"
+    end
+  end
+
   defp dav_put(contact, aid, body) do
     {attrs, nested} = Kith.DAV.VCardAdapter.vcard_to_attrs(body, account_id: aid)
     {:ok, contact} = Contacts.update_contact(contact, attrs)

@@ -16,6 +16,17 @@ defmodule Kith.VCard.Metadata do
   """
   def merge(lines, contact, version) do
     properties = Map.get(contact, :dav_vcard, %{}) |> Map.get("properties", [])
+
+    # Related names (3.0 X-ABRELATEDNAMES and their group labels) are native:
+    # Kith serves its own pairs, so a client's pairs, however its groups are
+    # numbered, never decorate or outlive a relationship (CDV-94).
+    related_groups =
+      properties
+      |> Enum.filter(&(&1["name"] == "X-ABRELATEDNAMES"))
+      |> MapSet.new(&group(&1["head"]))
+      |> MapSet.delete(nil)
+
+    lines = renumber_related(lines, properties, related_groups)
     {lines, _unused} = Enum.map_reduce(lines, properties, &restore/2)
     emitted = MapSet.new(lines)
     emitted_groups = MapSet.new(lines, &group/1)
@@ -30,7 +41,7 @@ defmodule Kith.VCard.Metadata do
       Enum.reject(properties, fn property ->
         group = group(property["head"])
 
-        native?(property) or
+        native?(property) or MapSet.member?(related_groups, group) or
           (MapSet.member?(native_groups, group) and not MapSet.member?(emitted_groups, group)) or
           MapSet.member?(emitted, render(property))
       end)
@@ -209,10 +220,42 @@ defmodule Kith.VCard.Metadata do
 
   defp rebuild(name, {params, value}), do: Enum.join([name | params], ";") <> ":" <> value
 
-  # Kith's own 3.0 relationship lines live in `kithrelN.` groups.
   defp native?(property) do
     property["name"] in @mapped or Map.has_key?(@social, property["name"]) or
-      Regex.match?(~r/\Akithrel\d+\z/i, group(property["head"]) || "")
+      property["name"] == "X-ABRELATEDNAMES"
+  end
+
+  # Kith's `item<relationship id>.` related-name groups move to a free itemN
+  # when a retained client group (other than a related-name one) has the name.
+  defp renumber_related(lines, properties, related_groups) do
+    taken =
+      properties
+      |> MapSet.new(&group(&1["head"]))
+      |> MapSet.delete(nil)
+      |> MapSet.difference(related_groups)
+
+    native =
+      lines
+      |> Enum.filter(&(property_name(&1) == "X-ABRELATEDNAMES"))
+      |> Enum.map(&group/1)
+      |> Enum.filter(&MapSet.member?(taken, &1))
+
+    used = MapSet.union(taken, MapSet.new(lines, &group/1))
+
+    {renames, _} =
+      Enum.map_reduce(native, used, fn old, used ->
+        new = Stream.iterate(1, &(&1 + 1)) |> Enum.find(&(not MapSet.member?(used, "item#{&1}")))
+        {{old, "item#{new}"}, MapSet.put(used, "item#{new}")}
+      end)
+
+    renames = Map.new(renames)
+
+    Enum.map(lines, fn line ->
+      case Map.fetch(renames, group(line) || "") do
+        {:ok, new} -> new <> "." <> (line |> String.split(".", parts: 2) |> List.last())
+        :error -> line
+      end
+    end)
   end
 
   defp group(line) do
@@ -234,7 +277,14 @@ defmodule Kith.VCard.Metadata do
 
   defp restore(line, properties) do
     {name, val} = identity(line)
+    restore_property(line, name, val, properties)
+  end
 
+  defp restore_property(line, name, _val, properties)
+       when name in ["X-ABRELATEDNAMES", "X-ABLABEL"],
+       do: {line, properties}
+
+  defp restore_property(line, name, val, properties) do
     match =
       Enum.find(properties, fn property ->
         native_name(property["name"]) == name and
