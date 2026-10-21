@@ -239,6 +239,10 @@ defmodule KithWeb.ContactLive.Show do
     {:noreply, assign(socket, :contact, contact)}
   end
 
+  # A year-unknown birthdate stores the placeholder year 2000 (CDV-114).
+  defp compute_age(%{birthdate_year_unknown: true}), do: nil
+  defp compute_age(%{birthdate: birthdate}), do: compute_age(birthdate)
+
   defp compute_age(birthdate) when is_struct(birthdate, Date) do
     today = Date.utc_today()
     years = today.year - birthdate.year

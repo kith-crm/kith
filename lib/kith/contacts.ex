@@ -1507,6 +1507,9 @@ defmodule Kith.Contacts do
         last_name: parsed.last_name,
         nickname: parsed.nickname,
         birthdate: parsed.birthdate,
+        # A year-less BDAY (`--MMDD`, Kith's `X-KITH-BDAY`) parses to the
+        # placeholder year 2000; without the flag it would be a real year (CDV-114).
+        birthdate_year_unknown: Map.get(parsed, :birthdate_year_unknown, false),
         company: parsed.company,
         occupation: parsed.occupation,
         description: parsed.description,
