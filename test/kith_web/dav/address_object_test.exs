@@ -1485,21 +1485,91 @@ defmodule KithWeb.DAV.AddressObjectTest do
   end
 
   describe "CDV-112: cards with no given name" do
-    test "CDV-112: single-name, FN-only and organisation cards are stored and served",
-         context do
-      for {name, lines, fn_line} <- [
-            {"family-only", ["N:Cher;;;;", "FN:Cher"], "FN:Cher"},
-            {"fn-only", ["FN:Madonna"], "FN:Madonna"},
-            {"org-only", ["N:;;;;", "FN:Acme Corp", "ORG:Acme Corp"], "FN:Acme Corp"}
-          ] do
-        href = "/dav/addressbooks/default/cdv112-#{name}.vcf"
-        conn = authed_dav(context, "PUT", href, card(lines))
-        assert conn.status == 201, "#{name} -> #{conn.status}"
+    defp put112(context, name, lines) do
+      href = "/dav/addressbooks/default/cdv112-#{name}.vcf"
+      {href, authed_dav(context, "PUT", href, card(lines))}
+    end
 
-        conn = authed_dav(context, "GET", href)
-        assert conn.status == 200
-        assert conn.resp_body =~ fn_line, "#{name}: #{conn.resp_body}"
-      end
+    defp stored112(%{account_id: account_id}, name),
+      do: Contacts.get_contact_by_dav_name(account_id, "cdv112-#{name}.vcf")
+
+    defp served112(context, href) do
+      conn = authed_dav(context, "GET", href)
+      assert conn.status == 200
+      lines = String.split(conn.resp_body, "\r\n")
+      {conn, lines}
+    end
+
+    test "CDV-112: family-name-only N moves the name to first_name", context do
+      {href, conn} = put112(context, "family", ["N:Cher;;;;", "FN:Cher"])
+      assert conn.status == 201
+      c = stored112(context, "family")
+      assert {c.first_name, c.last_name} == {"Cher", nil}
+      {_, lines} = served112(context, href)
+      assert "FN:Cher" in lines
+      assert "N:;Cher;;;" in lines
+    end
+
+    test "CDV-112: FN with no N becomes the first name", context do
+      {href, conn} = put112(context, "fn", ["FN:Madonna"])
+      assert conn.status == 201
+      c = stored112(context, "fn")
+      assert {c.first_name, c.last_name} == {"Madonna", nil}
+      {_, lines} = served112(context, href)
+      assert "FN:Madonna" in lines
+      assert "N:;Madonna;;;" in lines
+    end
+
+    test "CDV-112: an organisation card uses FN, else ORG", context do
+      {href, conn} = put112(context, "org", ["N:;;;;", "FN:Acme Corp", "ORG:Acme Corp"])
+      assert conn.status == 201
+      assert stored112(context, "org").first_name == "Acme Corp"
+      {_, lines} = served112(context, href)
+      assert "FN:Acme Corp" in lines
+
+      {_, conn} = put112(context, "orgonly", ["N:;;;;", "FN:", "ORG:Initech"])
+      assert conn.status == 201
+      assert stored112(context, "orgonly").first_name == "Initech"
+    end
+
+    test "CDV-112: NICKNAME is the last fallback", context do
+      {_, conn} = put112(context, "nick", ["N:;;;;", "FN:", "NICKNAME:Sparky"])
+      assert conn.status == 201
+      assert stored112(context, "nick").first_name == "Sparky"
+    end
+
+    test "CDV-112: a card with no name at all is still 422 and creates nothing",
+         %{account_id: account_id} = context do
+      {_, conn} = put112(context, "nothing", ["N:;;;;", "FN:", "EMAIL:x@example.com"])
+      assert conn.status == 422
+      assert conn.resp_body =~ "valid-address-data"
+      assert Contacts.count_contacts(account_id) == 0
+    end
+
+    # R4: every successful write moves the ETag (REV is in the card), so
+    # idempotence is about content: after the one rewrite (N:Cher;;;; ->
+    # N:;Cher;;;) PUT-backs of the served card change nothing but REV.
+    test "CDV-112: re-PUTting the same body or the served card is content-stable", context do
+      no_rev = fn lines -> Enum.reject(lines, &String.starts_with?(&1, "REV:")) end
+      {href, conn} = put112(context, "idem", ["N:Cher;;;;", "FN:Cher"])
+      assert conn.status == 201
+
+      # same body again
+      assert authed_dav(context, "PUT", href, card(["N:Cher;;;;", "FN:Cher"])).status == 204
+      {_, lines1} = served112(context, href)
+      assert "N:;Cher;;;" in lines1
+
+      # a client re-PUTs the card it received: the second and third GET are equal
+      body = Enum.join(lines1, "\r\n")
+      assert authed_dav(context, "PUT", href, body).status == 204
+      {_, lines2} = served112(context, href)
+      assert authed_dav(context, "PUT", href, Enum.join(lines2, "\r\n")).status == 204
+      {_, lines3} = served112(context, href)
+
+      assert no_rev.(lines2) == no_rev.(lines1)
+      assert no_rev.(lines3) == no_rev.(lines1)
+      c = stored112(context, "idem")
+      assert {c.first_name, c.last_name} == {"Cher", nil}
     end
   end
 
