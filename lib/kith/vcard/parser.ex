@@ -137,14 +137,17 @@ defmodule Kith.VCard.Parser do
   defp apply_property(acc, "NICKNAME", _params, value),
     do: %{acc | nickname: unescape(value)}
 
-  defp apply_property(acc, name, _params, value) when name in ["BDAY", "X-KITH-BDAY"] do
+  defp apply_property(acc, name, params, value) when name in ["BDAY", "X-KITH-BDAY"] do
     date = parse_date(value)
 
-    %{
-      acc
-      | birthdate: date,
-        birthdate_year_unknown: date != nil and String.starts_with?(value, "--")
-    }
+    year_unknown =
+      date != nil and (String.starts_with?(value, "--") or apple_omit_year?(params, date))
+
+    # Apple's 3.0 form `BDAY;X-APPLE-OMIT-YEAR=1604:1604-MM-DD` (also written
+    # by DAVx5) has no birth year: store the leap-safe placeholder (CDV-115).
+    date = if year_unknown, do: Date.new!(2000, date.month, date.day), else: date
+
+    %{acc | birthdate: date, birthdate_year_unknown: year_unknown}
   end
 
   defp apply_property(acc, "ORG", _params, value) do
@@ -406,6 +409,15 @@ defmodule Kith.VCard.Parser do
   defp social_label("X-TWITTER"), do: "Twitter"
   defp social_label("X-INSTAGRAM"), do: "Instagram"
   defp social_label(_), do: nil
+
+  # The year Apple writes for "no year" (`X-APPLE-OMIT-YEAR=1604`); a card with
+  # the parameter naming a different year keeps its real year.
+  defp apple_omit_year?(params, %Date{year: year}) do
+    case Map.get(params, "X-APPLE-OMIT-YEAR") do
+      nil -> year == 1604
+      omitted -> String.trim(omitted, "\"") == Integer.to_string(year)
+    end
+  end
 
   defp parse_date(str) do
     str = String.trim(str)

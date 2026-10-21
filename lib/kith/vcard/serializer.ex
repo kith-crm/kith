@@ -114,10 +114,17 @@ defmodule Kith.VCard.Serializer do
 
   defp bday_line(%{birthdate: nil}, _version), do: nil
 
-  defp bday_line(%{birthdate: date, birthdate_year_unknown: true}, version) do
-    month_day = Calendar.strftime(date, "%m%d")
-    name = if version == :v40, do: "BDAY", else: "X-KITH-BDAY"
-    name <> ":--" <> month_day
+  defp bday_line(%{birthdate: date, birthdate_year_unknown: true}, :v40),
+    do: "BDAY:--" <> Calendar.strftime(date, "%m%d")
+
+  # RFC 2426 BDAY needs a year: 3.0 uses Apple's year-omitted form, which Apple
+  # Contacts and DAVx5 display as month and day, plus Kith's own `--MMDD` (R35,
+  # CDV-115). The parser reads both back as year-unknown.
+  defp bday_line(%{birthdate: date, birthdate_year_unknown: true}, :v30) do
+    [
+      "BDAY;X-APPLE-OMIT-YEAR=1604:1604-" <> Calendar.strftime(date, "%m-%d"),
+      "X-KITH-BDAY:--" <> Calendar.strftime(date, "%m%d")
+    ]
   end
 
   defp bday_line(%{birthdate: date}, :v40), do: "BDAY:" <> Calendar.strftime(date, "%Y%m%d")
