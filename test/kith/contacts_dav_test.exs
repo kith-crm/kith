@@ -950,4 +950,49 @@ defmodule Kith.ContactsDAVTest do
       end)
     end
   end
+
+  describe "CDV-100: a change to a relationship's target changes the owner's card" do
+    test "CDV-100: renaming the target, or changing its UID, bumps the owner",
+         %{contact: owner, account_id: aid} do
+      [type | _] = Contacts.list_relationship_types(aid)
+      target = contact_fixture(aid, %{first_name: "Tess", last_name: "Target"})
+      bystander = contact_fixture(aid)
+
+      {:ok, _} =
+        Contacts.create_relationship(owner, %{
+          related_contact_id: target.id,
+          relationship_type_id: type.id
+        })
+
+      # the target relates back, so a rename must not ping-pong between them
+      {:ok, _} =
+        Contacts.create_relationship(target, %{
+          related_contact_id: owner.id,
+          relationship_type_id: type.id
+        })
+
+      %{seq: seq} = Contacts.dav_sync_state(aid)
+
+      target =
+        assert_dav_bump(owner, "rename", fn ->
+          {:ok, target} = Contacts.update_contact(target, %{first_name: "Tamsin"})
+          target
+        end)
+
+      changed = aid |> Contacts.list_contacts_changed_since(seq) |> Enum.map(& &1.id)
+      refute bystander.id in changed
+
+      assert_dav_bump(owner, "uid", fn ->
+        {:ok, _} = Contacts.put_dav_identity(target, %{dav_uid: "urn:uuid:cdv100-target"})
+      end)
+
+      # A write that changes nothing the owner shows leaves the owner alone.
+      %{seq: seq} = Contacts.dav_sync_state(aid)
+
+      {:ok, _} =
+        Contacts.update_contact(Kith.Repo.get!(Contacts.Contact, target.id), %{favorite: true})
+
+      refute owner.id in Enum.map(Contacts.list_contacts_changed_since(aid, seq), & &1.id)
+    end
+  end
 end
