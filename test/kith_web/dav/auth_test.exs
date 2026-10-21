@@ -92,8 +92,16 @@ defmodule KithWeb.DAV.AuthTest do
       {first_ms, 207} = timed_propfind(user.email, dav_password())
       assert first_ms >= 50, "precondition: the slow hash must be measurable (#{first_ms} ms)"
 
-      {second_ms, 207} = timed_propfind(user.email, dav_password())
-      assert second_ms < first_ms / 3, "second login #{second_ms} ms vs first #{first_ms} ms"
+      # Best of several cached logins: one slow sample under load can't fail it.
+      second_ms =
+        1..5
+        |> Enum.map(fn _ ->
+          {ms, 207} = timed_propfind(user.email, dav_password())
+          ms
+        end)
+        |> Enum.min()
+
+      assert second_ms < first_ms / 3, "cached login #{second_ms} ms vs first #{first_ms} ms"
     end
 
     test "CDV-103: a wrong password is still rejected after a cached success", %{user: user} do

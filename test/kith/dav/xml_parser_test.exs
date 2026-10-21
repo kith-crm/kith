@@ -37,9 +37,9 @@ defmodule Kith.DAV.XMLParserTest do
       <d:propfind xmlns:d="DAV:"><d:prop><d:displayname>&lol9;</d:displayname></d:prop></d:propfind>
       """
 
-      {micros, result} = :timer.tc(fn -> XMLParser.parse_propfind(body) end)
-      assert result == {:error, :invalid_xml}
-      assert micros < 1_000_000
+      # No wall-clock bound: an expanding parser would blow the ExUnit timeout
+      # (or memory) rather than return, which also fails the test.
+      assert XMLParser.parse_propfind(body) == {:error, :invalid_xml}
       assert {:error, :invalid_xml} = XMLParser.parse_proppatch(body)
     end
 

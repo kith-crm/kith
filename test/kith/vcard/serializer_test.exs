@@ -662,7 +662,7 @@ defmodule Kith.VCard.SerializerTest do
     # n EMAIL lines, retained in the opposite order: matching each native line
     # by scanning every retained property is O(n^2) (n = 3200: ~5 s); a lookup
     # is linear. 4x the lines should cost ~4x, quadratic code ~16x.
-    defp merge_ms(n) do
+    defp merge_reductions(n) do
       lines =
         ["BEGIN:VCARD", "VERSION:3.0"] ++
           Enum.map(1..n, &"EMAIL;TYPE=WORK:e#{&1}@example.test") ++ ["END:VCARD"]
@@ -676,22 +676,22 @@ defmodule Kith.VCard.SerializerTest do
           }
         end
 
-      {us, merged} =
-        :timer.tc(fn ->
-          Kith.VCard.Metadata.merge(lines, %{dav_vcard: %{"properties" => properties}}, :v30)
-        end)
+      # Reductions, not wall-clock time: deterministic under load.
+      {:reductions, before} = Process.info(self(), :reductions)
+      merged = Kith.VCard.Metadata.merge(lines, %{dav_vcard: %{"properties" => properties}}, :v30)
+      {:reductions, after_} = Process.info(self(), :reductions)
 
       # The retained parameters were applied to every line.
       assert Enum.count(merged, &String.starts_with?(&1, "EMAIL;X-KEEP=1;TYPE=WORK:")) == n
-      div(us, 1000)
+      after_ - before
     end
 
     test "CDV-109: restoring retained properties is linear in the number of lines" do
-      small = max(merge_ms(800), 1)
-      large = merge_ms(3200)
+      small = max(merge_reductions(800), 1)
+      large = merge_reductions(3200)
 
       assert large < small * 9,
-             "800 lines: #{small} ms, 3200 lines: #{large} ms (#{Float.round(large / small, 1)}x)"
+             "800 lines: #{small} reductions, 3200 lines: #{large} (#{Float.round(large / small, 1)}x)"
     end
   end
 end

@@ -562,21 +562,21 @@ defmodule Kith.VCard.ParserTest do
   end
 
   describe "scaling" do
-    defp parse_ms(line_fun, n) do
+    # Counts BEAM reductions of the calling process rather than wall-clock time,
+    # so the guard is deterministic under load (no scheduler or CI noise).
+    defp parse_reductions(line_fun, n) do
       card =
         "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Big\r\n" <>
           Enum.map_join(1..n, "\r\n", line_fun) <> "\r\nEND:VCARD\r\n"
 
-      1..3
-      |> Enum.map(fn _ ->
-        :timer.tc(fn -> assert {:ok, [_]} = Parser.parse(card) end) |> elem(0)
-      end)
-      |> Enum.min()
-      |> div(1000)
+      {:reductions, before} = Process.info(self(), :reductions)
+      assert {:ok, [_]} = Parser.parse(card)
+      {:reductions, after_} = Process.info(self(), :reductions)
+      after_ - before
     end
 
     # Appending with `list ++ [x]` makes a card of n lines O(n^2): 4x the lines
-    # cost ~16x the time. Linear parsing stays near 4x; 9x leaves room for noise.
+    # cost ~16x the work. Linear parsing stays near 4x; 9x leaves a wide margin.
     for {name, line} <- [
           {"unknown properties", "X-PERF-@N@:value @N@"},
           {"EMAIL lines", "EMAIL:e@N@@example.test"},
@@ -586,11 +586,11 @@ defmodule Kith.VCard.ParserTest do
         template = unquote(line)
         line_fun = &String.replace(template, "@N@", to_string(&1))
 
-        small = max(parse_ms(line_fun, 5_000), 1)
-        large = parse_ms(line_fun, 20_000)
+        small = max(parse_reductions(line_fun, 5_000), 1)
+        large = parse_reductions(line_fun, 20_000)
 
         assert large < small * 9,
-               "5000 lines: #{small} ms, 20000 lines: #{large} ms (#{Float.round(large / small, 1)}x)"
+               "5000 lines: #{small} reductions, 20000 lines: #{large} (#{Float.round(large / small, 1)}x)"
       end
     end
   end
