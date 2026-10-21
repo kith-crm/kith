@@ -560,4 +560,38 @@ defmodule Kith.VCard.ParserTest do
       assert card.description == "after"
     end
   end
+
+  describe "scaling" do
+    defp parse_ms(line_fun, n) do
+      card =
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Big\r\n" <>
+          Enum.map_join(1..n, "\r\n", line_fun) <> "\r\nEND:VCARD\r\n"
+
+      1..3
+      |> Enum.map(fn _ ->
+        :timer.tc(fn -> assert {:ok, [_]} = Parser.parse(card) end) |> elem(0)
+      end)
+      |> Enum.min()
+      |> div(1000)
+    end
+
+    # Appending with `list ++ [x]` makes a card of n lines O(n^2): 4x the lines
+    # cost ~16x the time. Linear parsing stays near 4x; 9x leaves room for noise.
+    for {name, line} <- [
+          {"unknown properties", "X-PERF-@N@:value @N@"},
+          {"EMAIL lines", "EMAIL:e@N@@example.test"},
+          {"TEL lines", "TEL;TYPE=CELL:+1555@N@"}
+        ] do
+      test "CDV-108: parsing #{name} is linear in the number of lines" do
+        template = unquote(line)
+        line_fun = &String.replace(template, "@N@", to_string(&1))
+
+        small = max(parse_ms(line_fun, 5_000), 1)
+        large = parse_ms(line_fun, 20_000)
+
+        assert large < small * 9,
+               "5000 lines: #{small} ms, 20000 lines: #{large} ms (#{Float.round(large / small, 1)}x)"
+      end
+    end
+  end
 end

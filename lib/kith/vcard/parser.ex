@@ -99,7 +99,15 @@ defmodule Kith.VCard.Parser do
       properties: []
     }
 
-    Enum.reduce(lines, base, &parse_line/2)
+    lines |> Enum.reduce(base, &parse_line/2) |> in_document_order()
+  end
+
+  # The accumulators are built by prepending (appending with `++` made a card
+  # of n lines O(n^2), CDV-108); restore the document order once at the end.
+  @ordered_lists [:properties, :phones, :emails, :addresses, :urls, :impp, :related]
+
+  defp in_document_order(acc) do
+    Enum.reduce(@ordered_lists, acc, fn key, acc -> Map.update!(acc, key, &Enum.reverse/1) end)
   end
 
   defp parse_line(line, acc) do
@@ -107,7 +115,7 @@ defmodule Kith.VCard.Parser do
       {name, params, value} ->
         {head, _value} = split_line(line)
         property = %{"name" => name, "head" => head, "value" => value}
-        acc = %{acc | properties: acc.properties ++ [property]}
+        acc = %{acc | properties: [property | acc.properties]}
         apply_property(acc, name, params, value)
 
       _ ->
@@ -155,34 +163,34 @@ defmodule Kith.VCard.Parser do
 
   defp apply_property(acc, "TEL", params, value) do
     label = extract_type(params)
-    %{acc | phones: acc.phones ++ [%{value: value |> unescape() |> phone_value(), label: label}]}
+    %{acc | phones: [%{value: value |> unescape() |> phone_value(), label: label} | acc.phones]}
   end
 
   defp apply_property(acc, "EMAIL", params, value) do
     label = extract_type(params)
-    %{acc | emails: acc.emails ++ [%{value: unescape(value), label: label}]}
+    %{acc | emails: [%{value: unescape(value), label: label} | acc.emails]}
   end
 
   defp apply_property(acc, "ADR", params, value) do
     label = extract_type(params)
     addr = parse_address(value, label)
-    %{acc | addresses: acc.addresses ++ [addr]}
+    %{acc | addresses: [addr | acc.addresses]}
   end
 
   defp apply_property(acc, "URL", params, value) do
     label = extract_type(params)
-    %{acc | urls: acc.urls ++ [%{value: unescape(value), label: label}]}
+    %{acc | urls: [%{value: unescape(value), label: label} | acc.urls]}
   end
 
   defp apply_property(acc, "IMPP", params, value) do
     label = extract_type(params)
-    %{acc | impp: acc.impp ++ [%{value: unescape(value), label: label}]}
+    %{acc | impp: [%{value: unescape(value), label: label} | acc.impp]}
   end
 
   defp apply_property(acc, name, params, value)
        when name in ["X-SOCIALPROFILE", "X-TWITTER", "X-INSTAGRAM"] do
     label = extract_type(params) || social_label(name)
-    %{acc | urls: acc.urls ++ [%{value: unescape(value), label: label}]}
+    %{acc | urls: [%{value: unescape(value), label: label} | acc.urls]}
   end
 
   defp apply_property(acc, "CATEGORIES", _params, value) do
@@ -206,7 +214,7 @@ defmodule Kith.VCard.Parser do
 
   defp apply_property(acc, "RELATED", params, value) do
     type = extract_type(params) || "contact"
-    %{acc | related: acc.related ++ [%{value: unescape(value), type: type}]}
+    %{acc | related: [%{value: unescape(value), type: type} | acc.related]}
   end
 
   defp apply_property(acc, "REV", _params, value),
