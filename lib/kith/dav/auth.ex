@@ -27,7 +27,7 @@ defmodule Kith.DAV.Auth do
     with {:ok, email, password} <- credentials(conn),
          %Kith.Accounts.User{confirmed_at: confirmed_at} = user
          when not is_nil(confirmed_at) <-
-           Accounts.get_user_by_email_and_password(email, password) do
+           Accounts.get_user_by_email_and_verified_password(email, password) do
       {:ok, user}
     else
       _ -> {:error, :unauthorized}

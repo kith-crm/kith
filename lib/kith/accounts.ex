@@ -41,6 +41,45 @@ defmodule Kith.Accounts do
     if User.valid_password?(user, password), do: user
   end
 
+  @verified_password_ttl :timer.minutes(5)
+
+  @doc """
+  Like `get_user_by_email_and_password/2`, but remembers a successful check for
+  a few minutes so a chatty client (CardDAV sends Basic credentials on every
+  request) does not pay the deliberately slow password hash each time (CDV-103).
+
+  The remembered entry is keyed by a digest of the user's current
+  `hashed_password` and the password, so changing the password invalidates it.
+  The user row is read on every call, so confirmation and deletion are always
+  current. Only successes are remembered; a wrong password always pays the full
+  hash.
+  """
+  def get_user_by_email_and_verified_password(email, password)
+      when is_binary(email) and is_binary(password) do
+    user = Repo.get_by(User, email: email) |> Repo.preload(:account)
+
+    case user do
+      %User{hashed_password: hashed} when is_binary(hashed) and byte_size(password) > 0 ->
+        key = {:verified_password, :crypto.hash(:sha256, [hashed, 0, password])}
+
+        if verified_password_cached?(key),
+          do: user,
+          else: verify_and_remember(user, password, key)
+
+      _ ->
+        if User.valid_password?(user, password), do: user
+    end
+  end
+
+  defp verified_password_cached?(key), do: match?({:ok, true}, Cachex.get(:kith_cache, key))
+
+  defp verify_and_remember(user, password, key) do
+    if User.valid_password?(user, password) do
+      Cachex.put(:kith_cache, key, true, ttl: @verified_password_ttl)
+      user
+    end
+  end
+
   @doc """
   Gets a single user. Preloads account.
   """

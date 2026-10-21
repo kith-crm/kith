@@ -83,16 +83,59 @@ if System.get_env("PERF") == "1" do
       :count
     )
 
+  # Each contact: 2 fields (email + phone), 1 address, 1 tag. Goes through the
+  # app's insert paths, so it also measures the child -> parent DAV triggers.
+  field_types = Contacts.list_contact_field_types(perf.account_id)
+  email_type = Enum.find(field_types, &(&1.protocol == "mailto:"))
+  phone_type = Enum.find(field_types, &(&1.protocol == "tel:"))
+
+  tag =
+    case Repo.get_by(Kith.Contacts.Tag, account_id: perf.account_id, name: "perf") do
+      nil ->
+        {:ok, tag} = Contacts.create_tag(perf.account_id, %{name: "perf"})
+        tag
+
+      tag ->
+        tag
+    end
+
+  started = System.monotonic_time(:millisecond)
+
   for i <- (have + 1)..2000//1 do
-    {:ok, _} =
+    {:ok, contact} =
       Contacts.create_contact(perf.account_id, %{
         first_name: "Perf#{i}",
         last_name: "Contact",
         display_name: "Perf#{i} Contact"
       })
+
+    {:ok, _} =
+      Contacts.create_contact_field(contact, %{
+        value: "perf#{i}@example.test",
+        contact_field_type_id: email_type.id
+      })
+
+    {:ok, _} =
+      Contacts.create_contact_field(contact, %{
+        value: "+1555#{String.pad_leading("#{i}", 7, "0")}",
+        contact_field_type_id: phone_type.id
+      })
+
+    {:ok, _} =
+      Contacts.create_address(contact, %{
+        line1: "#{i} Perf Street",
+        city: "Perfville",
+        country: "US"
+      })
+
+    Contacts.tag_contact(contact, tag)
   end
 
-  IO.puts("==> carddav seed: perf account has 2000 contacts")
+  elapsed = System.monotonic_time(:millisecond) - started
+
+  IO.puts(
+    "==> carddav seed: perf account has 2000 contacts (seeded #{max(2000 - have, 0)} in #{elapsed} ms)"
+  )
 end
 
 IO.puts("==> carddav seed: users ready")

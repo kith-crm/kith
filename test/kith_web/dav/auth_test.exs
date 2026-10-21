@@ -2,6 +2,7 @@ defmodule KithWeb.DAV.AuthTest do
   @moduledoc "RFC 7617 — HTTP Basic Authentication for CardDAV."
   use KithWeb.ConnCase, async: true
 
+  import Ecto.Query
   import KithWeb.DAV.TestHelpers
 
   setup :setup_dav_user
@@ -52,8 +53,6 @@ defmodule KithWeb.DAV.AuthTest do
     end
 
     test "MUST reject unconfirmed user credentials", %{conn: conn, user: user} do
-      import Ecto.Query
-
       Kith.Repo.update_all(from(u in Kith.Accounts.User, where: u.id == ^user.id),
         set: [confirmed_at: nil]
       )
@@ -64,6 +63,70 @@ defmodule KithWeb.DAV.AuthTest do
         |> dav_request("PROPFIND", "/dav/")
 
       assert conn.status == 401
+    end
+  end
+
+  describe "verified-password cache" do
+    # Production hashes at pbkdf2's default cost (~0.3 s per check); the test
+    # env uses 1 round, so give this user a slow hash to see the difference.
+    defp slow_hash_user(user) do
+      hash = Pbkdf2.hash_pwd_salt(dav_password(), rounds: 300_000)
+
+      Kith.Repo.update_all(
+        from(u in Kith.Accounts.User, where: u.id == ^user.id),
+        set: [hashed_password: hash]
+      )
+
+      Kith.Repo.get!(Kith.Accounts.User, user.id)
+    end
+
+    defp timed_propfind(email, password) do
+      {us, conn} = :timer.tc(fn -> propfind_as(email, password) end)
+      {div(us, 1000), conn.status}
+    end
+
+    test "CDV-103: a repeated successful Basic login does not rerun the password hash",
+         %{user: user} do
+      user = slow_hash_user(user)
+
+      {first_ms, 207} = timed_propfind(user.email, dav_password())
+      assert first_ms >= 50, "precondition: the slow hash must be measurable (#{first_ms} ms)"
+
+      {second_ms, 207} = timed_propfind(user.email, dav_password())
+      assert second_ms < first_ms / 3, "second login #{second_ms} ms vs first #{first_ms} ms"
+    end
+
+    test "CDV-103: a wrong password is still rejected after a cached success", %{user: user} do
+      user = slow_hash_user(user)
+      assert {_, 207} = timed_propfind(user.email, dav_password())
+      assert {_, 401} = timed_propfind(user.email, dav_password() <> "x")
+      assert {_, 207} = timed_propfind(user.email, dav_password())
+    end
+
+    test "CDV-103: changing the password invalidates a cached login", %{user: user} do
+      user = slow_hash_user(user)
+      assert {_, 207} = timed_propfind(user.email, dav_password())
+
+      new_hash = Pbkdf2.hash_pwd_salt("AnotherP@ssw0rd-123", rounds: 1)
+
+      Kith.Repo.update_all(
+        from(u in Kith.Accounts.User, where: u.id == ^user.id),
+        set: [hashed_password: new_hash]
+      )
+
+      assert {_, 401} = timed_propfind(user.email, dav_password())
+      assert {_, 207} = timed_propfind(user.email, "AnotherP@ssw0rd-123")
+    end
+
+    test "CDV-103: unconfirming the user stops a cached login", %{user: user} do
+      user = slow_hash_user(user)
+      assert {_, 207} = timed_propfind(user.email, dav_password())
+
+      Kith.Repo.update_all(from(u in Kith.Accounts.User, where: u.id == ^user.id),
+        set: [confirmed_at: nil]
+      )
+
+      assert {_, 401} = timed_propfind(user.email, dav_password())
     end
   end
 
