@@ -1,5 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// Machines whose Playwright-managed Chromium is missing or incomplete can point
+// at any compatible Chromium build (e.g. a cached chrome-headless-shell) with
+// PLAYWRIGHT_CHROMIUM_EXECUTABLE. Unset, Playwright's own browser is used.
+const chromium = {
+  ...devices["Desktop Chrome"],
+  channel: "chromium",
+  ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+    ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } }
+    : {}),
+};
+
 export default defineConfig({
   timeout: 30_000,
   outputDir: process.env.PLAYWRIGHT_OUTPUT_DIR ?? "test-results",
@@ -15,13 +26,13 @@ export default defineConfig({
     {
       name: "smoke",
       testDir: "./e2e",
-      use: { ...devices["Desktop Chrome"], channel: "chromium" },
+      use: chromium,
     },
     {
       name: "e2e",
       testDir: "./test/playwright",
       testMatch: "**/*.spec.ts",
-      use: { ...devices["Desktop Chrome"], channel: "chromium" },
+      use: chromium,
     },
   ],
 });

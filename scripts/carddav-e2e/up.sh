@@ -49,12 +49,26 @@ export PLAYWRIGHT_OUTPUT_DIR=$PLAYWRIGHT_OUTPUT_DIR
 export PLAYWRIGHT_BASE_URL=http://127.0.0.1:$PORT
 export DAV_SERVER_PID_FILE=$PID_FILE
 EOF
+if [ -n "${PLAYWRIGHT_CHROMIUM_EXECUTABLE:-}" ]; then
+  echo "export PLAYWRIGHT_CHROMIUM_EXECUTABLE=$PLAYWRIGHT_CHROMIUM_EXECUTABLE" >> "$ENV_FILE"
+fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 
 mix ecto.create
 mix ecto.migrate
 mix run test/playwright/carddav_seed.exs
+
+# The browser specs need the compiled CSS. On recent macOS the downloaded
+# tailwind binary can carry a signature the kernel rejects (SIGKILL, exit 137);
+# an ad-hoc signature makes it runnable without changing the pinned version.
+mix tailwind.install --if-missing
+for bin in _build/tailwind-*; do
+  if [ "$(uname)" = Darwin ] && ! codesign -v "$bin" > /dev/null 2>&1; then
+    codesign --force --sign - "$bin"
+  fi
+done
+mix assets.build
 
 nohup mix phx.server > "$LOG_FILE" 2>&1 &
 echo $! > "$PID_FILE"

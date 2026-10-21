@@ -11,6 +11,12 @@ MIX_TEST_PARTITION=_carddav mix test      # ExUnit, DB kith_test_carddav
 ```
 
 `PERF=1 scripts/carddav-e2e/up.sh` additionally seeds account E (2000 contacts).
+
+Browser specs (05, 06) need a launchable Chromium and the compiled CSS (R46):
+
+- If Playwright's own Chromium is missing or incomplete (here `chromium-1208` was a 428 KB partial download with no `INSTALLATION_COMPLETE`, and `npx playwright install chromium` stalled with no progress), point `PLAYWRIGHT_CHROMIUM_EXECUTABLE` at any compatible build. `playwright.config.ts` then passes it as `launchOptions.executablePath`; unset, nothing changes. Exported before `up.sh`, it is written into the env file. On this machine: `export PLAYWRIGHT_CHROMIUM_EXECUTABLE=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1248/chrome-headless-shell-mac-arm64/chrome-headless-shell`.
+- `up.sh` runs `mix tailwind.install --if-missing`, ad-hoc re-signs the tailwind binary when macOS rejects its signature (the upstream 4.1.12 binary failed `codesign -v`, so the kernel SIGKILLed it: `mix tailwind kith exited with 137`, then `/assets/css/app.css` 404), and runs `mix assets.build`.
+- `assets/vendor/heroicons.js` is gitignored and absent from fresh checkouts, so tailwind fails with `Can't resolve '../vendor/heroicons'`. Copy in the stock Phoenix 1.8 heroicons plugin (it reads `deps/heroicons/optimized`).
 Seeded users (password `ValidP@ssword123!`) are listed in `test/playwright/helpers/dav.ts`.
 
 ## Results matrix
@@ -114,11 +120,11 @@ All six fixtures (`v30-full`, `v40-full`, `apple-ios`, `davx5-android`, `thunder
 
 PHOTO policy: multiget is a complete card like GET; sync omits potentially large PHOTO. A subsequent sync PUT-back keeps the stored avatar. Native-only data is created through the authenticated API for V5 and verified afterwards; browser checks are limited to Unicode and avatar rendering.
 
-Run `source /tmp/kith-carddav-e2e.env && npx playwright test --project=e2e test/playwright/carddav/05-vcard.spec.ts --workers=1`. If Playwright's Chromium is unavailable, this spec accepts `PLAYWRIGHT_CHROMIUM_EXECUTABLE` for an existing compatible executable. Task6 used `/Users/basharqassis/.t3/tools/chrome-headless-shell/mac-arm64/154.0.8037.92/chrome-headless-shell`. The download of Playwright Chromium was incomplete and stopped; no dependency/build configuration changed.
+Run `source /tmp/kith-carddav-e2e.env && npx playwright test --project=e2e test/playwright/carddav/05-vcard.spec.ts --workers=1`. If Playwright's Chromium is unavailable, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` (now read by `playwright.config.ts` for every spec, R46). Task6 used `/Users/basharqassis/.t3/tools/chrome-headless-shell/mac-arm64/154.0.8037.92/chrome-headless-shell`. The download of Playwright Chromium was incomplete and stopped; no dependency/build configuration changed.
 
 Deploy `20261020220000_add_contact_dav_vcard` before the updated code. Existing contacts default to empty preservation metadata. Rollback drops that retained metadata. Ordinary non-DAV import does not acquire this DAV-specific preservation storage.
 
-Browser environment concern: `/assets/css/app.css` returns 404; the same missing artifact appeared in logs before Task6. `source /tmp/kith-carddav-e2e.env && mix assets.build` fails with `mix tailwind kith exited with 137`. All required browser interactions still pass. This is an isolated live-server build prerequisite for Task7, not a CardDAV defect; pinned versions and build config were left unchanged.
+Browser environment concern (resolved in Task 7, R46): `/assets/css/app.css` returned 404 because `mix tailwind kith` exited with 137 (macOS rejected the tailwind binary signature) and `assets/vendor/heroicons.js` was missing. See How to run.
 
 ## Bug log
 
@@ -299,5 +305,7 @@ Browser environment concern: `/assets/css/app.css` returns 404; the same missing
 - R44 — Retained N honorific prefix and suffix (components 4–5, which Kith does not store) decorate only the exact name they came with: while the native family, given and additional names (unescaped) equal the retained N's, the client's full N is served; after any native change to them N is served with empty prefix/suffix (CDV-93). Same rule as the retained FN (R34) — a UI rename is authoritative and Kith cannot tell whether the honorifics still apply — cost if wrong: a typo fix in the UI also drops the client's honorifics; the client can re-add them.
 
 - R45 (controller ruling; supersedes R43 for PUT) — A PUT replaces retained metadata except for what its vCard version cannot express (CDV-96): (1) a body line equal to how a retained line is served in that version keeps the retained line, so other-version parameters (4.0 `PID=`, `PREF=1`, `VALUE=uri`, `data:` URIs; 3.0 `CHARSET=`, `ENCODING=b`) survive when the value is unchanged; (2) a retained property with no form in the PUT's version (3.0 PUT: KIND, LANG, MEMBER, CLIENTPIDMAP, XML; 4.0 PUT: AGENT, NAME, MAILER, CLASS, PROFILE, SORT-STRING) is kept, in its old position, when the body has no property of that name; (3) ANNIVERSARY is served to 3.0 as Apple `itemN.X-ABDATE` + `itemN.X-ABLabel:_$!<Anniversary>!$_` (dates as YYYY-MM-DD) and that pair is served to 4.0 as ANNIVERSARY, so it is expressible in both and a 3.0 deletion deletes it. Output still drops what a version cannot express (R43). A client sharing the book in the other version cannot see what it cannot express, so its PUT cannot have meant to delete it — cost if wrong: such properties can be removed only by a client of the version that can express them.
+
+- R46 — Browser harness config (Task 7; not a CDV): `playwright.config.ts` keeps `channel: "chromium"` and adds `launchOptions.executablePath` only when `PLAYWRIGHT_CHROMIUM_EXECUTABLE` is set; `up.sh` writes that variable into the env file, ad-hoc re-signs a tailwind binary that fails `codesign -v` on macOS, and runs `mix assets.build`. Diagnosis: the managed `chromium-1208` was a 428 KB partial download (`browserType.launch: Target page, context or browser has been closed`), the CDN install stalled, and the cached `chromium_headless_shell-1248` launches fine with Playwright 1.58 — this avoids changing the pinned Playwright or tailwind versions and leaves other machines on their defaults — cost if wrong: a stale external executable could drift from the Playwright protocol; unset the variable to return to the default.
 
 ## Real-client smoke

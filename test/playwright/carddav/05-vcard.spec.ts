@@ -4,7 +4,6 @@ import { dav, propText, responseFor, runPrefix, assertWellFormedXml, USERS, vcar
 import { loginUser } from "../helpers/auth";
 
 test.describe.configure({ mode: "serial" });
-if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE) test.use({ launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } });
 const BOOK = "/dav/addressbooks/default/";
 const prefix = runPrefix();
 const headers = { "Content-Type": "text/vcard; charset=utf-8" };
