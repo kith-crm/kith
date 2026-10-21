@@ -122,14 +122,18 @@ defmodule Kith.Repo.Migrations.SyncTokensFromChangeLog do
     $$ LANGUAGE plpgsql
     """
 
+    # CDV-113: recreate the function exactly as 20261020180000 created it. The
+    # 20261020190000 down step drops `dav_sync_floors.seq` and `dav_change_seq`
+    # but keeps this trigger, so a version that referenced them broke every
+    # hard delete after a rollback past 190000.
     execute """
     CREATE FUNCTION contacts_record_dav_sync_floor() RETURNS trigger AS $$
     BEGIN
-      INSERT INTO dav_sync_floors (account_id, revision, xid, seq)
-      SELECT account_id, nextval('contacts_dav_revision_seq'), pg_current_xact_id(), nextval('dav_change_seq')
+      INSERT INTO dav_sync_floors (account_id, revision, xid)
+      SELECT account_id, nextval('contacts_dav_revision_seq'), pg_current_xact_id()
       FROM (SELECT DISTINCT account_id FROM deleted_contacts) AS accounts
       ON CONFLICT (account_id)
-      DO UPDATE SET revision = EXCLUDED.revision, xid = EXCLUDED.xid, seq = EXCLUDED.seq;
+      DO UPDATE SET revision = EXCLUDED.revision, xid = EXCLUDED.xid;
       RETURN NULL;
     END
     $$ LANGUAGE plpgsql
