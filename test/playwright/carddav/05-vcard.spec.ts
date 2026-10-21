@@ -21,7 +21,7 @@ type Expected = string | [string | null, string | null];
 const fullCommon: Expected[] = ["NICKNAME:Enchantress", "ORG:Analytical Engines;Research", "TITLE:Mathematician", "EMAIL;TYPE=HOME:ada@home.example.test", "EMAIL;TYPE=WORK,INTERNET:ada@work.example.test", "TEL;TYPE=CELL:+15550001111", "TEL;TYPE=WORK,VOICE:+15550002222", "URL;TYPE=HOME:https://ada.example.test/home", "URL;TYPE=WORK:https://ada.example.test/work", "IMPP;TYPE=HOME:xmpp:ada@example.test", "CATEGORIES:Computing,Friends\\, close", "X-CUSTOM:Keep me", ["KEY;ENCODING=b;TYPE=PGP:AAEC", "KEY:data:application/pgp-keys;base64,AAEC"]];
 const fixtures: Record<string, Expected[]> = {
   "v30-full": [...fullCommon, "BDAY:1815-12-10", ["ADR;TYPE=HOME:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK\r\n", "ADR;TYPE=HOME;LABEL=PO 42\\nLondon:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK\r\n"], ["LABEL;TYPE=HOME:PO 42\\nLondon", null], "ADR;TYPE=WORK:;Floor 3;20 Office St;Oxford;Oxon;OX1;UK\r\n", ["AGENT:BEGIN:VCARD\\nFN:Agent Smith\\nEND:VCARD", null], ["X-CHARSET;CHARSET=utf-8:Charset value", "X-CHARSET:Charset value"]],
-  "v40-full": [...fullCommon, "ADR;TYPE=HOME:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK\r\n", ["ADR;TYPE=WORK:;Floor 3;20 Office St;Oxford;Oxon;OX1;UK\r\nLABEL;TYPE=WORK:Floor 3\\, 20 Office St\\nOxford\r\n", 'ADR;TYPE=WORK;LABEL="Floor 3, 20 Office St\\nOxford":;Floor 3;20 Office St;Oxford;Oxon;OX1;UK\r\n'], ["EMAIL;TYPE=WORK:pid@example.test", "EMAIL;PID=1.1;TYPE=WORK:pid@example.test"], [null, "KIND:individual"], [null, "ANNIVERSARY:20100601"]],
+  "v40-full": [...fullCommon, "ADR;TYPE=HOME:PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK\r\n", ["ADR;TYPE=WORK:;Floor 3;20 Office St;Oxford;Oxon;OX1;UK\r\nLABEL;TYPE=WORK:Floor 3\\, 20 Office St\\nOxford\r\n", 'ADR;TYPE=WORK;LABEL="Floor 3, 20 Office St\\nOxford":;Floor 3;20 Office St;Oxford;Oxon;OX1;UK\r\n'], ["EMAIL;TYPE=WORK:pid@example.test", "EMAIL;PID=1.1;TYPE=WORK:pid@example.test"], [null, "KIND:individual"], [".X-ABDATE:2010-06-01", "ANNIVERSARY:20100601"], [".X-ABLabel:_$!<Anniversary>!$_", null]],
   "apple-ios": [`N:Apple;${prefix} Alice;;;`, `FN:${prefix} Alice Apple`, "item1.EMAIL;TYPE=INTERNET:alice@icloud.example.test", "item1.X-ABLabel:_$!<Home>!$_", "item2.TEL;TYPE=CELL:+15550003333", "item2.X-ABLabel:Mobile", "PRODID:-//Apple Inc.//iPhone OS 18.0//EN", `X-ABUID:${prefix}-apple-abuid`, `item3.X-SOCIALPROFILE;type=twitter;x-user=${prefix}-alice:https://twitter.com/${prefix}-alice`, "item3.X-ABLabel:Twitter"],
   "davx5-android": [`N:Android;${prefix} Amira;;;`, `FN:${prefix} Amira Android`, "PRODID:-//bitfire web engineering//DAVx5//EN", ["EMAIL;TYPE=WORK,PREF:amira@example.test", "EMAIL;TYPE=WORK;PREF=1:amira@example.test"], ["TEL;TYPE=CELL:+15550004444", "TEL;TYPE=CELL;VALUE=uri:tel:+15550004444"], "X-PHONETIC-FIRST-NAME:Amira", "IMPP:sip:amira@example.test"],
   "thunderbird": [`N:Thunderbird;${prefix} Theo;;;`, `FN:${prefix} Theo Thunderbird`, "PRODID:-//Mozilla.org/NONSGML Mozilla Addressbook//EN", ["EMAIL;TYPE=PREF:theo@example.test", "EMAIL;PREF=1:theo@example.test"], "URL:https://theo.example.test", "X-MOZILLA-HTML:TRUE"],
@@ -257,6 +257,22 @@ test("CDV-95: a BOM, trailing blanks on BEGIN/END and lone-CR line endings are a
     expect((await put(request, href, shape(vcard({ fn: `${prefix} Delim ${name}`, email: `${name}@example.test` })))).status).toBe(201);
     expect(unfold((await dav(request, "GET", href)).body)).toContain(`${name}@example.test`);
   }
+});
+test("CDV-96: an unchanged 3.0 PUT-back keeps 4.0-only data; Apple edits ANNIVERSARY as X-ABDATE", async ({ request }) => {
+  const href = `${BOOK}${prefix}-cross.vcf`; created.push(href);
+  const body = `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${prefix}-cross\r\nN:Cross;${prefix} Cy;;;\r\nFN:${prefix} Cy Cross\r\nKIND:individual\r\nANNIVERSARY:20100601\r\nEMAIL;PID=1.1;TYPE=work:cy@example.test\r\nCLIENTPIDMAP:1;urn:uuid:abc\r\nEND:VCARD\r\n`;
+  expect((await put(request, href, body)).status).toBe(201);
+  const four = (await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0" } })).body;
+  const three = (await dav(request, "GET", href)).body;
+  valid(three, "3.0");
+  expect(three).toMatch(/^(item\d+)\.X-ABDATE:2010-06-01\r\n\1\.X-ABLabel:_\$!<Anniversary>!\$_\r\n/m);
+  expect((await put(request, href, three)).status).toBe(204);
+  expect(withoutRev((await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0" } })).body)).toBe(withoutRev(four));
+  expect((await put(request, href, three.replace("X-ABDATE:2010-06-01", "X-ABDATE:2011-07-02"))).status).toBe(204);
+  const edited = unfold((await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0" } })).body);
+  expect(edited).toContain("ANNIVERSARY:20110702\r\n");
+  expect(edited).toContain("KIND:individual\r\n");
+  expect(edited).toContain("EMAIL;PID=1.1;TYPE=work:cy@example.test\r\n");
 });
 test("V3: unicode survives multiget and the web contact page", async ({ request, page }) => {
   const href = `${BOOK}${prefix}-unicode-folding.vcf`;

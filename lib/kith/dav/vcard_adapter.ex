@@ -84,6 +84,8 @@ defmodule Kith.DAV.VCardAdapter do
       impp: parsed.impp || [],
       photo: parsed.photo,
       vcard_metadata: %{
+        "version" =>
+          Enum.find_value(parsed.properties, &(&1["name"] == "VERSION" && &1["value"])),
         "properties" =>
           Enum.reject(parsed.properties, &(&1["name"] in ~w(BEGIN END VERSION UID REV PHOTO)))
       }

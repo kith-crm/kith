@@ -359,7 +359,7 @@ defmodule Kith.ContactsDAVTest do
     {:ok, _} = Contacts.put_dav_identity(target, %{dav_uid: "urn:uuid:cdv87-target"})
 
     body =
-      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Deleted;Dee;;;\r\nFN:Dee Deleted\r\nIMPP;TYPE=HOME:xmpp:dee@example.test\r\nRELATED;TYPE=friend:urn:uuid:cdv87-target\r\nitem1.TEL;TYPE=CELL:+15550009999\r\nitem1.X-ABLabel:Mobile\r\nitem2.X-ABDATE:2010-06-01\r\nitem2.X-ABLabel:_$!<Anniversary>!$_\r\nEMAIL;TYPE=WORK:keep@example.test\r\nEND:VCARD\r\n"
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Deleted;Dee;;;\r\nFN:Dee Deleted\r\nIMPP;TYPE=HOME:xmpp:dee@example.test\r\nRELATED;TYPE=friend:urn:uuid:cdv87-target\r\nitem1.TEL;TYPE=CELL:+15550009999\r\nitem1.X-ABLabel:Mobile\r\nitem2.X-ABDATE:2010-06-01\r\nitem2.X-ABLabel:_$!<Graduation>!$_\r\nEMAIL;TYPE=WORK:keep@example.test\r\nEND:VCARD\r\n"
 
     contact = dav_put(contact, aid, body)
     assert [_relationship] = Contacts.list_relationships(contact.id)
@@ -380,7 +380,7 @@ defmodule Kith.ContactsDAVTest do
       refute card =~ "RELATED"
       refute card =~ "item1."
       assert card =~ "item2.X-ABDATE:2010-06-01\r\n"
-      assert card =~ "item2.X-ABLabel:_$!<Anniversary>!$_\r\n"
+      assert card =~ "item2.X-ABLabel:_$!<Graduation>!$_\r\n"
       contact = dav_put(contact, aid, card)
 
       assert Enum.map(Contacts.list_contact_fields(contact.id), & &1.value) == [
@@ -558,6 +558,63 @@ defmodule Kith.ContactsDAVTest do
       refute card =~ "Friend"
       assert card =~ "item2.X-ABLabel:_$!<Home>!$_\r\n"
     end
+  end
+
+  test "CDV-96: a PUT keeps retained data its vCard version cannot express", %{
+    contact: contact,
+    account_id: aid
+  } do
+    v40 =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Cross;Cy;;;\r\nFN:Cy Cross\r\nKIND:individual\r\nANNIVERSARY:20100601\r\nEMAIL;PID=1.1;TYPE=work:cy@example.test\r\nCLIENTPIDMAP:1;urn:uuid:abc\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, v40)
+    three = dav_get(contact, :v30)
+    [_, group] = Regex.run(~r/^(item\d+)\.X-ABDATE:2010-06-01\r\n/m, three)
+    assert three =~ "#{group}.X-ABLabel:_$!<Anniversary>!$_\r\n"
+    refute three =~ ~r/KIND|ANNIVERSARY|CLIENTPIDMAP|PID=/
+
+    # An iPhone's unchanged 3.0 PUT-back keeps what 3.0 cannot express
+    contact = dav_put(contact, aid, three)
+    four = dav_get(contact, :v40)
+
+    for line <- [
+          "KIND:individual",
+          "ANNIVERSARY:20100601",
+          "EMAIL;PID=1.1;TYPE=work:cy@example.test",
+          "CLIENTPIDMAP:1;urn:uuid:abc"
+        ],
+        do: assert(four =~ line <> "\r\n")
+
+    refute four =~ "X-ABDATE"
+    assert dav_get(contact, :v30) == three
+
+    # Apple can edit and delete the anniversary through X-ABDATE
+    contact =
+      dav_put(contact, aid, String.replace(three, "X-ABDATE:2010-06-01", "X-ABDATE:2011-07-02"))
+
+    assert dav_get(contact, :v40) =~ "ANNIVERSARY:20110702\r\n"
+    refute dav_get(contact, :v40) =~ "20100601"
+
+    contact =
+      dav_put(contact, aid, String.replace(dav_get(contact, :v30), ~r/^#{group}\..*\r\n/m, ""))
+
+    refute dav_get(contact, :v40) =~ "ANNIVERSARY"
+    assert dav_get(contact, :v40) =~ "KIND:individual\r\n"
+
+    # A 4.0 PUT may delete 4.0 data
+    contact =
+      dav_put(contact, aid, String.replace(dav_get(contact, :v40), "KIND:individual\r\n", ""))
+
+    refute dav_get(contact, :v40) =~ "KIND"
+
+    # Symmetric: a 4.0 PUT keeps 3.0-only data
+    v30 =
+      "BEGIN:VCARD\r\nVERSION:3.0\r\nN:Three;Tia;;;\r\nFN:Tia Three\r\nAGENT:BEGIN:VCARD\\nFN:Agent\\nEND:VCARD\r\nMAILER:PigeonMail\r\nX-CUSTOM;CHARSET=utf-8:opaque\r\nEND:VCARD\r\n"
+
+    contact = dav_put(contact, aid, v30)
+    three = dav_get(contact, :v30)
+    contact = dav_put(contact, aid, dav_get(contact, :v40))
+    assert dav_get(contact, :v30) == three
   end
 
   defp dav_put(contact, aid, body) do

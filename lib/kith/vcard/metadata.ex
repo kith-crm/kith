@@ -51,6 +51,7 @@ defmodule Kith.VCard.Metadata do
 
     (body ++ extras ++ [ending])
     |> Enum.flat_map(&version_syntax(&1, version))
+    |> anniversaries(version)
     |> delivery_labels(version)
     |> Enum.map(fn line ->
       line |> convert(version) |> telephone_value(version) |> declare_identifier_type(version)
@@ -63,11 +64,146 @@ defmodule Kith.VCard.Metadata do
   # 4.0 ADR LABEL=, ENCODING=b ↔ data: URI) and dropped otherwise.
 
   @v30_only ~w(AGENT NAME MAILER CLASS PROFILE SORT-STRING)
-  @v40_only ~w(KIND GENDER ANNIVERSARY LANG MEMBER CLIENTPIDMAP XML)
+  @v40_only ~w(KIND GENDER LANG MEMBER CLIENTPIDMAP XML)
+  @anniversary "_$!<Anniversary>!$_"
+  @v40_carried ~w(KIND LANG MEMBER CLIENTPIDMAP XML)
   @v30_params ~w(CHARSET)
   @v40_params ~w(PID ALTID CALSCALE SORT-AS GEO TZ MEDIATYPE INDEX LEVEL CC)
   @v30_uri ~w(PHOTO LOGO SOUND AGENT)
   @media %{"PGP" => "application/pgp-keys", "X509" => "application/pkix-cert"}
+
+  @doc """
+  Retained metadata after a PUT (R45, CDV-96). The PUT replaces it, except
+  for what the PUT's vCard version cannot express: a retained property with
+  no form in that version and no counterpart in the body is kept, and a body
+  line that is exactly how a retained line is served in that version keeps
+  the retained line (with its other-version parameters, e.g. 4.0 `PID=`).
+  """
+  def carry_over(old, %{"version" => v, "properties" => new} = metadata) when is_binary(v) do
+    version = if String.starts_with?(v, "4"), do: :v40, else: :v30
+    old = Map.get(old || %{}, "properties", [])
+    new = if version == :v30, do: unchanged_anniversary(new, old), else: new
+    indexed_old = Enum.with_index(old)
+
+    {new, unused} =
+      new
+      |> Enum.with_index()
+      |> Enum.map_reduce(indexed_old, &keep_served(&1, &2, version))
+
+    names = MapSet.new(new, fn {property, _n, _i} -> property["name"] end)
+    inexpressible = if version == :v30, do: @v40_carried, else: @v30_only
+
+    # A kept property goes back after the body line that replaced its retained
+    # predecessor, so an unchanged PUT-back keeps the order.
+    anchors = for {_property, n, i} <- new, i != nil, do: {i, n}
+
+    carried =
+      for {property, i} <- unused,
+          property["name"] in inexpressible,
+          not MapSet.member?(names, property["name"]) do
+        anchor =
+          anchors
+          |> Enum.filter(fn {j, _n} -> j < i end)
+          |> Enum.map(&elem(&1, 1))
+          |> Enum.max(fn -> -1 end)
+
+        {{anchor, 1, i}, property}
+      end
+
+    properties =
+      (Enum.map(new, fn {property, n, _i} -> {{n, 0, 0}, property} end) ++ carried)
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map(&elem(&1, 1))
+
+    %{metadata | "properties" => properties}
+  end
+
+  def carry_over(_old, metadata), do: metadata
+
+  defp keep_served({property, n}, old, version) do
+    case Enum.find(old, fn {retained, _i} -> served_as(retained, version) == render(property) end) do
+      nil ->
+        {{property, n, nil}, old}
+
+      {retained, i} = match ->
+        {{without_label_param(retained, version), n, i}, List.delete(old, match)}
+    end
+  end
+
+  # An Apple X-ABDATE anniversary pair that still holds the retained 4.0
+  # ANNIVERSARY's date stands for that property.
+  defp unchanged_anniversary(new, old) do
+    with %{} = retained <- Enum.find(old, &(&1["name"] == "ANNIVERSARY")),
+         %{} = label <-
+           Enum.find(new, &(&1["name"] == "X-ABLABEL" and &1["value"] == @anniversary)),
+         group when is_binary(group) <- group(label["head"]),
+         %{} = date <- Enum.find(new, &(&1["name"] == "X-ABDATE" and group(&1["head"]) == group)),
+         [served, _label] <- anniversaries([render(retained)], :v30),
+         true <- value(served) == date["value"] do
+      new |> List.delete(label) |> Enum.map(&if(&1 == date, do: retained, else: &1))
+    else
+      _ -> new
+    end
+  end
+
+  defp served_as(property, version) do
+    case property |> without_label_param(version) |> render() |> version_syntax(version) do
+      [line] -> line |> convert(version) |> telephone_value(version)
+      _ -> nil
+    end
+  end
+
+  # A 3.0 body carries an ADR's delivery label as its own LABEL property.
+  defp without_label_param(%{"name" => "ADR", "head" => head} = property, :v30) do
+    [name | params] = Parser.split_params(head)
+
+    %{
+      property
+      | "head" => Enum.join([name | Enum.reject(params, &(param_key(&1) == "LABEL"))], ";")
+    }
+  end
+
+  defp without_label_param(property, _version), do: property
+
+  # 4.0 ANNIVERSARY is Apple's grouped `X-ABDATE` labelled `_$!<Anniversary>!$_`
+  # in 3.0, and that pair is ANNIVERSARY again in 4.0 (R45).
+  defp anniversaries(lines, :v30) do
+    Enum.flat_map(lines, fn line ->
+      if property_name(line) == "ANNIVERSARY" do
+        {_head, value} = Parser.split_line(line)
+        group = free_group(lines)
+        date = Regex.replace(~r/\A(\d{4})(\d{2})(\d{2})\z/, value, "\\1-\\2-\\3")
+        ["#{group}.X-ABDATE:#{date}", "#{group}.X-ABLabel:#{@anniversary}"]
+      else
+        [line]
+      end
+    end)
+  end
+
+  defp anniversaries(lines, :v40) do
+    group =
+      Enum.find_value(lines, fn line ->
+        property_name(line) == "X-ABLABEL" and value(line) == @anniversary and group(line)
+      end)
+
+    date = group && Enum.find(lines, &(property_name(&1) == "X-ABDATE" and group(&1) == group))
+
+    if date && not Enum.any?(lines, &(property_name(&1) == "ANNIVERSARY")) do
+      basic = Regex.replace(~r/\A(\d{4})-(\d{2})-(\d{2})\z/, value(date), "\\1\\2\\3")
+
+      lines
+      |> Enum.reject(&(group(&1) == group and property_name(&1) == "X-ABLABEL"))
+      |> Enum.map(&if(&1 == date, do: "ANNIVERSARY:" <> basic, else: &1))
+    else
+      lines
+    end
+  end
+
+  defp free_group(lines) do
+    used = MapSet.new(lines, &group/1)
+    n = Stream.iterate(1, &(&1 + 1)) |> Enum.find(&(not MapSet.member?(used, "item#{&1}")))
+    "item#{n}"
+  end
 
   defp version_syntax(line, version) do
     {head, value} = Parser.split_line(line)

@@ -34,7 +34,7 @@ defmodule Kith.Contacts do
 
   alias Kith.Activities.{Activity, Call}
   alias Kith.Storage
-  alias Kith.VCard.Serializer
+  alias Kith.VCard.{Metadata, Serializer}
 
   require Logger
 
@@ -1595,6 +1595,8 @@ defmodule Kith.Contacts do
       end
 
       if metadata = Map.get(nested_data, :vcard_metadata) do
+        # R45: keep retained data this PUT's vCard version cannot express (CDV-96)
+        metadata = Metadata.carry_over(contact.dav_vcard, metadata)
         contact |> Ecto.Changeset.change(dav_vcard: metadata) |> Repo.update!()
       end
 
