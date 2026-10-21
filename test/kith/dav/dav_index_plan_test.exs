@@ -10,7 +10,10 @@ defmodule Kith.DAV.IndexPlanTest do
   # then shows which index the query *can* use.
   defp plan(sql, params_fun) do
     account_id = seed_contacts()
-    params = params_fun.(account_id)
+    plan_sql(sql, params_fun.(account_id))
+  end
+
+  defp plan_sql(sql, params) do
     Repo.query!("SET LOCAL enable_seqscan = off")
     Repo.query!("SET LOCAL enable_bitmapscan = off")
     "EXPLAIN " |> Kernel.<>(sql) |> Repo.query!(params) |> Map.fetch!(:rows) |> Enum.join("\n")
@@ -51,6 +54,20 @@ defmodule Kith.DAV.IndexPlanTest do
         )
 
       assert plan =~ ~r/Index Cond:[^\n]*dav_uid/, plan
+    end
+  end
+
+  describe "RELATED resolution" do
+    test "CDV-105: both the UUID and the text-UID lookup are answered from an index" do
+      account_id = seed_contacts()
+
+      for uid <- ["urn:uuid:7a6c5a7e-0000-4000-8000-000000000001", "kith-text-uid"] do
+        {sql, params} =
+          account_id |> Kith.Contacts.related_contact_query(uid) |> then(&Repo.to_sql(:all, &1))
+
+        plan = plan_sql(sql, params)
+        assert plan =~ ~r/Index Cond:[^\n]*regexp_replace/, plan
+      end
     end
   end
 end

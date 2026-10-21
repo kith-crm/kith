@@ -1792,23 +1792,23 @@ defmodule Kith.Contacts do
   # hex digits compare case-insensitively (RFC 8141 §3.1, RFC 4122 §3); any
   # other text UID keeps its exact value (CDV-102).
   defp related_contact_by_uid(account_id, uid) do
+    by_uid = account_id |> related_contact_query(uid) |> Repo.one()
+    by_uid || default_related_contact(account_id, uid)
+  end
+
+  # The case-folded comparison is what the expression index
+  # `contacts_account_id_dav_uid_bare_index` answers (CDV-105); a text UID then
+  # also has to match exactly, which can only narrow the indexed candidates.
+  @doc false
+  def related_contact_query(account_id, uid) do
     bare = String.replace(uid, ~r/\Aurn:uuid:/i, "")
 
-    same_uid =
-      if Regex.match?(~r/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i, bare) do
-        dynamic(
-          [c],
-          fragment("lower(regexp_replace(?, '^urn:uuid:', '', 'i'))", c.dav_uid) ==
-            ^String.downcase(bare)
-        )
-      else
-        dynamic([c], fragment("regexp_replace(?, '^urn:uuid:', '', 'i')", c.dav_uid) == ^bare)
-      end
-
-    by_uid =
+    query =
       from(c in Contact,
         where: c.account_id == ^account_id and not is_nil(c.dav_uid),
-        where: ^same_uid,
+        where:
+          fragment("lower(regexp_replace(?, '^urn:uuid:', '', 'i'))", c.dav_uid) ==
+            ^String.downcase(bare),
         order_by: [
           desc: c.dav_uid == ^uid,
           asc: c.is_archived,
@@ -1816,9 +1816,12 @@ defmodule Kith.Contacts do
         ],
         limit: 1
       )
-      |> Repo.one()
 
-    by_uid || default_related_contact(account_id, uid)
+    if Regex.match?(~r/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i, bare) do
+      query
+    else
+      where(query, [c], fragment("regexp_replace(?, '^urn:uuid:', '', 'i')", c.dav_uid) == ^bare)
+    end
   end
 
   defp default_related_contact(account_id, uid) do
