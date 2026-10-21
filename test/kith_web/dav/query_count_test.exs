@@ -143,4 +143,44 @@ defmodule KithWeb.DAV.QueryCountTest do
                "#{length(many_queries)} for 50: #{extra_queries(many_queries, few_queries)}"
     end
   end
+
+  describe "PUT" do
+    defp put_card(context, name, lines) do
+      body =
+        Enum.join(
+          ["BEGIN:VCARD", "VERSION:3.0", "FN:Many Values", "N:Values;Many;;;"] ++
+            lines ++ ["END:VCARD"],
+          "\r\n"
+        ) <> "\r\n"
+
+      authed_dav(context, "PUT", @book <> name, body)
+    end
+
+    for {kind, line} <- [
+          {"EMAIL", "EMAIL:qc@N@example.test"},
+          {"TEL", "TEL;TYPE=CELL:+1555000@N@"},
+          {"URL", "URL:https://example.test/@N@"}
+        ] do
+      test "CDV-107: a PUT's query count does not grow with its #{kind} lines", context do
+        template = unquote(line)
+        line = &String.replace(template, "@N@", to_string(&1))
+        kind = unquote(kind)
+
+        queries = fn name, n ->
+          assert put_card(context, "warm-#{name}.vcf", []).status == 201
+
+          count_queries(fn ->
+            assert put_card(context, name, Enum.map(1..n, line)).status == 201
+          end)
+        end
+
+        few = queries.("few-#{kind}.vcf", 5)
+        many = queries.("many-#{kind}.vcf", 60)
+
+        assert length(many) == length(few),
+               "#{kind}: #{length(few)} queries for 5 lines, #{length(many)} for 60: " <>
+                 extra_queries(many, few)
+      end
+    end
+  end
 end

@@ -1556,19 +1556,33 @@ defmodule Kith.Contacts do
     if field_type do
       # A blank value (`EMAIL:`) is skipped; an unstorable one rolls back the
       # caller's transaction instead of raising (CDV-21).
+      now = DateTime.utc_now(:second)
+
       fields
       |> Enum.reject(fn %{value: value} -> is_nil(value) or String.trim(value) == "" end)
-      |> Enum.each(fn %{value: value, label: label} ->
-        %ContactField{}
-        |> ContactField.changeset(%{
-          value: value,
-          label: label,
-          contact_id: contact.id,
-          account_id: account_id,
-          contact_field_type_id: field_type.id
-        })
-        |> insert_or_rollback()
-      end)
+      |> Enum.map(&contact_field_row(&1, contact.id, account_id, field_type.id, now))
+      |> Enum.chunk_every(2000)
+      |> Enum.each(&Repo.insert_all(ContactField, &1))
+    end
+  end
+
+  defp contact_field_row(%{value: value, label: label}, contact_id, account_id, type_id, now) do
+    changeset =
+      ContactField.changeset(%ContactField{}, %{
+        value: value,
+        label: label,
+        contact_id: contact_id,
+        account_id: account_id,
+        contact_field_type_id: type_id
+      })
+
+    if changeset.valid? do
+      changeset
+      |> Ecto.Changeset.apply_changes()
+      |> Map.take([:value, :label, :contact_id, :account_id, :contact_field_type_id])
+      |> Map.merge(%{inserted_at: now, updated_at: now})
+    else
+      Repo.rollback(changeset)
     end
   end
 
