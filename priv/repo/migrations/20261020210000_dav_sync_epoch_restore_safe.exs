@@ -4,10 +4,12 @@ defmodule Kith.Repo.Migrations.DavSyncEpochRestoreSafe do
   # CDV-56: the sync epoch must also change on an in-place logical restore
   # (`pg_restore --clean` into the same database), which keeps the cluster id,
   # timeline and database oid. Such a restore drops and recreates the change
-  # log and its sequence, so their oids are folded in (pg_upgrade preserves
-  # relation oids, so an upgrade does not force a resync). For anything the
-  # database cannot see (a PITR on a host without pg_control rights), an
-  # operator rotates the epoch with `SELECT kith_dav_rotate_sync_epoch();`.
+  # log and its sequence, so their oids are folded in. pg_upgrade preserves
+  # relation oids, but it creates a new cluster with a new system identifier,
+  # so an upgrade still changes the epoch and every client resyncs once. For
+  # anything the database cannot see (a PITR on a host without pg_control
+  # rights), an operator rotates the epoch with
+  # `SELECT kith_dav_rotate_sync_epoch();`.
   def up do
     create table(:dav_sync_epoch_salt, primary_key: false) do
       add :salt, :text, null: false
