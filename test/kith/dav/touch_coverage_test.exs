@@ -278,4 +278,30 @@ defmodule Kith.DAV.TouchCoverageTest do
     assert Repo.get!(ContactDav, c.a.id).revision > before[c.a.id]
     assert Repo.get!(ContactDav, c.b.id).revision == before[c.b.id]
   end
+
+  test "merge touches incoming loser owners and leaves unrelated contacts unchanged", c do
+    owner = contact_fixture(c.account)
+    control = contact_fixture(c.account)
+    relationship_fixture(owner, c.b, c.rt.id)
+    Store.ensure_rows(c.account)
+    before_owner = Repo.get!(ContactDav, owner.id).revision
+    before_control = Repo.get!(ContactDav, control.id).revision
+    assert {:ok, _} = Contacts.merge_contacts(c.a.id, c.b.id)
+    assert Repo.get!(ContactDav, owner.id).revision > before_owner
+    assert Repo.get!(ContactDav, control.id).revision == before_control
+  end
+
+  test "merge name resolution touches incoming survivor owners", c do
+    owner = contact_fixture(c.account)
+    relationship_fixture(owner, c.a, c.rt.id)
+    {:ok, loser} = Contacts.update_contact(c.b, %{first_name: "Resolved name"})
+    Store.ensure_rows(c.account)
+    before = Repo.get!(ContactDav, owner.id).revision
+
+    assert {:ok, survivor} =
+             Contacts.merge_contacts(c.a.id, loser.id, %{"first_name" => "non_survivor"})
+
+    assert survivor.first_name == "Resolved name"
+    assert Repo.get!(ContactDav, owner.id).revision > before
+  end
 end

@@ -119,7 +119,7 @@ defmodule Kith.Contacts.Merge do
   values fail changeset validation on the survivor.
   """
   def run(scope, survivor_id, loser_ids, resolution) do
-    Repo.transaction(fn ->
+    Kith.DAV.Store.transaction(scope.account.id, fn ->
       with {:ok, members} <- lock_and_load(scope, survivor_id, loser_ids),
            survivor = Enum.find(members, &(&1.id == survivor_id)),
            {:ok, resolution} <- validate_fields(members, resolution),
@@ -132,8 +132,8 @@ defmodule Kith.Contacts.Merge do
   end
 
   # Everything below this point runs inside the `SELECT ... FOR UPDATE`
-  # transaction opened by `run/4` above — the lock and every validation and
-  # write must stay inside that one enclosing `Repo.transaction`.
+  # account transaction opened by `run/4` above — the lock and every validation
+  # and write must stay inside that one enclosing transaction.
   defp run_merge(scope, members, survivor, resolution) do
     losers = Enum.reject(members, &(&1.id == survivor.id))
 
@@ -142,6 +142,16 @@ defmodule Kith.Contacts.Merge do
     # and every dropped row's owner_id would read back as the survivor
     # regardless of which member actually held it.
     member_ids = Enum.map(members, & &1.id)
+    account_id = scope.account.id
+
+    incoming_owner_ids =
+      Repo.all(
+        from(r in Kith.Contacts.Relationship,
+          where: r.account_id == ^account_id and r.related_contact_id in ^member_ids,
+          select: r.contact_id
+        )
+      )
+
     dropped_records = describe_dropped(Repo, resolution, member_ids)
 
     # A dropped record owned by a loser must not be remapped onto the
@@ -162,7 +172,7 @@ defmodule Kith.Contacts.Merge do
     |> Repo.transaction()
     |> case do
       {:ok, %{last_talked_to: survivor, remap_first_met_reminders: first_met}} ->
-        Kith.DAV.Store.touch(survivor.account_id, member_ids)
+        Kith.DAV.Store.touch(survivor.account_id, Enum.uniq(member_ids ++ incoming_owner_ids))
         # The first-met step may have carried the opt-in flag onto the
         # survivor after `:survivor` was read, so fold it into the result.
         %{survivor | first_met_reminder: first_met.first_met_reminder}
