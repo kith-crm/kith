@@ -65,7 +65,8 @@ defmodule Kith.VCard.Parser do
   end
 
   defp split_vcards(data) do
-    ~r/BEGIN:VCARD\n(.*?)END:VCARD/si
+    # Escaped AGENT values can contain delimiter text within a property line.
+    ~r/^[ \t]*BEGIN:VCARD[ \t]*\n(.*?)^[ \t]*END:VCARD[ \t]*$/msi
     |> Regex.scan(data, capture: :all_but_first)
     |> Enum.map(&List.first/1)
     |> Enum.reject(&is_nil/1)
@@ -105,13 +106,23 @@ defmodule Kith.VCard.Parser do
       photo: nil
     }
 
-    Enum.reduce(lines, base, &parse_line/2)
+    lines |> Enum.reduce(base, &parse_line/2) |> in_document_order()
+  end
+
+  # Prepend while parsing and restore document order once to keep parsing linear.
+  @ordered_lists [:phones, :emails, :addresses, :urls, :impp, :related]
+
+  defp in_document_order(acc) do
+    Enum.reduce(@ordered_lists, acc, fn key, acc -> Map.update!(acc, key, &Enum.reverse/1) end)
   end
 
   defp parse_line(line, acc) do
     case parse_property(line) do
-      {name, params, value} -> apply_property(acc, name, params, value)
-      _ -> acc
+      {name, params, value} ->
+        apply_property(acc, name, params, value)
+
+      _ ->
+        acc
     end
   end
 
@@ -119,7 +130,7 @@ defmodule Kith.VCard.Parser do
     do: %{acc | display_name: unescape(value)}
 
   defp apply_property(acc, "N", _params, value) do
-    parts = String.split(value, ";", parts: 5)
+    parts = split_components(value, ";") |> Enum.take(5)
     last = Enum.at(parts, 0) |> unescape_or_nil()
     first = Enum.at(parts, 1) |> unescape_or_nil()
     middle = Enum.at(parts, 2) |> unescape_or_nil()
@@ -129,16 +140,20 @@ defmodule Kith.VCard.Parser do
   defp apply_property(acc, "NICKNAME", _params, value),
     do: %{acc | nickname: unescape(value)}
 
-  defp apply_property(acc, name, _params, "--" <> value) when name in ["BDAY", "X-KITH-BDAY"] do
-    date = parse_date("2000" <> String.replace(value, "-", ""))
-    %{acc | birthdate: date, birthdate_year_unknown: not is_nil(date)}
+  defp apply_property(acc, name, params, value) when name in ["BDAY", "X-KITH-BDAY"] do
+    date = parse_date(value)
+
+    year_unknown =
+      date != nil and (String.starts_with?(value, "--") or apple_omit_year?(params, date))
+
+    # Apple's omitted-year syntax uses a placeholder year, not a real birth year.
+    date = if year_unknown, do: Date.new!(2000, date.month, date.day), else: date
+
+    %{acc | birthdate: date, birthdate_year_unknown: year_unknown}
   end
 
-  defp apply_property(acc, "BDAY", _params, value),
-    do: %{acc | birthdate: parse_date(value)}
-
   defp apply_property(acc, "ORG", _params, value) do
-    company = value |> String.split(";") |> List.first() |> unescape()
+    company = value |> split_components(";") |> List.first() |> unescape()
     %{acc | company: company}
   end
 
@@ -153,34 +168,34 @@ defmodule Kith.VCard.Parser do
 
   defp apply_property(acc, "TEL", params, value) do
     label = extract_type(params)
-    %{acc | phones: acc.phones ++ [%{value: unescape(value), label: label}]}
+    %{acc | phones: [%{value: value |> unescape() |> phone_value(), label: label} | acc.phones]}
   end
 
   defp apply_property(acc, "EMAIL", params, value) do
     label = extract_type(params)
-    %{acc | emails: acc.emails ++ [%{value: unescape(value), label: label}]}
+    %{acc | emails: [%{value: unescape(value), label: label} | acc.emails]}
   end
 
   defp apply_property(acc, "ADR", params, value) do
     label = extract_type(params)
     addr = parse_address(value, label)
-    %{acc | addresses: acc.addresses ++ [addr]}
+    %{acc | addresses: [addr | acc.addresses]}
   end
 
   defp apply_property(acc, "URL", params, value) do
     label = extract_type(params)
-    %{acc | urls: acc.urls ++ [%{value: unescape(value), label: label}]}
+    %{acc | urls: [%{value: unescape(value), label: label} | acc.urls]}
   end
 
   defp apply_property(acc, "IMPP", params, value) do
     label = extract_type(params)
-    %{acc | impp: acc.impp ++ [%{value: unescape(value), label: label}]}
+    %{acc | impp: [%{value: unescape(value), label: label} | acc.impp]}
   end
 
   defp apply_property(acc, name, params, value)
        when name in ["X-SOCIALPROFILE", "X-TWITTER", "X-INSTAGRAM"] do
     label = extract_type(params) || social_label(name)
-    %{acc | urls: acc.urls ++ [%{value: unescape(value), label: label}]}
+    %{acc | urls: [%{value: unescape(value), label: label} | acc.urls]}
   end
 
   defp apply_property(acc, "CATEGORIES", _params, value) do
@@ -199,9 +214,12 @@ defmodule Kith.VCard.Parser do
     %{acc | gender_text: unescape(value)}
   end
 
+  defp apply_property(acc, "X-KITH-RELATED", params, value),
+    do: apply_property(acc, "RELATED", params, value)
+
   defp apply_property(acc, "RELATED", params, value) do
     type = extract_type(params) || "contact"
-    %{acc | related: acc.related ++ [%{value: unescape(value), type: type}]}
+    %{acc | related: [%{value: unescape(value), type: type} | acc.related]}
   end
 
   defp apply_property(acc, "REV", _params, value),
@@ -216,39 +234,84 @@ defmodule Kith.VCard.Parser do
   # ── Property Parsing ───────────────────────────────────────────────────
 
   defp parse_property(line) do
-    case String.split(line, ":", parts: 2) do
-      [name_and_params, value] ->
-        {name, params} = parse_name_params(name_and_params)
-        {String.upcase(name), params, value}
+    case split_line(line) do
+      {name_and_params, value} when is_binary(value) ->
+        [name | params] = split_params(name_and_params)
+        {name |> String.split(".") |> List.last() |> String.upcase(), parse_params(params), value}
 
       _ ->
         nil
     end
   end
 
-  defp parse_name_params(str) do
-    case String.split(str, ";", parts: 2) do
-      [name] -> {name, %{}}
-      [name, params_str] -> {name, parse_params(params_str)}
+  # Quoted parameter values may contain separators, so split outside quotes.
+
+  @doc false
+  def split_line(line) do
+    case split_unquoted(line, ?:, 2) do
+      [head, value] ->
+        {head, value}
+
+      # An unbalanced quote: fall back to the first colon rather than lose the value
+      [head] ->
+        case String.split(head, ":", parts: 2) do
+          [head, value] -> {head, value}
+          [head] -> {head, nil}
+        end
     end
   end
 
-  defp parse_params(str) do
-    str
-    |> String.split(";")
-    |> Enum.reduce(%{}, fn param, acc ->
-      case String.split(param, "=", parts: 2) do
-        [key, value] -> Map.put(acc, String.upcase(key), value)
+  @doc false
+  def split_params(head), do: split_unquoted(head, ?;, :infinity)
+
+  @doc "Parameter `{KEY, values}` pairs of a property head, values unquoted."
+  def params(head), do: head |> split_params() |> tl() |> param_pairs()
+
+  defp param_pairs(params) do
+    Enum.map(params, fn param ->
+      case split_unquoted(param, ?=, 2) do
+        [key, value] -> {String.upcase(key), param_values(value)}
         # Bare parameter (vCard 2.1 style): e.g., TEL;CELL:...
-        [bare] -> Map.put(acc, "TYPE", bare)
+        [bare] -> {"TYPE", [bare]}
       end
     end)
+  end
+
+  # A quoted TYPE list (`TYPE="work,voice"`) is still a list of values.
+  defp param_values(value), do: value |> String.replace("\"", "") |> String.split(",")
+
+  defp split_unquoted(string, separator, parts),
+    do: split_unquoted(string, separator, parts, false, [], [])
+
+  defp split_unquoted(<<>>, _separator, _parts, _quoted, current, acc),
+    do: Enum.reverse([current |> Enum.reverse() |> IO.iodata_to_binary() | acc])
+
+  defp split_unquoted(rest, _separator, parts, _quoted, current, acc)
+       when parts != :infinity and length(acc) == parts - 1,
+       do: Enum.reverse([IO.iodata_to_binary([Enum.reverse(current), rest]) | acc])
+
+  defp split_unquoted(<<?", rest::binary>>, separator, parts, quoted, current, acc),
+    do: split_unquoted(rest, separator, parts, not quoted, [?" | current], acc)
+
+  defp split_unquoted(<<separator, rest::binary>>, separator, parts, false, current, acc),
+    do:
+      split_unquoted(rest, separator, parts, false, [], [
+        current |> Enum.reverse() |> IO.iodata_to_binary() | acc
+      ])
+
+  defp split_unquoted(<<byte, rest::binary>>, separator, parts, quoted, current, acc),
+    do: split_unquoted(rest, separator, parts, quoted, [byte | current], acc)
+
+  defp parse_params(params) do
+    params
+    |> param_pairs()
+    |> Enum.reduce(%{}, fn {key, values}, acc -> Map.put(acc, key, Enum.join(values, ",")) end)
   end
 
   # ── Address Parsing ────────────────────────────────────────────────────
 
   defp parse_address(value, label) do
-    parts = String.split(value, ";", parts: 7)
+    parts = split_components(value, ";") |> Enum.take(7)
 
     %{
       label: label,
@@ -305,9 +368,30 @@ defmodule Kith.VCard.Parser do
 
   # ── Helpers ────────────────────────────────────────────────────────────
 
-  defp split_unescaped(str, delimiter) do
-    Regex.split(~r/(?<!\\)#{Regex.escape(delimiter)}/, str)
+  @doc false
+  def split_components(value, <<delimiter>>) do
+    split_components(value, delimiter, [], [])
   end
+
+  defp split_components(<<>>, _delimiter, current, parts),
+    do: Enum.reverse([current |> Enum.reverse() |> IO.iodata_to_binary() | parts])
+
+  defp split_components(<<92, escaped, rest::binary>>, delimiter, current, parts),
+    do: split_components(rest, delimiter, [<<92, escaped>> | current], parts)
+
+  defp split_components(<<delimiter, rest::binary>>, delimiter, current, parts),
+    do:
+      split_components(rest, delimiter, [], [
+        current |> Enum.reverse() |> IO.iodata_to_binary() | parts
+      ])
+
+  defp split_components(<<byte, rest::binary>>, delimiter, current, parts),
+    do: split_components(rest, delimiter, [<<byte>> | current], parts)
+
+  defp split_unescaped(value, delimiter), do: split_components(value, delimiter)
+
+  @doc false
+  def phone_value(value), do: String.replace(value, ~r/\Atel:/i, "")
 
   defp extract_type(params) do
     case Map.get(params, "TYPE") do
@@ -326,6 +410,15 @@ defmodule Kith.VCard.Parser do
   defp social_label("X-TWITTER"), do: "Twitter"
   defp social_label("X-INSTAGRAM"), do: "Instagram"
   defp social_label(_), do: nil
+
+  # The year Apple writes for "no year" (`X-APPLE-OMIT-YEAR=1604`); a card with
+  # the parameter naming a different year keeps its real year.
+  defp apple_omit_year?(params, %Date{year: year}) do
+    case Map.get(params, "X-APPLE-OMIT-YEAR") do
+      nil -> year == 1604
+      omitted -> String.trim(omitted, "\"") == Integer.to_string(year)
+    end
+  end
 
   defp parse_date(str) do
     str = String.trim(str)
@@ -349,9 +442,10 @@ defmodule Kith.VCard.Parser do
           _ -> nil
         end
 
-      # vCard 4.0 with dashes but no year: --0615
+      # A leap-safe placeholder stores month/day; the separate flag prevents
+      # exposing this implementation year to clients or age calculations.
       String.match?(str, ~r/^--\d{4}$/) ->
-        nil
+        parse_date("2000" <> String.replace_prefix(str, "--", ""))
 
       true ->
         nil
@@ -364,12 +458,9 @@ defmodule Kith.VCard.Parser do
   def unescape(nil), do: nil
 
   def unescape(value) do
-    value
-    |> String.replace("\\n", "\n")
-    |> String.replace("\\N", "\n")
-    |> String.replace("\\;", ";")
-    |> String.replace("\\,", ",")
-    |> String.replace("\\\\", "\\")
+    Regex.replace(~r/\\([\\nN;,])/, value, fn _, escaped ->
+      if escaped in ["n", "N"], do: "\n", else: escaped
+    end)
   end
 
   defp unescape_or_nil(nil), do: nil

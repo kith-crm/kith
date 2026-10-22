@@ -1857,11 +1857,12 @@ defmodule Kith.Contacts do
   @doc false
   def dav_preloads do
     [
+      :dav,
       :addresses,
       :gender,
       :tags,
       contact_fields: :contact_field_type,
-      relationships: [:relationship_type, :related_contact]
+      relationships: [:relationship_type, related_contact: :dav]
     ]
   end
 
