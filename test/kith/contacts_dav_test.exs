@@ -731,6 +731,27 @@ defmodule Kith.ContactsDAVTest do
     |> String.replace(~r/^REV:.*\r\n/m, "")
   end
 
+  describe "CDV-119: dav_vcard is loaded only where DAV needs it" do
+    test "CDV-119: plain contact queries leave the retained vCard out; DAV loaders bring it",
+         %{contact: contact, account_id: aid} do
+      retained = %{"properties" => [%{"name" => "X-BIG", "head" => "X-BIG", "value" => "v"}]}
+      contact |> Ecto.Changeset.change(dav_vcard: retained) |> Kith.Repo.update!()
+
+      assert Kith.Repo.get!(Contacts.Contact, contact.id).dav_vcard == nil
+      assert [%{dav_vcard: nil}] = Contacts.list_contacts(aid)
+      assert Contacts.get_contact(aid, contact.id).dav_vcard == nil
+
+      assert Contacts.load_dav_vcard(Kith.Repo.get!(Contacts.Contact, contact.id)).dav_vcard ==
+               retained
+
+      assert [%{dav_vcard: ^retained}] = Contacts.preload_for_dav(Contacts.list_contacts(aid))
+      assert [%{dav_vcard: ^retained}] = Contacts.list_contacts_changed_since(aid, 0)
+
+      card = Kith.DAV.VCardAdapter.contact_to_vcard(Contacts.get_contact(aid, contact.id))
+      assert card =~ "\r\nX-BIG:v\r\n"
+    end
+  end
+
   describe "touch_contact!/1" do
     test "bumps updated_at", %{contact: contact} do
       old_updated_at = contact.updated_at

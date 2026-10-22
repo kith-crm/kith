@@ -1325,7 +1325,31 @@ defmodule Kith.Contacts do
   end
 
   @doc "Preloads everything a contact's vCard shows, for a list in one pass."
-  def preload_for_dav(contacts), do: Repo.preload(contacts, dav_preloads())
+  def preload_for_dav(contacts), do: contacts |> Repo.preload(dav_preloads()) |> load_dav_vcard()
+
+  @doc """
+  Loads the retained client vCard (`dav_vcard`, not loaded by plain queries)
+  into a contact or a list of contacts, in one query; contacts that already
+  carry it are left alone (CDV-119).
+  """
+  def load_dav_vcard(%Contact{} = contact), do: contact |> List.wrap() |> load_dav_vcard() |> hd()
+
+  def load_dav_vcard(contacts) when is_list(contacts) do
+    case for(%Contact{dav_vcard: nil, id: id} when not is_nil(id) <- contacts, do: id) do
+      [] ->
+        contacts
+
+      ids ->
+        retained =
+          Contact
+          |> where([c], c.id in ^ids)
+          |> select([c], {c.id, c.dav_vcard})
+          |> Repo.all()
+          |> Map.new()
+
+        Enum.map(contacts, &%{&1 | dav_vcard: &1.dav_vcard || Map.get(retained, &1.id, %{})})
+    end
+  end
 
   @doc """
   Gets the visible (neither trashed nor archived) contact whose stored CardDAV
@@ -1402,12 +1426,13 @@ defmodule Kith.Contacts do
     |> stream_with_preloads(preloads)
   end
 
-  # Ecto cannot preload on a stream: preload each batch of 100 rows (CDV-116).
+  # Ecto cannot preload on a stream: preload each batch of 100 rows (CDV-116),
+  # with the retained vCard the export merges (R55, CDV-119).
   defp stream_with_preloads(query, preloads) do
     query
     |> Repo.stream(max_rows: 100)
     |> Stream.chunk_every(100)
-    |> Stream.flat_map(&Repo.preload(&1, preloads))
+    |> Stream.flat_map(&(&1 |> Repo.preload(preloads) |> load_dav_vcard()))
   end
 
   @doc """
@@ -1654,7 +1679,7 @@ defmodule Kith.Contacts do
 
       if metadata = Map.get(nested_data, :vcard_metadata) do
         # R45: keep retained data this PUT's vCard version cannot express (CDV-96)
-        metadata = Metadata.carry_over(contact.dav_vcard, metadata)
+        metadata = Metadata.carry_over(load_dav_vcard(contact).dav_vcard, metadata)
         contact |> Ecto.Changeset.change(dav_vcard: metadata) |> Repo.update!()
       end
 
@@ -2056,6 +2081,7 @@ defmodule Kith.Contacts do
     |> join(:inner, [c], ch in "contact_dav_changes", on: ch.contact_id == c.id)
     |> where([_c, ch], ch.seq > ^seq)
     |> preload(^dav_preloads())
+    |> select_merge([c], %{dav_vcard: c.dav_vcard})
     |> Repo.all()
   end
 

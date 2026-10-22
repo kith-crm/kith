@@ -35,7 +35,7 @@ defmodule KithWeb.API.ContactExportController do
         })
 
       contact ->
-        vcard = Serializer.serialize(contact)
+        vcard = contact |> Contacts.load_dav_vcard() |> Serializer.serialize()
         filename = safe_filename(contact.display_name || "contact")
 
         conn

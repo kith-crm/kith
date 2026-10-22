@@ -65,6 +65,7 @@ defmodule Kith.Imports.Sources.VCardTest do
         contact_fields: :contact_field_type,
         relationships: [:relationship_type, :related_contact]
       ])
+      |> Kith.Contacts.load_dav_vcard()
     end
 
     test "CDV-117: a card that is not UTF-8 is reported and the rest of the file imports",

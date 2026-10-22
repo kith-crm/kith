@@ -1035,7 +1035,7 @@ defmodule Kith.DAV.CardDAVPlug do
   defp contact_href(%{id: id}), do: "/dav/addressbooks/default/kith-contact-#{id}.vcf"
 
   defp list_contacts_for_dav(conn) do
-    Contacts.list_contacts(account_id(conn), preload: Contacts.dav_preloads())
+    account_id(conn) |> Contacts.list_contacts() |> Contacts.preload_for_dav()
   end
 
   defp list_contacts_for_propfind(conn) do

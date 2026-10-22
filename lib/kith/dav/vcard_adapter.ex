@@ -10,7 +10,6 @@ defmodule Kith.DAV.VCardAdapter do
 
   alias Kith.Contacts
   alias Kith.Contacts.Contact
-  alias Kith.Repo
   alias Kith.Storage
   alias Kith.VCard.{Parser, Serializer}
 
@@ -25,7 +24,7 @@ defmodule Kith.DAV.VCardAdapter do
   def contact_to_vcard(%Contact{} = contact, opts \\ []) do
     version = Keyword.get(opts, :version, :v30)
     include_photo = Keyword.get(opts, :include_photo, true)
-    contact = Repo.preload(contact, Contacts.dav_preloads())
+    contact = Contacts.preload_for_dav(contact)
     contact = if include_photo, do: maybe_load_avatar_data(contact), else: contact
 
     Serializer.serialize(contact, version: version, include_uid: true)

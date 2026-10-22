@@ -42,7 +42,10 @@ defmodule Kith.Contacts.Contact do
 
     # R4: set by a DB trigger on every write of the row; the ETag derives from it
     field :dav_revision, :integer, read_after_writes: true
-    field :dav_vcard, :map, default: %{}
+    # The client vCard retained for CardDAV round trips (up to ~1 MiB): not
+    # loaded by plain queries, only by the DAV and vCard-export loaders
+    # (`Kith.Contacts.load_dav_vcard/1`); nil means "not loaded" (CDV-119).
+    field :dav_vcard, :map, load_in_query: false
 
     # First-met metadata
     field :middle_name, :string
