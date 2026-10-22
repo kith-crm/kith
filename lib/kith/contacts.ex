@@ -1814,29 +1814,6 @@ defmodule Kith.Contacts do
     ]
   end
 
-  @doc """
-  Lists contacts modified since the given timestamp.
-  Used by CardDAV sync-collection REPORT for incremental sync.
-  """
-  def list_contacts_modified_since(account_id, %DateTime{} = since) do
-    Contact
-    |> scope_active(account_id)
-    |> where([c], c.updated_at > ^since)
-    |> preload(^dav_preloads())
-    |> Repo.all()
-  end
-
-  @doc """
-  Lists contacts soft-deleted since the given timestamp.
-  Used by CardDAV sync-collection REPORT to report deletions.
-  """
-  def list_contacts_deleted_since(account_id, %DateTime{} = since) do
-    Contact
-    |> scope_to_account(account_id)
-    |> where([c], not is_nil(c.deleted_at) and c.deleted_at > ^since)
-    |> Repo.all()
-  end
-
   # ── Contact Merge ──────────────────────────────────────────────────────
 
   @doc """

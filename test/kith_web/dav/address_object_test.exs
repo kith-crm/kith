@@ -1233,4 +1233,40 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
     {href, conn}
   end
+
+  describe "GET with If-None-Match" do
+    test "GET with a matching If-None-Match is 304 with the ETag and no body",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      [etag] = authed_dav(context, "GET", contact_path(contact)) |> get_resp_header("etag")
+
+      get = fn inm ->
+        build_conn()
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("if-none-match", inm)
+        |> dav_request("GET", contact_path(contact))
+      end
+
+      for inm <- [etag, "W/#{etag}", ~s("other", #{etag}), "*"] do
+        conn = get.(inm)
+        assert conn.status == 304, "If-None-Match: #{inm} -> #{conn.status}"
+        assert conn.resp_body == ""
+        assert get_resp_header(conn, "etag") == [etag]
+      end
+
+      assert get.(~s("other")).status == 200
+    end
+  end
+
+  test "a stored resource name is the only GET identity", context do
+    contact = ContactsFixtures.contact_fixture(context.account_id)
+    href = contact_path(contact)
+    assert authed_dav(context, "GET", href).status == 200
+
+    assert authed_dav(context, "GET", "/dav/addressbooks/default/kith-contact-#{contact.id}.vcf").status ==
+             404
+
+    {:ok, _} = Contacts.archive_contact(contact)
+    assert authed_dav(context, "GET", href).status == 404
+  end
 end
