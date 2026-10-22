@@ -358,14 +358,15 @@ defmodule KithWeb.DAV.ReportTest do
   # ── Unsupported REPORT types ────────────────────────────────────────────
 
   describe "RFC 6352 — unsupported REPORT types" do
-    test "server MUST return 400 for unrecognized REPORT type", context do
+    test "server returns supported-report precondition for unrecognized REPORT type", context do
       body = """
       <?xml version="1.0" encoding="UTF-8"?>
       <d:unknown-report xmlns:d="DAV:"/>
       """
 
       conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
-      assert conn.status == 400
+      assert conn.status == 403
+      assert conn.resp_body =~ "<d:supported-report/>"
     end
   end
 
