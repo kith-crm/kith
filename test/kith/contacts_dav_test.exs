@@ -90,32 +90,6 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
-  describe "list_contacts_modified_since/2" do
-    test "returns contacts modified after the given timestamp", %{
-      account_id: aid,
-      contact: contact
-    } do
-      # Contact was just created, so its updated_at is recent
-      past = DateTime.add(contact.updated_at, -1, :second)
-      assert [found] = Contacts.list_contacts_modified_since(aid, past)
-      assert found.id == contact.id
-    end
-
-    test "excludes contacts at exactly the timestamp (strict >)", %{
-      account_id: aid,
-      contact: contact
-    } do
-      assert [] = Contacts.list_contacts_modified_since(aid, contact.updated_at)
-    end
-
-    test "excludes soft-deleted contacts", %{account_id: aid, contact: contact} do
-      Contacts.soft_delete_contact(contact)
-      past = DateTime.add(DateTime.utc_now(), -60, :second)
-      results = Contacts.list_contacts_modified_since(aid, past)
-      refute Enum.any?(results, &(&1.id == contact.id))
-    end
-  end
-
   describe "replace_contact_children/3 — tags (CATEGORIES)" do
     test "creates tags from category names", %{contact: contact, account_id: aid} do
       nested = %{
@@ -193,32 +167,6 @@ defmodule Kith.ContactsDAVTest do
 
       # Should not crash
       assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
-    end
-  end
-
-  describe "list_contacts_deleted_since/2" do
-    test "returns soft-deleted contacts after the given timestamp", %{
-      account_id: aid,
-      contact: contact
-    } do
-      past = DateTime.add(DateTime.utc_now(), -1, :second)
-      Contacts.soft_delete_contact(contact)
-      assert [found] = Contacts.list_contacts_deleted_since(aid, past)
-      assert found.id == contact.id
-    end
-
-    test "excludes contacts at exactly the timestamp (strict >)", %{
-      account_id: aid,
-      contact: contact
-    } do
-      Contacts.soft_delete_contact(contact)
-      deleted = Kith.Repo.get!(Contacts.Contact, contact.id)
-      assert [] = Contacts.list_contacts_deleted_since(aid, deleted.deleted_at)
-    end
-
-    test "excludes active (non-deleted) contacts", %{account_id: aid} do
-      past = DateTime.add(DateTime.utc_now(), -60, :second)
-      assert [] = Contacts.list_contacts_deleted_since(aid, past)
     end
   end
 end

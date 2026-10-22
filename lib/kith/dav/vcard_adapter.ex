@@ -21,12 +21,20 @@ defmodule Kith.DAV.VCardAdapter do
 
   Options:
     - `:version` — `:v30` (default) for vCard 3.0, `:v40` for vCard 4.0
+    - `:preloaded` — use the caller's loaded DAV snapshot (default: false)
   """
   def contact_to_vcard(%Contact{} = contact, opts \\ []) do
     version = Keyword.get(opts, :version, :v30)
     include_photo = Keyword.get(opts, :include_photo, true)
-    Kith.DAV.Store.ensure_rows(contact.account_id)
-    contact = Repo.preload(contact, Contacts.dav_preloads(), force: true)
+
+    contact =
+      if Keyword.get(opts, :preloaded, false) do
+        contact
+      else
+        Kith.DAV.Store.ensure_rows(contact.account_id)
+        Repo.preload(contact, Contacts.dav_preloads(), force: true)
+      end
+
     contact = if include_photo, do: maybe_load_avatar_data(contact), else: contact
 
     Serializer.serialize(contact, version: version, include_uid: true)

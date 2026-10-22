@@ -136,7 +136,10 @@ defmodule KithWeb.DAV.TestHelpers do
     end
   end
 
-  def contact_uid(contact), do: "kith-contact-#{contact.id}.vcf"
+  def contact_uid(contact) do
+    Kith.DAV.Store.ensure_rows(contact.account_id)
+    Kith.Repo.preload(contact, :dav, force: true).dav.resource_name
+  end
 
   def contact_path(contact),
     do: "/dav/addressbooks/default/#{contact_uid(contact)}"

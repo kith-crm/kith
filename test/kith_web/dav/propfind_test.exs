@@ -880,4 +880,61 @@ defmodule KithWeb.DAV.PropfindTest do
     Kith.DAV.Store.ensure_rows(contact.account_id)
     contact |> Kith.Repo.preload(:dav, force: true) |> Kith.DAV.Store.href()
   end
+
+  test "address book offers a URI sync-token property", context do
+    body = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <d:propfind xmlns:d="DAV:"><d:prop><d:sync-token/></d:prop></d:propfind>
+    """
+
+    conn =
+      context.conn
+      |> basic_auth(context.user.email, dav_password())
+      |> put_req_header("depth", "0")
+      |> dav_request("PROPFIND", "/dav/addressbooks/default/", body)
+
+    assert conn.status == 207
+    refute conn.resp_body =~ "404 Not Found"
+    assert [_, token] = Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, conn.resp_body)
+    assert token =~ ~r/^[a-z][a-z0-9+.-]*:\S+$/i
+  end
+
+  test "the PROPFIND sync-token round-trips through sync-collection", context do
+    contact = ContactsFixtures.contact_fixture(context.account_id)
+
+    propfind = """
+    <d:propfind xmlns:d="DAV:"><d:prop><d:sync-token/></d:prop></d:propfind>
+    """
+
+    conn =
+      context.conn
+      |> basic_auth(context.user.email, dav_password())
+      |> put_req_header("depth", "0")
+      |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind)
+
+    [_, token] = Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, conn.resp_body)
+
+    sync = fn ->
+      body = """
+      <?xml version="1.0" encoding="UTF-8"?>
+      <d:sync-collection xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+        <d:sync-token>#{token}</d:sync-token>
+        <d:sync-level>1</d:sync-level>
+        <d:prop><d:getetag/></d:prop>
+      </d:sync-collection>
+      """
+
+      authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+    end
+
+    unchanged = sync.()
+    assert unchanged.status == 207
+    assert count_responses(unchanged.resp_body) == 0
+
+    {:ok, _} = Contacts.update_contact(contact, %{first_name: "Changed"})
+
+    changed = sync.()
+    assert changed.status == 207
+    assert changed.resp_body =~ "<d:href>#{contact_path(contact)}</d:href>"
+  end
 end
