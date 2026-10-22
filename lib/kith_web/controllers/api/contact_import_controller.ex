@@ -60,21 +60,28 @@ defmodule KithWeb.API.ContactImportController do
   end
 
   defp dispatch_import(conn, user, data, parsed_contacts) when length(parsed_contacts) > 100 do
-    %{account_id: user.account_id, user_id: user.id, file_data: data}
-    |> ImportWorker.new()
-    |> Oban.insert()
+    case ImportWorker.enqueue_file(user.account_id, user.id, data) do
+      {:ok, _job} ->
+        AuditLogs.log_event(user.account_id, user, :data_imported,
+          metadata: %{format: "vcf", count: length(parsed_contacts), async: true}
+        )
 
-    AuditLogs.log_event(user.account_id, user, :data_imported,
-      metadata: %{format: "vcf", count: length(parsed_contacts), async: true}
-    )
+        conn
+        |> put_status(202)
+        |> json(%{
+          message:
+            "Import is being processed. This may take a few minutes for #{length(parsed_contacts)} contacts.",
+          total: length(parsed_contacts)
+        })
 
-    conn
-    |> put_status(202)
-    |> json(%{
-      message:
-        "Import is being processed. This may take a few minutes for #{length(parsed_contacts)} contacts.",
-      total: length(parsed_contacts)
-    })
+      {:error, _reason} ->
+        problem_json(
+          conn,
+          422,
+          "Unprocessable Entity",
+          "Could not queue contact import. Please try again."
+        )
+    end
   end
 
   defp dispatch_import(conn, user, _data, parsed_contacts) do

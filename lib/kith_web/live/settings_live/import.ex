@@ -77,11 +77,10 @@ defmodule KithWeb.SettingsLive.Import do
 
   defp import_parsed_contacts(account_id, user_id, data, parsed_contacts) do
     if length(parsed_contacts) > 100 do
-      %{account_id: account_id, user_id: user_id, file_data: data}
-      |> ImportWorker.new()
-      |> Oban.insert()
-
-      {:async, length(parsed_contacts)}
+      case ImportWorker.enqueue_file(account_id, user_id, data) do
+        {:ok, _job} -> {:async, length(parsed_contacts)}
+        {:error, _reason} -> {:error, "Could not queue contact import. Please try again."}
+      end
     else
       result =
         ContactImportController.import_contacts_sync(account_id, parsed_contacts)

@@ -13,10 +13,30 @@ defmodule Kith.Workers.ImportWorker do
   alias Kith.VCard.Parser
   alias Kith.Workers.DuplicateDetectionWorker
 
+  @doc "Queues vCard bytes using a JSON-safe representation shared by upload entry points."
+  def enqueue_file(account_id, user_id, file_data) do
+    %{account_id: account_id, user_id: user_id, file_data_base64: Base.encode64(file_data)}
+    |> new()
+    |> Oban.insert()
+  end
+
   @impl Oban.Worker
-  def perform(%Oban.Job{
-        args: %{"account_id" => account_id, "user_id" => user_id, "file_data" => file_data}
-      }) do
+  def perform(%Oban.Job{args: %{"account_id" => account_id, "user_id" => user_id} = args}) do
+    with {:ok, file_data} <- decode_file(args) do
+      import_file(account_id, user_id, file_data)
+    end
+  end
+
+  defp decode_file(%{"file_data_base64" => encoded}) do
+    case Base.decode64(encoded) do
+      {:ok, data} -> {:ok, data}
+      :error -> {:error, "Invalid encoded vCard file."}
+    end
+  end
+
+  defp decode_file(%{"file_data" => data}), do: {:ok, data}
+
+  defp import_file(account_id, user_id, file_data) do
     Logger.info("Starting vCard import for account #{account_id}, user #{user_id}")
 
     case Parser.parse(file_data, per_card: true) do
