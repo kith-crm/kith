@@ -4,7 +4,7 @@ defmodule Kith.DAV.VCardAdapter do
   for the CardDAV server.
 
   Delegates to the existing `Kith.VCard.Serializer` and `Kith.VCard.Parser`
-  modules, adding a UID property for CardDAV identification and adapting the
+  modules, loading stored CardDAV identities and adapting the
   parser output into changeset-compatible attribute maps.
   """
 
@@ -25,11 +25,11 @@ defmodule Kith.DAV.VCardAdapter do
   def contact_to_vcard(%Contact{} = contact, opts \\ []) do
     version = Keyword.get(opts, :version, :v30)
     include_photo = Keyword.get(opts, :include_photo, true)
-    contact = Repo.preload(contact, Contacts.dav_preloads())
+    Kith.DAV.Store.ensure_rows(contact.account_id)
+    contact = Repo.preload(contact, Contacts.dav_preloads(), force: true)
     contact = if include_photo, do: maybe_load_avatar_data(contact), else: contact
 
-    vcard = Serializer.serialize(contact, version: version)
-    inject_uid(vcard, contact.id, version)
+    Serializer.serialize(contact, version: version, include_uid: true)
   end
 
   @doc """
@@ -68,7 +68,8 @@ defmodule Kith.DAV.VCardAdapter do
       "company" => parsed.company,
       "occupation" => parsed.occupation,
       "description" => parsed.description,
-      "birthdate" => parsed.birthdate && Date.to_iso8601(parsed.birthdate)
+      "birthdate" => parsed.birthdate && Date.to_iso8601(parsed.birthdate),
+      "birthdate_year_unknown" => parsed.birthdate_year_unknown
     }
   end
 
@@ -87,17 +88,6 @@ defmodule Kith.DAV.VCardAdapter do
   end
 
   # ── Private ────────────────────────────────────────────────────────────
-
-  # Inserts a UID line after the VERSION line in the serialized vCard.
-  defp inject_uid(vcard, contact_id, :v30) do
-    uid_line = "UID:kith-contact-#{contact_id}"
-    String.replace(vcard, "VERSION:3.0\r\n", "VERSION:3.0\r\n#{uid_line}\r\n")
-  end
-
-  defp inject_uid(vcard, contact_id, :v40) do
-    uid_line = "UID:urn:uuid:kith-contact-#{contact_id}"
-    String.replace(vcard, "VERSION:4.0\r\n", "VERSION:4.0\r\n#{uid_line}\r\n")
-  end
 
   defp maybe_strip_nils(attrs, opts) do
     if Keyword.get(opts, :strip_nils, true) do

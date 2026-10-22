@@ -12,8 +12,6 @@ defmodule KithWeb.API.ContactExportController do
   alias Kith.DAV.Store
   alias Kith.VCard.Serializer
 
-  @vcard_preloads [:dav, :addresses, :gender, contact_fields: :contact_field_type]
-
   @doc """
   Export a single contact as a vCard 3.0 file.
 
@@ -24,7 +22,7 @@ defmodule KithWeb.API.ContactExportController do
     account_id = user.account_id
     Store.ensure_rows(account_id)
 
-    case Contacts.get_contact(account_id, id, preload: @vcard_preloads) do
+    case Contacts.get_contact(account_id, id, preload: Contacts.dav_preloads()) do
       nil ->
         conn
         |> put_status(404)
@@ -37,7 +35,7 @@ defmodule KithWeb.API.ContactExportController do
         })
 
       contact ->
-        vcard = Serializer.serialize(contact)
+        vcard = Serializer.serialize(contact, include_uid: true)
         filename = safe_filename(contact.display_name || "contact")
 
         conn
@@ -82,9 +80,12 @@ defmodule KithWeb.API.ContactExportController do
     stream =
       if ids do
         validated_ids = Enum.map(ids, &parse_id/1) |> Enum.reject(&is_nil/1)
-        Contacts.stream_contacts_by_ids(account_id, validated_ids, preload: @vcard_preloads)
+
+        Contacts.stream_contacts_by_ids(account_id, validated_ids,
+          preload: Contacts.dav_preloads()
+        )
       else
-        Contacts.stream_all_contacts(account_id, preload: @vcard_preloads)
+        Contacts.stream_all_contacts(account_id, preload: Contacts.dav_preloads())
       end
 
     {:ok, conn} =
@@ -94,7 +95,7 @@ defmodule KithWeb.API.ContactExportController do
   end
 
   defp chunk_contact(contact, conn) do
-    case chunk(conn, Serializer.serialize(contact)) do
+    case chunk(conn, Serializer.serialize(contact, include_uid: true)) do
       {:ok, conn} -> {:cont, conn}
       {:error, _closed} -> {:halt, conn}
     end
