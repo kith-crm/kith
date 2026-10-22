@@ -27,7 +27,7 @@ defmodule Kith.Imports.Sources.VCard do
 
   @impl true
   def parse_summary(data) do
-    case Parser.parse(data) do
+    case Parser.parse(data, per_card: true) do
       {:ok, contacts} -> {:ok, %{contacts: length(contacts)}}
       {:error, reason} -> {:error, reason}
     end
@@ -37,7 +37,7 @@ defmodule Kith.Imports.Sources.VCard do
   def import(account_id, _user_id, data, opts) do
     import_record = opts[:import]
 
-    case Parser.parse(data) do
+    case Parser.parse(data, per_card: true) do
       {:ok, parsed_contacts} ->
         total = length(parsed_contacts)
         topic = "import:#{account_id}"

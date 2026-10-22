@@ -19,7 +19,7 @@ defmodule Kith.Workers.ImportWorker do
       }) do
     Logger.info("Starting vCard import for account #{account_id}, user #{user_id}")
 
-    case Parser.parse(file_data) do
+    case Parser.parse(file_data, per_card: true) do
       {:ok, parsed_contacts} ->
         total = length(parsed_contacts)
         topic = "import:#{account_id}"

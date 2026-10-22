@@ -9,9 +9,10 @@ defmodule KithWeb.API.ContactExportController do
   use KithWeb, :controller
 
   alias Kith.Contacts
+  alias Kith.DAV.Store
   alias Kith.VCard.Serializer
 
-  @vcard_preloads [:addresses, :gender, contact_fields: :contact_field_type]
+  @vcard_preloads [:dav, :addresses, :gender, contact_fields: :contact_field_type]
 
   @doc """
   Export a single contact as a vCard 3.0 file.
@@ -21,6 +22,7 @@ defmodule KithWeb.API.ContactExportController do
   def show(conn, %{"id" => id}) do
     user = conn.assigns.current_api_user
     account_id = user.account_id
+    Store.ensure_rows(account_id)
 
     case Contacts.get_contact(account_id, id, preload: @vcard_preloads) do
       nil ->
@@ -59,6 +61,7 @@ defmodule KithWeb.API.ContactExportController do
   def bulk(conn, params) do
     user = conn.assigns.current_api_user
     account_id = user.account_id
+    Store.ensure_rows(account_id)
     ids = Map.get(params, "ids", nil)
 
     Kith.AuditLogs.log_event(account_id, user, :data_exported,
@@ -84,16 +87,17 @@ defmodule KithWeb.API.ContactExportController do
         Contacts.stream_all_contacts(account_id, preload: @vcard_preloads)
       end
 
-    Kith.Repo.transaction(fn ->
-      stream
-      |> Stream.each(fn contact ->
-        vcard = Serializer.serialize(contact)
-        {:ok, _conn} = chunk(conn, vcard)
-      end)
-      |> Stream.run()
-    end)
+    {:ok, conn} =
+      Kith.Repo.transaction(fn -> Enum.reduce_while(stream, conn, &chunk_contact/2) end)
 
     conn
+  end
+
+  defp chunk_contact(contact, conn) do
+    case chunk(conn, Serializer.serialize(contact)) do
+      {:ok, conn} -> {:cont, conn}
+      {:error, _closed} -> {:halt, conn}
+    end
   end
 
   defp safe_filename(name) do

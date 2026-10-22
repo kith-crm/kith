@@ -34,5 +34,12 @@ defmodule Kith.Contacts.Address do
       :contact_id,
       :account_id
     ])
+    |> validate_column_lengths()
+  end
+
+  # varchar(255) columns
+  defp validate_column_lengths(changeset) do
+    [:label, :line1, :line2, :city, :province, :postal_code, :country]
+    |> Enum.reduce(changeset, &validate_length(&2, &1, max: 255, count: :codepoints))
   end
 end

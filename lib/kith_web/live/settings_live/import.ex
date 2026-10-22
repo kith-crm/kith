@@ -67,7 +67,7 @@ defmodule KithWeb.SettingsLive.Import do
 
   defp process_uploaded_vcf(path, account_id, user_id) do
     with {:ok, data} <- File.read(path),
-         {:ok, parsed_contacts} <- Parser.parse(data) do
+         {:ok, parsed_contacts} <- Parser.parse(data, per_card: true) do
       import_parsed_contacts(account_id, user_id, data, parsed_contacts)
     else
       {:error, reason} when is_binary(reason) -> {:error, reason}
