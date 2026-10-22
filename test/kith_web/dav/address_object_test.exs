@@ -206,14 +206,14 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert conn.status == 201
     end
 
-    test "response MUST include ETag header on creation (RFC 6352 §5.1)", context do
+    test "PUT response has no ETag header on creation", context do
       vcard = build_vcard("New", "Contact")
 
       conn =
         authed_dav(context, "PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", vcard)
 
       assert conn.status == 201
-      assert get_resp_header(conn, "etag") != []
+      assert get_resp_header(conn, "etag") == []
     end
 
     test "created resource MUST be retrievable via GET", context do
@@ -268,14 +268,14 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert conn.status == 204
     end
 
-    test "response MUST include updated ETag header (RFC 6352 §5.1)",
+    test "PUT response has no ETag header on update",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id)
       vcard = build_vcard("Updated", "Contact")
 
       conn = authed_dav(context, "PUT", contact_path(contact), vcard)
 
-      assert get_resp_header(conn, "etag") != []
+      assert get_resp_header(conn, "etag") == []
     end
 
     test "updated properties MUST be reflected in subsequent GET",
@@ -311,7 +311,8 @@ defmodule KithWeb.DAV.AddressObjectTest do
       Process.sleep(1000)
       vcard = build_vcard("Updated", "Name")
       conn2 = authed_dav(context, "PUT", contact_path(contact), vcard)
-      [etag_after] = get_resp_header(conn2, "etag")
+      assert conn2.status == 204
+      [etag_after] = authed_dav(context, "GET", contact_path(contact)) |> get_resp_header("etag")
 
       assert etag_before != etag_after
     end
@@ -555,7 +556,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert conn.status == 415
     end
 
-    test "PUT with invalid vCard body returns 422 with precondition error", context do
+    test "PUT with invalid vCard body returns 403 with precondition error", context do
       conn =
         build_conn()
         |> basic_auth(context.user.email, dav_password())
@@ -567,7 +568,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
           "not a vcard"
         )
 
-      assert conn.status == 422
+      assert conn.status == 403
       assert conn.resp_body =~ "valid-address-data"
     end
   end
@@ -1268,5 +1269,117 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
     {:ok, _} = Contacts.archive_contact(contact)
     assert authed_dav(context, "GET", href).status == 404
+  end
+
+  test "PUT to a trashed contact's href is 409 and does not restore it",
+       %{account_id: aid} = context do
+    contact = ContactsFixtures.contact_fixture(aid)
+    path = contact_path(contact)
+    {:ok, _} = Contacts.soft_delete_contact(contact)
+    assert authed_dav(context, "PUT", path, build_vcard("Changed", "Name")).status == 409
+    assert Kith.Repo.get!(Kith.Contacts.Contact, contact.id).deleted_at
+  end
+
+  test "PUT changing the UID of an existing card is 409", %{account_id: aid} = context do
+    contact = ContactsFixtures.contact_fixture(aid)
+
+    assert authed_dav(
+             context,
+             "PUT",
+             contact_path(contact),
+             build_vcard("Changed", "Name", uid: "different")
+           ).status == 409
+  end
+
+  test "PUT to an archived contact's href is 409 and does not unarchive it",
+       %{account_id: aid} = context do
+    contact = ContactsFixtures.contact_fixture(aid)
+    path = contact_path(contact)
+    {:ok, _} = Contacts.archive_contact(contact)
+    assert authed_dav(context, "PUT", path, build_vcard("Changed", "Name")).status == 409
+    assert Kith.Repo.get!(Kith.Contacts.Contact, contact.id).is_archived
+  end
+
+  test "PUT of a new card whose UID a trashed contact holds is 409",
+       %{account_id: aid} = context do
+    contact = ContactsFixtures.contact_fixture(aid)
+    path = contact_path(contact)
+    contact = Kith.Repo.preload(contact, :dav)
+    {:ok, _} = Contacts.soft_delete_contact(contact)
+
+    response =
+      authed_dav(
+        context,
+        "PUT",
+        "/dav/addressbooks/default/new.vcf",
+        build_vcard("New", "Name", uid: contact.dav.uid)
+      )
+
+    assert response.status == 409
+    assert response.resp_body =~ "no-uid-conflict"
+    assert response.resp_body =~ path
+    assert Kith.DAV.Store.get_by_resource_name(aid, "new.vcf") == nil
+  end
+
+  test "PUT retains extras and replaces them on update", context do
+    path = "/dav/addressbooks/default/extras.vcf"
+
+    body =
+      String.replace(
+        build_vcard("Extra", "Fields", uid: "extra-uid"),
+        "END:VCARD",
+        "X-CUSTOM:verbatim\r\nitem1.X-CUSTOM:drop\r\nEND:VCARD"
+      )
+
+    assert authed_dav(context, "PUT", path, body).status == 201
+    stored = authed_dav(context, "GET", path).resp_body
+    assert stored =~ "UID:extra-uid"
+    assert stored =~ "X-CUSTOM:verbatim"
+    refute stored =~ "item1.X-CUSTOM"
+
+    assert authed_dav(context, "PUT", path, build_vcard("Extra", "Fields", uid: "extra-uid")).status ==
+             204
+
+    refute authed_dav(context, "GET", path).resp_body =~ "X-CUSTOM"
+  end
+
+  test "invalid creation leaves no contact or identity", %{account_id: aid} = context do
+    before_count = Contacts.count_contacts(aid)
+
+    response =
+      authed_dav(
+        context,
+        "PUT",
+        "/dav/addressbooks/default/invalid.vcf",
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nNOTE:no name\r\nEND:VCARD\r\n"
+      )
+
+    assert response.status == 403
+    assert response.resp_body =~ "valid-address-data"
+    assert Contacts.count_contacts(aid) == before_count
+    assert Kith.DAV.Store.get_by_resource_name(aid, "invalid.vcf") == nil
+  end
+
+  test "a child validation failure rolls back creation and update",
+       %{account_id: aid} = context do
+    path = "/dav/addressbooks/default/rollback.vcf"
+    count = Contacts.count_contacts(aid)
+    invalid = build_vcard("Rollback", "Card", email: String.duplicate("x", 256))
+    assert authed_dav(context, "PUT", path, invalid).status == 403
+    assert Contacts.count_contacts(aid) == count
+    assert Kith.DAV.Store.get_by_resource_name(aid, "rollback.vcf") == nil
+
+    assert authed_dav(
+             context,
+             "PUT",
+             path,
+             build_vcard("Original", "Card", email: "ok@example.com")
+           ).status == 201
+
+    before_write = authed_dav(context, "GET", path)
+    assert authed_dav(context, "PUT", path, invalid).status == 403
+    after_write = authed_dav(context, "GET", path)
+    assert after_write.resp_body == before_write.resp_body
+    assert get_resp_header(after_write, "etag") == get_resp_header(before_write, "etag")
   end
 end

@@ -1572,16 +1572,18 @@ defmodule Kith.Contacts do
   """
   def replace_contact_children(contact, account_id, nested_data) do
     Repo.transaction(fn ->
-      from(cf in ContactField, where: cf.contact_id == ^contact.id) |> Repo.delete_all()
-      from(a in Address, where: a.contact_id == ^contact.id) |> Repo.delete_all()
-
+      # Keep native-only fields and unchanged rows (including native type ids
+      # and address geocoding) that a DAV client cannot reconstruct.
+      nested_data = reconcile_dav_fields(contact, nested_data)
       create_imported_contact_fields(contact, account_id, nested_data.emails, "mailto")
       create_imported_contact_fields(contact, account_id, nested_data.phones, "tel")
       create_imported_contact_fields(contact, account_id, nested_data.urls, "https")
 
-      Enum.each(nested_data.addresses, fn addr ->
-        insert_address!(addr, contact.id, account_id)
-      end)
+      addresses = from(a in Address, where: a.contact_id == ^contact.id) |> Repo.all()
+
+      nested_data.addresses
+      |> retain_dav_entries(addresses, &same_dav_address?/2)
+      |> Enum.each(&insert_address!(&1, contact.id, account_id))
 
       # Tags (CATEGORIES)
       if Map.has_key?(nested_data, :categories) do
@@ -1612,6 +1614,79 @@ defmodule Kith.Contacts do
     end)
   end
 
+  defp reconcile_dav_fields(contact, data) do
+    fields =
+      from(cf in ContactField,
+        where: cf.contact_id == ^contact.id,
+        preload: [:contact_field_type]
+      )
+      |> Repo.all()
+
+    Enum.reduce(fields, data, fn field, data ->
+      case dav_field_kind(field.contact_field_type) do
+        nil ->
+          data
+
+        kind ->
+          Map.put(
+            data,
+            kind,
+            retain_dav_entries(Map.get(data, kind, []), [field], &same_dav_field?/2)
+          )
+      end
+    end)
+  end
+
+  defp dav_field_kind(%{protocol: protocol, vcard_label: label}) do
+    case protocol do
+      p when p in ["mailto", "mailto:"] -> :emails
+      p when p in ["tel", "tel:"] -> :phones
+      p when p in ["http", "http://", "https", "https://"] -> :urls
+      _ -> if label == "IMPP", do: :impp
+    end
+  end
+
+  defp same_dav_field?(field, entry),
+    do: field.value == entry.value and dav_label(field.label) == dav_label(entry.label)
+
+  # Compare labels the way they survive a TYPE parameter: the serializer
+  # drops DQUOTE/control characters and a parser keeps the first TYPE value
+  # of a list.
+  defp dav_label(label) do
+    label =
+      (label || "")
+      |> String.replace(~r/["\x00-\x1F\x7F]/, "")
+      |> String.split(",")
+      |> hd()
+      |> String.trim()
+
+    case String.downcase(label) do
+      "mobile" -> "cell"
+      "personal" -> "home"
+      "business" -> "work"
+      other -> other
+    end
+  end
+
+  defp same_dav_address?(address, entry) do
+    Enum.all?([:label, :line1, :line2, :city, :province, :postal_code, :country], fn key ->
+      Map.get(address, key) == Map.get(entry, key)
+    end)
+  end
+
+  defp retain_dav_entries(incoming, existing, matches?) do
+    Enum.reduce(existing, incoming, fn record, incoming ->
+      case Enum.find_index(incoming, &matches?.(record, &1)) do
+        nil ->
+          Repo.delete!(record)
+          incoming
+
+        index ->
+          List.delete_at(incoming, index)
+      end
+    end)
+  end
+
   defp insert_address!(addr, contact_id, account_id) do
     %Address{}
     |> Address.changeset(Map.merge(addr, %{contact_id: contact_id, account_id: account_id}))
@@ -1623,8 +1698,6 @@ defmodule Kith.Contacts do
   end
 
   # ── Tag sync (CATEGORIES) ──────────────────────────────────────────
-
-  defp replace_contact_tags(_contact, _account_id, []), do: :ok
 
   defp replace_contact_tags(contact, account_id, category_names) do
     from(ct in "contact_tags", where: ct.contact_id == ^contact.id) |> Repo.delete_all()
@@ -1661,38 +1734,53 @@ defmodule Kith.Contacts do
 
   # ── Relationship sync (RELATED) ────────────────────────────────────
 
-  defp replace_contact_relationships(_contact, _account_id, []), do: :ok
-
   defp replace_contact_relationships(contact, account_id, related_entries) do
-    from(r in Relationship, where: r.contact_id == ^contact.id and r.account_id == ^account_id)
-    |> Repo.delete_all()
+    entries =
+      Enum.flat_map(related_entries, fn entry ->
+        case Kith.DAV.Store.get_related(account_id, entry.value) do
+          nil -> []
+          related -> [{related.id, entry.type, hidden_from_dav?(related)}]
+        end
+      end)
 
-    Enum.each(related_entries, fn entry ->
-      with {:ok, related_id} <- extract_contact_id_from_uid(entry.value),
-           %Contact{} <- get_contact(account_id, related_id) do
-        type_name = vcard_type_to_relationship_name(entry.type)
-        rel_type = find_or_create_relationship_type!(account_id, type_name)
+    entries =
+      entries
+      |> Enum.reject(fn {_id, _type, hidden} -> hidden end)
+      |> Enum.map(fn {id, type, _hidden} -> {id, type} end)
+      |> Enum.uniq_by(fn {id, type} -> {id, String.downcase(type)} end)
 
-        %Relationship{}
-        |> Relationship.changeset(%{
-          account_id: account_id,
-          contact_id: contact.id,
-          related_contact_id: related_id,
-          relationship_type_id: rel_type.id
-        })
-        |> Repo.insert(on_conflict: :nothing)
-      else
-        _ -> :ok
-      end
+    existing =
+      from(r in Relationship,
+        where: r.contact_id == ^contact.id and r.account_id == ^account_id,
+        preload: [:relationship_type, :related_contact]
+      )
+      |> Repo.all()
+      |> Enum.reject(&hidden_from_dav?(&1.related_contact))
+
+    entries
+    |> retain_dav_entries(existing, &same_dav_relationship?/2)
+    |> Enum.each(fn {related_id, type} ->
+      rel_type =
+        find_or_create_relationship_type!(account_id, vcard_type_to_relationship_name(type))
+
+      %Relationship{}
+      |> Relationship.changeset(%{
+        account_id: account_id,
+        contact_id: contact.id,
+        related_contact_id: related_id,
+        relationship_type_id: rel_type.id
+      })
+      |> insert_or_rollback()
     end)
   end
 
-  defp extract_contact_id_from_uid(uid) do
-    # Match both "kith-contact-123" and "urn:uuid:kith-contact-123"
-    case Regex.run(~r/kith-contact-(\d+)/, uid) do
-      [_, id_str] -> {:ok, String.to_integer(id_str)}
-      _ -> :error
-    end
+  defp hidden_from_dav?(%Contact{deleted_at: deleted_at, is_archived: archived}),
+    do: deleted_at != nil or archived
+
+  defp same_dav_relationship?(relationship, {related_id, type}) do
+    relationship.related_contact_id == related_id and
+      Kith.VCard.Serializer.relationship_type_to_vcard(relationship.relationship_type.name) ==
+        String.downcase(type)
   end
 
   defp vcard_type_to_relationship_name(type) do
@@ -1794,13 +1882,6 @@ defmodule Kith.Contacts do
   defp photo_extension("image/gif"), do: ".gif"
   defp photo_extension("image/webp"), do: ".webp"
   defp photo_extension(_), do: ".jpg"
-
-  @doc "Bumps `updated_at` on a contact. Used after replacing child data."
-  def touch_contact!(%Contact{} = contact) do
-    contact
-    |> Ecto.Changeset.change(updated_at: DateTime.utc_now(:second))
-    |> Repo.update!()
-  end
 
   @doc false
   def dav_preloads do

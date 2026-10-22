@@ -172,8 +172,7 @@ defmodule KithWeb.DAV.AccessControlTest do
         |> dav_request("PUT", resource_path, updated)
 
       assert conn4.status == 204
-      [etag_v2] = get_resp_header(conn4, "etag")
-      assert etag_v1 != etag_v2
+      assert get_resp_header(conn4, "etag") == []
 
       # 5. GET to verify update
       conn5 =
@@ -181,6 +180,8 @@ defmodule KithWeb.DAV.AccessControlTest do
         |> basic_auth(context.user.email, dav_password())
         |> dav_request("GET", resource_path)
 
+      [etag_v2] = get_resp_header(conn5, "etag")
+      assert etag_v1 != etag_v2
       assert conn5.status == 200
       assert conn5.resp_body =~ "Updated"
       assert conn5.resp_body =~ "NewCo"

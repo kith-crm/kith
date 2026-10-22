@@ -538,100 +538,28 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
-  defp handle_put_contact(conn, uid) do
-    # RFC 6352 §5.1: Content-Type MUST be text/vcard
-    content_type = get_req_header(conn, "content-type") |> List.first("")
+  defp handle_put_contact(conn, raw) do
+    media_type =
+      get_req_header(conn, "content-type")
+      |> List.first("")
+      |> String.split(";")
+      |> hd()
+      |> String.trim()
+      |> String.downcase()
 
-    if String.starts_with?(content_type, "text/vcard") do
-      with_body(conn, fn conn, body -> do_put_contact(conn, uid, body) end)
-    else
-      send_resp(conn, 415, "Unsupported Media Type")
+    cond do
+      not Kith.DAV.AddressObject.valid_name?(raw) ->
+        send_resp(conn, 400, "Bad Request")
+
+      media_type not in ["text/vcard", "text/x-vcard"] ->
+        send_resp(conn, 415, "Unsupported Media Type")
+
+      true ->
+        with_body(conn, &Kith.DAV.AddressObject.put(&1, raw, &2))
     end
   end
 
-  defp do_put_contact(conn, uid, body) do
-    aid = account_id(conn)
-
-    case VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: aid) do
-      :error ->
-        xml = XMLBuilder.precondition_error("valid-address-data", "Invalid vCard format")
-        send_dav_response(conn, 422, xml)
-
-      {scalar_attrs, nested_data} ->
-        existing = find_contact_by_name(conn, uid)
-        put_contact(conn, aid, existing, scalar_attrs, nested_data)
-    end
-  end
-
-  defp put_contact(conn, aid, nil, scalar_attrs, nested_data) do
-    with {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
-         {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data) do
-      contact = Contacts.touch_contact!(contact)
-      Store.ensure_rows(aid)
-
-      {:ok, _} =
-        Store.put_identity(Kith.Repo.preload(contact, :dav).dav, %{
-          resource_name: List.last(path_segments(conn.request_path))
-        })
-
-      contact = Kith.Repo.preload(contact, :dav, force: true)
-      etag = compute_etag(contact)
-
-      conn
-      |> put_resp_header("etag", "\"#{etag}\"")
-      |> send_resp(201, "")
-    else
-      {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
-    end
-  end
-
-  defp put_contact(conn, aid, contact, scalar_attrs, nested_data) do
-    # RFC 7232 §3.2: If-None-Match: * means "only if resource does NOT exist"
-    if get_req_header(conn, "if-none-match") == ["*"] do
-      send_resp(conn, 412, "Precondition Failed")
-    else
-      put_update_contact(conn, aid, contact, scalar_attrs, nested_data)
-    end
-  end
-
-  defp put_update_contact(conn, aid, contact, scalar_attrs, nested_data) do
-    case check_if_match(conn, contact) do
-      :precondition_failed ->
-        send_resp(conn, 412, "Precondition Failed")
-
-      :ok ->
-        with {:ok, updated} <- Contacts.update_contact(contact, scalar_attrs),
-             {:ok, _} <- Contacts.replace_contact_children(updated, aid, nested_data) do
-          updated = Contacts.touch_contact!(updated)
-          updated = Kith.Repo.preload(updated, :dav, force: true)
-          etag = compute_etag(updated)
-
-          conn
-          |> put_resp_header("etag", "\"#{etag}\"")
-          |> send_resp(204, "")
-        else
-          {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
-        end
-    end
-  end
-
-  defp handle_delete_contact(conn, uid) do
-    case find_contact_by_name(conn, uid) do
-      nil ->
-        send_resp(conn, 404, "Not Found")
-
-      contact ->
-        # RFC 7232 §3.1: If-Match — only delete if ETag matches
-        case check_if_match(conn, contact) do
-          :precondition_failed ->
-            send_resp(conn, 412, "Precondition Failed")
-
-          :ok ->
-            Contacts.soft_delete_contact(contact)
-            send_resp(conn, 204, "")
-        end
-    end
-  end
+  defp handle_delete_contact(conn, raw), do: Kith.DAV.AddressObject.delete(conn, raw)
 
   defp handle_proppatch(conn),
     do: authorize(conn, :update, fn -> with_body(conn, &proppatch/2) end)
@@ -651,19 +579,6 @@ defmodule Kith.DAV.CardDAVPlug do
 
       _ ->
         send_resp(conn, 400, "Bad Request")
-    end
-  end
-
-  defp check_if_match(conn, contact) do
-    case get_req_header(conn, "if-match") |> List.first() do
-      nil ->
-        :ok
-
-      "*" ->
-        :ok
-
-      if_match ->
-        if if_match == "\"#{compute_etag(contact)}\"", do: :ok, else: :precondition_failed
     end
   end
 

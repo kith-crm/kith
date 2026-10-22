@@ -80,16 +80,6 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
-  describe "touch_contact!/1" do
-    test "bumps updated_at", %{contact: contact} do
-      old_updated_at = contact.updated_at
-      # Ensure at least 1 second passes
-      Process.sleep(1100)
-      updated = Contacts.touch_contact!(contact)
-      assert DateTime.compare(updated.updated_at, old_updated_at) == :gt
-    end
-  end
-
   describe "replace_contact_children/3 — tags (CATEGORIES)" do
     test "creates tags from category names", %{contact: contact, account_id: aid} do
       nested = %{
@@ -140,13 +130,15 @@ defmodule Kith.ContactsDAVTest do
   describe "replace_contact_children/3 — relationships (RELATED)" do
     test "creates relationships from related entries", %{contact: contact, account_id: aid} do
       other = contact_fixture(aid, %{first_name: "Bob"})
+      Kith.DAV.Store.ensure_rows(aid)
+      other = Kith.Repo.preload(other, :dav)
 
       nested = %{
         emails: [],
         phones: [],
         urls: [],
         addresses: [],
-        related: [%{value: "kith-contact-#{other.id}", type: "Friend"}]
+        related: [%{value: other.dav.uid, type: "Friend"}]
       }
 
       assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
@@ -168,5 +160,47 @@ defmodule Kith.ContactsDAVTest do
       # Should not crash
       assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
     end
+  end
+
+  test "unchanged phone keeps its row id and native type", %{contact: contact, account_id: aid} do
+    nested = %{
+      emails: [],
+      phones: [%{value: "555-1234", label: "Mobile"}],
+      urls: [],
+      addresses: []
+    }
+
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    [before] = Contacts.list_contact_fields(contact.id)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    [after_write] = Contacts.list_contact_fields(contact.id)
+    assert after_write.id == before.id
+    assert after_write.contact_field_type_id == before.contact_field_type_id
+  end
+
+  test "RELATED to an archived contact keeps the existing relationship", %{
+    contact: contact,
+    account_id: aid
+  } do
+    other = contact_fixture(aid)
+    Kith.DAV.Store.ensure_rows(aid)
+    other = Kith.Repo.preload(other, :dav)
+
+    nested = %{
+      emails: [],
+      phones: [],
+      urls: [],
+      addresses: [],
+      related: [%{value: other.dav.uid, type: "Friend"}]
+    }
+
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    [relationship] = Contacts.list_relationships(contact.id)
+    {:ok, _} = Contacts.archive_contact(other)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    assert [%{id: id}] = Contacts.list_relationships(contact.id)
+    assert id == relationship.id
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, %{nested | related: []})
+    assert [%{id: ^id}] = Contacts.list_relationships(contact.id)
   end
 end
