@@ -1462,6 +1462,9 @@ defmodule Kith.Contacts do
   Checks if a contact with the given email or name already exists in the account.
   Returns true if a duplicate is found.
   """
+  # A card the parser could not read (`per_card: true`, CDV-117) matches nothing.
+  def contact_exists?(_account_id, {:error, _reason}), do: false
+
   def contact_exists?(account_id, %{} = attrs) do
     emails = Map.get(attrs, :emails, [])
     first_name = Map.get(attrs, :first_name)
@@ -1504,8 +1507,12 @@ defmodule Kith.Contacts do
 
   @doc """
   Creates a contact from parsed vCard data. Used by the import flow.
-  Does not create birthday reminders (intentional for bulk import).
+  Does not create birthday reminders (intentional for bulk import). A
+  `{:error, reason}` entry (a card `Parser.parse(data, per_card: true)` could
+  not read) is returned as that error.
   """
+  def import_contact(_account_id, {:error, reason}), do: {:error, reason}
+
   def import_contact(account_id, %{} = parsed) do
     Repo.transaction(fn ->
       contact_attrs = %{

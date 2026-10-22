@@ -29,17 +29,24 @@ defmodule Kith.VCard.Parser do
   - :rev (string timestamp or nil)
   - :photo (map with :content_type/:data/:encoding or :url, or nil)
   """
-  def parse(data) when is_binary(data) do
+  def parse(data, opts \\ []) when is_binary(data) do
     # A fold can bisect a UTF-8 code point (RFC 6350 §3.2). Restore bytes
     # before validating encoding; genuinely malformed input remains rejected.
     data =
       data |> String.replace_prefix("\uFEFF", "") |> normalize_line_endings() |> unfold_lines()
 
-    if String.valid?(data) do
-      contacts = data |> split_vcards() |> Enum.map(&parse_vcard/1) |> Enum.reject(&is_nil/1)
-      {:ok, contacts}
-    else
-      {:error, "Invalid UTF-8"}
+    cond do
+      String.valid?(data) ->
+        {:ok, data |> split_vcards() |> Enum.map(&parse_vcard/1) |> Enum.reject(&is_nil/1)}
+
+      # Imports (`per_card: true`): a card that is not UTF-8 becomes an
+      # `{:error, reason}` entry, so one bad card does not reject the whole file
+      # (CDV-117). DAV keeps the strict whole-body check (CDV-75).
+      Keyword.get(opts, :per_card, false) ->
+        {:ok, data |> split_vcards() |> Enum.map(&parse_valid_vcard/1) |> Enum.reject(&is_nil/1)}
+
+      true ->
+        {:error, "Invalid UTF-8"}
     end
   rescue
     e -> {:error, "Failed to parse vCard file: #{Exception.message(e)}"}
@@ -69,6 +76,10 @@ defmodule Kith.VCard.Parser do
   end
 
   # ── Single vCard Parsing ───────────────────────────────────────────────
+
+  defp parse_valid_vcard(block) do
+    if String.valid?(block), do: parse_vcard(block), else: {:error, "Invalid UTF-8"}
+  end
 
   defp parse_vcard(block) do
     lines = String.split(block, "\n", trim: true)

@@ -594,4 +594,28 @@ defmodule Kith.VCard.ParserTest do
       end
     end
   end
+
+  describe "CDV-117: per-card encoding" do
+    test "a file with one non-UTF-8 card: strict parse refuses it, per_card isolates the card" do
+      card = fn name ->
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nN:#{name};A;;;\r\nFN:A #{name}\r\nEND:VCARD\r\n"
+      end
+
+      data = card.("One") <> card.(<<"Zo", 0xEB>>) <> card.("Three")
+
+      # DAV (a single card per PUT, CDV-75) keeps the strict whole-body check.
+      assert Parser.parse(data) == {:error, "Invalid UTF-8"}
+
+      assert {:ok, [%{last_name: "One"}, {:error, "Invalid UTF-8"}, %{last_name: "Three"}]} =
+               Parser.parse(data, per_card: true)
+
+      # A fold that splits a code point is still repaired per card (CDV-75).
+      folded =
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nN:" <>
+          <<0xC3>> <> "\r\n " <> <<0xBC>> <> "nal;A;;;\r\nFN:A\r\nEND:VCARD\r\n"
+
+      assert {:ok, [%{last_name: "ünal"}, {:error, "Invalid UTF-8"}]} =
+               Parser.parse(folded <> card.(<<0xFF>>), per_card: true)
+    end
+  end
 end
