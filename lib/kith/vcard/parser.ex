@@ -444,8 +444,8 @@ defmodule Kith.VCard.Parser do
 
       # A leap-safe placeholder stores month/day; the separate flag prevents
       # exposing this implementation year to clients or age calculations.
-      String.match?(str, ~r/^--\d{4}$/) ->
-        parse_date("2000" <> String.replace_prefix(str, "--", ""))
+      String.match?(str, ~r/^--\d{2}-?\d{2}$/) ->
+        parse_date("2000" <> String.replace(str, "-", ""))
 
       true ->
         nil

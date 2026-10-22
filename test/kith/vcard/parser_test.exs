@@ -628,4 +628,14 @@ defmodule Kith.VCard.ParserTest do
     assert parsed.emails == [%{value: "a@example.test", label: nil}]
     assert Enum.map(parsed.urls, & &1.label) == ["Twitter", "Instagram", "Work"]
   end
+
+  for property <- ["BDAY", "X-KITH-BDAY"], value <- ["--02-29", "--0229"] do
+    test "#{property} accepts yearless birthday #{value}" do
+      assert {:ok, [parsed]} =
+               Parser.parse("BEGIN:VCARD\n#{unquote(property)}:#{unquote(value)}\nEND:VCARD")
+
+      assert parsed.birthdate == ~D[2000-02-29]
+      assert parsed.birthdate_year_unknown
+    end
+  end
 end
