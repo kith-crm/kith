@@ -36,6 +36,7 @@ defmodule Kith.DAV.CardDAVPlug do
     getetag: "<d:getetag/>",
     getcontenttype: "<d:getcontenttype/>",
     getlastmodified: "<d:getlastmodified/>",
+    address_data: "<card:address-data/>",
     addressbook_home_set: "<card:addressbook-home-set/>",
     supported_address_data: "<card:supported-address-data/>",
     supported_report_set: "<d:supported-report-set/>",

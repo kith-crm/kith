@@ -841,6 +841,26 @@ defmodule KithWeb.DAV.PropfindTest do
       assert ctag.() == first
     end
 
+    test "PROPFIND reports unsupported address-data in a 404 propstat", context do
+      body =
+        ~s(<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav"><d:prop><c:address-data/></d:prop></d:propfind>)
+
+      conn = authed_dav(context, "PROPFIND", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+      assert conn.resp_body =~ "<card:address-data/>"
+      assert conn.resp_body =~ "HTTP/1.1 404 Not Found"
+    end
+
+    test "PROPPATCH reports protected address-data in a 403 propstat", context do
+      body =
+        ~s(<d:propertyupdate xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav"><d:set><d:prop><c:address-data/></d:prop></d:set></d:propertyupdate>)
+
+      conn = authed_dav(context, "PROPPATCH", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+      assert conn.resp_body =~ "<card:address-data/>"
+      assert conn.resp_body =~ "HTTP/1.1 403 Forbidden"
+    end
+
     test "PROPPATCH echoes every prop with its own namespace", context do
       body = """
       <d:propertyupdate xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
