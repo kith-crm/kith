@@ -269,6 +269,8 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
     contact
     |> Ecto.Changeset.change(avatar: key)
     |> Repo.update!()
+
+    Kith.DAV.Store.touch(contact.account_id, [contact.id])
   end
 
   defp maybe_set_avatar(_contact, _key), do: :ok

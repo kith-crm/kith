@@ -106,8 +106,13 @@ defmodule Kith.Workers.PhoneRenormalizeWorker do
     {:ok, normalized} = PhoneFormatter.normalize(value, region)
 
     if normalized && normalized != value do
-      from(cf in ContactField, where: cf.id == ^id)
-      |> Repo.update_all(set: [value: normalized])
+      field = Repo.get!(ContactField, id)
+
+      {count, _} =
+        from(cf in ContactField, where: cf.id == ^id)
+        |> Repo.update_all(set: [value: normalized])
+
+      if count > 0, do: Kith.DAV.Store.touch(field.account_id, [field.contact_id])
 
       :updated
     else

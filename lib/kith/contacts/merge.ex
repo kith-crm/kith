@@ -162,6 +162,7 @@ defmodule Kith.Contacts.Merge do
     |> Repo.transaction()
     |> case do
       {:ok, %{last_talked_to: survivor, remap_first_met_reminders: first_met}} ->
+        Kith.DAV.Store.touch(survivor.account_id, member_ids)
         # The first-met step may have carried the opt-in flag onto the
         # survivor after `:survivor` was read, so fold it into the result.
         %{survivor | first_met_reminder: first_met.first_met_reminder}

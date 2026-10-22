@@ -45,6 +45,17 @@ defmodule Kith.Workers.DisplayNameRecomputeWorker do
         |> Repo.update_all(set: [display_name: new_display_name])
       end)
 
+      ids = Enum.map(contacts, & &1.id)
+
+      owners =
+        Repo.all(
+          from(r in Kith.Contacts.Relationship,
+            where: r.related_contact_id in ^ids,
+            select: r.contact_id
+          )
+        )
+
+      Kith.DAV.Store.touch(account_id, ids ++ owners)
       recompute_batch(account_id, format, offset + @batch_size)
     end
   end
