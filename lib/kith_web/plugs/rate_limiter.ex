@@ -35,14 +35,17 @@ defmodule KithWeb.Plugs.RateLimiter do
         conn
 
       {:deny, _limit} ->
-        retry_after = div(scale_ms, 1000)
-
-        conn
-        |> put_resp_content_type(content_type(conn))
-        |> put_resp_header("retry-after", to_string(retry_after))
-        |> send_resp(429, error_body(conn, retry_after))
-        |> halt()
+        deny(conn, div(scale_ms, 1000))
     end
+  end
+
+  @doc "Sends a rate limit response with a retry delay in seconds."
+  def deny(conn, retry_after) do
+    conn
+    |> put_resp_content_type(content_type(conn))
+    |> put_resp_header("retry-after", to_string(retry_after))
+    |> send_resp(429, error_body(conn, retry_after))
+    |> halt()
   end
 
   defp build_key(conn, %{key_fun: fun}) when is_function(fun, 1) do
