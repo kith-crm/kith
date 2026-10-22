@@ -158,6 +158,22 @@ defmodule KithWeb.ContactLive.ShowTest do
       assert html =~ "Birthday today"
     end
 
+    test "CDV-114: a year-unknown birthday shows no age", %{conn: conn, account_id: account_id} do
+      known = contact_fixture(account_id, %{birthdate: ~D[2000-01-01]})
+      age = Date.utc_today().year - 2000
+      {:ok, _view, html} = live(conn, ~p"/contacts/#{known.id}")
+      assert html =~ "(#{age})"
+
+      yearless =
+        contact_fixture(account_id, %{birthdate: ~D[2000-01-01], birthdate_year_unknown: true})
+
+      {:ok, _view, html} = live(conn, ~p"/contacts/#{yearless.id}")
+      assert html =~ "Birthday"
+      refute html =~ "(#{age})"
+      # Visible text only (the `<time datetime>` attribute keeps the stored date).
+      refute html =~ ~r/>[^<]*2000[^<]*</, "the placeholder year is shown"
+    end
+
     test "no birthday badge when no birthdate set", %{conn: conn, contact: contact} do
       {:ok, _view, html} = live(conn, ~p"/contacts/#{contact.id}")
       refute html =~ "Birthday"

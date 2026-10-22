@@ -37,7 +37,12 @@ defmodule Kith.Contacts.MergeInvariantsTest do
     duplicate_candidates
     import_records
     audit_logs
+    contact_dav_changes
   )
+
+  # contact_dav_changes is the CardDAV change log (CDV-53): written only by the
+  # contacts_log_dav_change trigger, which logs the survivor's and the loser's
+  # own writes; it must never be repointed.
 
   test "every table with a contact_id is handled by the merge engine" do
     %{rows: rows} =

@@ -34,6 +34,7 @@ defmodule Kith.Contacts do
 
   alias Kith.Activities.{Activity, Call}
   alias Kith.Storage
+  alias Kith.VCard.{Metadata, Serializer}
 
   require Logger
 
@@ -329,7 +330,7 @@ defmodule Kith.Contacts do
   def restore_contact(%Contact{} = contact) do
     contact
     |> Contact.restore_changeset()
-    |> Repo.update()
+    |> update_rejoining_contact()
   end
 
   def archive_contact(%Contact{} = contact) do
@@ -341,7 +342,24 @@ defmodule Kith.Contacts do
   def unarchive_contact(%Contact{} = contact) do
     contact
     |> Contact.archive_changeset(false)
-    |> Repo.update()
+    |> update_rejoining_contact()
+  end
+
+  # A contact coming back from the trash or the archive may carry a CardDAV UID
+  # that another visible contact has taken meanwhile (unique index, CDV-36).
+  # Outside a transaction (UI, API) it then drops its stored UID and falls back
+  # to `kith-contact-<id>`; inside one (a CardDAV PUT) the aborted transaction
+  # cannot retry, so the error is returned for a 409.
+  defp update_rejoining_contact(changeset) do
+    case Repo.update(changeset) do
+      {:error, %Ecto.Changeset{errors: [{:dav_uid, _} | _]}} = error ->
+        if Repo.in_transaction?(),
+          do: error,
+          else: changeset |> Ecto.Changeset.put_change(:dav_uid, nil) |> Repo.update()
+
+      result ->
+        result
+    end
   end
 
   def hard_delete_contact(%Contact{} = contact) do
@@ -1284,6 +1302,118 @@ defmodule Kith.Contacts do
   end
 
   @doc """
+  Gets the non-deleted contact a CardDAV client stored under resource `name`
+  (R2), or nil.
+  """
+  @spec get_contact_by_dav_name(integer(), String.t()) :: Contact.t() | nil
+  def get_contact_by_dav_name(account_id, name) when is_binary(name) do
+    Contact
+    |> scope_active(account_id)
+    |> where([c], c.dav_resource_name == ^name)
+    |> Repo.one()
+  end
+
+  @doc """
+  The non-deleted contacts of the account stored under the CardDAV resource
+  `names`, as `%{name => contact}`, in one query.
+  """
+  def get_contacts_by_dav_names(_account_id, []), do: %{}
+
+  def get_contacts_by_dav_names(account_id, names) when is_list(names) do
+    Contact
+    |> scope_active(account_id)
+    |> where([c], c.dav_resource_name in ^names)
+    |> Repo.all()
+    |> Map.new(&{&1.dav_resource_name, &1})
+  end
+
+  @doc "The non-deleted contacts of the account with the given ids, as `%{id => contact}`."
+  def get_active_contacts_by_ids(_account_id, []), do: %{}
+
+  def get_active_contacts_by_ids(account_id, ids) when is_list(ids) do
+    Contact
+    |> scope_active(account_id)
+    |> where([c], c.id in ^ids)
+    |> Repo.all()
+    |> Map.new(&{&1.id, &1})
+  end
+
+  @doc "Preloads everything a contact's vCard shows, for a list in one pass."
+  def preload_for_dav(contacts), do: contacts |> Repo.preload(dav_preloads()) |> load_dav_vcard()
+
+  @doc """
+  Loads the retained client vCard (`dav_vcard`, not loaded by plain queries)
+  into a contact or a list of contacts, in one query; contacts that already
+  carry it are left alone (CDV-119).
+  """
+  def load_dav_vcard(%Contact{} = contact), do: contact |> List.wrap() |> load_dav_vcard() |> hd()
+
+  def load_dav_vcard(contacts) when is_list(contacts) do
+    case for(%Contact{dav_vcard: nil, id: id} when not is_nil(id) <- contacts, do: id) do
+      [] ->
+        contacts
+
+      ids ->
+        retained =
+          Contact
+          |> where([c], c.id in ^ids)
+          |> select([c], {c.id, c.dav_vcard})
+          |> Repo.all()
+          |> Map.new()
+
+        Enum.map(contacts, &%{&1 | dav_vcard: &1.dav_vcard || Map.get(retained, &1.id, %{})})
+    end
+  end
+
+  @doc """
+  Gets the visible (neither trashed nor archived) contact whose stored CardDAV
+  vCard UID is `uid`, or nil.
+  """
+  def get_contact_by_dav_uid(account_id, uid) when is_binary(uid) do
+    Contact
+    |> scope_active(account_id)
+    |> where([c], c.is_archived == false and c.dav_uid == ^uid)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  @doc "Like `get_contact_by_dav_name/2`, but only for a contact in the trash."
+  def get_trashed_contact_by_dav_name(account_id, name) when is_binary(name) do
+    Contact
+    |> scope_trashed(account_id)
+    |> where([c], c.dav_resource_name == ^name)
+    |> Repo.one()
+  end
+
+  @doc "Gets a contact in the trash by id, or nil."
+  def get_trashed_contact(account_id, id) do
+    Contact
+    |> scope_trashed(account_id)
+    |> Repo.get(id)
+  end
+
+  @doc """
+  Re-reads `contact` with a `FOR NO KEY UPDATE` row lock, whatever its state
+  (trashed or archived included), or nil if it no longer exists. Call inside a
+  transaction. Not `FOR UPDATE`: that conflicts with the `FOR KEY SHARE` lock a
+  foreign-key check takes when another writer inserts a row referencing this
+  contact (e.g. a relationship), which can deadlock two PUTs (CDV-33).
+  """
+  def lock_contact(%Contact{id: id}) do
+    Contact
+    |> where([c], c.id == ^id)
+    |> lock("FOR NO KEY UPDATE")
+    |> Repo.one()
+  end
+
+  @doc "Stores the CardDAV resource name and vCard UID a client chose (R2)."
+  def put_dav_identity(%Contact{} = contact, attrs) do
+    contact
+    |> Contact.dav_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
   Returns a stream of all non-deleted contacts for an account.
   Must be called inside a `Repo.transaction/1`.
   """
@@ -1293,8 +1423,7 @@ defmodule Kith.Contacts do
     Contact
     |> scope_active(account_id)
     |> order_by([c], asc: c.last_name, asc: c.first_name)
-    |> preload(^preloads)
-    |> Repo.stream(max_rows: 100)
+    |> stream_with_preloads(preloads)
   end
 
   @doc """
@@ -1308,8 +1437,16 @@ defmodule Kith.Contacts do
     |> scope_active(account_id)
     |> where([c], c.id in ^ids)
     |> order_by([c], asc: c.last_name, asc: c.first_name)
-    |> preload(^preloads)
+    |> stream_with_preloads(preloads)
+  end
+
+  # Ecto cannot preload on a stream: preload each batch of 100 rows (CDV-116),
+  # with the retained vCard the export merges (R55, CDV-119).
+  defp stream_with_preloads(query, preloads) do
+    query
     |> Repo.stream(max_rows: 100)
+    |> Stream.chunk_every(100)
+    |> Stream.flat_map(&(&1 |> Repo.preload(preloads) |> load_dav_vcard()))
   end
 
   @doc """
@@ -1364,6 +1501,9 @@ defmodule Kith.Contacts do
   Checks if a contact with the given email or name already exists in the account.
   Returns true if a duplicate is found.
   """
+  # A card the parser could not read (`per_card: true`, CDV-117) matches nothing.
+  def contact_exists?(_account_id, {:error, _reason}), do: false
+
   def contact_exists?(account_id, %{} = attrs) do
     emails = Map.get(attrs, :emails, [])
     first_name = Map.get(attrs, :first_name)
@@ -1406,8 +1546,12 @@ defmodule Kith.Contacts do
 
   @doc """
   Creates a contact from parsed vCard data. Used by the import flow.
-  Does not create birthday reminders (intentional for bulk import).
+  Does not create birthday reminders (intentional for bulk import). A
+  `{:error, reason}` entry (a card `Parser.parse(data, per_card: true)` could
+  not read) is returned as that error.
   """
+  def import_contact(_account_id, {:error, reason}), do: {:error, reason}
+
   def import_contact(account_id, %{} = parsed) do
     Repo.transaction(fn ->
       contact_attrs = %{
@@ -1415,6 +1559,9 @@ defmodule Kith.Contacts do
         last_name: parsed.last_name,
         nickname: parsed.nickname,
         birthdate: parsed.birthdate,
+        # A year-less BDAY (`--MMDD`, Kith's `X-KITH-BDAY`) parses to the
+        # placeholder year 2000; without the flag it would be a real year (CDV-114).
+        birthdate_year_unknown: Map.get(parsed, :birthdate_year_unknown, false),
         company: parsed.company,
         occupation: parsed.occupation,
         description: parsed.description,
@@ -1462,17 +1609,42 @@ defmodule Kith.Contacts do
       |> Repo.one()
 
     if field_type do
-      Enum.each(fields, fn %{value: value, label: label} ->
-        %ContactField{}
-        |> ContactField.changeset(%{
-          value: value,
-          label: label,
-          contact_id: contact.id,
-          account_id: account_id,
-          contact_field_type_id: field_type.id
-        })
-        |> Repo.insert!()
-      end)
+      # A blank value (`EMAIL:`) is skipped; an unstorable one rolls back the
+      # caller's transaction instead of raising (CDV-21).
+      now = DateTime.utc_now(:second)
+
+      fields
+      |> Enum.reject(fn %{value: value} -> is_nil(value) or String.trim(value) == "" end)
+      |> Enum.map(&contact_field_row(&1, contact.id, account_id, field_type.id, now))
+      |> Enum.chunk_every(2000)
+      |> Enum.each(&Repo.insert_all(ContactField, &1))
+    end
+  end
+
+  defp contact_field_row(%{value: value, label: label}, contact_id, account_id, type_id, now) do
+    changeset =
+      ContactField.changeset(%ContactField{}, %{
+        value: value,
+        label: label,
+        contact_id: contact_id,
+        account_id: account_id,
+        contact_field_type_id: type_id
+      })
+
+    if changeset.valid? do
+      changeset
+      |> Ecto.Changeset.apply_changes()
+      |> Map.take([:value, :label, :contact_id, :account_id, :contact_field_type_id])
+      |> Map.merge(%{inserted_at: now, updated_at: now})
+    else
+      Repo.rollback(changeset)
+    end
+  end
+
+  defp insert_or_rollback(changeset) do
+    case Repo.insert(changeset) do
+      {:ok, record} -> record
+      {:error, changeset} -> Repo.rollback(changeset)
     end
   end
 
@@ -1486,16 +1658,18 @@ defmodule Kith.Contacts do
   """
   def replace_contact_children(contact, account_id, nested_data) do
     Repo.transaction(fn ->
-      from(cf in ContactField, where: cf.contact_id == ^contact.id) |> Repo.delete_all()
-      from(a in Address, where: a.contact_id == ^contact.id) |> Repo.delete_all()
-
+      # Keep native-only fields and unchanged rows (including native type ids
+      # and address geocoding) that a DAV client cannot reconstruct.
+      nested_data = reconcile_dav_fields(contact, nested_data)
       create_imported_contact_fields(contact, account_id, nested_data.emails, "mailto")
       create_imported_contact_fields(contact, account_id, nested_data.phones, "tel")
       create_imported_contact_fields(contact, account_id, nested_data.urls, "https")
 
-      Enum.each(nested_data.addresses, fn addr ->
-        insert_address!(addr, contact.id, account_id)
-      end)
+      addresses = from(a in Address, where: a.contact_id == ^contact.id) |> Repo.all()
+
+      nested_data.addresses
+      |> retain_dav_entries(addresses, &same_dav_address?/2)
+      |> Enum.each(&insert_address!(&1, contact.id, account_id))
 
       # Tags (CATEGORIES)
       if Map.has_key?(nested_data, :categories) do
@@ -1517,12 +1691,91 @@ defmodule Kith.Contacts do
         )
       end
 
+      if metadata = Map.get(nested_data, :vcard_metadata) do
+        # R45: keep retained data this PUT's vCard version cannot express (CDV-96)
+        metadata = Metadata.carry_over(load_dav_vcard(contact).dav_vcard, metadata)
+        contact |> Ecto.Changeset.change(dav_vcard: metadata) |> Repo.update!()
+      end
+
       # Photo
       if photo = Map.get(nested_data, :photo) do
         maybe_import_vcard_photo(contact, account_id, photo)
       end
 
       :ok
+    end)
+  end
+
+  defp reconcile_dav_fields(contact, data) do
+    fields =
+      from(cf in ContactField,
+        where: cf.contact_id == ^contact.id,
+        preload: [:contact_field_type]
+      )
+      |> Repo.all()
+
+    Enum.reduce(fields, data, fn field, data ->
+      case dav_field_kind(field.contact_field_type) do
+        nil ->
+          data
+
+        kind ->
+          Map.put(
+            data,
+            kind,
+            retain_dav_entries(Map.get(data, kind, []), [field], &same_dav_field?/2)
+          )
+      end
+    end)
+  end
+
+  defp dav_field_kind(%{protocol: protocol, vcard_label: label}) do
+    case protocol do
+      p when p in ["mailto", "mailto:"] -> :emails
+      p when p in ["tel", "tel:"] -> :phones
+      p when p in ["http", "http://", "https", "https://"] -> :urls
+      _ -> if label == "IMPP", do: :impp
+    end
+  end
+
+  defp same_dav_field?(field, entry),
+    do: field.value == entry.value and dav_label(field.label) == dav_label(entry.label)
+
+  # Compare labels the way they survive a TYPE parameter: the serializer
+  # drops DQUOTE/control characters and a parser keeps the first TYPE value
+  # of a list (CDV-89).
+  defp dav_label(label) do
+    label =
+      (label || "")
+      |> String.replace(~r/["\x00-\x1F\x7F]/, "")
+      |> String.split(",")
+      |> hd()
+      |> String.trim()
+
+    case String.downcase(label) do
+      "mobile" -> "cell"
+      "personal" -> "home"
+      "business" -> "work"
+      other -> other
+    end
+  end
+
+  defp same_dav_address?(address, entry) do
+    Enum.all?([:label, :line1, :line2, :city, :province, :postal_code, :country], fn key ->
+      Map.get(address, key) == Map.get(entry, key)
+    end)
+  end
+
+  defp retain_dav_entries(incoming, existing, matches?) do
+    Enum.reduce(existing, incoming, fn record, incoming ->
+      case Enum.find_index(incoming, &matches?.(record, &1)) do
+        nil ->
+          Repo.delete!(record)
+          incoming
+
+        index ->
+          List.delete_at(incoming, index)
+      end
     end)
   end
 
@@ -1577,35 +1830,106 @@ defmodule Kith.Contacts do
 
   defp replace_contact_relationships(_contact, _account_id, []), do: :ok
 
+  # R41: a target hidden from DAV (archived or trashed, R5) is resolved only so
+  # its entry matches; DAV neither creates nor deletes a relationship to it,
+  # since the client cannot see that contact (CDV-88).
   defp replace_contact_relationships(contact, account_id, related_entries) do
-    from(r in Relationship, where: r.contact_id == ^contact.id and r.account_id == ^account_id)
-    |> Repo.delete_all()
+    entries =
+      Enum.flat_map(related_entries, fn entry ->
+        case related_contact_by_uid(account_id, entry.value) do
+          nil -> []
+          related -> [{related.id, entry.type, hidden_from_dav?(related)}]
+        end
+      end)
 
-    Enum.each(related_entries, fn entry ->
-      with {:ok, related_id} <- extract_contact_id_from_uid(entry.value),
-           %Contact{} <- get_contact(account_id, related_id) do
-        type_name = vcard_type_to_relationship_name(entry.type)
-        rel_type = find_or_create_relationship_type!(account_id, type_name)
+    entries =
+      entries
+      |> Enum.reject(fn {_id, _type, hidden} -> hidden end)
+      |> Enum.map(fn {id, type, _hidden} -> {id, type} end)
+      |> Enum.uniq_by(fn {id, type} -> {id, String.downcase(type)} end)
 
-        %Relationship{}
-        |> Relationship.changeset(%{
-          account_id: account_id,
-          contact_id: contact.id,
-          related_contact_id: related_id,
-          relationship_type_id: rel_type.id
-        })
-        |> Repo.insert(on_conflict: :nothing)
-      else
-        _ -> :ok
-      end
+    existing =
+      from(r in Relationship,
+        where: r.contact_id == ^contact.id and r.account_id == ^account_id,
+        preload: [:relationship_type, :related_contact]
+      )
+      |> Repo.all()
+      |> Enum.reject(&hidden_from_dav?(&1.related_contact))
+
+    entries
+    |> retain_dav_entries(existing, &same_dav_relationship?/2)
+    |> Enum.each(fn {related_id, type} ->
+      rel_type =
+        find_or_create_relationship_type!(account_id, vcard_type_to_relationship_name(type))
+
+      %Relationship{}
+      |> Relationship.changeset(%{
+        account_id: account_id,
+        contact_id: contact.id,
+        related_contact_id: related_id,
+        relationship_type_id: rel_type.id
+      })
+      |> insert_or_rollback()
     end)
   end
 
-  defp extract_contact_id_from_uid(uid) do
-    # Match both "kith-contact-123" and "urn:uuid:kith-contact-123"
-    case Regex.run(~r/kith-contact-(\d+)/, uid) do
-      [_, id_str] -> {:ok, String.to_integer(id_str)}
-      _ -> :error
+  defp hidden_from_dav?(%Contact{deleted_at: deleted_at, is_archived: archived}),
+    do: deleted_at != nil or archived
+
+  defp same_dav_relationship?(relationship, {related_id, type}) do
+    relationship.related_contact_id == related_id and
+      Serializer.relationship_type_to_vcard(relationship.relationship_type.name) ==
+        String.downcase(type)
+  end
+
+  # Any contact of the account, hidden ones included (see R41). A 4.0 RELATED
+  # names its target as `urn:uuid:<x>` while the target's own card may carry
+  # the bare `UID:<x>` (or the other way round); both forms name the same
+  # contact, an exact match first (CDV-99, R49). The URN scheme and a UUID's
+  # hex digits compare case-insensitively (RFC 8141 §3.1, RFC 4122 §3); any
+  # other text UID keeps its exact value (CDV-102).
+  defp related_contact_by_uid(account_id, uid) do
+    by_uid = account_id |> related_contact_query(uid) |> Repo.one()
+    by_uid || default_related_contact(account_id, uid)
+  end
+
+  # The case-folded comparison is what the expression index
+  # `contacts_account_id_dav_uid_bare_index` answers (CDV-105); a text UID then
+  # also has to match exactly, which can only narrow the indexed candidates.
+  # The fold runs in SQL on both sides: Postgres `lower/1` and
+  # `String.downcase/1` disagree on e.g. `İ` and a final sigma (CDV-110).
+  @doc false
+  def related_contact_query(account_id, uid) do
+    bare = String.replace(uid, ~r/\Aurn:uuid:/i, "")
+
+    query =
+      from(c in Contact,
+        where: c.account_id == ^account_id and not is_nil(c.dav_uid),
+        where:
+          fragment("lower(regexp_replace(?, '^urn:uuid:', '', 'i'))", c.dav_uid) ==
+            fragment("lower(?)", ^bare),
+        order_by: [
+          desc: c.dav_uid == ^uid,
+          asc: c.is_archived,
+          asc_nulls_first: c.deleted_at
+        ],
+        limit: 1
+      )
+
+    if Regex.match?(~r/\A[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\z/i, bare) do
+      query
+    else
+      where(query, [c], fragment("regexp_replace(?, '^urn:uuid:', '', 'i')", c.dav_uid) == ^bare)
+    end
+  end
+
+  defp default_related_contact(account_id, uid) do
+    with [_, id] <- Regex.run(~r/\A(?:urn:uuid:)?kith-contact-([1-9]\d{0,17})\z/, uid),
+         %Contact{dav_uid: nil, account_id: ^account_id} = related <-
+           Repo.get(Contact, String.to_integer(id)) do
+      related
+    else
+      _ -> nil
     end
   end
 
@@ -1709,11 +2033,14 @@ defmodule Kith.Contacts do
   defp photo_extension("image/webp"), do: ".webp"
   defp photo_extension(_), do: ".jpg"
 
-  @doc "Bumps `updated_at` on a contact. Used after replacing child data."
+  @doc """
+  Bumps `updated_at` and the ETag revision on a contact. Used after replacing
+  child data. Always writes the row, even within the same second (R4).
+  """
   def touch_contact!(%Contact{} = contact) do
     contact
     |> Ecto.Changeset.change(updated_at: DateTime.utc_now(:second))
-    |> Repo.update!()
+    |> Repo.update!(force: true)
   end
 
   @doc false
@@ -1728,25 +2055,47 @@ defmodule Kith.Contacts do
   end
 
   @doc """
-  Lists contacts modified since the given timestamp.
-  Used by CardDAV sync-collection REPORT for incremental sync.
+  The account's CardDAV sync state: `epoch` identifies this database
+  incarnation (it changes on a restore into another cluster or database and on
+  a point-in-time recovery), `seq` is the newest commit-ordered change of the
+  account's contacts or hard delete (CDV-53), `floor` the newest hard delete.
+  A sync token is `{epoch, seq}`; a later commit always gets a greater `seq`,
+  so a change is never missed (R3, CDV-54).
   """
-  def list_contacts_modified_since(account_id, %DateTime{} = since) do
-    Contact
-    |> scope_active(account_id)
-    |> where([c], c.updated_at > ^since)
-    |> preload(^dav_preloads())
-    |> Repo.all()
+  def dav_sync_state(account_id) do
+    %{rows: [[epoch, seq, floor]]} =
+      Repo.query!(
+        """
+        SELECT kith_dav_sync_epoch(),
+               GREATEST((SELECT max(seq) FROM contact_dav_changes WHERE account_id = $1), f.seq, 0),
+               COALESCE(f.seq, 0)
+        FROM (SELECT (SELECT seq FROM dav_sync_floors WHERE account_id = $1) AS seq) f
+        """,
+        [account_id]
+      )
+
+    %{epoch: epoch, seq: seq, floor: floor}
   end
 
   @doc """
-  Lists contacts soft-deleted since the given timestamp.
-  Used by CardDAV sync-collection REPORT to report deletions.
+  The CardDAV ctag of the account's address book: its sync `seq`, which moves
+  whenever a committed write or hard delete becomes visible, `0` for an account
+  that never had a contact (CDV-08, CDV-49, CDV-53).
   """
-  def list_contacts_deleted_since(account_id, %DateTime{} = since) do
+  def dav_ctag(account_id), do: dav_sync_state(account_id).seq
+
+  @doc """
+  Lists every contact of the account whose last committed write is newer than
+  the sync `seq`, hidden ones (trashed, archived) included. Used by CardDAV
+  sync-collection.
+  """
+  def list_contacts_changed_since(account_id, seq) do
     Contact
     |> scope_to_account(account_id)
-    |> where([c], not is_nil(c.deleted_at) and c.deleted_at > ^since)
+    |> join(:inner, [c], ch in "contact_dav_changes", on: ch.contact_id == c.id)
+    |> where([_c, ch], ch.seq > ^seq)
+    |> preload(^dav_preloads())
+    |> select_merge([c], %{dav_vcard: c.dav_vcard})
     |> Repo.all()
   end
 

@@ -9,6 +9,7 @@ defmodule Kith.Application do
   @impl true
   def start(_type, _args) do
     log_oban_pruner_retention()
+    Kith.Accounts.init_verified_password_key()
     children = base_children() ++ mode_children()
     opts = [strategy: :one_for_one, name: Kith.Supervisor]
     Supervisor.start_link(children, opts)

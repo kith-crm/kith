@@ -10,6 +10,8 @@ defmodule Kith.VCard.Serializer do
   - Special characters (semicolons, commas, backslashes, newlines) must be escaped
   """
 
+  alias Kith.VCard.Metadata
+
   @crlf "\r\n"
 
   @doc """
@@ -31,17 +33,18 @@ defmodule Kith.VCard.Serializer do
     [
       "BEGIN:VCARD",
       version_line(version),
+      uid_line(contact, version, Keyword.get(opts, :include_uid, false)),
       fn_line(contact),
       n_line(contact),
       nickname_line(contact),
-      bday_line(contact),
+      bday_line(contact, version),
       org_line(contact),
       title_line(contact),
       note_line(contact),
       gender_line(contact, version),
       categories_line(contact),
       related_lines(contact, version),
-      rev_line(contact),
+      rev_line(contact, version),
       photo_line(contact, version),
       contact_field_lines(contact),
       address_lines(contact),
@@ -49,6 +52,7 @@ defmodule Kith.VCard.Serializer do
     ]
     |> List.flatten()
     |> Enum.reject(&is_nil/1)
+    |> Metadata.merge(contact, version)
     |> Enum.map_join(@crlf, &fold_line/1)
     |> Kernel.<>(@crlf)
   end
@@ -59,6 +63,24 @@ defmodule Kith.VCard.Serializer do
   def serialize_many(contacts, opts \\ []) do
     Enum.map_join(contacts, "", &serialize(&1, opts))
   end
+
+  @doc false
+  def uid_for(%{dav_uid: uid}, _version) when is_binary(uid), do: uid
+  def uid_for(%{id: id}, :v30), do: "kith-contact-#{id}"
+  def uid_for(%{id: id}, :v40), do: "urn:uuid:kith-contact-#{id}"
+
+  defp uid_line(_contact, _version, false), do: nil
+
+  defp uid_line(contact, version, true),
+    do: identifier_line("UID", uid_for(contact, version), version)
+
+  defp identifier_line(name, value, :v40) do
+    if Metadata.uri?(value),
+      do: name <> ":" <> value,
+      else: name <> ";VALUE=text:" <> escape(value)
+  end
+
+  defp identifier_line(name, value, :v30), do: name <> ":" <> escape(value)
 
   # ── Version ───────────────────────────────────────────────────────────
 
@@ -90,9 +112,24 @@ defmodule Kith.VCard.Serializer do
   defp nickname_line(%{nickname: ""}), do: nil
   defp nickname_line(%{nickname: nick}), do: "NICKNAME:" <> escape(nick)
 
-  defp bday_line(%{birthdate: nil}), do: nil
+  defp bday_line(%{birthdate: nil}, _version), do: nil
 
-  defp bday_line(%{birthdate: date}) do
+  defp bday_line(%{birthdate: date, birthdate_year_unknown: true}, :v40),
+    do: "BDAY:--" <> Calendar.strftime(date, "%m%d")
+
+  # RFC 2426 BDAY needs a year: 3.0 uses Apple's year-omitted form, which Apple
+  # Contacts and DAVx5 display as month and day, plus Kith's own `--MMDD` (R35,
+  # CDV-115). The parser reads both back as year-unknown.
+  defp bday_line(%{birthdate: date, birthdate_year_unknown: true}, :v30) do
+    [
+      "BDAY;X-APPLE-OMIT-YEAR=1604:1604-" <> Calendar.strftime(date, "%m-%d"),
+      "X-KITH-BDAY:--" <> Calendar.strftime(date, "%m%d")
+    ]
+  end
+
+  defp bday_line(%{birthdate: date}, :v40), do: "BDAY:" <> Calendar.strftime(date, "%Y%m%d")
+
+  defp bday_line(%{birthdate: date}, :v30) do
     "BDAY:" <> Date.to_iso8601(date)
   end
 
@@ -110,10 +147,18 @@ defmodule Kith.VCard.Serializer do
 
   # ── REV ──────────────────────────────────────────────────────────────
 
-  defp rev_line(contact) do
+  defp rev_line(contact, version) do
     case Map.get(contact, :updated_at) do
-      %DateTime{} = dt -> "REV:" <> DateTime.to_iso8601(dt)
-      _ -> nil
+      %DateTime{} = dt ->
+        timestamp =
+          if version == :v40,
+            do: Calendar.strftime(dt, "%Y%m%dT%H%M%SZ"),
+            else: DateTime.to_iso8601(dt)
+
+        "REV:" <> timestamp
+
+      _ ->
+        nil
     end
   end
 
@@ -175,9 +220,9 @@ defmodule Kith.VCard.Serializer do
 
   defp do_related_lines(rels, :v40) do
     Enum.map(rels, fn rel ->
-      type = map_relationship_to_rfc6350(rel.relationship_type.name)
-      uid = "urn:uuid:kith-contact-#{rel.related_contact_id}"
-      "RELATED;TYPE=#{type}:#{uid}"
+      type = relationship_type_to_vcard(rel.relationship_type.name)
+      uid = rel.related_contact |> Map.put_new(:id, rel.related_contact_id) |> uid_for(:v40)
+      identifier_line("RELATED;TYPE=#{type}", uid, :v40)
     end)
   end
 
@@ -190,7 +235,8 @@ defmodule Kith.VCard.Serializer do
 
   defp display_name_for_related(_), do: ""
 
-  defp map_relationship_to_rfc6350(name) do
+  @doc false
+  def relationship_type_to_vcard(name) do
     case String.downcase(name) do
       n when n in ["spouse", "husband", "wife"] -> "spouse"
       n when n in ["parent", "mother", "father"] -> "parent"
@@ -246,7 +292,7 @@ defmodule Kith.VCard.Serializer do
     vcard_label = field.contact_field_type.vcard_label
     type_param = type_param_from_label(field.label)
 
-    case protocol do
+    case normalize_protocol(protocol) do
       "tel" ->
         "TEL#{type_param}:#{escape(field.value)}"
 
@@ -255,22 +301,27 @@ defmodule Kith.VCard.Serializer do
 
       "https" ->
         if vcard_label && String.starts_with?(vcard_label, "X-") do
-          "#{vcard_label}:#{escape(field.value)}"
+          "#{vcard_label}#{type_param}:#{escape(field.value)}"
         else
-          "URL:#{escape(field.value)}"
+          "URL#{type_param}:#{escape(field.value)}"
         end
 
       "http" ->
-        "URL:#{escape(field.value)}"
+        "URL#{type_param}:#{escape(field.value)}"
 
       _ ->
         if vcard_label do
-          "#{vcard_label}:#{escape(field.value)}"
+          "#{vcard_label}#{type_param}:#{escape(field.value)}"
         end
     end
   end
 
   defp contact_field_line(_), do: nil
+
+  defp normalize_protocol(nil), do: ""
+
+  defp normalize_protocol(protocol),
+    do: protocol |> String.trim_trailing("://") |> String.trim_trailing(":")
 
   defp type_param_from_label(nil), do: ""
   defp type_param_from_label(""), do: ""
@@ -288,7 +339,7 @@ defmodule Kith.VCard.Serializer do
         _ -> String.upcase(label)
       end
 
-    ";TYPE=#{type}"
+    ";TYPE=" <> Metadata.param_value(type)
   end
 
   # ── Addresses ──────────────────────────────────────────────────────────
@@ -331,10 +382,16 @@ defmodule Kith.VCard.Serializer do
   defp fold_line(<<>>, _max, acc), do: acc
 
   defp fold_line(rest, max, acc) do
-    size = min(max, byte_size(rest))
+    size = utf8_chunk_size(rest, min(max, byte_size(rest)))
     <<chunk::binary-size(size), remaining::binary>> = rest
     # Continue lines use 74 octets (75 minus the leading space)
     fold_line(remaining, 74, [chunk | acc])
+  end
+
+  defp utf8_chunk_size(rest, size) do
+    if String.valid?(binary_part(rest, 0, size)),
+      do: size,
+      else: utf8_chunk_size(rest, size - 1)
   end
 
   # ── Escaping ───────────────────────────────────────────────────────────
