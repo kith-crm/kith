@@ -876,15 +876,29 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
+  # RFC 7232 §3.1: If-Match is evaluated on the row read under its lock, in the
+  # transaction that trashes it, so a concurrent PUT cannot be trashed with a
+  # stale ETag; a failed write is not answered 204 (CDV-118, as CDV-24 for PUT).
   defp delete_contact(conn, contact) do
-    # RFC 7232 §3.1: If-Match — only delete if ETag matches
-    case check_if_match(conn, contact) do
-      :precondition_failed ->
-        send_resp(conn, 412, "Precondition Failed")
+    result =
+      Kith.Repo.transaction(fn ->
+        with %Contact{deleted_at: nil, is_archived: false} = locked <-
+               Contacts.lock_contact(contact),
+             :ok <- check_if_match(conn, locked),
+             {:ok, _} <- Contacts.soft_delete_contact(locked) do
+          :deleted
+        else
+          :precondition_failed -> Kith.Repo.rollback(:precondition_failed)
+          {:error, reason} -> Kith.Repo.rollback(reason)
+          _gone_or_hidden -> Kith.Repo.rollback(:not_found)
+        end
+      end)
 
-      :ok ->
-        Contacts.soft_delete_contact(contact)
-        send_resp(conn, 204, "")
+    case result do
+      {:ok, :deleted} -> send_resp(conn, 204, "")
+      {:error, :precondition_failed} -> send_resp(conn, 412, "Precondition Failed")
+      {:error, :not_found} -> send_resp(conn, 404, "Not Found")
+      {:error, _changeset} -> send_resp(conn, 500, "Internal Server Error")
     end
   end
 

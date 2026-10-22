@@ -429,4 +429,63 @@ defmodule KithWeb.DAV.ConcurrencyTest do
       assert body =~ "FN:Anna Lock\r\n"
     end
   end
+
+  describe "CDV-118: DELETE evaluates If-Match under the row lock" do
+    defp dav_delete(user, href, headers) do
+      Sandbox.unboxed_run(Repo, fn ->
+        headers
+        |> Enum.reduce(build_conn(), fn {k, v}, c -> put_req_header(c, k, v) end)
+        |> basic_auth(user.email, dav_password())
+        |> dav_request("DELETE", href)
+      end)
+    end
+
+    # Runs `write` in a transaction that holds the contact's row lock until the
+    # DELETE (started meanwhile) is blocked on it, then commits.
+    defp delete_during(user, account_id, name, headers, write) do
+      Sandbox.unboxed_run(Repo, fn ->
+        {:ok, task} =
+          Repo.transaction(fn ->
+            contact = Contacts.get_contact_by_dav_name(account_id, name)
+            write.(contact)
+            task = Task.async(fn -> dav_delete(user, @book <> name, headers) end)
+            wait_for_lock_waiter()
+            task
+          end)
+
+        Task.await(task, 10_000)
+      end)
+    end
+
+    test "CDV-118: a DELETE whose If-Match is overtaken by an uncommitted edit is 412",
+         %{user: user, account_id: account_id} do
+      href = @book <> "del-race.vcf"
+      assert dav_put(user, href, card("+15550000000")).status == 201
+      [etag] = dav_get(user, href) |> get_resp_header("etag")
+
+      deleted =
+        delete_during(user, account_id, "del-race.vcf", [{"if-match", etag}], fn contact ->
+          {:ok, _} = Contacts.update_contact(contact, %{"last_name" => "Edited"})
+        end)
+
+      assert deleted.status == 412
+      get = dav_get(user, href)
+      assert get.status == 200
+      assert get.resp_body =~ "N:Edited;Race;"
+    end
+
+    test "CDV-118: a DELETE of a contact removed meanwhile is 404, never a 204 or 500",
+         %{user: user, account_id: account_id} do
+      href = @book <> "del-gone.vcf"
+      assert dav_put(user, href, card("+15550000000")).status == 201
+      [etag] = dav_get(user, href) |> get_resp_header("etag")
+
+      deleted =
+        delete_during(user, account_id, "del-gone.vcf", [{"if-match", etag}], fn contact ->
+          {:ok, _} = Contacts.hard_delete_contact(contact)
+        end)
+
+      assert deleted.status == 404
+    end
+  end
 end
