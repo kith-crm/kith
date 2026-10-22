@@ -51,6 +51,27 @@ defmodule KithWeb.DAV.ConcurrencyTest do
     end)
   end
 
+  # Waits until a request started by the test is blocked on a lock held by the
+  # test's open transaction, so the race is exercised whatever the scheduling
+  # (a fixed sleep let a late request arrive after the commit, CDV-120). With
+  # `done_ok: task`, the request finishing without ever blocking also ends the
+  # wait (CDV-33: the fixed PUT takes no conflicting lock, a regressed one blocks).
+  defp wait_for_lock_waiter(opts \\ [], tries \\ 250) do
+    %{rows: [[n]]} =
+      Repo.query!(
+        "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'"
+      )
+
+    task = opts[:done_ok]
+
+    cond do
+      n > 0 -> :blocked
+      task && not Process.alive?(task.pid) -> :done
+      tries == 0 -> flunk("the request never blocked")
+      true -> Process.sleep(20) && wait_for_lock_waiter(opts, tries - 1)
+    end
+  end
+
   describe "CDV-24: preconditions are evaluated under a row lock" do
     test "CDV-24: a PUT whose If-Match is overtaken by an uncommitted write is 412, not a lost update",
          %{user: user, account_id: account_id} do
@@ -60,7 +81,7 @@ defmodule KithWeb.DAV.ConcurrencyTest do
       [etag] = dav_get(user, href) |> get_resp_header("etag")
 
       # Another writer changes the contact and holds its row lock while the
-      # PUT (carrying the now-stale ETag) runs; it commits half a second later.
+      # PUT (carrying the now-stale ETag) runs; it commits once the PUT is blocked on that lock.
       task =
         Sandbox.unboxed_run(Repo, fn ->
           {:ok, task} =
@@ -81,7 +102,7 @@ defmodule KithWeb.DAV.ConcurrencyTest do
                   dav_put(user, href, card("+15551111111"), [{"if-match", etag}])
                 end)
 
-              Process.sleep(500)
+              wait_for_lock_waiter()
               task
             end)
 
@@ -124,7 +145,7 @@ defmodule KithWeb.DAV.ConcurrencyTest do
             task =
               Task.async(fn -> dav_put(user, @book <> name, card("+15553333333"), headers) end)
 
-            Process.sleep(500)
+            wait_for_lock_waiter()
             task
           end)
 
@@ -193,7 +214,7 @@ defmodule KithWeb.DAV.ConcurrencyTest do
             Repo.transaction(fn ->
               Contacts.lock_contact(b)
               task = Task.async(fn -> dav_put(user, contact_path(a), card) end)
-              Process.sleep(500)
+              wait_for_lock_waiter(done_ok: task)
 
               %Kith.Contacts.Relationship{}
               |> Kith.Contacts.Relationship.changeset(%{
@@ -238,7 +259,7 @@ defmodule KithWeb.DAV.ConcurrencyTest do
                   )
                 end)
 
-              Process.sleep(500)
+              wait_for_lock_waiter()
               task
             end)
 
@@ -371,19 +392,6 @@ defmodule KithWeb.DAV.ConcurrencyTest do
     defp related_card(first, uid, related_uid) do
       "BEGIN:VCARD\r\nVERSION:4.0\r\nN:Lock;#{first};;;\r\nFN:#{first} Lock\r\nUID:#{uid}\r\n" <>
         "RELATED;TYPE=friend:urn:uuid:#{related_uid}\r\nEND:VCARD\r\n"
-    end
-
-    defp wait_for_lock_waiter(tries \\ 100) do
-      %{rows: [[n]]} =
-        Repo.query!(
-          "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'"
-        )
-
-      cond do
-        n > 0 -> :ok
-        tries == 0 -> flunk("the PUT never blocked")
-        true -> Process.sleep(20) && wait_for_lock_waiter(tries - 1)
-      end
     end
 
     test "CDV-101: a PUT renaming A while another transaction holds B and then writes A",
