@@ -1344,8 +1344,7 @@ defmodule Kith.Contacts do
     Contact
     |> scope_active(account_id)
     |> order_by([c], asc: c.last_name, asc: c.first_name)
-    |> preload(^preloads)
-    |> Repo.stream(max_rows: 100)
+    |> stream_with_preloads(preloads)
   end
 
   @doc """
@@ -1359,8 +1358,14 @@ defmodule Kith.Contacts do
     |> scope_active(account_id)
     |> where([c], c.id in ^ids)
     |> order_by([c], asc: c.last_name, asc: c.first_name)
-    |> preload(^preloads)
+    |> stream_with_preloads(preloads)
+  end
+
+  defp stream_with_preloads(query, preloads) do
+    query
     |> Repo.stream(max_rows: 100)
+    |> Stream.chunk_every(100)
+    |> Stream.flat_map(&Repo.preload(&1, preloads))
   end
 
   @doc """
@@ -1415,6 +1420,8 @@ defmodule Kith.Contacts do
   Checks if a contact with the given email or name already exists in the account.
   Returns true if a duplicate is found.
   """
+  def contact_exists?(_account_id, {:error, _reason}), do: false
+
   def contact_exists?(account_id, %{} = attrs) do
     emails = Map.get(attrs, :emails, [])
     first_name = Map.get(attrs, :first_name)
@@ -1459,6 +1466,8 @@ defmodule Kith.Contacts do
   Creates a contact from parsed vCard data. Used by the import flow.
   Does not create birthday reminders (intentional for bulk import).
   """
+  def import_contact(_account_id, {:error, reason}), do: {:error, reason}
+
   def import_contact(account_id, %{} = parsed) do
     Repo.transaction(fn ->
       contact_attrs = %{
@@ -1466,6 +1475,7 @@ defmodule Kith.Contacts do
         last_name: parsed.last_name,
         nickname: parsed.nickname,
         birthdate: parsed.birthdate,
+        birthdate_year_unknown: Map.get(parsed, :birthdate_year_unknown, false),
         company: parsed.company,
         occupation: parsed.occupation,
         description: parsed.description,
@@ -1476,7 +1486,7 @@ defmodule Kith.Contacts do
         %Contact{}
         |> Contact.create_changeset(contact_attrs)
         |> Ecto.Changeset.put_change(:account_id, account_id)
-        |> Repo.insert!()
+        |> insert_or_rollback()
 
       # Create email contact fields
       create_imported_contact_fields(contact, account_id, parsed.emails, "mailto")
@@ -1491,7 +1501,7 @@ defmodule Kith.Contacts do
       Enum.each(parsed.addresses, fn addr ->
         %Address{}
         |> Address.changeset(Map.merge(addr, %{contact_id: contact.id, account_id: account_id}))
-        |> Repo.insert!()
+        |> insert_or_rollback()
       end)
 
       contact
@@ -1513,17 +1523,42 @@ defmodule Kith.Contacts do
       |> Repo.one()
 
     if field_type do
-      Enum.each(fields, fn %{value: value, label: label} ->
-        %ContactField{}
-        |> ContactField.changeset(%{
-          value: value,
-          label: label,
-          contact_id: contact.id,
-          account_id: account_id,
-          contact_field_type_id: field_type.id
-        })
-        |> Repo.insert!()
-      end)
+      # A blank value (`EMAIL:`) is skipped; an unstorable one rolls back the
+      # caller's transaction instead of raising.
+      now = DateTime.utc_now(:second)
+
+      fields
+      |> Enum.reject(fn %{value: value} -> is_nil(value) or String.trim(value) == "" end)
+      |> Enum.map(&contact_field_row(&1, contact.id, account_id, field_type.id, now))
+      |> Enum.chunk_every(2000)
+      |> Enum.each(&Repo.insert_all(ContactField, &1))
+    end
+  end
+
+  defp contact_field_row(%{value: value, label: label}, contact_id, account_id, type_id, now) do
+    changeset =
+      ContactField.changeset(%ContactField{}, %{
+        value: value,
+        label: label,
+        contact_id: contact_id,
+        account_id: account_id,
+        contact_field_type_id: type_id
+      })
+
+    if changeset.valid? do
+      changeset
+      |> Ecto.Changeset.apply_changes()
+      |> Map.take([:value, :label, :contact_id, :account_id, :contact_field_type_id])
+      |> Map.merge(%{inserted_at: now, updated_at: now})
+    else
+      Repo.rollback(changeset)
+    end
+  end
+
+  defp insert_or_rollback(changeset) do
+    case Repo.insert(changeset) do
+      {:ok, record} -> record
+      {:error, changeset} -> Repo.rollback(changeset)
     end
   end
 

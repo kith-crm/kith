@@ -48,7 +48,7 @@ defmodule KithWeb.API.ContactImportController do
   defp do_create_import(conn, user, upload) do
     with :ok <- validate_file_size(upload),
          {:ok, data} <- read_upload(upload),
-         {:ok, parsed_contacts} <- Parser.parse(data) do
+         {:ok, parsed_contacts} <- Parser.parse(data, per_card: true) do
       dispatch_import(conn, user, data, parsed_contacts)
     else
       {:error, :file_too_large} ->

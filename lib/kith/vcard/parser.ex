@@ -29,16 +29,24 @@ defmodule Kith.VCard.Parser do
   - :rev (string timestamp or nil)
   - :photo (map with :content_type/:data/:encoding or :url, or nil)
   """
-  def parse(data) when is_binary(data) do
-    contacts =
-      data
-      |> normalize_line_endings()
-      |> unfold_lines()
-      |> split_vcards()
-      |> Enum.map(&parse_vcard/1)
-      |> Enum.reject(&is_nil/1)
+  def parse(data, opts \\ []) when is_binary(data) do
+    # A fold can bisect a UTF-8 code point (RFC 6350 §3.2). Restore bytes
+    # before validating encoding; genuinely malformed input remains rejected.
+    data =
+      data |> String.replace_prefix("\uFEFF", "") |> normalize_line_endings() |> unfold_lines()
 
-    {:ok, contacts}
+    cond do
+      String.valid?(data) ->
+        {:ok, data |> split_vcards() |> Enum.map(&parse_vcard/1) |> Enum.reject(&is_nil/1)}
+
+      # Imports (`per_card: true`): a card that is not UTF-8 becomes an
+      # `{:error, reason}` entry, so one bad card does not reject the whole file
+      Keyword.get(opts, :per_card, false) ->
+        {:ok, data |> split_vcards() |> Enum.map(&parse_valid_vcard/1) |> Enum.reject(&is_nil/1)}
+
+      true ->
+        {:error, "Invalid UTF-8"}
+    end
   rescue
     e -> {:error, "Failed to parse vCard file: #{Exception.message(e)}"}
   end
@@ -65,6 +73,10 @@ defmodule Kith.VCard.Parser do
 
   # ── Single vCard Parsing ───────────────────────────────────────────────
 
+  defp parse_valid_vcard(block) do
+    if String.valid?(block), do: parse_vcard(block), else: {:error, "Invalid UTF-8"}
+  end
+
   defp parse_vcard(block) do
     lines = String.split(block, "\n", trim: true)
 
@@ -75,6 +87,7 @@ defmodule Kith.VCard.Parser do
       display_name: nil,
       nickname: nil,
       birthdate: nil,
+      birthdate_year_unknown: false,
       company: nil,
       occupation: nil,
       description: nil,
@@ -115,6 +128,11 @@ defmodule Kith.VCard.Parser do
 
   defp apply_property(acc, "NICKNAME", _params, value),
     do: %{acc | nickname: unescape(value)}
+
+  defp apply_property(acc, name, _params, "--" <> value) when name in ["BDAY", "X-KITH-BDAY"] do
+    date = parse_date("2000" <> String.replace(value, "-", ""))
+    %{acc | birthdate: date, birthdate_year_unknown: not is_nil(date)}
+  end
 
   defp apply_property(acc, "BDAY", _params, value),
     do: %{acc | birthdate: parse_date(value)}
