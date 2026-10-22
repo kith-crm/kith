@@ -124,13 +124,16 @@ defmodule Kith.DAV.Store do
       preload: [dav: d]
   end
 
-  defp transact(account_id, fun) do
-    {:ok, _} =
-      Repo.transaction(fn ->
-        lock_account(account_id)
-        fun.()
-      end)
+  @doc "Runs a write transaction with the account lock acquired before any contact locks."
+  def transaction(account_id, fun) do
+    Repo.transaction(fn ->
+      lock_account(account_id)
+      fun.()
+    end)
+  end
 
+  defp transact(account_id, fun) do
+    {:ok, _} = transaction(account_id, fun)
     :ok
   end
 
