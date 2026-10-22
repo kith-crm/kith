@@ -230,12 +230,13 @@ defmodule KithWeb.DAV.AddressObjectTest do
         |> put_req_header("depth", "1")
         |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
 
-      [[_, id_str]] = Regex.scan(~r{kith-contact-(\d+)\.vcf}, conn2.resp_body)
+      [_, discovered_href] =
+        Regex.run(~r{<d:href>(/dav/addressbooks/default/[^<]+\.vcf)</d:href>}, conn2.resp_body)
 
       conn3 =
         build_conn()
         |> basic_auth(context.user.email, dav_password())
-        |> dav_request("GET", "/dav/addressbooks/default/kith-contact-#{id_str}.vcf")
+        |> dav_request("GET", discovered_href)
 
       assert conn3.status == 200
       assert conn3.resp_body =~ "Created"
@@ -490,7 +491,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
       # Extract the contact href from PROPFIND response
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/[^<]+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -631,7 +632,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/[^<]+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -702,7 +703,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/[^<]+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -784,7 +785,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/[^<]+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -1146,7 +1147,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/[^<]+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -1191,7 +1192,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/[^<]+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -1224,7 +1225,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
     [href] =
       Regex.scan(
-        ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+        ~r{<d:href>(/dav/addressbooks/default/[^<]+\.vcf)</d:href>},
         conn_list.resp_body,
         capture: :all_but_first
       )

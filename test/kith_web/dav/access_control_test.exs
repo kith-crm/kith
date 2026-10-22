@@ -149,8 +149,8 @@ defmodule KithWeb.DAV.AccessControlTest do
         |> put_req_header("depth", "1")
         |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
 
-      [[_, id_str]] = Regex.scan(~r{kith-contact-(\d+)\.vcf}, conn2.resp_body)
-      resource_path = "/dav/addressbooks/default/kith-contact-#{id_str}.vcf"
+      [_, resource_path] =
+        Regex.run(~r{<d:href>(/dav/addressbooks/default/[^<]+\.vcf)</d:href>}, conn2.resp_body)
 
       # 3. GET to retrieve (RFC 6352 §8.6)
       conn3 =
@@ -201,5 +201,96 @@ defmodule KithWeb.DAV.AccessControlTest do
 
       assert conn7.status == 404
     end
+  end
+
+  describe "request routing and limits" do
+    setup :setup_dav_user
+
+    test "collections cannot be replaced or deleted", context do
+      for path <- [
+            "/dav/",
+            "/dav/principals/",
+            "/dav/addressbooks/",
+            "/dav/addressbooks/default/"
+          ],
+          method <- ["PUT", "DELETE"] do
+        conn = authed_dav(context, method, path)
+        assert conn.status == 405
+        assert [allow] = get_resp_header(conn, "allow")
+        assert allow =~ "PROPFIND"
+      end
+    end
+
+    test "REPORT on existing collections and members returns a protocol response", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      body = ~s(<d:unknown-report xmlns:d="DAV:"/>)
+
+      for path <- ["/dav/", "/dav/principals/", "/dav/addressbooks/", stored_path(contact)] do
+        conn = authed_dav(context, "REPORT", path, body)
+        assert conn.status == 403
+        assert conn.resp_body =~ "<d:supported-report/>"
+      end
+    end
+
+    test "chunked DAV requests require a content length", context do
+      conn = context.conn |> put_req_header("transfer-encoding", "chunked")
+      assert authed_dav(%{context | conn: conn}, "PROPFIND", "/dav/").status == 411
+    end
+
+    test "REPORT bodies obey the resource size limit", context do
+      assert authed_dav(
+               context,
+               "REPORT",
+               "/dav/addressbooks/default/",
+               String.duplicate("x", 1_048_577)
+             ).status == 413
+    end
+  end
+
+  describe "roles" do
+    setup do
+      viewer = AccountsFixtures.user_fixture(%{role: "viewer"})
+      contact = ContactsFixtures.contact_fixture(viewer.account.id, %{first_name: "Original"})
+      %{conn: build_conn(), user: viewer, contact: contact}
+    end
+
+    test "viewer DELETE is 403 and the contact survives", context do
+      conn = authed_dav(context, "DELETE", stored_path(context.contact))
+
+      assert conn.status == 403
+      assert is_nil(Kith.Repo.reload!(context.contact).deleted_at)
+    end
+
+    test "viewer PROPPATCH is 403", context do
+      body = """
+      <?xml version="1.0"?>
+      <d:propertyupdate xmlns:d="DAV:"><d:set><d:prop><d:displayname>X</d:displayname></d:prop></d:set></d:propertyupdate>
+      """
+
+      conn = authed_dav(context, "PROPPATCH", "/dav/addressbooks/default/", body)
+      assert conn.status == 403
+    end
+
+    test "viewer can still PROPFIND, GET and REPORT", context do
+      assert authed_dav(context, "GET", stored_path(context.contact)).status == 200
+
+      conn =
+        context.conn
+        |> put_req_header("depth", "1")
+        |> basic_auth(context.user.email, dav_password())
+        |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
+
+      assert conn.status == 207
+
+      body = multiget_body([stored_path(context.contact)])
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+      assert conn.resp_body =~ "Original"
+    end
+  end
+
+  defp stored_path(contact) do
+    Kith.DAV.Store.ensure_rows(contact.account_id)
+    contact |> Kith.Repo.preload(:dav, force: true) |> Kith.DAV.Store.href()
   end
 end

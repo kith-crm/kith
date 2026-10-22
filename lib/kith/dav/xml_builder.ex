@@ -77,36 +77,55 @@ defmodule Kith.DAV.XMLBuilder do
   def current_user_principal(href),
     do: "<d:current-user-principal><d:href>#{escape(href)}</d:href></d:current-user-principal>"
 
-  @doc "Builds a propstat element for protected properties that cannot be modified (403)."
-  def propstat_forbidden(prop_names) do
-    props = Enum.map_join(prop_names, "\n", fn name -> "<d:#{name}/>" end)
-
-    """
-    <d:propstat>
-    <d:prop>
-    #{props}
-    </d:prop>
-    <d:status>HTTP/1.1 403 Forbidden</d:status>
-    </d:propstat>
-    """
-  end
+  @doc "Builds an empty element for a property in an arbitrary namespace."
+  def empty_element("", name), do: "<#{name} xmlns=\"\"/>"
+  def empty_element(ns, name), do: "<x:#{name} xmlns:x=\"#{escape(ns)}\"/>"
 
   @doc "Builds a response element for a deleted resource in sync-collection (RFC 6578 §3.5)."
-  def response_deleted(href) do
+  def response_deleted(href), do: status_response(href, "HTTP/1.1 404 Not Found")
+
+  @doc """
+  Builds a response element carrying only a status, no propstat (RFC 4918
+  §14.24): a deleted sync member, a missing multiget href (RFC 6352 §8.7).
+  """
+  def status_response(href, status) do
     """
     <d:response>
     <d:href>#{escape(href)}</d:href>
-    <d:status>HTTP/1.1 404 Not Found</d:status>
+    <d:status>#{status}</d:status>
+    </d:response>
+    """
+  end
+
+  @doc """
+  The response for the request-URI when a REPORT's results were truncated at
+  the client's limit (RFC 6352 §8.6.1, RFC 5323 §5.17).
+  """
+  def truncated_response(href) do
+    """
+    <d:response>
+    <d:href>#{escape(href)}</d:href>
+    <d:status>HTTP/1.1 507 Insufficient Storage</d:status>
+    <d:error><d:number-of-matches-within-limits/></d:error>
+    <d:responsedescription>Only the first matching results were returned</d:responsedescription>
     </d:response>
     """
   end
 
   @doc "Builds a DAV precondition error response (RFC 6352 §10)."
   def precondition_error(precondition, message) do
+    error_body("<card:#{precondition}/>", message)
+  end
+
+  @doc """
+  Builds a DAV:error body around an already-built condition element (RFC 4918
+  §16). `card:` (CardDAV) and `k:` (Kith, `https://kith.app/ns/`) are bound.
+  """
+  def error_body(condition_xml, message) do
     """
     <?xml version="1.0" encoding="UTF-8"?>
-    <d:error xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
-    <card:#{precondition}/>
+    <d:error xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:k="https://kith.app/ns/">
+    #{condition_xml}
     <d:description>#{escape(message)}</d:description>
     </d:error>
     """

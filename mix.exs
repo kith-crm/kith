@@ -22,7 +22,7 @@ defmodule Kith.MixProject do
   def application do
     [
       mod: {Kith.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :xmerl, :runtime_tools]
     ]
   end
 
