@@ -47,6 +47,8 @@ defmodule Kith.Contacts.Contact do
     belongs_to :currency, Kith.Contacts.Currency
     belongs_to :first_met_through, Kith.Contacts.Contact
 
+    has_one :dav, Kith.DAV.ContactDav, foreign_key: :contact_id
+
     has_many :addresses, Kith.Contacts.Address
     has_many :contact_fields, Kith.Contacts.ContactField
     has_many :notes, Kith.Contacts.Note
