@@ -93,6 +93,42 @@ defmodule KithWeb.API.ContactExportControllerTest do
     end
   end
 
+  describe "GET /api/contacts/export.vcf" do
+    test "CDV-116: the bulk export holds every contact, year-unknown birthdays included", %{
+      conn: conn,
+      user: user
+    } do
+      dee = contact_fixture(user.account_id, %{first_name: "Dee", birthdate: ~D[1985-01-02]})
+
+      contact_fixture(user.account_id, %{
+        first_name: "Eve",
+        birthdate: ~D[2000-02-29],
+        birthdate_year_unknown: true
+      })
+
+      conn = get(conn, ~p"/api/contacts/export.vcf")
+      assert conn.status == 200
+      body = conn.resp_body
+
+      assert {:ok, parsed} = Parser.parse(body)
+      by_name = Map.new(parsed, &{&1.first_name, &1})
+      assert by_name["Dee"].birthdate == ~D[1985-01-02]
+      refute by_name["Dee"].birthdate_year_unknown
+      assert by_name["Eve"].birthdate == ~D[2000-02-29]
+      assert by_name["Eve"].birthdate_year_unknown
+      assert body =~ "\r\nBDAY;X-APPLE-OMIT-YEAR=1604:1604-02-29\r\n"
+
+      # `ids[]` selects contacts.
+      body =
+        build_conn()
+        |> put_req_header("authorization", hd(get_req_header(conn, "authorization")))
+        |> get(~p"/api/contacts/export.vcf?#{[ids: [dee.id]]}")
+        |> Map.fetch!(:resp_body)
+
+      assert {:ok, [%{first_name: "Dee"}]} = Parser.parse(body)
+    end
+  end
+
   describe "Apple's year-omitted BDAY" do
     test "CDV-115: X-APPLE-OMIT-YEAR and the 1604 year parse as year-unknown" do
       for line <- [

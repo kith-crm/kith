@@ -1385,8 +1385,7 @@ defmodule Kith.Contacts do
     Contact
     |> scope_active(account_id)
     |> order_by([c], asc: c.last_name, asc: c.first_name)
-    |> preload(^preloads)
-    |> Repo.stream(max_rows: 100)
+    |> stream_with_preloads(preloads)
   end
 
   @doc """
@@ -1400,8 +1399,15 @@ defmodule Kith.Contacts do
     |> scope_active(account_id)
     |> where([c], c.id in ^ids)
     |> order_by([c], asc: c.last_name, asc: c.first_name)
-    |> preload(^preloads)
+    |> stream_with_preloads(preloads)
+  end
+
+  # Ecto cannot preload on a stream: preload each batch of 100 rows (CDV-116).
+  defp stream_with_preloads(query, preloads) do
+    query
     |> Repo.stream(max_rows: 100)
+    |> Stream.chunk_every(100)
+    |> Stream.flat_map(&Repo.preload(&1, preloads))
   end
 
   @doc """
