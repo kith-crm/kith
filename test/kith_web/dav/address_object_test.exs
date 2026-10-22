@@ -1382,4 +1382,51 @@ defmodule KithWeb.DAV.AddressObjectTest do
     assert after_write.resp_body == before_write.resp_body
     assert get_resp_header(after_write, "etag") == get_resp_header(before_write, "etag")
   end
+
+  test "GET PUT round trip retains normalized address labels and native geocoding",
+       %{account_id: aid} = context do
+    contact = ContactsFixtures.contact_fixture(aid)
+
+    addresses =
+      for label <- ["Business", "Personal", "CuStOm"] do
+        ContactsFixtures.address_fixture(contact, %{
+          "label" => label,
+          "latitude" => 31.5,
+          "longitude" => 35.2
+        })
+      end
+
+    path = contact_path(contact)
+    serialized = authed_dav(context, "GET", path).resp_body
+    assert authed_dav(context, "PUT", path, serialized).status == 204
+    retained = Kith.Repo.preload(contact, :addresses, force: true).addresses
+    assert Enum.sort(Enum.map(retained, & &1.id)) == Enum.sort(Enum.map(addresses, & &1.id))
+    assert Enum.all?(retained, &(&1.latitude == 31.5 and &1.longitude == 35.2))
+  end
+
+  for hidden <- [false, true] do
+    @hidden_holder hidden
+    test "UID mutation reports the actual #{if hidden, do: "hidden", else: "visible"} holder href",
+         %{account_id: aid} = context do
+      target = ContactsFixtures.contact_fixture(aid)
+      holder = ContactsFixtures.contact_fixture(aid)
+      target_path = contact_path(target)
+      holder_path = contact_path(holder)
+      holder = Kith.Repo.preload(holder, :dav)
+      if @hidden_holder, do: Contacts.soft_delete_contact(holder)
+
+      response =
+        authed_dav(
+          context,
+          "PUT",
+          target_path,
+          build_vcard("Changed", "Name", uid: holder.dav.uid)
+        )
+
+      assert response.status == 409
+      assert response.resp_body =~ "no-uid-conflict"
+      assert response.resp_body =~ "<d:href>#{holder_path}</d:href>"
+      refute response.resp_body =~ "<d:href>#{target_path}</d:href>"
+    end
+  end
 end

@@ -46,7 +46,7 @@ defmodule Kith.DAV.AddressObject do
             Repo.rollback(:precondition)
 
           contact && children.uid && children.uid != contact.dav.uid ->
-            Repo.rollback({:uid, contact})
+            Repo.rollback({:uid, Store.get_by_uid(aid, children.uid) || contact})
 
           true ->
             if is_nil(contact) && children.uid do

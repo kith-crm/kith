@@ -1669,9 +1669,10 @@ defmodule Kith.Contacts do
   end
 
   defp same_dav_address?(address, entry) do
-    Enum.all?([:label, :line1, :line2, :city, :province, :postal_code, :country], fn key ->
-      Map.get(address, key) == Map.get(entry, key)
-    end)
+    dav_label(address.label) == dav_label(Map.get(entry, :label)) and
+      Enum.all?([:line1, :line2, :city, :province, :postal_code, :country], fn key ->
+        Map.get(address, key) == Map.get(entry, key)
+      end)
   end
 
   defp retain_dav_entries(incoming, existing, matches?) do
