@@ -824,11 +824,14 @@ defmodule Kith.Imports.Sources.MonicaApi do
       tag_id = Map.get(ref_data.tags, tag_name)
 
       if tag_id do
-        Repo.insert_all(
-          "contact_tags",
-          [%{contact_id: contact.id, tag_id: tag_id}],
-          on_conflict: :nothing
-        )
+        {count, _} =
+          Repo.insert_all(
+            "contact_tags",
+            [%{contact_id: contact.id, tag_id: tag_id}],
+            on_conflict: :nothing
+          )
+
+        if count > 0, do: Kith.DAV.Store.touch(contact.account_id, [contact.id])
       end
     end)
   end

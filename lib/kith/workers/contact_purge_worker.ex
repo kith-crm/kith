@@ -71,6 +71,9 @@ defmodule Kith.Workers.ContactPurgeWorker do
     })
 
     # Hard-delete (CASCADE removes all sub-entities)
-    Repo.delete!(contact)
+    case Kith.Contacts.hard_delete_contact(contact) do
+      {:ok, _} -> :ok
+      {:error, reason} -> raise "Contact purge failed: #{inspect(reason)}"
+    end
   end
 end
