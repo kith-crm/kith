@@ -539,3 +539,45 @@ test("U9: a contact PUT to <uuid>.vcf and edited in the UI is served at that hre
   expect(await defaultHref(request, id)).toBe(href);
   expect(await depth1(request)).toContain(href);
 });
+
+test("family-only contacts can be created and edited in the browser while nameless edits are rejected", async ({ request }) => {
+  const family = `${P}-family-only`;
+  const href = `${BOOK}${randomUUID()}.vcf`;
+  const body = `BEGIN:VCARD\r\nVERSION:3.0\r\nFN:${family}\r\nN:${family};;;;\r\nEND:VCARD\r\n`;
+  await put(request, href, body);
+  const id = await idByName(family);
+
+  await editContact(id, { occupation: "Family-only browser edit" });
+  let card = await getOk(request, href);
+  expect(card.body).toContain(`FN:${family}\r\n`);
+  expect(card.body).toContain(`N:${family};;;;\r\n`);
+  expect(card.body).toContain("TITLE:Family-only browser edit\r\n");
+
+  await page.goto(`/contacts/${id}/edit`);
+  await settle();
+  await page.locator('[name="contact[last_name]"]').fill("");
+  await page.getByRole("button", { name: /save changes/i }).click();
+  await expect(page.locator("#contact-form").getByText(/can't be blank/)).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/contacts/${id}/edit$`));
+  expect((await getOk(request, href)).body).toContain(`FN:${family}\r\n`);
+
+  const createdFamily = `${P}-family-created`;
+  const createdId = await createContact(page, { firstName: "", lastName: createdFamily });
+  const createdHref = await discoverHref(request, createdFamily);
+  await editContact(createdId, { occupation: "Created without a given name" });
+  card = await getOk(request, createdHref);
+  expect(card.body).toContain(`FN:${createdFamily}\r\n`);
+  expect(card.body).toContain(`N:${createdFamily};;;;\r\n`);
+
+  const auth = await request.post("/api/auth/token", { data: USERS.admin });
+  expect(auth.status()).toBe(201);
+  const token = (await auth.json()).token;
+  for (const [contactId, last] of [[id, family], [createdId, createdFamily]] as const) {
+    const response = await request.get(`/api/contacts/${contactId}`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(response.status()).toBe(200);
+    expect((await response.json()).data).toMatchObject({ first_name: "", last_name: last, display_name: last });
+  }
+  await request.delete("/api/auth/token", { headers: { Authorization: `Bearer ${token}` } });
+  expect((await dav(request, "DELETE", href)).status).toBe(204);
+  expect((await dav(request, "DELETE", createdHref)).status).toBe(204);
+});
