@@ -1,11 +1,14 @@
 # Kith v1 — Entity Relationship Diagram
 
-> **27 tables** | PostgreSQL 16+ | Elixir/Phoenix migrations
+> **47 application tables** (distinct migration-created tables; excludes Oban and Ecto metadata) | PostgreSQL 16+ | Elixir/Phoenix migrations
 >
 > Every table includes `id bigserial PRIMARY KEY`, `inserted_at timestamptz NOT NULL DEFAULT now()`,
 > `updated_at timestamptz NOT NULL DEFAULT now()` unless explicitly noted otherwise.
 
 ---
+
+The detailed legacy inventory below covers the original core tables plus the two
+CardDAV tables; the header counts all application tables in current migrations.
 
 ## Mermaid ER Diagram
 
@@ -38,6 +41,24 @@ erDiagram
     users ||--o{ user_tokens : "has many"
     users ||--o{ invitations : "invited_by"
     users o|--o| contacts : "me_contact"
+
+    contacts ||--o| contact_dav : "has DAV identity"
+    accounts ||--o{ contact_dav : "owns"
+    accounts ||--o| dav_sync_floors : "sync floor"
+
+    contact_dav {
+        bigint contact_id PK,FK
+        bigint account_id FK
+        text uid
+        text resource_name
+        bigint revision
+        text_array extras
+    }
+
+    dav_sync_floors {
+        bigint account_id PK,FK
+        bigint revision
+    }
 
     contacts ||--o{ addresses : "has many"
     contacts ||--o{ contact_fields : "has many"
@@ -433,7 +454,7 @@ Central hub entity. **Supports soft-delete via `deleted_at`.**
 |---|---|---|---|---|
 | `id` | `bigserial` | NO | auto | `PRIMARY KEY` |
 | `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
-| `first_name` | `varchar(255)` | NO | — | |
+| `first_name` | `varchar(255)` | NO | — | Empty string for family-only contacts; at least one first/last name required by application |
 | `last_name` | `varchar(255)` | YES | `NULL` | |
 | `display_name` | `varchar(255)` | YES | `NULL` | Computed or overridden |
 | `nickname` | `varchar(255)` | YES | `NULL` | |
@@ -907,6 +928,43 @@ Pure join table. **No `id`, `inserted_at`, or `updated_at` columns.**
 
 ---
 
+### 28. `contact_dav`
+
+Protocol identity and revision state. No surrogate `id` or timestamps.
+
+| Column | Postgres Type | Nullable | Default | Constraints |
+|---|---|---|---|---|
+| `contact_id` | `bigint` | NO | — | `PRIMARY KEY`, `FK → contacts(id) ON DELETE CASCADE` |
+| `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
+| `uid` | `text` | NO | — | Account-unique, including hidden contacts |
+| `resource_name` | `text` | NO | — | Account-unique |
+| `revision` | `bigint` | NO | `nextval('contact_dav_revision_seq')` | |
+| `extras` | `text[]` | NO | `'{}'` | Ungrouped unmapped vCard properties |
+
+**Indexes:**
+
+- `contact_dav_pkey` — PRIMARY KEY on `(contact_id)`
+- `contact_dav_account_id_uid_index` — UNIQUE on `(account_id, uid)`
+- `contact_dav_account_id_resource_name_index` — UNIQUE on `(account_id, resource_name)`
+- `contact_dav_account_id_revision_index` — on `(account_id, revision)`
+
+---
+
+### 29. `dav_sync_floors`
+
+Hard-delete invalidation floor per account. No surrogate `id` or timestamps.
+
+| Column | Postgres Type | Nullable | Default | Constraints |
+|---|---|---|---|---|
+| `account_id` | `bigint` | NO | — | `PRIMARY KEY`, `FK → accounts(id) ON DELETE CASCADE` |
+| `revision` | `bigint` | NO | — | Fresh sequence value on hard deletion |
+
+**Indexes:**
+
+- `dav_sync_floors_pkey` — PRIMARY KEY on `(account_id)`
+
+---
+
 ## Schema Policies
 
 ### Soft-Delete
@@ -921,7 +979,7 @@ Pure join table. **No `id`, `inserted_at`, or `updated_at` columns.**
 
 | Pattern | Tables | ON DELETE |
 |---|---|---|
-| Cascade (parent owns child) | Most FK relationships | `CASCADE` |
+| Cascade (parent owns child) | Most FK relationships, including `contact_dav.contact_id`, `contact_dav.account_id`, `dav_sync_floors.account_id` | `CASCADE` |
 | Set NULL (preserve child, clear reference) | `users.me_contact_id`, `contacts.gender_id`, `activities.activity_type_category_id`, `activities.emotion_id`, `calls.emotion_id`, `audit_logs.actor_id` | `SET NULL` |
 | No FK (intentional denormalization) | `audit_logs.contact_id` | N/A — plain integer column |
 
@@ -947,11 +1005,11 @@ Two tables are pure join tables with no surrogate key or timestamps:
 
 ### Additive-Only Migrations
 
-All schema changes follow an additive-only policy: no column drops, no table drops until a major version. This ensures safe rollbacks and zero-downtime deployments.
+The CardDAV rework is validated on a fresh isolated installation, with no production-data upgrade requirement. Its migration creates two tables and one sequence, without triggers or PL/pgSQL.
 
 ### Timestamp Convention
 
-All tables use `inserted_at` and `updated_at` (Phoenix/Ecto convention) with type `timestamptz` and default `now()`, except pure join tables which have no timestamps.
+All tables use `inserted_at` and `updated_at` (Phoenix/Ecto convention) with type `timestamptz` and default `now()`, except pure join tables and the CardDAV state tables, which have no timestamps.
 
 ### Encryption
 
