@@ -54,7 +54,7 @@ card_key() {
 
 server_state() { # outfile
   list_hrefs "$D/hrefs" || fail "server listing failed"
-  [ -s "$D/hrefs" ] || fail "server listing is empty (the book always holds this run's cards)"
+
   : >"$1.unsorted"
   local h body
   while read -r h; do
@@ -104,6 +104,7 @@ step "install vdirsyncer"
 python3 -I -m venv "$D/venv"
 "$D/venv/bin/python" -I -m pip install -q vdirsyncer
 VDS="$D/venv/bin/vdirsyncer"
+"$VDS" --version
 
 step "seed server with 2 cards over DAV"
 card "$RUN-a" "$RUN Alpha" >"$D/a.vcf"
@@ -153,7 +154,10 @@ B="$(grep -l "^UID:$RUN-b" "$LOCAL"/*.vcf | head -1)"
 [ -n "$A" ] && [ -n "$B" ] || fail "seeded cards not synced down"
 sed -i.bak -e "s/^FN:.*/FN:$RUN Alpha Edited/" -e "s/^N:.*/N:;$RUN Alpha Edited;;;/" "$A" && rm -f "$A.bak"
 NEWUUID="$(python3 -I -c 'import uuid;print(uuid.uuid4())')"
-card "$NEWUUID" "$RUN Charlie" >"$LOCAL/$NEWUUID.vcf"
+card "$NEWUUID" "$RUN Charlie" | sed '/END:VCARD/i\
+TEL:+15550123456\
+NOTE:CLI client note\
+X-CLI-EXTRA:retained' >"$LOCAL/$NEWUUID.vcf"
 rm -f "$B"
 "$VDS" sync kith
 assert_agree "2 local edit/add/delete" 2
@@ -192,4 +196,40 @@ cp "$D/server.txt" "$D/before-repeat.txt"
 "$VDS" sync kith
 assert_agree "5 repeat sync" 2
 diff -u "$D/before-repeat.txt" "$D/server.txt" || fail "5 repeat changed state"
-echo "ALL 5 STEPS PASSED"
+step "S4 local phone/note edit preserves client extras"
+C="$(grep -l "^UID:$NEWUUID" "$LOCAL"/*.vcf | head -1)"
+sed -i.bak -e 's/^TEL:.*/TEL:+15550654321/' -e 's/^NOTE:.*/NOTE:CLI client edited note/' "$C"
+rm -f "$C.bak"
+"$VDS" sync kith
+step "S3/S4/S6 application state and extra preservation"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+app_action() {
+  (cd "$ROOT"; source .carddav-task10/env; mix run scripts/carddav-e2e/app-action.exs "$1" "$USER_EMAIL" ${2:+"$2"}) >"$D/app-action.log" 2>&1 || { cat "$D/app-action.log"; fail "application action $1"; }
+}
+app_action assert-trash "$RUN-b"
+dcurl "$BOOK$NEWUUID.vcf" >"$D/charlie-server.vcf"
+for line in '+15550654321' 'NOTE:CLI client edited note' 'X-CLI-EXTRA:retained'; do
+  grep -q "$line" "$D/charlie-server.vcf" || fail "S3/S4 missing $line"
+done
+step "S5 application phone and tag rename"
+app_action edit "$NEWUUID"
+"$VDS" sync kith
+C="$(grep -l "^UID:$NEWUUID" "$LOCAL"/*.vcf | head -1)"
+grep -q '+15550999999' "$C" || fail "S5 phone not synchronized"
+grep -q "Renamed CLI tag $NEWUUID" "$C" || fail "S5 tag rename not synchronized"
+step "S7 application trash and archive"
+app_action trash "$RUN-a"
+app_action archive "$NEWUUID"
+"$VDS" sync --force-delete kith
+assert_agree "S7 hidden contacts disappear" 0
+step "S11 application restore"
+app_action restore "$RUN-a"
+"$VDS" sync kith
+assert_agree "S11 restored contact reappears" 1
+step "S10 application empty trash and resync"
+app_action empty-trash
+"$VDS" sync kith
+assert_agree "S10 no duplicates or deleted resurrection" 1
+"$VDS" sync kith
+assert_agree "S10 repeat remains stable" 1
+echo "ALL STEPS PASSED (including S3-S7, S10, S11)"
