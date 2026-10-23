@@ -101,12 +101,15 @@ defmodule Kith.DAV.StoreTest do
     Store.record_hard_delete(c.account)
     assert Store.sync_state(c.account).floor > floor
     floor = Store.sync_state(c.account).floor
+    Store.ensure_rows(other)
+    foreign_dav = Repo.get!(ContactDav, foreign.id)
+    foreign_state = Store.sync_state(other)
     [x | _] = c.contacts
     Store.touch(c.account, from(contact in Kith.Contacts.Contact, select: contact.id))
     assert Store.sync_state(c.account).token > floor
     assert Store.sync_state(c.account).floor == floor
-    assert Store.sync_state(other) == %{token: 0, floor: 0}
-    refute Repo.get(ContactDav, foreign.id)
+    assert Store.sync_state(other) == foreign_state
+    assert Repo.get!(ContactDav, foreign.id) == foreign_dav
     assert Repo.get!(ContactDav, x.id).revision > floor
   end
 

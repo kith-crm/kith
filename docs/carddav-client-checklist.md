@@ -96,7 +96,12 @@ isolate the final 403 → empty-token 207 recovery. Screenshots include
 Auth recovery evidence is `tb-s12-natural-recovery.png` and
 `android-s12-natural-recovery.png`.
 
-Final validation on fresh isolated seed: affected Playwright `05-vcard` **19
+The Thunderbird birthday screenshot crops the full field; it is supporting
+evidence for the recorded UI observation and corrected wire format, not
+standalone proof of the complete displayed birthday. The final fix wave did
+not rerun native-client UI scenarios.
+
+Prior validation on fresh isolated seed: affected Playwright `05-vcard` **19
 passed**, expanded vdirsyncer **all steps passed**, full ExUnit **1897 tests,
 0 failures**. `mix quality`, format checks and warning-free compilation passed.
 These automated results do not change the recorded Thunderbird failures.

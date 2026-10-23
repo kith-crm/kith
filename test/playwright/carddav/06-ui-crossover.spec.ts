@@ -420,7 +420,7 @@ test("U6: merging A into B in the UI removes A's href and gives B the merged fie
   const nameA = `${P}-u6a Merge`;
   const nameB = `${P}-u6b Merge`;
 
-  // Both carry client metadata (Apple groups, labels) that Kith retains.
+  // Grouped phone/email values become native fields; their Apple groups and labels are dropped.
   await put(
     request,
     hrefA,
@@ -468,15 +468,24 @@ test("U6: merging A into B in the UI removes A's href and gives B the merged fie
   expect(emails, afterB.body).toHaveLength(1);
   expect(emails[0]).toContain(`${P}-u6b@example.test`);
   expect(lines(afterB.body, "X-B-ONLY")).toHaveLength(1);
-  // The two cards' item1 groups must not collide into one group on B.
-  const groups = afterB.body.split("\r\n").filter((l) => /^item1\./i.test(l));
-  expect(groups.filter((l) => /\.(TEL|EMAIL)[;:]/i.test(l)).length, afterB.body).toBeLessThanOrEqual(1);
+  expect(afterB.body).not.toMatch(/^item\d+\./im);
+  const auth = await request.post("/api/auth/token", { data: USERS.admin });
+  expect(auth.status()).toBe(201);
+  const token = (await auth.json()).token;
+  const nativeFields = await request.get(`/api/contacts/${idB}/contact_fields`, { headers: { Authorization: `Bearer ${token}` } });
+  expect(nativeFields.status()).toBe(200);
+  const fields = (await nativeFields.json()).data;
+  expect(fields.map((f: { value: string }) => f.value).sort()).toEqual(["+15550106001", `${P}-u6b@example.test`].sort());
 
   // A second sync shows nothing new for B, and a PUT-back of B keeps one of each.
   await put(request, hrefB, afterB.body, { "If-Match": afterB.etag! });
   const again = await getOk(request, hrefB);
   expect(lines(again.body, "TEL")).toHaveLength(1);
   expect(lines(again.body, "EMAIL")).toHaveLength(1);
+  const repeated = await request.get(`/api/contacts/${idB}/contact_fields`, { headers: { Authorization: `Bearer ${token}` } });
+  expect(repeated.status()).toBe(200);
+  expect((await repeated.json()).data).toEqual(fields);
+  await request.delete("/api/auth/token", { headers: { Authorization: `Bearer ${token}` } });
 });
 
 test("U7: archive in the UI is a removal for DAV; unarchive is an addition", async ({ request }) => {

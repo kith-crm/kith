@@ -100,3 +100,10 @@ restoration and unarchiving appear as additions at the same href.
   between vCard 3.0 and 4.0, so some client fidelity is lost.
 - Renames performed through raw SQL do not touch revisions. Use application
   functions for writes that clients must observe.
+
+Native relationships in vCard 3.0 include an ungrouped
+`X-KITH-RELATED;TYPE=...` identity alongside the grouped Apple display
+name/label. Keeping that extension on PUT preserves the native relationship;
+removing it removes visible relationships. Hidden targets remain protected.
+vCard 4.0 uses `RELATED`. Grouped display properties alone do not identify
+relationship targets.

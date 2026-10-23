@@ -354,10 +354,15 @@ defmodule Kith.Contacts do
   def hard_delete_contact(%Contact{} = contact) do
     Repo.transaction(fn ->
       Store.record_hard_delete(contact.account_id)
+      owners = incoming_relationship_owner_ids(contact.account_id, [contact.id])
 
       case Repo.delete(contact) do
-        {:ok, deleted} -> deleted
-        {:error, reason} -> Repo.rollback(reason)
+        {:ok, deleted} ->
+          Store.touch(contact.account_id, owners)
+          deleted
+
+        {:error, reason} ->
+          Repo.rollback(reason)
       end
     end)
   end
@@ -371,13 +376,24 @@ defmodule Kith.Contacts do
   def empty_trash(account_id) do
     Repo.transaction(fn ->
       Store.record_hard_delete(account_id)
-
-      {count, _} =
-        from(c in Contact, where: c.account_id == ^account_id and not is_nil(c.deleted_at))
-        |> Repo.delete_all()
-
+      query = from(c in Contact, where: c.account_id == ^account_id and not is_nil(c.deleted_at))
+      ids = Repo.all(from(c in query, select: c.id))
+      owners = incoming_relationship_owner_ids(account_id, ids)
+      {count, _} = Repo.delete_all(from(c in query, where: c.id in ^ids))
+      Store.touch(account_id, owners)
       count
     end)
+  end
+
+  # Snapshot before FK cascades remove the incoming edges; the account lock is held.
+  defp incoming_relationship_owner_ids(account_id, ids) do
+    Repo.all(
+      from(r in Relationship,
+        where: r.account_id == ^account_id and r.related_contact_id in ^ids,
+        distinct: true,
+        select: r.contact_id
+      )
+    )
   end
 
   ## Addresses
@@ -1232,9 +1248,7 @@ defmodule Kith.Contacts do
 
   @doc "Renames a tag. Validates new name is unique per account (case-insensitive)."
   def rename_tag(%Tag{} = tag, new_name) do
-    tag
-    |> Tag.changeset(%{name: new_name})
-    |> Repo.update()
+    update_tag(tag, %{name: new_name})
   end
 
   @doc """

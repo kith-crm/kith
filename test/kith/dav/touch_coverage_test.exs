@@ -68,6 +68,7 @@ defmodule Kith.DAV.TouchCoverageTest do
         {"set_avatar", :set_avatar, :a},
         {"clear_avatar", :clear_avatar, :a},
         {"update_tag", :update_tag, :a},
+        {"rename_tag", :rename_tag, :a},
         {"delete_tag", :delete_tag, :a},
         {"delete_tag_with_removal", :delete_tag_with_removal, :a},
         {"merge_tags", :merge_tags, :a},
@@ -137,6 +138,7 @@ defmodule Kith.DAV.TouchCoverageTest do
   defp run_operation(:create_photo, c), do: photo_fixture(c.a)
   defp run_operation(:delete_photo, c), do: Contacts.delete_photo(c.photo)
   defp run_operation(:set_avatar, c), do: Contacts.set_avatar(c.a, c.photo)
+  defp run_operation(:rename_tag, c), do: Contacts.rename_tag(c.tag, "Renamed")
   defp run_operation(:update_tag, c), do: Contacts.update_tag(c.tag, %{name: "New"})
 
   defp run_operation(op, c) when op in [:delete_tag, :delete_tag_with_removal],
@@ -178,6 +180,8 @@ defmodule Kith.DAV.TouchCoverageTest do
       old = DateTime.add(DateTime.utc_now(:second), -40 * 86_400, :second)
       a = c.a |> Ecto.Changeset.change(deleted_at: old) |> Repo.update!()
       before = Store.sync_state(c.account)
+      owner_before = Repo.get!(ContactDav, c.b.id).revision
+      card_before = Kith.DAV.VCardAdapter.contact_to_vcard(c.b)
 
       case unquote(operation) do
         :hard_delete_contact -> assert {:ok, _} = Contacts.hard_delete_contact(a)
@@ -187,8 +191,22 @@ defmodule Kith.DAV.TouchCoverageTest do
 
       assert Repo.get(ContactDav, a.id) == nil
       assert Store.sync_state(c.account).floor > before.token
-      assert Repo.get!(ContactDav, c.b.id)
+      assert Repo.get!(ContactDav, c.b.id).revision > owner_before
+      assert Kith.DAV.VCardAdapter.contact_to_vcard(c.b) != card_before
+      assert Contacts.list_relationships(c.b.id) == []
     end
+  end
+
+  test "public tag rename appears in incremental sync and isolates other contacts and accounts",
+       c do
+    other = contact_fixture(user_fixture().account_id)
+    Store.ensure_rows(other.account_id)
+    foreign = Repo.get!(ContactDav, other.id)
+    before = Store.sync_state(c.account).token
+    assert {:ok, renamed} = Contacts.rename_tag(c.tag, "Renamed")
+    assert renamed.name == "Renamed"
+    assert Enum.map(Store.list_changed_since(c.account, before), & &1.id) == [c.a.id]
+    assert Repo.get!(ContactDav, other.id) == foreign
   end
 
   test "merge_contacts touches survivor and loser", c do
@@ -247,6 +265,7 @@ defmodule Kith.DAV.TouchCoverageTest do
 
   test "hard-delete rollback restores row and floor", c do
     before = Store.sync_state(c.account)
+    before_revisions = revisions(c)
 
     assert {:error, :cancelled} =
              Repo.transaction(fn ->
@@ -256,6 +275,8 @@ defmodule Kith.DAV.TouchCoverageTest do
 
     assert Repo.get!(ContactDav, c.a.id)
     assert Store.sync_state(c.account) == before
+    assert revisions(c) == before_revisions
+    assert Repo.get!(Kith.Contacts.Relationship, c.relationship.id)
   end
 
   test "successful unused reference deletions leave unrelated contacts unchanged", c do

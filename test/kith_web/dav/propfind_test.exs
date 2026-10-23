@@ -634,7 +634,7 @@ defmodule KithWeb.DAV.PropfindTest do
       refute conn.resp_body =~ "getlastmodified"
     end
 
-    # Ruling R10: unknown props get a 404 propstat (RFC 4918 §9.1), see CDV-06.
+    # Unknown properties need a separate 404 propstat so supported properties remain usable (RFC 4918 §9.1).
     test "requesting unknown property reports it as 404, serves known props", context do
       body = """
       <?xml version="1.0" encoding="UTF-8"?>

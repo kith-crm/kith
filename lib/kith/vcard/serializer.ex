@@ -79,12 +79,23 @@ defmodule Kith.VCard.Serializer do
   defp identifier_line(_name, nil, _version), do: nil
 
   defp identifier_line(name, value, :v40) do
-    if Regex.match?(~r/\A[A-Za-z][A-Za-z0-9+.-]*:/, value),
+    if safe_uri?(value),
       do: name <> ":" <> value,
       else: name <> ";VALUE=text:" <> escape(value)
   end
 
   defp identifier_line(name, value, :v30), do: name <> ":" <> escape(value)
+
+  defp safe_uri?(value) do
+    # A scheme prefix alone does not make decoded text safe on a content line.
+    case URI.new(value) do
+      {:ok, %URI{scheme: scheme}} when is_binary(scheme) ->
+        not Regex.match?(~r/[\x00-\x20\x7F-\x{10FFFF}\\]|%(?![0-9A-Fa-f]{2})/u, value)
+
+      _ ->
+        false
+    end
+  end
 
   # ── Version ───────────────────────────────────────────────────────────
 
@@ -217,15 +228,20 @@ defmodule Kith.VCard.Serializer do
       name = display_name_for_related(rel.related_contact)
       label = map_relationship_to_label(rel.relationship_type.name)
       group = "item#{rel.id}"
-      ["#{group}.X-ABRELATEDNAMES:#{escape(name)}", "#{group}.X-ABLabel:#{label}"]
+
+      [
+        related_uid_line(rel, :v30),
+        "#{group}.X-ABRELATEDNAMES:#{escape(name)}",
+        "#{group}.X-ABLabel:#{label}"
+      ]
     end)
   end
 
   defp do_related_lines(rels, :v40) do
-    Enum.map(rels, &related_uid_line/1)
+    Enum.map(rels, &related_uid_line(&1, :v40))
   end
 
-  defp related_uid_line(rel) do
+  defp related_uid_line(rel, version) do
     type = relationship_type_to_vcard(rel.relationship_type.name)
 
     case uid_for(rel.related_contact, :v40) do
@@ -234,7 +250,8 @@ defmodule Kith.VCard.Serializer do
 
       uid ->
         uid = if String.contains?(uid, ":"), do: uid, else: "urn:uuid:" <> uid
-        identifier_line("RELATED;TYPE=#{type}", uid, :v40)
+        name = if version == :v30, do: "X-KITH-RELATED", else: "RELATED"
+        identifier_line("#{name};TYPE=#{type}", uid, version)
     end
   end
 
