@@ -67,8 +67,11 @@ A missing first name is stored as an empty string.
 Every successful vCard-visible write must call `Kith.DAV.Store.touch/2`.
 `Store.ensure_rows/1` runs before DAV reads.
 `Store.transaction(account_id, fun)` acquires the account advisory lock before
-contact row locks for merges, DAV writes and hard deletes. Application writes mutate data,
-and draw a sequence revision atomically. See
+contact row locks for merges, DAV writes and hard deletes; these operations keep
+data changes and revisions in the same transaction. Ordinary application writes
+may touch after the mutation commits. Only an enclosing transaction makes the
+mutation and touch atomic; a post-commit touch can report the change one sync
+later. Always touch after a successful mutation. See
 [`touch_coverage_test.exs`](../test/kith/dav/touch_coverage_test.exs) for coverage
 of contact, child, relationship and vocabulary changes. Renaming a contact also
 touches contacts whose relationship labels show that name; merges touch incoming
