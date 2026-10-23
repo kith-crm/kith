@@ -21,6 +21,7 @@ defmodule Kith.Workers.PhoneRenormalizeWorker do
 
   alias Kith.Accounts.Account
   alias Kith.Contacts.{ContactField, ContactFieldType, PhoneFormatter}
+  alias Kith.DAV.Store
   alias Kith.Repo
 
   require Logger
@@ -112,7 +113,7 @@ defmodule Kith.Workers.PhoneRenormalizeWorker do
         from(cf in ContactField, where: cf.id == ^id)
         |> Repo.update_all(set: [value: normalized])
 
-      if count > 0, do: Kith.DAV.Store.touch(field.account_id, [field.contact_id])
+      if count > 0, do: Store.touch(field.account_id, [field.contact_id])
 
       :updated
     else

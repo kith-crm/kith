@@ -1,0 +1,11 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:{{PREFIX}}-davx5
+PRODID:-//bitfire web engineering//DAVx5//EN
+N:Android;{{PREFIX}} Amira;;;
+FN:{{PREFIX}} Amira Android
+EMAIL;TYPE=WORK;PREF=1:amira@example.test
+TEL;TYPE=CELL;VALUE=uri:tel:+15550004444
+IMPP:sip:amira@example.test
+X-PHONETIC-FIRST-NAME:Amira
+END:VCARD

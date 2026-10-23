@@ -171,7 +171,7 @@ defmodule Kith.DAV.TouchCoverageTest do
       })
 
   defp run_operation(:failed_update, c),
-    do: assert({:error, _} = Contacts.update_contact(c.a, %{first_name: ""}))
+    do: assert({:error, _} = Contacts.update_contact(c.a, %{first_name: "", last_name: ""}))
 
   for operation <- [:hard_delete_contact, :empty_trash, :purge] do
     test "#{operation} moves floor atomically with removal", c do

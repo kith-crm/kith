@@ -32,6 +32,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   alias Kith.Contacts
   alias Kith.Contacts.PhoneFormatter
+  alias Kith.DAV.Store
   alias Kith.Imports
   alias Kith.Imports.DuplicateAutomerge
   alias Kith.Imports.Monica.NoteTimestamps
@@ -819,21 +820,20 @@ defmodule Kith.Imports.Sources.MonicaApi do
   defp import_api_tags(contact, api_contact, ref_data) do
     tags = api_contact["tags"] || []
 
-    Enum.each(tags, fn tag ->
-      tag_name = tag["name"]
-      tag_id = Map.get(ref_data.tags, tag_name)
+    Enum.each(tags, &import_api_tag(contact, &1, ref_data))
+  end
 
-      if tag_id do
-        {count, _} =
-          Repo.insert_all(
-            "contact_tags",
-            [%{contact_id: contact.id, tag_id: tag_id}],
-            on_conflict: :nothing
-          )
+  defp import_api_tag(contact, tag, ref_data) do
+    tag_id = Map.get(ref_data.tags, tag["name"])
 
-        if count > 0, do: Kith.DAV.Store.touch(contact.account_id, [contact.id])
-      end
-    end)
+    if tag_id do
+      {count, _} =
+        Repo.insert_all("contact_tags", [%{contact_id: contact.id, tag_id: tag_id}],
+          on_conflict: :nothing
+        )
+
+      if count > 0, do: Store.touch(contact.account_id, [contact.id])
+    end
   end
 
   defp collect_deferred_data(api_contact, source_id, local_id, deferred, opts) do

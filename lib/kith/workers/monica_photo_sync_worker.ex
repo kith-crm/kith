@@ -16,6 +16,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
   require Logger
 
   alias Kith.Contacts
+  alias Kith.DAV.Store
   alias Kith.Imports
   alias Kith.Repo
   alias Kith.Storage
@@ -270,7 +271,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
     |> Ecto.Changeset.change(avatar: key)
     |> Repo.update!()
 
-    Kith.DAV.Store.touch(contact.account_id, [contact.id])
+    Store.touch(contact.account_id, [contact.id])
   end
 
   defp maybe_set_avatar(_contact, _key), do: :ok

@@ -7,6 +7,7 @@ defmodule Kith.Contacts do
   import Ecto.Query, warn: false
   import Kith.Scope
   alias Kith.Cache.Invalidation
+  alias Kith.DAV.Store
   alias Kith.Repo
 
   alias Kith.Contacts.{
@@ -36,6 +37,7 @@ defmodule Kith.Contacts do
   alias Kith.Activities.{Activity, Call}
   alias Kith.Imports.ContactCleanup
   alias Kith.Storage
+  alias Kith.VCard.Serializer
 
   require Logger
 
@@ -362,7 +364,7 @@ defmodule Kith.Contacts do
 
   def hard_delete_contact(%Contact{} = contact) do
     Repo.transaction(fn ->
-      Kith.DAV.Store.record_hard_delete(contact.account_id)
+      Store.record_hard_delete(contact.account_id)
       # Lock the parent before inspecting children: a concurrent FK insert
       # must not land between mapping cleanup and the cascade.
       from(c in Contact,
@@ -389,7 +391,7 @@ defmodule Kith.Contacts do
   """
   def empty_trash(account_id) do
     Repo.transaction(fn ->
-      Kith.DAV.Store.record_hard_delete(account_id)
+      Store.record_hard_delete(account_id)
       contact_ids =
         from(c in Contact,
           where: c.account_id == ^account_id and not is_nil(c.deleted_at),
@@ -1790,7 +1792,7 @@ defmodule Kith.Contacts do
   defp replace_contact_relationships(contact, account_id, related_entries) do
     entries =
       Enum.flat_map(related_entries, fn entry ->
-        case Kith.DAV.Store.get_related(account_id, entry.value) do
+        case Store.get_related(account_id, entry.value) do
           nil -> []
           related -> [{related.id, entry.type, hidden_from_dav?(related)}]
         end
@@ -1832,7 +1834,7 @@ defmodule Kith.Contacts do
 
   defp same_dav_relationship?(relationship, {related_id, type}) do
     relationship.related_contact_id == related_id and
-      Kith.VCard.Serializer.relationship_type_to_vcard(relationship.relationship_type.name) ==
+      Serializer.relationship_type_to_vcard(relationship.relationship_type.name) ==
         String.downcase(type)
   end
 
@@ -2412,14 +2414,14 @@ defmodule Kith.Contacts do
   end
 
   defp touched({:ok, _} = result, account_id, ids) do
-    Kith.DAV.Store.touch(account_id, ids)
+    Store.touch(account_id, ids)
     result
   end
 
   defp touched(result, _account_id, _ids), do: result
 
   defp touched_rows({count, _} = result, account_id, ids) when count > 0 do
-    Kith.DAV.Store.touch(account_id, ids)
+    Store.touch(account_id, ids)
     result
   end
 

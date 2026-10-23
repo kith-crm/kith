@@ -222,18 +222,20 @@ defmodule Kith.VCard.Serializer do
   end
 
   defp do_related_lines(rels, :v40) do
-    Enum.map(rels, fn rel ->
-      type = relationship_type_to_vcard(rel.relationship_type.name)
+    Enum.map(rels, &related_uid_line/1)
+  end
 
-      case uid_for(rel.related_contact, :v40) do
-        nil ->
-          nil
+  defp related_uid_line(rel) do
+    type = relationship_type_to_vcard(rel.relationship_type.name)
 
-        uid ->
-          uid = if String.contains?(uid, ":"), do: uid, else: "urn:uuid:" <> uid
-          identifier_line("RELATED;TYPE=#{type}", uid, :v40)
-      end
-    end)
+    case uid_for(rel.related_contact, :v40) do
+      nil ->
+        nil
+
+      uid ->
+        uid = if String.contains?(uid, ":"), do: uid, else: "urn:uuid:" <> uid
+        identifier_line("RELATED;TYPE=#{type}", uid, :v40)
+    end
   end
 
   defp display_name_for_related(%{display_name: name}) when is_binary(name) and name != "",

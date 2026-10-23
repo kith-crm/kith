@@ -15,3 +15,6 @@
 # Windows scripts — CRLF
 *.bat   text eol=crlf
 *.cmd   text eol=crlf
+
+# CardDAV wire fixtures retain CRLF and intentional mid-UTF-8 folding.
+test/playwright/fixtures/carddav/*.vcf -text whitespace=cr-at-eol

@@ -34,6 +34,7 @@ defmodule Kith.Contacts.Merge do
   alias Ecto.Multi
   alias Kith.AuditLogs
   alias Kith.Contacts.{Address, Contact, ContactField, MergeFields, Tag}
+  alias Kith.DAV.Store
   alias Kith.Repo
 
   # Policy, array, Immich and coupled-flag fields are computed rather than
@@ -119,7 +120,7 @@ defmodule Kith.Contacts.Merge do
   values fail changeset validation on the survivor.
   """
   def run(scope, survivor_id, loser_ids, resolution) do
-    Kith.DAV.Store.transaction(scope.account.id, fn ->
+    Store.transaction(scope.account.id, fn ->
       with {:ok, members} <- lock_and_load(scope, survivor_id, loser_ids),
            survivor = Enum.find(members, &(&1.id == survivor_id)),
            {:ok, resolution} <- validate_fields(members, resolution),
@@ -172,7 +173,7 @@ defmodule Kith.Contacts.Merge do
     |> Repo.transaction()
     |> case do
       {:ok, %{last_talked_to: survivor, remap_first_met_reminders: first_met}} ->
-        Kith.DAV.Store.touch(survivor.account_id, Enum.uniq(member_ids ++ incoming_owner_ids))
+        Store.touch(survivor.account_id, Enum.uniq(member_ids ++ incoming_owner_ids))
         # The first-met step may have carried the opt-in flag onto the
         # survivor after `:survivor` was read, so fold it into the result.
         %{survivor | first_met_reminder: first_met.first_met_reminder}
