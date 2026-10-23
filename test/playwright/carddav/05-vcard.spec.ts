@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { dav, propText, responseFor, runPrefix, assertWellFormedXml, USERS, vcard } from "../helpers/dav";
+import { dav, propText, responseFor, runPrefix, assertWellFormedXml, USERS, vcard, hrefs } from "../helpers/dav";
 import { loginUser } from "../helpers/auth";
 
 test.describe.configure({ mode: "serial" });
@@ -97,6 +97,7 @@ for (const [name, values] of Object.entries(fixtures)) {
       const card = unfold(g.body);
       expect(/^UID(?:;[^:]*)?:([^\r]*)/m.exec(card)?.[1]).toBe(fixtureUids[name]);
       for (const value of values) expect(card, `${name} ${version}: ${value}`).toContain(value);
+      if (name === "v30-full") expect(card).toMatch(/^BDAY:(?:1815-12-10|18151210)\r$/m);
       if (name === "v40-full") {
         expect(card).toContain("\r\nBDAY:--1210\r\n");
         expect(card).not.toMatch(/^BDAY[^\r\n]*:(?:1604|2000)/m);
@@ -113,9 +114,7 @@ for (const [name, values] of Object.entries(fixtures)) {
       }
       expect((await put(request, href, g.body)).status).toBe(204);
       const next = await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } });
-      // 3.0 relationship output is grouped Apple data, which is not imported.
-      const expected = version === "3.0" ? g.body.replace(/^item\d+\.X-AB(?:RELATEDNAMES|Label):.*\r\n/gm, "") : g.body;
-      expect(withoutRev(next.body)).toBe(withoutRev(expected));
+      expect(withoutRev(next.body)).toBe(withoutRev(g.body));
     }
   });
 }
@@ -228,7 +227,7 @@ test("V4/V5: avatar survives photo-free sync and 4.0 GET PUT-back", async ({ req
   const reminder = await api(request, "POST", `/api/contacts/${id}/reminders`, { reminder: { type: "one_time", title: `${prefix} native reminder`, anchor_date: "2099-12-10" } }, 201);
   await api(request, "PATCH", `/api/contacts/${id}`, { contact: { favorite: true, first_met_where: "Kith-only place" } });
   const relatives = (await api(request, "GET", `/api/contacts/${id}/relationships`)).data;
-  expect(relatives).toHaveLength(0);
+  expect(relatives).toHaveLength(1);
   const before = unfold((await dav(request, "GET", href)).body);
   const photo = before.match(/^PHOTO.*$/m)![0];
   const multi = unfold(await reportCard(request, href));
@@ -307,5 +306,22 @@ test("unmapped extras retain syntax across versions while mapped parameters and 
     expect(card).toContain("extra@example.test");
     expect(card).not.toContain("PID=");
     expect(card).not.toContain("X-UNMAPPED");
+  }
+});
+
+test("encoded resource names remain usable through discovered hrefs", async ({ request }) => {
+  for (const name of ["hash#", "query?", "percent%", "a space", "مرحبا"]) {
+    const expected = BOOK + encodeURIComponent(`${prefix}-${name}.vcf`);
+    expect((await put(request, expected, vcard({ fn: `${prefix} Encoded ${name}` }))).status).toBe(201);
+    created.push(expected);
+    const listing = await dav(request, "PROPFIND", BOOK, { headers: { Depth: "1" }, body: '<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>' });
+    expect(listing.status).toBe(207);
+    const discovered = hrefs(listing.body).find(h => h === expected);
+    expect(discovered).toBe(expected);
+    expect((await dav(request, "GET", discovered!)).status).toBe(200);
+    expect(await reportCard(request, discovered!)).toContain(`${prefix} Encoded`);
+    expect((await dav(request, "DELETE", discovered!)).status).toBe(204);
+    created.splice(created.indexOf(expected), 1);
+    expect((await dav(request, "GET", discovered!)).status).toBe(404);
   }
 });

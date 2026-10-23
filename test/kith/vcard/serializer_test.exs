@@ -25,6 +25,31 @@ defmodule Kith.VCard.SerializerTest do
     end
   end
 
+  test "stored scheme-looking CR identities escape content-line controls" do
+    for version <- [:v30, :v40], separator <- ["\r", "\r\n"] do
+      identity = "urn:test:hello" <> separator <> "FN:Injected"
+      target = %{display_name: "Target", dav: %{uid: identity}}
+
+      contact = %Kith.Contacts.Contact{
+        display_name: "Owner",
+        first_name: "Owner",
+        dav: %{uid: identity},
+        addresses: [],
+        contact_fields: [],
+        gender: nil,
+        tags: [],
+        relationships: [%{id: 1, related_contact: target, relationship_type: %{name: "Friend"}}]
+      }
+
+      card = Serializer.serialize(contact, version: version, include_uid: true)
+      refute Regex.match?(~r/(?<!\r)\n|\r(?!\n)/, card)
+      assert length(Regex.scan(~r/^FN:/m, card)) == 1
+      {:ok, [parsed]} = Kith.VCard.Parser.parse(card)
+      assert parsed.uid == "urn:test:hello\nFN:Injected"
+      assert hd(parsed.related).value == parsed.uid
+    end
+  end
+
   describe "serialize/1" do
     test "generates valid vCard 3.0 with all fields" do
       contact = %{

@@ -114,7 +114,8 @@ defmodule Kith.DAV.Store do
   def put_extras(%ContactDav{} = dav, extras),
     do: dav |> Ecto.Changeset.change(extras: extras) |> Repo.update()
 
-  def href(%Contact{dav: dav}), do: "/dav/addressbooks/default/" <> URI.encode(dav.resource_name)
+  def href(%Contact{dav: dav}),
+    do: "/dav/addressbooks/default/" <> URI.encode(dav.resource_name, &URI.char_unreserved?/1)
 
   defp base(account_id) do
     from c in Contact,

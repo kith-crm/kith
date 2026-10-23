@@ -374,10 +374,15 @@ defmodule Kith.Contacts do
       |> Repo.one!()
 
       ContactCleanup.delete_for_contacts(contact.account_id, [contact.id])
+      owners = incoming_relationship_owner_ids(contact.account_id, [contact.id])
 
       case Repo.delete(contact) do
-        {:ok, deleted} -> deleted
-        {:error, reason} -> Repo.rollback(reason)
+        {:ok, deleted} ->
+          Store.touch(contact.account_id, owners)
+          deleted
+
+        {:error, reason} ->
+          Repo.rollback(reason)
       end
     end)
     |> Invalidation.after_contact_removal(contact.account_id)
@@ -403,13 +408,27 @@ defmodule Kith.Contacts do
 
       ContactCleanup.delete_for_contacts(account_id, contact_ids)
 
+      owners = incoming_relationship_owner_ids(account_id, contact_ids)
+
       {count, _} =
         from(c in Contact, where: c.account_id == ^account_id and c.id in ^contact_ids)
         |> Repo.delete_all()
 
+      Store.touch(account_id, owners)
       count
     end)
     |> Invalidation.after_contact_removal(account_id)
+  end
+
+  # Snapshot before FK cascades remove the incoming edges; the account lock is held.
+  defp incoming_relationship_owner_ids(account_id, ids) do
+    Repo.all(
+      from(r in Relationship,
+        where: r.account_id == ^account_id and r.related_contact_id in ^ids,
+        distinct: true,
+        select: r.contact_id
+      )
+    )
   end
 
   ## Addresses
@@ -1281,9 +1300,7 @@ defmodule Kith.Contacts do
 
   @doc "Renames a tag. Validates new name is unique per account (case-insensitive)."
   def rename_tag(%Tag{} = tag, new_name) do
-    tag
-    |> Tag.changeset(%{name: new_name})
-    |> Repo.update()
+    update_tag(tag, %{name: new_name})
   end
 
   @doc """
