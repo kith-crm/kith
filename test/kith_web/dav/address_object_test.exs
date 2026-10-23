@@ -16,6 +16,28 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
   setup :setup_dav_user
 
+  test "PUT preserves family-only and formatted-only native names",
+       %{account_id: aid} = context do
+    for {name, structured, first, last} <- [
+          {"Family Only", "N:Family Only;;;;\r\n", "", "Family Only"},
+          {"Formatted Only", "", "Formatted Only", nil}
+        ] do
+      resource = "#{String.replace(name, " ", "-")}.vcf"
+      href = "/dav/addressbooks/default/#{resource}"
+      body = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:#{name}\r\n#{structured}END:VCARD\r\n"
+      assert authed_dav(context, "PUT", href, body).status == 201
+      card = authed_dav(context, "GET", href).resp_body
+      assert card =~ "FN:#{name}\r\n"
+      assert card =~ "N:#{last};#{first};;;\r\n"
+      assert authed_dav(context, "PUT", href, card).status == 204
+      assert authed_dav(context, "GET", href).resp_body =~ "FN:#{name}\r\n"
+      stored = Kith.DAV.Store.get_by_resource_name(aid, resource)
+      assert stored.first_name == first
+      assert stored.last_name == last
+      assert stored.display_name == name
+    end
+  end
+
   # ═══════════════════════════════════════════════════════════════════════════
   # RFC 6352 §8.6 — GET address object resource
   # ═══════════════════════════════════════════════════════════════════════════

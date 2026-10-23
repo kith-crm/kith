@@ -3,6 +3,21 @@ defmodule Kith.Contacts.ContactTest do
 
   alias Kith.Contacts.Contact
 
+  test "native contacts still require a nonblank given or family name" do
+    for attrs <- [%{}, %{first_name: " ", last_name: " "}] do
+      changeset = Contact.create_changeset(%Contact{}, Map.put(attrs, :account_id, 1))
+      refute changeset.valid?
+      assert Keyword.has_key?(changeset.errors, :first_name)
+    end
+
+    assert Contact.update_changeset(%Contact{first_name: "", last_name: "Doe"}, %{favorite: true}).valid?
+
+    contact = %Contact{first_name: "Jane", last_name: "Doe"}
+    changeset = Contact.update_changeset(contact, %{first_name: nil, last_name: nil})
+    refute changeset.valid?
+    assert Keyword.has_key?(changeset.errors, :first_name)
+  end
+
   describe "schema" do
     test "has first-met and middle_name fields" do
       fields = Contact.__schema__(:fields)

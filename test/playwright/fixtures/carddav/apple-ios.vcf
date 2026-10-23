@@ -1,0 +1,14 @@
+BEGIN:VCARD
+VERSION:3.0
+UID:{{PREFIX}}-apple
+N:Apple;{{PREFIX}} Alice;;;
+FN:{{PREFIX}} Alice Apple
+PRODID:-//Apple Inc.//iPhone OS 18.0//EN
+item1.EMAIL;TYPE=INTERNET:alice@icloud.example.test
+item1.X-ABLabel:_$!<Home>!$_
+X-ABUID:{{PREFIX}}-apple-abuid
+item2.TEL;TYPE=CELL:+15550003333
+item2.X-ABLabel:Mobile
+item3.X-SOCIALPROFILE;type=twitter;x-user={{PREFIX}}-alice:https://twitter.com/{{PREFIX}}-alice
+item3.X-ABLabel:Twitter
+END:VCARD

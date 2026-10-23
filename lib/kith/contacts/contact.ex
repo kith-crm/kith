@@ -106,7 +106,8 @@ defmodule Kith.Contacts.Contact do
       :first_met_reminder,
       :birthdate_year_unknown
     ])
-    |> validate_required([:first_name, :account_id])
+    |> validate_required([:account_id])
+    |> validate_name()
     |> assoc_constraint(:account)
     |> compute_display_name()
     |> validate_column_lengths()
@@ -145,7 +146,7 @@ defmodule Kith.Contacts.Contact do
       :first_met_reminder,
       :birthdate_year_unknown
     ])
-    |> validate_required([:first_name])
+    |> validate_name()
     |> compute_display_name()
     |> validate_column_lengths()
     |> validate_first_met_through_account()
@@ -204,6 +205,17 @@ defmodule Kith.Contacts.Contact do
     Enum.reduce(@varchar_fields, changeset, fn field, cs ->
       validate_length(cs, field, max: 255, count: :codepoints)
     end)
+  end
+
+  defp validate_name(changeset) do
+    if get_field(changeset, :first_name) in [nil, ""] and
+         is_binary(get_field(changeset, :last_name)) and
+         String.trim(get_field(changeset, :last_name)) != "" do
+      # Family-only vCards have no given name; the database column is NOT NULL.
+      put_change(changeset, :first_name, "")
+    else
+      validate_required(changeset, [:first_name])
+    end
   end
 
   defp compute_display_name(changeset) do

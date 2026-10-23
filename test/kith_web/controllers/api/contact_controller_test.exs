@@ -97,11 +97,20 @@ defmodule KithWeb.API.ContactControllerTest do
       assert location == "/api/contacts/#{data["id"]}"
     end
 
-    test "returns 422 when first_name is missing", %{conn: conn} do
+    test "accepts a family-only contact without duplicating its display name", %{conn: conn} do
+      user = user_fixture()
+      body = %{"contact" => %{"last_name" => "Family"}}
+      response = conn |> authed_conn(user) |> post(~p"/api/contacts", body) |> json_response(201)
+      assert response["data"]["first_name"] == ""
+      assert response["data"]["last_name"] == "Family"
+      assert response["data"]["display_name"] == "Family"
+    end
+
+    test "returns 422 when both names are missing", %{conn: conn} do
       user = user_fixture()
       conn = authed_conn(conn, user)
 
-      body = %{"contact" => %{"last_name" => "NoFirst"}}
+      body = %{"contact" => %{}}
       resp = conn |> post(~p"/api/contacts", body) |> json_response(422)
 
       # RFC 7807 format

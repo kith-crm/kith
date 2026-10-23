@@ -14,6 +14,7 @@ defmodule Kith.Workers.DisplayNameRecomputeWorker do
 
   import Ecto.Query
   alias Kith.Contacts.Contact
+  alias Kith.DAV.Store
   alias Kith.Repo
 
   @batch_size 500
@@ -55,7 +56,7 @@ defmodule Kith.Workers.DisplayNameRecomputeWorker do
           )
         )
 
-      Kith.DAV.Store.touch(account_id, ids ++ owners)
+      Store.touch(account_id, ids ++ owners)
       recompute_batch(account_id, format, offset + @batch_size)
     end
   end

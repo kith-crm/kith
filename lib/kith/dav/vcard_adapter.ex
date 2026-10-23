@@ -10,6 +10,7 @@ defmodule Kith.DAV.VCardAdapter do
 
   alias Kith.Contacts
   alias Kith.Contacts.Contact
+  alias Kith.DAV.Store
   alias Kith.Repo
   alias Kith.Storage
   alias Kith.VCard.{Parser, Serializer}
@@ -31,7 +32,7 @@ defmodule Kith.DAV.VCardAdapter do
       if Keyword.get(opts, :preloaded, false) do
         contact
       else
-        Kith.DAV.Store.ensure_rows(contact.account_id)
+        Store.ensure_rows(contact.account_id)
         Repo.preload(contact, Contacts.dav_preloads(), force: true)
       end
 
@@ -69,7 +70,7 @@ defmodule Kith.DAV.VCardAdapter do
 
   defp build_scalar_attrs(parsed) do
     %{
-      "first_name" => parsed.first_name,
+      "first_name" => parsed.first_name || if(is_nil(parsed.last_name), do: parsed.display_name),
       "last_name" => parsed.last_name,
       "middle_name" => parsed.middle_name,
       "nickname" => parsed.nickname,

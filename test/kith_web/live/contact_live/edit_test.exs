@@ -40,7 +40,7 @@ defmodule KithWeb.ContactLive.EditTest do
 
       html =
         view
-        |> form("#contact-form", %{contact: %{first_name: ""}})
+        |> form("#contact-form", %{contact: %{first_name: "", last_name: ""}})
         |> render_submit()
 
       # Should stay on the page with errors, not crash

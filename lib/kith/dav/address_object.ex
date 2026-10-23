@@ -3,13 +3,14 @@ defmodule Kith.DAV.AddressObject do
   import Plug.Conn
   alias Kith.{Contacts, Repo}
   alias Kith.DAV.{Store, VCardAdapter, XMLBuilder}
+  alias Kith.VCard.{Extras, Parser}
 
   def put(conn, raw, body) do
     with {:ok, name} <- resource_name(raw),
-         {:ok, [_card]} <- Kith.VCard.Parser.parse(body),
+         {:ok, [_card]} <- Parser.parse(body),
          {attrs, children} <-
            VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: account_id(conn)) do
-      write(conn, name, attrs, children, Kith.VCard.Extras.extract(body), true)
+      write(conn, name, attrs, children, Extras.extract(body), true)
     else
       {:error, :name} -> send_resp(conn, 400, "Bad Request")
       _ -> invalid(conn)
@@ -35,48 +36,13 @@ defmodule Kith.DAV.AddressObject do
         Store.ensure_rows(aid)
         contact = locked(aid, name)
 
-        cond do
-          contact && hidden?(contact) ->
-            Repo.rollback(:hidden)
-
-          contact && not matches?(conn, contact) ->
-            Repo.rollback(:precondition)
-
-          is_nil(contact) && get_req_header(conn, "if-match") != [] ->
-            Repo.rollback(:precondition)
-
-          contact && children.uid && children.uid != contact.dav.uid ->
-            Repo.rollback({:uid, Store.get_by_uid(aid, children.uid) || contact})
-
-          true ->
-            if is_nil(contact) && children.uid do
-              if holder = Store.get_by_uid(aid, children.uid), do: Repo.rollback({:uid, holder})
-            end
-
-            {status, updated} =
-              if contact do
-                {204, unwrap(Contacts.update_contact(contact, attrs))}
-              else
-                created = unwrap(Contacts.create_contact(aid, attrs))
-                Store.ensure_rows(aid)
-                created = Repo.preload(created, :dav)
-
-                unwrap(
-                  Store.put_identity(created.dav, %{
-                    uid: children.uid || created.dav.uid,
-                    resource_name: name
-                  })
-                )
-
-                {201, created}
-              end
-
-            unwrap(Contacts.replace_contact_children(updated, aid, children))
-            updated = Repo.preload(updated, :dav, force: true)
-            unwrap(Store.put_extras(updated.dav, extras))
-            Store.touch(aid, [updated.id])
-            status
-        end
+        validate_write!(conn, contact, children.uid, aid)
+        {status, updated} = save_contact(contact, aid, name, attrs, children.uid)
+        unwrap(Contacts.replace_contact_children(updated, aid, children))
+        updated = Repo.preload(updated, :dav, force: true)
+        unwrap(Store.put_extras(updated.dav, extras))
+        Store.touch(aid, [updated.id])
+        status
       end)
 
     case result do
@@ -100,32 +66,77 @@ defmodule Kith.DAV.AddressObject do
     end
   end
 
+  defp validate_write!(conn, nil, uid, aid) do
+    if get_req_header(conn, "if-match") != [], do: Repo.rollback(:precondition)
+    validate_new_uid!(aid, uid)
+  end
+
+  defp validate_write!(conn, contact, uid, aid) do
+    cond do
+      hidden?(contact) ->
+        Repo.rollback(:hidden)
+
+      not matches?(conn, contact) ->
+        Repo.rollback(:precondition)
+
+      uid && uid != contact.dav.uid ->
+        Repo.rollback({:uid, Store.get_by_uid(aid, uid) || contact})
+
+      true ->
+        :ok
+    end
+  end
+
+  defp validate_new_uid!(_aid, nil), do: :ok
+
+  defp validate_new_uid!(aid, uid) do
+    case Store.get_by_uid(aid, uid) do
+      nil -> :ok
+      holder -> Repo.rollback({:uid, holder})
+    end
+  end
+
+  defp save_contact(nil, aid, name, attrs, uid) do
+    created = unwrap(Contacts.create_contact(aid, attrs))
+    Store.ensure_rows(aid)
+    created = Repo.preload(created, :dav)
+    unwrap(Store.put_identity(created.dav, %{uid: uid || created.dav.uid, resource_name: name}))
+    {201, created}
+  end
+
+  defp save_contact(contact, _aid, _name, attrs, _uid),
+    do: {204, unwrap(Contacts.update_contact(contact, attrs))}
+
   def delete(conn, raw) do
-    with {:ok, name} <- resource_name(raw) do
-      result =
-        transaction(account_id(conn), fn ->
-          Store.ensure_rows(account_id(conn))
-          contact = locked(account_id(conn), name)
-
-          cond do
-            is_nil(contact) || hidden?(contact) ->
-              Repo.rollback(:missing)
-
-            not matches?(conn, contact) ->
-              Repo.rollback(:precondition)
-
-            true ->
-              unwrap(Contacts.soft_delete_contact(contact))
-              204
-          end
-        end)
-
-      case result do
-        {:ok, status} -> send_resp(conn, status, "")
-        {:error, reason} -> error(conn, reason)
-      end
-    else
+    case resource_name(raw) do
+      {:ok, name} -> delete_named(conn, name)
       _ -> send_resp(conn, 400, "Bad Request")
+    end
+  end
+
+  defp delete_named(conn, name) do
+    result = transaction(account_id(conn), fn -> delete_locked(conn, name) end)
+
+    case result do
+      {:ok, status} -> send_resp(conn, status, "")
+      {:error, reason} -> error(conn, reason)
+    end
+  end
+
+  defp delete_locked(conn, name) do
+    Store.ensure_rows(account_id(conn))
+    contact = locked(account_id(conn), name)
+
+    cond do
+      is_nil(contact) || hidden?(contact) ->
+        Repo.rollback(:missing)
+
+      not matches?(conn, contact) ->
+        Repo.rollback(:precondition)
+
+      true ->
+        unwrap(Contacts.soft_delete_contact(contact))
+        204
     end
   end
 

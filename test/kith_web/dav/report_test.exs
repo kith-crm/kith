@@ -12,6 +12,24 @@ defmodule KithWeb.DAV.ReportTest do
 
   setup :setup_dav_user
 
+  test "requested address-data includes the stored avatar across report types",
+       %{account_id: account_id} = context do
+    contact = ContactsFixtures.contact_fixture(account_id)
+    photo = ContactsFixtures.photo_fixture(contact)
+    {:ok, _} = Kith.Storage.upload_binary(<<1, 2, 3>>, photo.storage_key)
+    on_exit(fn -> Kith.Storage.delete(photo.storage_key) end)
+    {:ok, _} = Contacts.set_avatar(contact, photo)
+
+    query =
+      ~s(<card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:prop><card:address-data/></d:prop><card:filter/></card:addressbook-query>)
+
+    for body <- [multiget_body([contact_path(contact)]), query, sync_collection_body()] do
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+      assert conn.resp_body =~ "PHOTO;ENCODING=b;TYPE=JPEG:AQID"
+    end
+  end
+
   # ── RFC 6352 §8.7 — addressbook-multiget ────────────────────────────────
 
   describe "RFC 6352 §8.7 — addressbook-multiget REPORT" do

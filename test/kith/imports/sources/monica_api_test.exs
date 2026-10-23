@@ -983,7 +983,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       account_id: account_id
     } do
       contacts = [
-        contact_json(id: 1, first_name: "", last_name: nil),
+        contact_json(id: 1, first_name: "", last_name: ""),
         contact_json(id: 2, first_name: "Fine")
       ]
 
