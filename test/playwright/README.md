@@ -34,6 +34,32 @@ npx playwright test --project=e2e --headed
 npx playwright test --project=smoke
 ```
 
+## CardDAV live harness
+
+The harness recreates its dedicated fresh database and seeds 2,000 performance
+contacts. PostgreSQL, project dependencies, npm dependencies (`npm ci`), Python 3,
+curl, xmllint and Chromium are required.
+
+```bash
+set -e
+trap 'scripts/carddav-e2e/down.sh' EXIT
+scripts/carddav-e2e/up.sh
+source .carddav-task10/env
+npx playwright test --project=e2e test/playwright/carddav
+scripts/carddav-e2e/vdirsyncer-smoke.sh
+```
+
+`scripts/carddav-e2e/up.sh` fixes `DB_NAME=kith_carddav_task10_e2e`, port 4527
+and a fresh `STORAGE_PATH` under `.carddav-task10/`; these override normal dev
+configuration. They are not configurable harness inputs. For a separately
+managed server, `DB_NAME` and `STORAGE_PATH` select its database/storage, and
+`PLAYWRIGHT_BASE_URL` overrides Playwright's default `http://127.0.0.1:4000`.
+Source the generated environment before running harness tests; it also sets
+`PLAYWRIGHT_OUTPUT_DIR` and serializes shared-account DAV specs.
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` can select an installed compatible Chromium.
+`down.sh` stops the recorded server; `vdirsyncer-smoke.sh` runs a scripted sync
+client in a temporary virtual environment. See [client results and limitations](../../docs/carddav-client-checklist.md).
+
 ## Test Data Setup
 
 Playwright tests run outside the Elixir test harness — they hit the running
@@ -57,6 +83,8 @@ shared `helpers/auth.ts` module provides `registerUser()`, `loginUser()`, and
 ```
 test/playwright/
 ├── README.md              # This file
+├── carddav/               # DAV protocol, browser and performance specs
+├── carddav_seed.exs        # Dedicated live-harness accounts and fixtures
 ├── helpers/
 │   └── auth.ts            # Shared auth helpers (register, login, logout)
 ├── auth.spec.ts           # Authentication flows (21 tests)

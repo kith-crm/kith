@@ -37,8 +37,11 @@ location come from the sourced environment file.
 ## Real-client results
 
 See the [client checklist and recorded results](carddav-client-checklist.md)
-for Thunderbird and DAVx5/Android Contacts, including the observed Thunderbird
-conflict and invalid-sync-token recovery limitations. These checks use actual
+for the full scenario definitions. Pixel 7 / Android 14 with DAVx5 4.5.21
+and Contacts 4.8.17 passed S1–S12. Thunderbird 158 failed S9 (unconditional
+PUT overwrites without If-Match) and S10 (no automatic recovery from 403
+invalid token; removing and re-adding the address book was verified). S2/S5
+category display was partial. These checks use actual
 application UI; the vdirsyncer smoke remains a separate scripted client run.
 
 Yearless birthdays use `BDAY:--MMDD` in both versions. This is standard in
@@ -58,12 +61,18 @@ PROPFIND; contact IDs do not determine DAV identity.
 Trashed and archived contacts keep their identities reserved. PUT to their
 href returns 409. Duplicate UIDs return `no-uid-conflict` with the holder href.
 
+Family-only contacts are accepted; at least one first or last name is required.
+A missing first name is stored as an empty string.
+
 Every successful vCard-visible write must call `Kith.DAV.Store.touch/2`.
-Application writes hold the account advisory transaction lock, mutate data,
+`Store.ensure_rows/1` runs before DAV reads.
+`Store.transaction(account_id, fun)` acquires the account advisory lock before
+contact row locks for merges, DAV writes and hard deletes. Application writes mutate data,
 and draw a sequence revision atomically. See
 [`touch_coverage_test.exs`](../test/kith/dav/touch_coverage_test.exs) for coverage
 of contact, child, relationship and vocabulary changes. Renaming a contact also
-touches contacts whose relationship labels show that name.
+touches contacts whose relationship labels show that name; merges touch incoming
+relationship owners.
 
 ETags are quoted revisions, identical across vCard 3.0 and 4.0 representations.
 The collection ctag and token revision are the maximum of stored revisions and
