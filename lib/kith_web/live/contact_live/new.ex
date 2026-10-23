@@ -56,7 +56,7 @@ defmodule KithWeb.ContactLive.New do
           phx-submit="save"
         >
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <UI.input field={f[:first_name]} type="text" label="First Name *" required />
+            <UI.input field={f[:first_name]} type="text" label="First Name" />
             <UI.input field={f[:last_name]} type="text" label="Last Name" />
             <UI.input field={f[:nickname]} type="text" label="Nickname" />
             <UI.input
