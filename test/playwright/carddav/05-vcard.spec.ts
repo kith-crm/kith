@@ -98,7 +98,8 @@ for (const [name, values] of Object.entries(fixtures)) {
       expect(/^UID(?:;[^:]*)?:([^\r]*)/m.exec(card)?.[1]).toBe(fixtureUids[name]);
       for (const value of values) expect(card, `${name} ${version}: ${value}`).toContain(value);
       if (name === "v40-full") {
-        expect(card).toContain(version === "4.0" ? "BDAY:--1210" : "X-KITH-BDAY:--1210");
+        expect(card).toContain("\r\nBDAY:--1210\r\n");
+        expect(card).not.toMatch(/^BDAY[^\r\n]*:(?:1604|2000)/m);
         expect(card).toContain(version === "4.0" ? "GENDER:F" : "X-GENDER:Female");
         expect(card).toContain(version === "4.0" ? `RELATED;TYPE=friend:urn:uuid:${prefix}-friend` : `.X-ABRELATEDNAMES:${prefix} Friend`);
       }

@@ -3,6 +3,28 @@ defmodule Kith.VCard.SerializerTest do
 
   alias Kith.VCard.Serializer
 
+  test "yearless birthday exports a reduced date without a synthetic year" do
+    contact = %Kith.Contacts.Contact{
+      display_name: "Yearless Birthday",
+      first_name: "Yearless",
+      last_name: "Birthday",
+      birthdate: ~D[2000-07-14],
+      birthdate_year_unknown: true,
+      addresses: [],
+      contact_fields: [],
+      gender: nil,
+      tags: [],
+      relationships: []
+    }
+
+    for version <- [:v30, :v40] do
+      card = Serializer.serialize(contact, version: version)
+      assert card =~ "\r\nBDAY:--0714\r\n"
+      refute card =~ "1604"
+      refute card =~ "2000"
+    end
+  end
+
   describe "serialize/1" do
     test "generates valid vCard 3.0 with all fields" do
       contact = %{

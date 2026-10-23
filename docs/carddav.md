@@ -34,6 +34,19 @@ Set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` before starting the harness to use an
 existing compatible Chromium binary. The Playwright base URL and output
 location come from the sourced environment file.
 
+## Real-client results
+
+See the [client checklist and recorded results](carddav-client-checklist.md)
+for Thunderbird and DAVx5/Android Contacts, including the observed Thunderbird
+conflict and invalid-sync-token recovery limitations. These checks use actual
+application UI; the vdirsyncer smoke remains a separate scripted client run.
+
+Yearless birthdays use `BDAY:--MMDD` in both versions. This is standard in
+vCard 4.0 and an interoperability extension in 3.0, whose original date syntax
+requires a year. It avoids synthetic years appearing in Thunderbird. Strict
+legacy 3.0 consumers may reject it. Incoming Apple year-omission forms remain
+accepted. The 3.0 output also retains `X-KITH-BDAY:--MMDD`.
+
 ## Data model and writes
 
 `contact_dav` belongs to a contact and account. It stores an account-unique

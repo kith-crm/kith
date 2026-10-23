@@ -121,11 +121,11 @@ defmodule Kith.VCard.Serializer do
   defp bday_line(%{birthdate: date, birthdate_year_unknown: true}, :v40),
     do: "BDAY:--" <> Calendar.strftime(date, "%m%d")
 
-  # RFC 2426 BDAY needs a year: 3.0 uses Apple's year-omitted form, which Apple
-  # Contacts and DAVx5 display as month and day, plus Kith's own `--MMDD` form.
+  # RFC 2426 cannot represent a missing year. Use the reduced-date extension
+  # understood by Thunderbird and DAVx5 instead of displaying a synthetic year.
   defp bday_line(%{birthdate: date, birthdate_year_unknown: true}, :v30) do
     [
-      "BDAY;X-APPLE-OMIT-YEAR=1604:1604-" <> Calendar.strftime(date, "%m-%d"),
+      "BDAY:--" <> Calendar.strftime(date, "%m%d"),
       "X-KITH-BDAY:--" <> Calendar.strftime(date, "%m%d")
     ]
   end

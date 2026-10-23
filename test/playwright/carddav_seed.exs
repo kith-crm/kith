@@ -73,6 +73,74 @@ end
 unconfirmed = ensure_user.("dav-unconfirmed@carddav.test")
 unconfirmed |> Ecto.Changeset.change(confirmed_at: nil) |> Repo.update!()
 
+# Real-client fixtures live in account A; account B remains available for CLI runs.
+# All visible writes use application functions so DAV revisions are exercised.
+unless Repo.get_by(Contact, account_id: admin.account_id, first_name: "Client", last_name: "Seed") do
+  {:ok, seed} =
+    Contacts.create_contact(admin.account_id, %{
+      first_name: "Client",
+      last_name: "Seed",
+      birthdate: ~D[2000-07-14],
+      birthdate_year_unknown: true,
+      description: "Real-client seed note"
+    })
+
+  types = Contacts.list_contact_field_types(admin.account_id)
+
+  for {protocol, value} <- [{"tel:", "+15550101001"}, {"mailto:", "seed@example.test"}] do
+    type = Enum.find(types, &(&1.protocol == protocol))
+
+    {:ok, _} =
+      Contacts.create_contact_field(seed, %{value: value, contact_field_type_id: type.id})
+  end
+
+  {:ok, _} =
+    Contacts.create_address(seed, %{
+      line1: "14 Client Street",
+      city: "Testville",
+      postal_code: "12345",
+      country: "US"
+    })
+
+  for name <- ["Client Friends", "Client Family"] do
+    {:ok, tag} = Contacts.create_tag(admin.account_id, %{name: name})
+    {1, _} = Contacts.tag_contact(seed, tag)
+  end
+
+  # Reuse the local image fixture so photo checks need no external service.
+  photo_data = File.read!(Path.expand("../support/fixtures/sample_avatar.jpg", __DIR__))
+  key = Kith.Storage.generate_key(admin.account_id, "photos", "client-seed.jpg")
+  {:ok, _} = Kith.Storage.upload_binary(photo_data, key)
+
+  {:ok, photo} =
+    Contacts.create_photo(seed, %{
+      file_name: "client-seed.jpg",
+      storage_key: key,
+      file_size: byte_size(photo_data),
+      content_type: "image/jpeg"
+    })
+
+  {:ok, _} = Contacts.set_avatar(seed, photo)
+
+  {:ok, related} =
+    Contacts.create_contact(admin.account_id, %{first_name: "Related", last_name: "Seed"})
+
+  relationship_type = Contacts.list_relationship_types(admin.account_id) |> hd()
+
+  {:ok, _} =
+    Contacts.create_relationship(seed, %{
+      related_contact_id: related.id,
+      relationship_type_id: relationship_type.id
+    })
+
+  for {name, hidden} <- [{"Archived", :archive_contact}, {"Trashed", :soft_delete_contact}] do
+    {:ok, contact} =
+      Contacts.create_contact(admin.account_id, %{first_name: name, last_name: "Seed"})
+
+    {:ok, _} = apply(Contacts, hidden, [contact])
+  end
+end
+
 # Account E: perf (opt-in)
 if System.get_env("PERF") == "1" do
   perf = ensure_user.("dav-perf@carddav.test") |> confirm.()
