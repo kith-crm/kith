@@ -1,54 +1,76 @@
 defmodule Kith.SlowQueryLoggerTest do
-  # Application env and the Logger level are global.
-  use Kith.DataCase, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
-
   alias Kith.SlowQueryLogger
 
-  setup do
-    previous_level = Logger.level()
-    Logger.configure(level: :info)
-    on_exit(fn -> Logger.configure(level: previous_level) end)
-
-    SlowQueryLogger.attach()
-    on_exit(fn -> :telemetry.detach("kith-slow-query-logger") end)
-    :ok
+  defp measurements(total_ms) do
+    %{
+      total_time: System.convert_time_unit(total_ms, :millisecond, :native),
+      query_time: System.convert_time_unit(400, :millisecond, :native),
+      queue_time: System.convert_time_unit(100, :millisecond, :native)
+    }
   end
 
-  test "logs a query slower than the threshold with its timing and SQL" do
-    Kith.TestEnv.put_env_restoring(:kith, :slow_query_threshold_ms, 20)
-
+  test "does not log below the 500ms threshold" do
     log =
       capture_log(fn ->
-        Repo.query!("select pg_sleep(0.06), 'marker-slow'")
+        SlowQueryLogger.handle_event(
+          [],
+          measurements(499),
+          %{query: "select 'qa-below-threshold'"},
+          nil
+        )
       end)
 
-    assert log =~ "[SlowQuery]"
-    assert log =~ "marker-slow"
-    assert log =~ ~r/\d+ms \(db \d+ms, queue \d+ms/
+    refute log =~ "qa-below-threshold"
   end
 
-  test "stays quiet for queries under the threshold" do
-    Kith.TestEnv.put_env_restoring(:kith, :slow_query_threshold_ms, 5_000)
+  test "logs exactly at the threshold and separates database from queue time" do
+    log =
+      capture_log(fn ->
+        SlowQueryLogger.handle_event(
+          [],
+          measurements(500),
+          %{query: "select 'slow'", source: "contacts"},
+          nil
+        )
+      end)
 
-    log = capture_log(fn -> Repo.query!("select 1, 'marker-fast'") end)
-
-    refute log =~ "[SlowQuery]"
+    assert log =~ "[SlowQuery] 500ms (db 400ms, queue 100ms, decode 0ms)"
+    assert log =~ "source=contacts select 'slow'"
   end
 
-  test "truncates very long statements and never logs bound parameters" do
-    Kith.TestEnv.put_env_restoring(:kith, :slow_query_threshold_ms, 0)
+  test "truncates statements and never emits bound parameters" do
     padding = String.duplicate("x", 2_000)
 
     log =
       capture_log(fn ->
-        Repo.query!("select $1::text, '#{padding}'", ["secret-param-value"])
+        SlowQueryLogger.handle_event(
+          [],
+          measurements(501),
+          %{query: "select $1::text, '#{padding}'", params: ["secret-param-value"]},
+          nil
+        )
       end)
 
     assert log =~ "[SlowQuery]"
     assert log =~ "…"
     refute log =~ "secret-param-value"
     refute log =~ padding
+  end
+
+  test "missing optional SQL and timings do not crash the handler" do
+    log =
+      capture_log(fn ->
+        SlowQueryLogger.handle_event(
+          [],
+          %{total_time: System.convert_time_unit(500, :millisecond, :native)},
+          %{},
+          nil
+        )
+      end)
+
+    assert log =~ "500ms (db 0ms, queue 0ms, decode 0ms) source=-"
   end
 end

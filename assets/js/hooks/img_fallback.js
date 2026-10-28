@@ -75,9 +75,12 @@ const ImgFallback = {
     if (this.state === "ok" && this.el.dataset.refreshable === "true") {
       this.setState("retrying")
       const img = this.img
+      const refresh = (this.refreshGeneration || 0) + 1
+      this.refreshGeneration = refresh
       this.pushEventTo(this.el, "refresh_url", {}, (reply) => {
-        // A node swap since the push resets state; a late reply is stale.
-        if (this.img !== img || this.state !== "retrying") return
+        // The same node can start another retry after a src change or a load.
+        // Its older callback must not settle the newer refresh attempt.
+        if (this.img !== img || this.state !== "retrying" || this.refreshGeneration !== refresh) return
         if (!reply || !reply.changed) this.setState("failed")
       })
     } else {

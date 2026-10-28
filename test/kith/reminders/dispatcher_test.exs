@@ -1,5 +1,5 @@
 defmodule Kith.Reminders.DispatcherTest do
-  use Kith.DataCase, async: false
+  use Kith.DataCase, async: true
   use Oban.Testing, repo: Kith.Repo
 
   import Ecto.Query
@@ -69,6 +69,33 @@ defmodule Kith.Reminders.DispatcherTest do
 
     assert instances(r) == []
     refute_enqueued(worker: ReminderEmailWorker)
+  end
+
+  test "dispatch begins at the exact local send-hour boundary", ctx do
+    r = create!(ctx, %{type: "one_time", anchor_date: ctx.today})
+    assert :ok = Dispatcher.run(DateTime.new!(ctx.today, ~T[08:59:59], "Etc/UTC"))
+    assert instances(r) == []
+    assert :ok = Dispatcher.run(DateTime.new!(ctx.today, ~T[09:00:00], "Etc/UTC"))
+    assert [%{kind: "on_day", occurrence_date: date}] = instances(r)
+    assert date == ctx.today
+  end
+
+  test "the repeated DST send hour produces only one occurrence", ctx do
+    Repo.update_all(from(a in Kith.Accounts.Account, where: a.id == ^ctx.account_id),
+      set: [timezone: "America/New_York", send_hour: 1]
+    )
+
+    r = create!(ctx, %{type: "one_time", anchor_date: ~D[2026-11-01]})
+
+    # New York repeats 01:00 when clocks fall back: both instants are due,
+    # but they represent the same calendar occurrence.
+    assert :ok = Dispatcher.run(~U[2026-11-01 04:59:59Z])
+    assert instances(r) == []
+    assert :ok = Dispatcher.run(~U[2026-11-01 05:00:00Z])
+    assert [%{id: id, occurrence_date: ~D[2026-11-01]}] = instances(r)
+    assert :ok = Dispatcher.run(~U[2026-11-01 06:00:00Z])
+    assert [%{id: ^id}] = instances(r)
+    assert [%{args: %{"instance_id" => ^id}}] = all_enqueued(worker: ReminderEmailWorker)
   end
 
   test "missed periods send one notice and jump to the next future occurrence", ctx do
@@ -373,6 +400,6 @@ defmodule Kith.Reminders.DispatcherTest do
     assert [%{kind: "on_day", days_before: 0}] = instances(r)
 
     assert Repo.get!(Reminder, r.id).next_reminder_date ==
-             Kith.Reminders.Occurrences.advance_after(Reminder.schedule(r), ctx.today)
+             Date.shift(ctx.today, year: 1)
   end
 end

@@ -3,6 +3,7 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
 
   import Kith.Factory
   import Kith.ContactsFixtures
+  import Kith.ImportsFixtures
 
   alias Kith.Contacts.Contact
   alias Kith.Contacts.DuplicateCandidate
@@ -11,7 +12,7 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
 
   setup do
     seed_reference_data!()
-    {account, _user} = setup_account()
+    {account, user} = setup_account()
 
     email_type_id =
       Repo.one!(
@@ -22,7 +23,7 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
         )
       )
 
-    %{account: account, email_type_id: email_type_id}
+    %{account: account, user: user, email_type_id: email_type_id}
   end
 
   defp contact(account, display, first, last, attrs \\ %{}) do
@@ -322,26 +323,50 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
   describe "run/2 — dry_run" do
     test "reports the merge and writes nothing at all", %{
       account: account,
+      user: user,
       email_type_id: email_type_id
     } do
       a = contact(account, "Rae Lin", "Rae", "Lin")
-      b = contact(account, "Rae Lin", "Rae", "Lin")
+      b = contact(account, "Rae Lin", "Rae", "Lin", %{company: "Survivor must not acquire this"})
       contact_field_fixture(a, email_type_id, %{"value" => "rae@example.com"})
       contact_field_fixture(b, email_type_id, %{"value" => "rae@example.com"})
+      note = note_fixture(b, user.id, %{"body" => "A note that must keep its owner"})
+      import_job = import_fixture(account.id, user.id)
 
-      before_candidates = Repo.aggregate(DuplicateCandidate, :count)
+      for {type, source, row} <- [{"contact", "rae", b}, {"note", "rae-note", note}] do
+        assert {:ok, _} =
+                 Kith.Imports.record_imported_entity(import_job, type, source, type, row.id)
+      end
+
+      # Equality is the contract here: a dry run may report a proposed merge,
+      # but must not enrich a contact, move children/mappings, or leave scan or
+      # audit rows behind. Read persisted rows rather than the loaded fixtures.
+      snapshot = fn ->
+        Map.new(
+          [
+            Contact,
+            Kith.Contacts.ContactField,
+            Kith.Contacts.Note,
+            Kith.Imports.ImportRecord,
+            DuplicateCandidate,
+            Kith.AuditLogs.AuditLog
+          ],
+          fn schema ->
+            {schema,
+             Repo.all(from(row in schema, where: row.account_id == ^account.id, order_by: row.id))}
+          end
+        )
+      end
+
+      before = snapshot.()
+      assert before[DuplicateCandidate] == []
+      assert Repo.get!(Kith.Contacts.Note, note.id).contact_id == b.id
 
       assert %{merged: 1, clusters_merged: 1, left_behind: 0} =
                DuplicateAutomerge.run(account.id, dry_run: true)
 
-      # Nothing merged, and the detector scan the pass runs is rolled back —
-      # zero DuplicateCandidate rows persist.
-      assert length(active_ids(account.id)) == 2
-      assert Repo.aggregate(DuplicateCandidate, :count) == before_candidates
-
-      assert DuplicateCandidate
-             |> where([d], d.account_id == ^account.id)
-             |> Repo.aggregate(:count) == 0
+      assert snapshot.() == before
+      assert active_ids(account.id) == [a.id, b.id]
     end
   end
 

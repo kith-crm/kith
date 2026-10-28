@@ -29,7 +29,7 @@ Application.put_env(
 Application.put_env(:kith, Kith.Mailer,
   adapter: Swoosh.Adapters.SMTP,
   relay: System.get_env("SMTP_HOST", "127.0.0.1"),
-  port: 1025,
+  port: String.to_integer(System.get_env("SMTP_PORT", "1025")),
   ssl: false,
   tls: :never,
   auth: :never,

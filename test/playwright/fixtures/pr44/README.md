@@ -15,9 +15,37 @@ contents and direction are also checked through the REST API.
 ## Prerequisites
 
 - Elixir/OTP from `.tool-versions`, `mix deps.get`, root `npm ci`.
+- Node.js 22 or newer (`npm run test:js` runs the isolated hook tests).
 - PostgreSQL at `DB_PORT` (default development compose port 5434).
 - Mailpit SMTP at `127.0.0.1:1025` and HTTP at `127.0.0.1:8025`.
 - Playwright Chromium: `npx playwright install chromium`.
+
+## Automated local and CI run
+
+After installing dependencies and building assets (`MIX_ENV=test mix assets.setup &&
+MIX_ENV=test mix assets.vendor && MIX_ENV=test mix assets.build`), run:
+
+```sh
+npm run test:pr44
+```
+
+This starts Phoenix, the deterministic Monica fixture, and a fresh fake S3; seeds
+an isolated database with a unique `kith_testpr44_browser_*` name; and runs both the six PR44 regressions
+and eight image-fallback scenarios. PostgreSQL and Mailpit must already be running.
+It requires the fixtures rather than silently skipping their tests. Servers started
+by the script are stopped on exit; diagnostic logs are under `tmp/pr44-browser`.
+Browser traces are retained on failure. The existing 90% ExUnit coverage threshold
+is unchanged; these browser tests are behavioral checks, not part of that metric.
+
+Override `DB_PORT`, `MIX_TEST_PARTITION`, `PORT`, `PR44_MONICA_PORT`, `PR44_S3_PORT`,
+`SMTP_HOST`, `SMTP_PORT`, or `MAILPIT_URL` when the defaults are occupied. The script
+refuses occupied Phoenix/fixture ports. It uses one Playwright worker because its
+control commands drain whole Oban queues; parallel execution needs queue isolation
+first. The default database is unique per run so stale queues cannot affect a
+later run; an explicitly supplied partition reuses its database. Databases remain
+available for debugging and are never dropped by the script.
+
+The manual steps below remain useful for debugging one scenario.
 
 Use a separate test partition so browser data cannot contaminate ExUnit tests:
 
@@ -92,3 +120,25 @@ broadcast. CLI actions never start a web listener, cron, or background queues.
 - `mix test --cover`: 54.06% application-wide, below the unchanged 90% threshold;
   the command exits nonzero for coverage despite all tests passing. The new
   `Kith.Imports.ContactCleanup` module has 100% coverage.
+
+## QA follow-up verification (2026-10-29)
+
+- `MIX_TEST_PARTITION=pr44_final_qa mix test --cover --export-coverage pr44_final --seed 321`:
+  1,800 tests, zero failures. `mix test.coverage` reports 54.59% line coverage and
+  exits below the unchanged 90% threshold. CI runs tests once, then publishes
+  this report as a diagnostic artifact; test failures remain blocking.
+- `npm run test:js`: 14 deterministic real-hook tests passed.
+- `npm run test:pr44`: all 14 browser scenarios passed without skips.
+- `mix quality`: passed.
+
+The added tests cover whole continuation chains, exact retry summaries and
+persisted mappings, cancellation and contact changes during HTTP requests,
+transaction rollback, independent-connection reminder overlaps, late SMTP
+failure bookkeeping, and stale image callbacks. Race ordering uses explicit
+barriers. The importer lock regression rejects both reversed lock acquisition
+and removal of the live-target lock; its positive control uses `NO KEY UPDATE`
+so incidental foreign-key locks cannot make the test pass.
+
+These tests establish database and application-state contracts, not exactly-once
+SMTP delivery. Completed import response checkpoints preserve the original
+snapshot on retry and do not restore rows the user subsequently deleted.

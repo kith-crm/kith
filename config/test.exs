@@ -34,6 +34,10 @@ config :ex_phone_number, metadata_file: Path.join("resources", "PhoneNumberMetad
 # isolation in rate_limiter_test.exs, not via the full crawl integration.
 config :kith, :monica_rate_limit, 1_000_000
 
+# Stubs remain owned by each test process; no network or retry backoff in unit tests.
+config :kith, Kith.Immich.Client,
+  req_options: [plug: {Req.Test, Kith.Immich.Client}, retry: false]
+
 # Disable PromEx in tests (its Ecto poller conflicts with sandbox ownership)
 config :kith, Kith.PromEx, disabled: true
 
@@ -54,6 +58,22 @@ config :kith, signup_double_optin: false
 
 # Storage — local backend for tests
 config :kith, Kith.Storage, backend: :local, path: "priv/uploads/test"
+
+# Explicitly opt-in local browser harness; ordinary ExUnit keeps local storage.
+if System.get_env("PR44_E2E") == "1" and System.get_env("REVIEW_S3") == "1" do
+  config :kith, Kith.Storage, backend: :s3, bucket: "kith-review"
+
+  config :ex_aws,
+    http_client: ExAws.Request.Req,
+    access_key_id: "test",
+    secret_access_key: "test",
+    region: "us-east-1"
+
+  config :ex_aws, :s3,
+    scheme: "http://",
+    host: "127.0.0.1",
+    port: String.to_integer(System.get_env("PR44_S3_PORT", "9000"))
+end
 
 # Print only warnings and errors during test
 config :logger, level: :warning

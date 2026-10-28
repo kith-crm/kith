@@ -21,7 +21,7 @@ defmodule Kith.Immich.Client do
     url = "#{String.trim_trailing(base_url, "/")}/api/people"
 
     result =
-      Req.get(url,
+      get(url,
         headers: [{"x-api-key", api_key}],
         receive_timeout: @timeout
       )
@@ -67,10 +67,15 @@ defmodule Kith.Immich.Client do
   Returns `{:ok, binary}` or `{:error, reason}`.
   """
   def download_asset(url, api_key) do
-    case Req.get(url, headers: [{"x-api-key", api_key}], receive_timeout: @timeout) do
+    case get(url, headers: [{"x-api-key", api_key}], receive_timeout: @timeout) do
       {:ok, %{status: 200, body: body}} when is_binary(body) -> {:ok, body}
       {:ok, %{status: status}} -> {:error, {:unexpected_status, status}}
       {:error, _} -> {:error, :network_error}
     end
+  end
+
+  defp get(url, options) do
+    configured = Application.get_env(:kith, __MODULE__, []) |> Keyword.get(:req_options, [])
+    Req.get(url, Keyword.merge(options, configured))
   end
 end

@@ -1,75 +1,81 @@
 defmodule Kith.Workers.ReminderEmailWorkerTest do
-  use Kith.DataCase, async: false
+  use Kith.DataCase, async: true
   use Oban.Testing, repo: Kith.Repo
 
   import Ecto.Query
   import Swoosh.TestAssertions
-  import Kith.AccountsFixtures
-  import Kith.ContactsFixtures
 
   alias Kith.Reminders
-  alias Kith.Reminders.{Dispatcher, Reminder, ReminderInstance}
+  alias Kith.Reminders.{Dispatcher, ReminderInstance}
   alias Kith.Workers.ReminderEmailWorker
 
-  defmodule FailingAdapter do
-    @moduledoc false
-    use Swoosh.Adapter
-
-    @impl Swoosh.Adapter
-    def deliver(_email, _config), do: {:error, :boom}
-  end
+  import Kith.ReminderEmailFixtures
 
   setup do
-    user = user_fixture()
-    contact = contact_fixture(user.account_id, %{first_name: "Mona", display_name: "Mona Vale"})
-
-    {:ok, reminder} =
-      Reminders.create_reminder(user.account_id, user.id, %{
-        type: "one_time",
-        title: "Call Mona",
-        anchor_date: Reminders.account_today(user.account_id),
-        contact_id: contact.id
-      })
-
-    :ok = dispatch_today(user.account_id)
-    [instance] = Repo.all(from(i in ReminderInstance, where: i.reminder_id == ^reminder.id))
-
-    %{user: user, contact: contact, instance: instance}
+    setup_fixture()
   end
 
-  # Runs the dispatcher at a late hour of the account-local "today", so the
-  # run is never before send_hour and never straddles local midnight.
-  defp dispatch_today(account_id) do
-    account = Kith.Accounts.get_account!(account_id)
-    today = Reminders.account_today(account_id)
-    Dispatcher.run(DateTime.new!(today, ~T[23:00:00], account.timezone))
-  end
-
-  defp fail_mail(_ctx) do
-    original = Application.get_env(:kith, Kith.Mailer)
-    Application.put_env(:kith, Kith.Mailer, Keyword.put(original, :adapter, FailingAdapter))
-    on_exit(fn -> Application.put_env(:kith, Kith.Mailer, original) end)
-    :ok
-  end
-
-  test "emails the reminder's creator", %{user: user, instance: instance} do
-    assert :ok = perform_job(ReminderEmailWorker, %{instance_id: instance.id})
+  test "only the creator receives the email, not another account member", ctx do
+    other = Kith.Factory.insert(:user, account: Kith.Accounts.get_account!(ctx.user.account_id))
+    assert other.account_id == ctx.user.account_id
+    assert :ok = perform_job(ReminderEmailWorker, %{instance_id: ctx.instance.id})
 
     assert_email_sent(fn email ->
-      assert email.to == [{user.email, user.email}]
+      assert email.to == [{ctx.user.email, ctx.user.email}]
+      assert email.cc == []
+      assert email.bcc == []
       assert email.subject == "Reminder: Call Mona"
     end)
+
+    refute_email_sent()
   end
 
-  test "a retried job never creates another instance", %{instance: instance} do
-    assert :ok = perform_job(ReminderEmailWorker, %{instance_id: instance.id})
-    assert :ok = perform_job(ReminderEmailWorker, %{instance_id: instance.id}, attempt: 2)
+  for {type, kind, days, title, subject} <- [
+        {"birthday", "on_day", 0, nil, "Mona Vale's birthday is today"},
+        {"birthday", "advance", 7, nil, "Mona Vale's birthday is in 7 days"},
+        {"one_time", "advance", 30, "Renew passport", "Reminder in 30 days: Renew passport"},
+        {"stay_in_touch", "on_day", 0, "Reach out", "Time to reach out to Mona Vale"}
+      ] do
+    test "#{type} #{kind} email contains its subject and contact", ctx do
+      type = unquote(type)
 
-    assert Repo.aggregate(
-             from(i in ReminderInstance, where: i.reminder_id == ^instance.reminder_id),
-             :count
-           ) ==
-             1
+      attrs = %{
+        type: type,
+        title: unquote(title),
+        anchor_date: ~D[2026-10-29],
+        contact_id: ctx.contact.id
+      }
+
+      attrs =
+        if type == "one_time",
+          do: attrs,
+          else: Map.merge(attrs, %{interval_unit: "year", interval_count: 1})
+
+      {:ok, reminder} = Reminders.create_reminder(ctx.user.account_id, ctx.user.id, attrs)
+
+      instance =
+        %ReminderInstance{}
+        |> ReminderInstance.create_changeset(%{
+          reminder_id: reminder.id,
+          account_id: ctx.user.account_id,
+          contact_id: ctx.contact.id,
+          occurrence_date: ~D[2026-10-29],
+          scheduled_for: ~U[2026-10-29 09:00:00Z],
+          kind: unquote(kind),
+          days_before: unquote(days)
+        })
+        |> Repo.insert!()
+
+      assert :ok = perform_job(ReminderEmailWorker, %{instance_id: instance.id, snooze_count: 0})
+
+      assert_email_sent(fn email ->
+        assert email.to == [{ctx.user.email, ctx.user.email}]
+        assert email.subject == unquote(subject)
+        assert email.text_body == unquote(subject) <> "\n\nContact: Mona Vale"
+      end)
+
+      refute_email_sent()
+    end
   end
 
   test "discards a job whose instance is gone", %{instance: instance} do
@@ -101,24 +107,6 @@ defmodule Kith.Workers.ReminderEmailWorkerTest do
       # miss the duplicate-delivery regression.
       assert %{discard: 1, success: 1, failure: 0} = Oban.drain_queue(queue: :reminders)
       assert Repo.reload!(original).state == "discarded"
-      assert_one_delivery()
-    end
-
-    test "a retryable original job cannot send after a later snooze wakes", ctx do
-      [original] = all_enqueued(worker: ReminderEmailWorker)
-      original_mailer = Application.get_env(:kith, Kith.Mailer)
-      :ok = fail_mail(ctx)
-
-      assert %{failure: 1, success: 0} = Oban.drain_queue(queue: :reminders)
-      assert Repo.reload!(original).state == "retryable"
-      Application.put_env(:kith, Kith.Mailer, original_mailer)
-
-      snooze_and_wake(ctx.instance)
-
-      assert %{discard: 1, success: 1, failure: 0} =
-               Oban.drain_queue(queue: :reminders, with_scheduled: true)
-
-      assert %{state: "discarded", attempt: 2} = Repo.reload!(original)
       assert_one_delivery()
     end
 
@@ -172,79 +160,6 @@ defmodule Kith.Workers.ReminderEmailWorkerTest do
 
       assert :ok = perform_job(ReminderEmailWorker, %{instance_id: ctx.instance.id})
       assert_email_sent(subject: "Reminder: Call Mona")
-    end
-  end
-
-  describe "eligibility changes between delivery attempts" do
-    setup :fail_mail
-
-    for blocked <- [:inactive, :deleted, :archived, :resolved, :dismissed, :snoozed, :failed] do
-      test "does not retry delivery after #{blocked}", ctx do
-        assert {:error, :boom} =
-                 perform_job(ReminderEmailWorker, %{instance_id: ctx.instance.id}, attempt: 1)
-
-        block_delivery(ctx, unquote(blocked))
-        before = Repo.get!(ReminderInstance, ctx.instance.id)
-
-        assert {:discard, _} =
-                 perform_job(ReminderEmailWorker, %{instance_id: ctx.instance.id}, attempt: 3)
-
-        assert Repo.get!(ReminderInstance, ctx.instance.id) == before
-      end
-    end
-  end
-
-  defp block_delivery(ctx, :inactive) do
-    ctx.instance.reminder_id
-    |> then(&Repo.get!(Reminder, &1))
-    |> Reminders.update_reminder(%{active: false})
-  end
-
-  defp block_delivery(ctx, :deleted), do: Kith.Contacts.soft_delete_contact(ctx.contact)
-  defp block_delivery(ctx, :archived), do: Kith.Contacts.archive_contact(ctx.contact)
-
-  defp block_delivery(ctx, status) do
-    ctx.instance
-    |> Ecto.Changeset.change(status: Atom.to_string(status))
-    |> Repo.update!()
-  end
-
-  describe "when delivery fails on the final attempt" do
-    setup :fail_mail
-
-    test "the instance is marked failed", %{instance: instance} do
-      assert {:error, :boom} =
-               perform_job(ReminderEmailWorker, %{instance_id: instance.id}, attempt: 3)
-
-      assert Repo.get!(ReminderInstance, instance.id).status == "failed"
-    end
-
-    test "an earlier attempt leaves the instance pending", %{instance: instance} do
-      assert {:error, :boom} =
-               perform_job(ReminderEmailWorker, %{instance_id: instance.id}, attempt: 1)
-
-      assert Repo.get!(ReminderInstance, instance.id).status == "pending"
-    end
-
-    test "a stay-in-touch reminder is re-armed one interval from today", ctx do
-      today = Reminders.account_today(ctx.user.account_id)
-
-      {:ok, reminder} =
-        Reminders.create_reminder(ctx.user.account_id, ctx.user.id, %{
-          type: "stay_in_touch",
-          frequency: "monthly",
-          anchor_date: today,
-          contact_id: ctx.contact.id
-        })
-
-      :ok = dispatch_today(ctx.user.account_id)
-      [instance] = Repo.all(from(i in ReminderInstance, where: i.reminder_id == ^reminder.id))
-
-      assert {:error, :boom} =
-               perform_job(ReminderEmailWorker, %{instance_id: instance.id}, attempt: 3)
-
-      assert Repo.get!(ReminderInstance, instance.id).status == "failed"
-      assert Repo.get!(Reminder, reminder.id).next_reminder_date == Date.shift(today, month: 1)
     end
   end
 

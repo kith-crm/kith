@@ -243,12 +243,17 @@ defmodule Kith.Reminders.Dispatcher do
     end)
   end
 
-  # Conditional update so two overlapping runs can't both re-send.
+  # Recheck eligibility in the update: a contact can be archived or its
+  # reminder disabled after wake_snoozed/1 selects the id. The conditional
+  # update also prevents two overlapping runs from both re-sending.
   defp wake(instance_id, now) do
     Repo.transaction(fn ->
       {_count, snooze_counts} =
         from(i in ReminderInstance,
+          join: r in assoc(i, :reminder),
+          join: c in assoc(i, :contact),
           where: i.id == ^instance_id and i.status == "snoozed" and i.snoozed_until <= ^now,
+          where: r.active == true and is_nil(c.deleted_at) and c.is_archived == false,
           select: i.snooze_count
         )
         |> Repo.update_all(set: [status: "pending", fired_at: now, snoozed_until: nil])

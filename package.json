@@ -9,7 +9,9 @@
     "test": "test"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run test:js",
+    "test:js": "node --test test/js/*.test.mjs",
+    "test:pr44": "bash test/playwright/fixtures/pr44/run.sh",
     "prepare": "husky"
   },
   "keywords": [],

@@ -33,6 +33,14 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   being killed at the timeout and restarting from the top. Every run completes
   at least one contact, so each one makes progress.
 
+  ## Retry checkpoints
+
+  Each fetched endpoint (or notes page) commits its rows and outcome together
+  in a short transaction. Outcomes live under `summary["misc_progress"]`, so
+  an interrupted slice resumes without losing its earlier counts or fetching
+  completed responses again. Retries finish the original snapshot; they do
+  not restore rows the user deleted after a response was committed.
+
   ## Logging
 
   Everything is logged under `[MonicaMiscData] import <id>:` — a start line
@@ -60,6 +68,10 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   alias Kith.Reminders
   alias Kith.Repo
   alias Kith.Tasks.Task
+
+  defmodule FetchError do
+    defexception [:message]
+  end
 
   @timeout_ms :timer.minutes(30)
   @default_budget_ms :timer.minutes(25)
@@ -91,6 +103,10 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       true ->
         import_misc_data(import_job, args, job)
     end
+  rescue
+    error in FetchError -> {:error, error}
+  catch
+    :import_cancelled -> :ok
   end
 
   defp import_misc_data(import_job, args, job) do
@@ -104,38 +120,68 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     {counts, remaining} = process_plan(plan, credential, import_job, run)
     total_counts = merge_counts(counts, carried)
 
-    summary = Map.put(import_job.summary || %{}, "misc", total_counts)
-    Imports.update_import_status(import_job, import_job.status, %{summary: summary})
+    # Only the short summary/enqueue operation is transactional; network requests
+    # never hold this lock. Reload under the lock so cancellation cannot be
+    # overwritten by the status captured when this job started.
+    {:ok, outcome} =
+      Repo.transaction(fn ->
+        current =
+          Repo.one!(from(i in Imports.Import, where: i.id == ^import_job.id, lock: "FOR UPDATE"))
 
-    if remaining == [] do
-      topic = "import:#{import_job.account_id}"
-      Phoenix.PubSub.broadcast(Kith.PubSub, topic, {:import_misc_complete, total_counts})
+        finish_slice(current, args, total_counts, remaining)
+      end)
 
-      log(
-        import_job,
-        "complete in #{fmt_ms(elapsed_ms(run))}: #{request_stats()} | #{fmt_counts(total_counts)}"
-      )
-    else
-      # Raise on a failed insert: the retry re-runs this slice, which is idempotent.
-      {:ok, _} =
-        args
-        |> Map.merge(%{"plan" => remaining, "carried" => total_counts})
-        |> new()
-        |> Oban.insert()
+    case outcome do
+      :complete ->
+        Phoenix.PubSub.broadcast(
+          Kith.PubSub,
+          "import:#{import_job.account_id}",
+          {:import_misc_complete, total_counts}
+        )
 
-      log(
-        import_job,
-        "time budget reached after #{fmt_ms(elapsed_ms(run))}; #{length(remaining)} contacts left, " <>
-          "continuing in a follow-up job | #{request_stats()} | #{fmt_counts(total_counts)}"
-      )
+        log(
+          import_job,
+          "complete in #{fmt_ms(elapsed_ms(run))}: #{request_stats()} | #{fmt_counts(total_counts)}"
+        )
+
+      :continued ->
+        log(
+          import_job,
+          "time budget reached after #{fmt_ms(elapsed_ms(run))}; #{length(remaining)} contacts left, " <>
+            "continuing in a follow-up job | #{request_stats()} | #{fmt_counts(total_counts)}"
+        )
+
+      :cancelled ->
+        :ok
     end
 
     :ok
   end
 
+  defp finish_slice(%{status: status}, _args, _counts, _remaining)
+       when status in ["cancelled", "failed"], do: :cancelled
+
+  defp finish_slice(current, args, counts, remaining) do
+    summary = Map.put(current.summary || %{}, "misc", counts)
+    {:ok, _} = Imports.update_import_status(current, current.status, %{summary: summary})
+    continue_slice(args, counts, remaining)
+  end
+
+  defp continue_slice(_args, _counts, []), do: :complete
+
+  defp continue_slice(args, counts, remaining) do
+    {:ok, _} =
+      args
+      |> Map.merge(%{"plan" => remaining, "carried" => counts})
+      |> new()
+      |> Oban.insert()
+
+    :continued
+  end
+
   @doc false
   # Projects how long `plan` takes at `rate_per_minute`. `requests` is an upper
-  # bound: merged-away contacts only fetch notes, and notes can need several pages.
+  # estimate: checkpoints can skip completed endpoints, and notes can need several pages.
   def estimate_plan(plan, rate_per_minute) do
     requests = plan |> Enum.map(&length(&1["endpoints"] || [])) |> Enum.sum()
     %{requests: requests, minutes: requests / rate_per_minute}
@@ -242,6 +288,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     %{
       url: args["credential_url"],
       api_key: import_job.api_key_encrypted,
+      import_id: import_job.id,
       req_options: Application.get_env(:kith, :monica_req_options, [])
     }
   end
@@ -394,7 +441,9 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   # ── HTTP wrapper ──────────────────────────────────────────────────────
 
   defp api_get_json(credential, url, params) do
+    ensure_import_active!(credential.import_id)
     {wait_ms, :ok} = timed(fn -> RateLimiter.wait!(credential.url) end)
+    ensure_import_active!(credential.import_id)
 
     headers = [
       {"Authorization", "Bearer #{credential.api_key}"},
@@ -421,13 +470,121 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
     {request_ms, result} = timed(fn -> Req.get(url, options) end)
     track_request(url, wait_ms, request_ms, result)
+    ensure_import_active!(credential.import_id)
 
     case result do
-      {:ok, %{status: 200, body: body}} when is_map(body) -> {:ok, body}
-      {:ok, %{status: 429}} -> {:error, :rate_limited}
-      {:ok, %{status: status}} -> {:error, "Unexpected status: #{status}"}
-      {:error, reason} -> {:error, reason}
+      {:ok, %{status: 200, body: %{"data" => data} = body}} when is_list(data) ->
+        {:ok, Map.put_new(body, "meta", %{})}
+
+      {:ok, %{status: 200}} ->
+        raise FetchError, "Malformed Monica response for #{URI.parse(url).path}"
+
+      {:ok, %{status: status}} ->
+        raise FetchError, "Monica HTTP #{status} for #{URI.parse(url).path}"
+
+      {:error, reason} ->
+        raise FetchError, "Monica request failed for #{URI.parse(url).path}: #{inspect(reason)}"
     end
+  end
+
+  # A completed response and its outcome are committed together. A crash cannot
+  # leave imported rows without their count, and retries reuse the committed
+  # outcome instead of reclassifying previously imported rows as duplicates.
+  # Fetch before taking the import lock: no network I/O holds a DB transaction.
+  defp checkpointed_fetch(credential, source_id, key, url, params, contact, import_response) do
+    import = Imports.get_import!(credential.import_id)
+    source_id = to_string(source_id)
+
+    case get_in(import.summary || %{}, ["misc_progress", source_id, key]) do
+      nil ->
+        {:ok, body} = api_get_json(credential, url, params)
+
+        persist_response(import.id, source_id, key, body, contact, import_response)
+
+      outcome ->
+        outcome
+    end
+  end
+
+  defp persist_response(import_id, source_id, key, body, contact, import_response) do
+    result =
+      Repo.transaction(fn ->
+        current =
+          Repo.one!(from(i in Imports.Import, where: i.id == ^import_id, lock: "FOR UPDATE"))
+
+        commit_response(current, source_id, key, body, contact, import_response)
+      end)
+
+    case result do
+      {:ok, outcome} ->
+        outcome
+
+      {:error, :contact_target_changed} ->
+        # Release any obsolete target lock before resolving a new survivor.
+        # Reuse the fetched response; no HTTP is repeated while retrying a lock.
+        persist_response(import_id, source_id, key, body, contact, import_response)
+    end
+  end
+
+  defp commit_response(%{status: status}, _source_id, _key, _body, _contact, _import_response)
+       when status in ["cancelled", "failed"], do: throw(:import_cancelled)
+
+  defp commit_response(current, source_id, key, body, contact, import_response) do
+    summary = current.summary || %{}
+
+    case get_in(summary, ["misc_progress", source_id, key]) do
+      nil ->
+        outcome = apply_response(current, source_id, key, body, contact, import_response)
+        progress = Map.get(summary, "misc_progress", %{})
+        source = progress |> Map.get(source_id, %{}) |> Map.put(key, outcome)
+        summary = Map.put(summary, "misc_progress", Map.put(progress, source_id, source))
+        {:ok, _} = Imports.update_import_status(current, current.status, %{summary: summary})
+        outcome
+
+      outcome ->
+        outcome
+    end
+  end
+
+  defp apply_response(current, source_id, key, body, contact, import_response) do
+    case lock_current_contact(contact.id, source_id, current) do
+      nil -> empty_response(key)
+      target -> import_response.(body, target)
+    end
+  end
+
+  # The contact may have been deleted or folded into a survivor while HTTP was
+  # in flight. Resolve again under the write transaction, locking only the target
+  # row so a subsequent merge/delete cannot invalidate it before these writes.
+  defp lock_current_contact(contact_id, source_id, import_job) do
+    entry = %{"local_id" => contact_id, "source_id" => source_id}
+    target = planned_or_surviving_contact(entry, import_job)
+    lock_live_target(target, import_job.account_id)
+  end
+
+  defp lock_live_target(%{deleted_at: nil, account_id: account_id, id: id}, account_id) do
+    case Repo.one(
+           from(c in Contacts.Contact,
+             where: c.id == ^id and c.account_id == ^account_id and is_nil(c.deleted_at),
+             lock: "FOR UPDATE"
+           )
+         ) do
+      nil -> Repo.rollback(:contact_target_changed)
+      target -> target
+    end
+  end
+
+  defp lock_live_target(_missing_or_deleted, _account_id), do: nil
+
+  defp empty_response("notes:" <> _page), do: %{"count" => 0, "last_page" => 0}
+  defp empty_response("reminders"), do: no_reminder_counts()
+  defp empty_response(_endpoint), do: 0
+
+  # Requests already in flight cannot be recalled. Check again on return,
+  # before importing their response or beginning a later endpoint/page.
+  defp ensure_import_active!(import_id) do
+    if Imports.get_import!(import_id).status in ["cancelled", "failed"],
+      do: throw(:import_cancelled)
   end
 
   defp timed(fun) do
@@ -488,30 +645,25 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     source_id = entry["source_id"]
     url = "#{credential.url}/api/contacts/#{source_id}/notes"
 
-    case api_get_json(credential, url, limit: @notes_page_limit, page: page) do
-      {:ok, %{"data" => notes, "meta" => meta}} when is_list(notes) ->
-        # No positional skip: the notes embedded in the contact payload are the
-        # newest three, while this endpoint lists oldest first, so dropping the
-        # first N dropped the wrong notes. Already-imported ones are recognised
-        # by uuid (or content) in import_notes_batch/4 instead.
-        imported = import_notes_batch(contact, user_id, notes, import_job)
+    %{"count" => imported, "last_page" => last_page} =
+      checkpointed_fetch(
+        credential,
+        source_id,
+        "notes:#{page}",
+        url,
+        [limit: @notes_page_limit, page: page],
+        contact,
+        fn %{"data" => notes, "meta" => meta}, contact ->
+          %{
+            "count" => import_notes_batch(contact, user_id, notes, import_job),
+            "last_page" => meta["last_page"] || 1
+          }
+        end
+      )
 
-        if page < (meta["last_page"] || 1),
-          do:
-            imported +
-              fetch_notes_pages(credential, contact, user_id, entry, import_job, page + 1),
-          else: imported
-
-      {:ok, _} ->
-        0
-
-      {:error, reason} ->
-        Logger.warning(
-          "[MonicaMiscData] failed to fetch notes for contact #{source_id}: #{inspect(reason)}"
-        )
-
-        0
-    end
+    if page < last_page,
+      do: imported + fetch_notes_pages(credential, contact, user_id, entry, import_job, page + 1),
+      else: imported
   end
 
   # A note is skipped when its uuid is already mapped (the crawl's embedded notes,
@@ -572,22 +724,12 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp import_contact_pets(credential, contact, source_id, import_job) do
     url = "#{credential.url}/api/contacts/#{source_id}/pets"
 
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => pets}} when is_list(pets) ->
-        Enum.count(pets, fn pet ->
-          match?(:ok, import_single_pet(contact.account_id, contact, pet, import_job))
-        end)
-
-      {:ok, _} ->
-        0
-
-      {:error, reason} ->
-        Logger.warning(
-          "[MonicaMiscData] failed to fetch pets for contact #{source_id}: #{inspect(reason)}"
-        )
-
-        0
-    end
+    checkpointed_fetch(credential, source_id, "pets", url, [], contact, fn %{"data" => pets},
+                                                                           contact ->
+      Enum.count(pets, fn pet ->
+        match?(:ok, import_single_pet(contact.account_id, contact, pet, import_job))
+      end)
+    end)
   end
 
   defp import_single_pet(account_id, contact, pet_data, import_job) do
@@ -620,22 +762,12 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp import_contact_calls(credential, contact, source_id, import_job) do
     url = "#{credential.url}/api/contacts/#{source_id}/calls"
 
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => calls}} when is_list(calls) ->
-        Enum.count(calls, fn call ->
-          match?(:ok, import_single_call(contact.account_id, contact, call, import_job))
-        end)
-
-      {:ok, _} ->
-        0
-
-      {:error, reason} ->
-        Logger.warning(
-          "[MonicaMiscData] failed to fetch calls for contact #{source_id}: #{inspect(reason)}"
-        )
-
-        0
-    end
+    checkpointed_fetch(credential, source_id, "calls", url, [], contact, fn %{"data" => calls},
+                                                                            contact ->
+      Enum.count(calls, fn call ->
+        match?(:ok, import_single_call(contact.account_id, contact, call, import_job))
+      end)
+    end)
   end
 
   # An Oban retry of this import must not recreate what an earlier attempt mapped.
@@ -674,22 +806,15 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp import_contact_activities(credential, contact, source_id, import_job) do
     url = "#{credential.url}/api/contacts/#{source_id}/activities"
 
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => activities}} when is_list(activities) ->
-        Enum.count(activities, fn activity ->
-          match?(:ok, import_single_activity(contact.account_id, contact, activity, import_job))
-        end)
-
-      {:ok, _} ->
-        0
-
-      {:error, reason} ->
-        Logger.warning(
-          "[MonicaMiscData] failed to fetch activities for contact #{source_id}: #{inspect(reason)}"
-        )
-
-        0
-    end
+    checkpointed_fetch(credential, source_id, "activities", url, [], contact, fn %{
+                                                                                   "data" =>
+                                                                                     activities
+                                                                                 },
+                                                                                 contact ->
+      Enum.count(activities, fn activity ->
+        match?(:ok, import_single_activity(contact.account_id, contact, activity, import_job))
+      end)
+    end)
   end
 
   # An Oban retry of this import must not recreate what an earlier attempt mapped.
@@ -725,25 +850,15 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp import_contact_gifts(credential, user_id, contact, source_id, import_job) do
     url = "#{credential.url}/api/contacts/#{source_id}/gifts"
 
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => gifts}} when is_list(gifts) ->
-        Enum.count(gifts, fn gift ->
-          match?(
-            :ok,
-            import_single_gift(contact.account_id, user_id, contact, gift, import_job)
-          )
-        end)
-
-      {:ok, _} ->
-        0
-
-      {:error, reason} ->
-        Logger.warning(
-          "[MonicaMiscData] failed to fetch gifts for contact #{source_id}: #{inspect(reason)}"
+    checkpointed_fetch(credential, source_id, "gifts", url, [], contact, fn %{"data" => gifts},
+                                                                            contact ->
+      Enum.count(gifts, fn gift ->
+        match?(
+          :ok,
+          import_single_gift(contact.account_id, user_id, contact, gift, import_job)
         )
-
-        0
-    end
+      end)
+    end)
   end
 
   # An Oban retry of this import must not recreate what an earlier attempt mapped.
@@ -787,25 +902,15 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp import_contact_debts(credential, user_id, contact, source_id, import_job) do
     url = "#{credential.url}/api/contacts/#{source_id}/debts"
 
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => debts}} when is_list(debts) ->
-        Enum.count(debts, fn debt ->
-          match?(
-            :ok,
-            import_single_debt(contact.account_id, user_id, contact, debt, import_job)
-          )
-        end)
-
-      {:ok, _} ->
-        0
-
-      {:error, reason} ->
-        Logger.warning(
-          "[MonicaMiscData] failed to fetch debts for contact #{source_id}: #{inspect(reason)}"
+    checkpointed_fetch(credential, source_id, "debts", url, [], contact, fn %{"data" => debts},
+                                                                            contact ->
+      Enum.count(debts, fn debt ->
+        match?(
+          :ok,
+          import_single_debt(contact.account_id, user_id, contact, debt, import_job)
         )
-
-        0
-    end
+      end)
+    end)
   end
 
   # An Oban retry of this import must not recreate what an earlier attempt mapped.
@@ -842,25 +947,15 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp import_contact_tasks(credential, user_id, contact, source_id, import_job) do
     url = "#{credential.url}/api/contacts/#{source_id}/tasks"
 
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => tasks}} when is_list(tasks) ->
-        Enum.count(tasks, fn task ->
-          match?(
-            :ok,
-            import_single_task(contact.account_id, user_id, contact, task, import_job)
-          )
-        end)
-
-      {:ok, _} ->
-        0
-
-      {:error, reason} ->
-        Logger.warning(
-          "[MonicaMiscData] failed to fetch tasks for contact #{source_id}: #{inspect(reason)}"
+    checkpointed_fetch(credential, source_id, "tasks", url, [], contact, fn %{"data" => tasks},
+                                                                            contact ->
+      Enum.count(tasks, fn task ->
+        match?(
+          :ok,
+          import_single_task(contact.account_id, user_id, contact, task, import_job)
         )
-
-        0
-    end
+      end)
+    end)
   end
 
   # An Oban retry of this import must not recreate what an earlier attempt mapped.
@@ -896,32 +991,25 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp import_contact_reminders(credential, user_id, contact, source_id, import_job) do
     url = "#{credential.url}/api/contacts/#{source_id}/reminders"
 
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => reminders}} when is_list(reminders) ->
-        today = Reminders.account_today(contact.account_id)
+    checkpointed_fetch(credential, source_id, "reminders", url, [], contact, fn %{
+                                                                                  "data" =>
+                                                                                    reminders
+                                                                                },
+                                                                                contact ->
+      today = Reminders.account_today(contact.account_id)
 
-        # `contact` is threaded through: importing a first-met reminder updates
-        # the contact, and later reminders must see that update.
-        {counts, _contact} =
-          Enum.reduce(reminders, {no_reminder_counts(), contact}, fn reminder, {acc, contact} ->
-            {outcome, contact} =
-              import_single_reminder(user_id, contact, reminder, import_job, today)
+      # `contact` is threaded through: importing a first-met reminder updates
+      # the contact, and later reminders must see that update.
+      {counts, _contact} =
+        Enum.reduce(reminders, {no_reminder_counts(), contact}, fn reminder, {acc, contact} ->
+          {outcome, contact} =
+            import_single_reminder(user_id, contact, reminder, import_job, today)
 
-            {tally_reminder(acc, outcome), contact}
-          end)
+          {tally_reminder(acc, outcome), contact}
+        end)
 
-        counts
-
-      {:ok, _} ->
-        no_reminder_counts()
-
-      {:error, reason} ->
-        Logger.warning(
-          "[MonicaMiscData] failed to fetch reminders for contact #{source_id}: #{inspect(reason)}"
-        )
-
-        no_reminder_counts()
-    end
+      counts
+    end)
   end
 
   defp no_reminder_counts,
@@ -1109,32 +1197,24 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp import_contact_conversations(credential, user_id, contact, source_id, import_job) do
     url = "#{credential.url}/api/contacts/#{source_id}/conversations"
 
-    case api_get_json(credential, url, []) do
-      {:ok, %{"data" => convos}} when is_list(convos) ->
-        Enum.count(convos, fn convo ->
-          match?(
-            :ok,
-            import_single_conversation(
-              contact.account_id,
-              user_id,
-              contact,
-              convo,
-              import_job
-            )
+    checkpointed_fetch(credential, source_id, "conversations", url, [], contact, fn %{
+                                                                                      "data" =>
+                                                                                        convos
+                                                                                    },
+                                                                                    contact ->
+      Enum.count(convos, fn convo ->
+        match?(
+          :ok,
+          import_single_conversation(
+            contact.account_id,
+            user_id,
+            contact,
+            convo,
+            import_job
           )
-        end)
-
-      {:ok, _} ->
-        0
-
-      {:error, reason} ->
-        Logger.warning(
-          "[MonicaMiscData] failed to fetch conversations for contact #{source_id}: " <>
-            inspect(reason)
         )
-
-        0
-    end
+      end)
+    end)
   end
 
   defp import_single_conversation(account_id, user_id, contact, convo_data, import_job) do
@@ -1285,7 +1365,9 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
           join: ac in "activity_contacts",
           on: ac.activity_id == a.id,
           where:
-            ac.contact_id == ^contact_id and a.title == ^title and a.occurred_at == ^occurred_at
+            ac.contact_id == ^contact_id and
+              fragment("lower(trim(?))", a.title) == ^norm(title) and
+              a.occurred_at == ^occurred_at
         )
       )
   end
@@ -1381,8 +1463,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       from p in Kith.Contacts.Pet,
         where:
           p.contact_id == ^contact_id and
-            fragment("lower(coalesce(?, ''))", p.name) ==
-              fragment("lower(coalesce(?, ''))", ^(name || "")) and
+            fragment("lower(trim(coalesce(?, '')))", p.name) == ^norm(name) and
             p.species == ^species
     )
   end

@@ -16,6 +16,7 @@ defmodule Kith.Workers.ReminderEmailWorker do
   use Oban.Worker, queue: :reminders, max_attempts: 3
 
   require Logger
+  import Ecto.Query
 
   alias Kith.Accounts.User
   alias Kith.Reminders.{Reminder, ReminderInstance}
@@ -82,8 +83,22 @@ defmodule Kith.Workers.ReminderEmailWorker do
 
   defp mark_failed(instance) do
     Repo.transaction(fn ->
-      instance |> ReminderInstance.fail_changeset() |> Repo.update!()
-      rearm_stay_in_touch(instance.reminder)
+      # SMTP may finish after the user snoozed or resolved the notice. Only
+      # fail the pending generation this attempt actually tried to deliver.
+      {changed, _} =
+        from(i in ReminderInstance,
+          where: i.id == ^instance.id and i.status == "pending",
+          where: i.snooze_count == ^instance.snooze_count
+        )
+        |> Repo.update_all(set: [status: "failed", updated_at: DateTime.utc_now(:second)])
+
+      if changed == 1 do
+        # The user can also edit the schedule while SMTP is in flight. Lock
+        # and use the current row so rearming cannot restore the old interval.
+        from(r in Reminder, where: r.id == ^instance.reminder_id, lock: "FOR UPDATE")
+        |> Repo.one!()
+        |> rearm_stay_in_touch()
+      end
     end)
   end
 

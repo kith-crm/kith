@@ -134,30 +134,33 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert_in_delta minutes, 0.5, 1.0e-9
     end
 
-    test "warns up front when the estimate exceeds the job timeout",
+    test "warns before processing when projected work exceeds the run budget",
          %{user: user, account_id: account_id} do
       import_job = api_import(account_id, user.id)
       contact = contact_fixture(account_id)
 
-      # 31 requests at 1/min project to 31 minutes, past the 25m budget. The bucket
-      # window is shrunk so the run itself finishes in about a second.
+      # A zero budget creates a deterministic boundary. Rate-limit timing is
+      # covered separately; this test only needs the warning and one request.
       plan =
-        for _ <- 1..31,
-            do: %{"source_id" => "42", "local_id" => contact.id, "endpoints" => ["pets"]}
+        for source <- ["42", "43"],
+            do: %{"source_id" => source, "local_id" => contact.id, "endpoints" => ["pets"]}
 
-      Kith.TestEnv.put_env_restoring(:kith, :monica_rate_limit, 1)
-      Kith.TestEnv.put_env_restoring(:kith, :monica_rate_limit_scale_ms, 40)
-      Kith.TestEnv.put_env_restoring(:kith, :monica_rate_limit_retry_sleep_ms, 5)
+      Kith.TestEnv.put_env_restoring(:kith, :monica_rate_limit, 60_000)
+      Kith.TestEnv.put_env_restoring(:kith, :monica_misc_budget_ms, 0)
 
-      Req.Test.stub(@stub_name, fn conn -> Req.Test.json(conn, %{"data" => []}) end)
+      Req.Test.expect(@stub_name, fn conn ->
+        assert conn.request_path == "/api/contacts/42/pets"
+        Req.Test.json(conn, %{"data" => []})
+      end)
 
       log =
         capture_log([level: :info], fn ->
           assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
         end)
 
-      assert log =~ "exceeds the 25m0s time budget"
+      assert log =~ "exceeds the 0ms time budget"
       assert log =~ "follow-up jobs"
+      Req.Test.verify!(@stub_name)
     end
   end
 
@@ -606,8 +609,15 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
 
       updated = Imports.get_import!(import_job.id)
-      assert is_map(updated.summary["misc"])
-      assert updated.summary["misc"]["calls"] >= 0
+      assert updated.summary["misc"]["calls"] == 2
+
+      assert Repo.all(
+               from(c in Kith.Activities.Call,
+                 where: c.account_id == ^account_id and c.contact_id == ^contact.id,
+                 order_by: c.occurred_at,
+                 select: c.occurred_at
+               )
+             ) == [~U[2025-01-01 10:00:00Z], ~U[2025-01-02 10:00:00Z]]
     end
   end
 
@@ -1173,13 +1183,609 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
 
         plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => [endpoint]}]
 
-        for _ <- 1..2,
-            do: assert(:ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan)))
+        assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+        [before] = Repo.all(unquote(schema))
+        assert before.account_id == account_id
+        assert_owned_by_contact(before, contact.id)
+        assert_imported_fields(before, endpoint)
 
-        assert Repo.aggregate(unquote(schema), :count) == 1
+        type =
+          if endpoint == "activities", do: "activity", else: String.trim_trailing(endpoint, "s")
+
+        mapping =
+          Imports.find_import_record(
+            account_id,
+            "monica_api",
+            type,
+            to_string(unquote(Macro.escape(item))["id"])
+          )
+
+        assert mapping.local_entity_id == before.id
+
+        assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+
+        assert Repo.all(unquote(schema)) == [before]
+
+        assert Imports.find_import_record(
+                 account_id,
+                 "monica_api",
+                 type,
+                 mapping.source_entity_id
+               ) == mapping
       end
     end
   end
+
+  describe "completion and recovery contracts" do
+    test "real continuation jobs finish every contact before releasing credentials", ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+
+      plan =
+        for source <- ["101", "102", "103"] do
+          contact = contact_fixture(ctx.account_id)
+          %{"source_id" => source, "local_id" => contact.id, "endpoints" => ["calls"]}
+        end
+
+      Req.Test.stub(@stub_name, fn conn ->
+        source = conn.request_path |> String.split("/") |> Enum.at(3)
+
+        Req.Test.json(conn, %{
+          "data" => [
+            %{
+              "id" => source,
+              "called_at" => "2025-01-01T10:00:00Z",
+              "content" => "Call #{source}"
+            }
+          ]
+        })
+      end)
+
+      Kith.TestEnv.put_env_restoring(:kith, :monica_misc_budget_ms, 0)
+      Phoenix.PubSub.subscribe(Kith.PubSub, "import:#{ctx.account_id}")
+
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+      refute_received {:import_misc_complete, _}
+      [continuation] = all_enqueued(worker: MonicaMiscDataWorker)
+      assert continuation.args["plan"] == Enum.drop(plan, 1)
+      assert continuation.args["carried"]["calls"] == 1
+
+      assert {:snooze, 60} =
+               perform_job(Kith.Workers.MonicaApiKeyReleaseWorker, %{import_id: import_job.id})
+
+      assert Imports.get_import!(import_job.id).api_key_encrypted == "test-key"
+
+      assert %{success: 2, failure: 0} = Oban.drain_queue(queue: :imports, with_recursion: true)
+      assert_received {:import_misc_complete, %{"calls" => 3}}
+      refute_received {:import_misc_complete, _}
+      refute_enqueued(worker: MonicaMiscDataWorker)
+      assert misc_summary(import_job)["calls"] == 3
+
+      assert Repo.all(
+               from(c in Kith.Activities.Call, order_by: c.notes, select: {c.contact_id, c.notes})
+             ) ==
+               Enum.map(plan, &{&1["local_id"], "Call #{&1["source_id"]}"})
+
+      assert :ok =
+               perform_job(Kith.Workers.MonicaApiKeyReleaseWorker, %{import_id: import_job.id})
+
+      assert Imports.get_import!(import_job.id).api_key_encrypted == nil
+    end
+
+    test "cancellation before a continuation prevents its requests and preserves cancelled status",
+         ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+
+      plan =
+        for source <- ["1", "2"] do
+          contact = contact_fixture(ctx.account_id)
+          %{"source_id" => source, "local_id" => contact.id, "endpoints" => ["calls"]}
+        end
+
+      Kith.TestEnv.put_env_restoring(:kith, :monica_misc_budget_ms, 0)
+      pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        send(pid, {:requested, conn.request_path})
+        Req.Test.json(conn, %{"data" => []})
+      end)
+
+      Phoenix.PubSub.subscribe(Kith.PubSub, "import:#{ctx.account_id}")
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+      assert_received {:requested, "/api/contacts/1/calls"}
+      {:ok, _} = Imports.update_import_status(Imports.get_import!(import_job.id), "cancelled")
+      assert %{success: 1, failure: 0} = Oban.drain_queue(queue: :imports, with_recursion: true)
+      refute_received {:requested, _}
+      refute_received {:import_misc_complete, _}
+      assert Imports.get_import!(import_job.id).status == "cancelled"
+    end
+
+    test "cancellation during a request cannot be overwritten or start a later endpoint", ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+      contact = contact_fixture(ctx.account_id)
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["calls", "tasks"]}]
+      pid = self()
+      # The HTTP boundary is deterministic: cancellation commits after the job's
+      # initial eligibility check and before its first response is returned.
+      Req.Test.stub(@stub_name, fn conn ->
+        send(pid, {:requested, conn.request_path})
+        {:ok, _} = Imports.update_import_status(Imports.get_import!(import_job.id), "cancelled")
+
+        Req.Test.json(conn, %{
+          "data" => [
+            %{"id" => 90, "called_at" => "2025-01-01T10:00:00Z", "content" => "Must not persist"}
+          ]
+        })
+      end)
+
+      Phoenix.PubSub.subscribe(Kith.PubSub, "import:#{ctx.account_id}")
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+      assert_received {:requested, "/api/contacts/1/calls"}
+      refute_received {:requested, _}
+      refute_received {:import_misc_complete, _}
+      refute_enqueued(worker: MonicaMiscDataWorker)
+      assert Imports.get_import!(import_job.id).status == "cancelled"
+      assert Repo.all(Kith.Activities.Call) == []
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "call", "90") == nil
+    end
+
+    test "a contact deleted while its request is in flight receives no response rows", ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+      contact = contact_fixture(ctx.account_id)
+      Imports.record_imported_entity(import_job, "contact", "1", "contact", contact.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        {:ok, _} = Kith.Contacts.soft_delete_contact(contact)
+
+        Req.Test.json(conn, %{
+          "data" => [
+            %{"id" => 90, "called_at" => "2025-01-01T10:00:00Z", "content" => "Deleted target"}
+          ]
+        })
+      end)
+
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["calls"]}]
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+      assert Repo.all(Kith.Activities.Call) == []
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "call", "90") == nil
+      assert misc_summary(import_job)["calls"] == 0
+    end
+
+    test "a contact merged while its request is in flight imports onto the current survivor",
+         ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+      contact = contact_fixture(ctx.account_id)
+      survivor = contact_fixture(ctx.account_id)
+      Imports.record_imported_entity(import_job, "contact", "1", "contact", contact.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        {:ok, _} = Kith.Contacts.merge_contacts(survivor.id, contact.id)
+
+        Req.Test.json(conn, %{
+          "data" => [
+            %{"id" => 90, "called_at" => "2025-01-01T10:00:00Z", "content" => "Current survivor"}
+          ]
+        })
+      end)
+
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["calls"]}]
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+
+      assert [%{contact_id: target, account_id: account, notes: "Current survivor"}] =
+               Repo.all(Kith.Activities.Call)
+
+      assert target == survivor.id
+      assert account == ctx.account_id
+
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "contact", "1").local_entity_id ==
+               survivor.id
+
+      assert misc_summary(import_job)["calls"] == 1
+    end
+
+    for response <- [:rate_limited, :server_error, :transport_error, :malformed] do
+      test "#{response} fails the job without announcing successful completion", ctx do
+        import_job = api_import(ctx.account_id, ctx.user.id)
+        contact = contact_fixture(ctx.account_id)
+        response = unquote(response)
+
+        Req.Test.stub(@stub_name, &failed_response(&1, response))
+
+        Phoenix.PubSub.subscribe(Kith.PubSub, "import:#{ctx.account_id}")
+        plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["calls"]}]
+        assert {:error, _} = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+        refute_received {:import_misc_complete, _}
+        assert Imports.get_import!(import_job.id).summary["misc"] == nil
+        assert Repo.all(Kith.Activities.Call) == []
+      end
+    end
+
+    test "a later endpoint failure retries already persisted calls without losing or duplicating them",
+         ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+      contact = contact_fixture(ctx.account_id)
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["calls", "tasks"]}]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        if String.ends_with?(conn.request_path, "/calls") do
+          Req.Test.json(conn, %{
+            "data" => [
+              %{
+                "id" => 20,
+                "called_at" => "2025-01-01T10:00:00Z",
+                "content" => "hello",
+                "duration" => 5
+              }
+            ]
+          })
+        else
+          Plug.Conn.send_resp(conn, 503, "unavailable")
+        end
+      end)
+
+      assert {:error, _} = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+      [call] = Repo.all(Kith.Activities.Call)
+      assert call.notes == "hello"
+      assert call.contact_id == contact.id
+      assert call.account_id == ctx.account_id
+
+      Req.Test.stub(@stub_name, fn conn ->
+        if String.ends_with?(conn.request_path, "/calls") do
+          Req.Test.json(conn, %{
+            "data" => [
+              %{
+                "id" => 20,
+                "called_at" => "2025-01-01T10:00:00Z",
+                "content" => "hello",
+                "duration" => 5
+              }
+            ]
+          })
+        else
+          Req.Test.json(conn, %{
+            "data" => [%{"id" => 21, "title" => "Call back", "completed" => false}]
+          })
+        end
+      end)
+
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan), attempt: 2)
+      assert Repo.all(Kith.Activities.Call) == [call]
+      assert [%{title: "Call back", contact_id: id}] = Repo.all(Kith.Tasks.Task)
+      assert id == contact.id
+      assert %{"calls" => 1, "tasks" => 1} = misc_summary(import_job)
+    end
+
+    test "a page import and its checkpoint roll back together if processing crashes", ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+      contact = contact_fixture(ctx.account_id)
+      Imports.record_imported_entity(import_job, "contact", "1", "contact", contact.id)
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["notes"]}]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, %{
+          "data" => [
+            %{"uuid" => "n1", "body" => "First"},
+            %{"uuid" => %{"invalid" => "identifier"}, "body" => "Second"}
+          ],
+          "meta" => %{"last_page" => 1}
+        })
+      end)
+
+      assert_raise Protocol.UndefinedError, fn ->
+        perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+      end
+
+      assert Repo.all(Kith.Contacts.Note) == []
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "note", "n1") == nil
+
+      assert get_in(Imports.get_import!(import_job.id).summary || %{}, [
+               "misc_progress",
+               "1",
+               "notes:1"
+             ]) == nil
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, %{
+          "data" => [
+            %{"uuid" => "n1", "body" => "First"},
+            %{"uuid" => "n2", "body" => "Second"}
+          ],
+          "meta" => %{"last_page" => 1}
+        })
+      end)
+
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan), attempt: 2)
+
+      assert Repo.all(from(n in Kith.Contacts.Note, order_by: n.body, select: n.body)) == [
+               "First",
+               "Second"
+             ]
+
+      assert misc_summary(import_job)["notes"] == 2
+    end
+
+    test "a failed continuation insert does not publish partial summary and retries completed work safely",
+         ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+
+      plan =
+        for source <- ["1", "2"] do
+          contact = contact_fixture(ctx.account_id)
+          %{"source_id" => source, "local_id" => contact.id, "endpoints" => ["pets"]}
+        end
+
+      Req.Test.stub(@stub_name, fn conn ->
+        source = conn.request_path |> String.split("/") |> Enum.at(3)
+
+        Req.Test.json(conn, %{
+          "data" => [%{"id" => source, "name" => "Pet #{source}", "pet_category" => "dog"}]
+        })
+      end)
+
+      Kith.TestEnv.put_env_restoring(:kith, :monica_misc_budget_ms, 0)
+      Phoenix.PubSub.subscribe(Kith.PubSub, "import:#{ctx.account_id}")
+      # Failure occurs at the actual continuation insert, after this slice's
+      # contact was committed. DDL is confined to this serialized sandbox test.
+      Repo.query!(
+        "ALTER TABLE oban_jobs ADD CONSTRAINT misc_continuation_failure CHECK (worker <> 'Kith.Workers.MonicaMiscDataWorker') NOT VALID"
+      )
+
+      assert_raise Ecto.ConstraintError, fn ->
+        perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+      end
+
+      assert Imports.get_import!(import_job.id).summary["misc"] == nil
+      refute_received {:import_misc_complete, _}
+      [first_pet] = Repo.all(Kith.Contacts.Pet)
+      assert first_pet.name == "Pet 1"
+      Repo.query!("ALTER TABLE oban_jobs DROP CONSTRAINT misc_continuation_failure")
+
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan), attempt: 2)
+      assert Repo.all(Kith.Contacts.Pet) == [first_pet]
+      [next_job] = all_enqueued(worker: MonicaMiscDataWorker)
+      assert next_job.args["plan"] == Enum.drop(plan, 1)
+      assert next_job.args["carried"]["pets"] == 1
+      assert %{success: 1, failure: 0} = Oban.drain_queue(queue: :imports, with_recursion: true)
+      assert misc_summary(import_job)["pets"] == 2
+      assert_received {:import_misc_complete, %{"pets" => 2}}
+    end
+
+    test "a failed later notes page does not report completion and a retry preserves all notes",
+         ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+      contact = contact_fixture(ctx.account_id)
+      Imports.record_imported_entity(import_job, "contact", "1", "contact", contact.id)
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["notes"]}]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        if conn.query_params["page"] == "1" do
+          Req.Test.json(conn, %{
+            "data" => [%{"uuid" => "n1", "body" => "Oldest"}],
+            "meta" => %{"last_page" => 2}
+          })
+        else
+          Plug.Conn.send_resp(conn, 503, "unavailable")
+        end
+      end)
+
+      Phoenix.PubSub.subscribe(Kith.PubSub, "import:#{ctx.account_id}")
+      assert {:error, _} = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+      refute_received {:import_misc_complete, _}
+      [oldest] = Repo.all(Kith.Contacts.Note)
+      assert oldest.body == "Oldest"
+
+      Req.Test.stub(@stub_name, fn conn ->
+        {uuid, body} =
+          if conn.query_params["page"] == "1", do: {"n1", "Oldest"}, else: {"n2", "Newest"}
+
+        Req.Test.json(conn, %{
+          "data" => [%{"uuid" => uuid, "body" => body}],
+          "meta" => %{"last_page" => 2}
+        })
+      end)
+
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan), attempt: 2)
+      assert Repo.get!(Kith.Contacts.Note, oldest.id) == oldest
+
+      assert Repo.all(
+               from(n in Kith.Contacts.Note, order_by: n.body, select: {n.contact_id, n.body})
+             ) == [{contact.id, "Newest"}, {contact.id, "Oldest"}]
+
+      assert_received {:import_misc_complete, %{"notes" => 2}}
+      assert misc_summary(import_job)["notes"] == 2
+    end
+  end
+
+  describe "merged survivor deduplication boundaries" do
+    test "equivalent debt, task, activity and pet data collapses while meaningful differences survive",
+         ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+      survivor = contact_fixture(ctx.account_id)
+      loser = contact_fixture(ctx.account_id)
+      Imports.record_imported_entity(import_job, "contact", "1", "contact", survivor.id)
+      Imports.record_imported_entity(import_job, "contact", "2", "contact", loser.id)
+      assert {:ok, _} = Kith.Contacts.merge_contacts(survivor.id, loser.id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        data =
+          case conn.request_path do
+            "/api/contacts/1/debts" ->
+              [%{"id" => 1, "reason" => "Dinner", "amount" => "10", "in_debt" => "yes"}]
+
+            "/api/contacts/2/debts" ->
+              [
+                %{"id" => 2, "reason" => " dinner ", "amount" => "10.00", "in_debt" => "yes"},
+                %{"id" => 3, "reason" => "Dinner", "amount" => "11", "in_debt" => "yes"},
+                %{"id" => 4, "reason" => "Dinner", "amount" => "10", "in_debt" => "no"}
+              ]
+
+            "/api/contacts/1/tasks" ->
+              [%{"id" => 11, "title" => "Call", "completed" => false}]
+
+            "/api/contacts/2/tasks" ->
+              [
+                %{"id" => 12, "title" => " call ", "completed" => false},
+                %{"id" => 13, "title" => "Call", "completed" => true}
+              ]
+
+            "/api/contacts/1/activities" ->
+              [%{"id" => 21, "summary" => "Lunch", "happened_at" => "2025-01-01T10:00:00Z"}]
+
+            "/api/contacts/2/activities" ->
+              [
+                %{"id" => 22, "summary" => " lunch ", "happened_at" => "2025-01-01T10:00:00Z"},
+                %{"id" => 23, "summary" => "Lunch", "happened_at" => "2025-01-02T10:00:00Z"}
+              ]
+
+            "/api/contacts/1/pets" ->
+              [%{"id" => 31, "name" => "Rex", "pet_category" => "dog"}]
+
+            "/api/contacts/2/pets" ->
+              [
+                %{"id" => 32, "name" => " rex ", "pet_category" => "dog"},
+                %{"id" => 33, "name" => "Rex", "pet_category" => "cat"}
+              ]
+          end
+
+        Req.Test.json(conn, %{"data" => data})
+      end)
+
+      plan =
+        for {source, id} <- [{"1", survivor.id}, {"2", loser.id}] do
+          %{
+            "source_id" => source,
+            "local_id" => id,
+            "endpoints" => ["debts", "tasks", "activities", "pets"]
+          }
+        end
+
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+
+      assert Repo.all(
+               from(d in Kith.Contacts.Debt,
+                 order_by: [d.direction, d.amount],
+                 select: {d.contact_id, d.title, d.direction, d.amount}
+               )
+             ) == [
+               {survivor.id, "Dinner", "owed_by_me", Decimal.new("10.00")},
+               {survivor.id, "Dinner", "owed_by_me", Decimal.new("11.00")},
+               {survivor.id, "Dinner", "owed_to_me", Decimal.new("10.00")}
+             ]
+
+      assert Repo.all(
+               from(t in Kith.Tasks.Task,
+                 order_by: t.status,
+                 select: {t.contact_id, t.title, t.status}
+               )
+             ) == [
+               {survivor.id, "Call", "completed"},
+               {survivor.id, "Call", "pending"}
+             ]
+
+      assert Repo.all(
+               from(a in Kith.Activities.Activity,
+                 join: ac in "activity_contacts",
+                 on: ac.activity_id == a.id,
+                 order_by: a.occurred_at,
+                 select: {ac.contact_id, a.title, a.occurred_at}
+               )
+             ) == [
+               {survivor.id, "Lunch", ~U[2025-01-01 10:00:00Z]},
+               {survivor.id, "Lunch", ~U[2025-01-02 10:00:00Z]}
+             ]
+
+      assert Repo.all(
+               from(p in Kith.Contacts.Pet,
+                 order_by: p.species,
+                 select: {p.contact_id, p.name, p.species}
+               )
+             ) == [
+               {survivor.id, "Rex", "cat"},
+               {survivor.id, "Rex", "dog"}
+             ]
+
+      snapshot = fn ->
+        for schema <- [
+              Kith.Contacts.Debt,
+              Kith.Tasks.Task,
+              Kith.Activities.Activity,
+              Kith.Contacts.Pet
+            ],
+            do: Repo.all(from(row in schema, order_by: row.id))
+      end
+
+      before_retry = snapshot.()
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan), attempt: 2)
+      assert snapshot.() == before_retry
+    end
+
+    test "an invalid debt does not prevent a later valid record from importing", ctx do
+      import_job = api_import(ctx.account_id, ctx.user.id)
+      contact = contact_fixture(ctx.account_id)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, %{
+          "data" => [
+            %{"id" => 1, "reason" => "Invalid", "amount" => "-1", "in_debt" => "yes"},
+            %{"id" => 2, "reason" => "Dinner", "amount" => "10", "in_debt" => "yes"}
+          ]
+        })
+      end)
+
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["debts"]}]
+      assert :ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan))
+      assert [%{title: "Dinner", contact_id: id}] = Repo.all(Kith.Contacts.Debt)
+      assert id == contact.id
+      assert misc_summary(import_job)["debts"] == 1
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "debt", "1") == nil
+
+      assert Imports.find_import_record(ctx.account_id, "monica_api", "debt", "2").local_entity_id ==
+               Repo.one!(Kith.Contacts.Debt).id
+    end
+  end
+
+  defp failed_response(conn, :rate_limited), do: Plug.Conn.send_resp(conn, 429, "busy")
+  defp failed_response(conn, :server_error), do: Plug.Conn.send_resp(conn, 503, "unavailable")
+  defp failed_response(conn, :transport_error), do: Req.Test.transport_error(conn, :timeout)
+  defp failed_response(conn, :malformed), do: Req.Test.json(conn, %{"data" => "not a list"})
+
+  defp assert_owned_by_contact(%Kith.Activities.Activity{id: id}, contact_id) do
+    assert Repo.all(
+             from(ac in "activity_contacts", where: ac.activity_id == ^id, select: ac.contact_id)
+           ) == [contact_id]
+  end
+
+  defp assert_owned_by_contact(row, contact_id), do: assert(row.contact_id == contact_id)
+
+  defp assert_imported_fields(row, "calls"),
+    do:
+      assert(
+        Map.take(row, [:notes, :duration_mins, :occurred_at]) == %{
+          notes: "hello",
+          duration_mins: 5,
+          occurred_at: ~U[2025-01-01 10:00:00Z]
+        }
+      )
+
+  defp assert_imported_fields(row, "activities"),
+    do:
+      assert(
+        Map.take(row, [:title, :occurred_at]) == %{
+          title: "Lunch",
+          occurred_at: ~U[2025-01-01 10:00:00Z]
+        }
+      )
+
+  defp assert_imported_fields(row, "gifts"),
+    do: assert(Map.take(row, [:name, :direction]) == %{name: "Book", direction: "given"})
+
+  defp assert_imported_fields(row, "debts") do
+    assert row.title == "Dinner"
+    assert row.direction == "owed_by_me"
+    assert Decimal.equal?(row.amount, Decimal.new("10"))
+  end
+
+  defp assert_imported_fields(row, "tasks"),
+    do: assert(Map.take(row, [:title, :status]) == %{title: "Call back", status: "pending"})
 
   defp monica(id, attrs) do
     Map.merge(

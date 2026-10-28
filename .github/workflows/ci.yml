@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, "release/**"]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, "release/**"]
 
 env:
   MIX_ENV: test
@@ -71,7 +71,80 @@ jobs:
         run: mix ecto.create && mix ecto.migrate
 
       - name: Run tests
-        run: mix test
+        run: mix test --cover --export-coverage ci
+
+      # Keep test failures blocking. Coverage is diagnostic while its existing
+      # 90% application-wide threshold is above the baseline; do not lower it.
+      - name: Build coverage report
+        continue-on-error: true
+        run: mix test.coverage
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exunit-coverage
+          path: cover/
+          retention-days: 7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Test JavaScript hooks
+        run: npm ci && npm run test:js
+
+  browser-regressions:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MIX_TEST_PARTITION: pr44_browser
+      ERL_FLAGS: "+S 4:4"
+    services:
+      postgres:
+        image: postgres:15-alpine
+        ports: ["5432:5432"]
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mailpit:
+        image: axllent/mailpit:latest
+        ports: ["1025:1025", "8025:8025"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/cache@v6
+        with:
+          path: |
+            deps
+            _build
+          key: browser-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+      - run: mix deps.get
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: mix assets.setup && mix assets.vendor && mix assets.build
+      - name: Run deterministic browser regressions
+        run: npm run test:pr44
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-regression-results
+          path: |
+            test-results/
+            tmp/pr44-browser/
+          retention-days: 7
 
   dialyzer:
     runs-on: ubuntu-latest

@@ -2,6 +2,7 @@
 """Deterministic Monica HTTP fixture. No database or external Monica needed."""
 import argparse
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -31,7 +32,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Authorization") != "Bearer pr44-fixture-token":
             self.send_error(401)
             return
-        if path == "/api/me":
+        if path == "/__pr44_fixture__":
+            body = {"run": os.environ.get("PR44_FIXTURE_TOKEN")}
+        elif path == "/api/me":
             body = {"data": {"id": 1}}
         elif path == "/api/contacts":
             page = int(parse_qs(parsed.query).get("page", ["1"])[0])
