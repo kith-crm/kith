@@ -58,6 +58,11 @@ defmodule Kith.Workers.ReminderEmailWorkerTest do
     assert_email_sent(fn email ->
       assert email.to == [{user.email, user.email}]
       assert email.subject == "Reminder: Call Mona"
+      assert email.html_body =~ "Call Mona"
+      assert email.html_body =~ "REMINDER"
+      assert email.text_body =~ "Call Mona"
+      assert email.html_body =~ KithWeb.Endpoint.url() <> "/contacts/#{instance.contact_id}"
+      assert length(email.attachments) == 1
     end)
   end
 
