@@ -14,12 +14,13 @@ defmodule Kith.Workers.ReminderEmailWorker do
   require Logger
 
   alias Kith.Accounts.User
+  alias Kith.Emails.ReminderNotification
   alias Kith.Reminders.{Reminder, ReminderInstance}
   alias Kith.{Repo, TimeHelper}
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"instance_id" => id}, attempt: attempt, max_attempts: max}) do
-    case ReminderInstance |> Repo.get(id) |> Repo.preload(reminder: :contact) do
+    case ReminderInstance |> Repo.get(id) |> Repo.preload([:account, reminder: :contact]) do
       nil -> {:discard, "instance deleted"}
       instance -> deliver(instance, attempt >= max)
     end
@@ -35,7 +36,7 @@ defmodule Kith.Workers.ReminderEmailWorker do
   end
 
   defp deliver_to(creator, instance, last_attempt?) do
-    case Kith.Mailer.deliver(build_email(creator, instance)) do
+    case Kith.Mailer.deliver(ReminderNotification.build(creator, instance)) do
       {:ok, _} ->
         audit(instance, nil)
         :ok
@@ -65,39 +66,6 @@ defmodule Kith.Workers.ReminderEmailWorker do
     Logger.warning("[ReminderEmailWorker] reminder #{reminder.id} has no creator; not emailing")
     :ok
   end
-
-  defp build_email(%User{} = creator, instance) do
-    reminder = instance.reminder
-    contact = reminder.contact
-    name = contact.display_name || contact.first_name
-    subject = subject(reminder.type, instance.kind, instance.days_before, name, reminder.title)
-
-    Swoosh.Email.new()
-    |> Swoosh.Email.to({creator.email, creator.email})
-    |> Swoosh.Email.from(
-      {"Kith", Application.get_env(:kith, Kith.Mailer)[:from] || "noreply@localhost"}
-    )
-    |> Swoosh.Email.subject(subject)
-    |> Swoosh.Email.text_body(body(subject, name, reminder.description))
-  end
-
-  defp body(subject, name, nil), do: "#{subject}\n\nContact: #{name}"
-  defp body(subject, name, ""), do: body(subject, name, nil)
-  defp body(subject, name, description), do: "#{subject}\n\n#{description}\n\nContact: #{name}"
-
-  defp subject("birthday", "on_day", _days, name, _title), do: "#{name}'s birthday is today"
-
-  defp subject("birthday", "advance", days, name, _title),
-    do: "#{name}'s birthday is in #{days} days"
-
-  defp subject("first_met", _kind, _days, name, _title), do: "Anniversary of meeting #{name}"
-
-  defp subject("stay_in_touch", _kind, _days, name, _title), do: "Time to reach out to #{name}"
-
-  defp subject("one_time", "advance", days, _name, title),
-    do: "Reminder in #{days} days: #{title}"
-
-  defp subject(_type, _kind, _days, _name, title), do: "Reminder: #{title || "Untitled"}"
 
   defp audit(instance, error) do
     reminder = instance.reminder
