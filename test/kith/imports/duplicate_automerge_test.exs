@@ -35,7 +35,7 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
     )
   end
 
-  defp seed_pair(account_id, one, two, score, reasons) do
+  defp seed_pair(account_id, one, two, score, reasons, status \\ "pending") do
     {low, high} = if one.id < two.id, do: {one.id, two.id}, else: {two.id, one.id}
 
     Repo.insert!(%DuplicateCandidate{
@@ -44,7 +44,7 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
       duplicate_contact_id: high,
       score: score,
       reasons: reasons,
-      status: "pending",
+      status: status,
       detected_at: DateTime.utc_now(:second)
     })
   end
@@ -92,6 +92,116 @@ defmodule Kith.Imports.DuplicateAutomergeTest do
                DuplicateAutomerge.run(account.id)
 
       assert length(active_ids(account.id)) == 1
+    end
+  end
+
+  describe "run/2 — saved not-duplicates decisions" do
+    defp dismissed_chain(account) do
+      a = contact(account, "Aaa One", "Aaa", "One")
+      b = contact(account, "Bbb Two", "Bbb", "Two")
+      c = contact(account, "Ccc Three", "Ccc", "Three")
+
+      # Insert the tied edges in reverse order: grouping must still prefer
+      # A–B by id and never reunite A and C through B.
+      seed_pair(account.id, b, c, 1.0, ["phone_match"])
+      seed_pair(account.id, a, b, 1.0, ["email_match"])
+      seed_pair(account.id, a, c, 1.0, ["email_match"], "dismissed")
+      {a, b, c}
+    end
+
+    test "a directly dismissed match is not reopened by the scan", %{
+      account: account,
+      email_type_id: email_type_id
+    } do
+      a = contact(account, "Amy Poe", "Amy", "Poe")
+      b = contact(account, "Amy Poe", "Amy", "Poe")
+      contact_field_fixture(a, email_type_id, %{"value" => "amy@example.com"})
+      contact_field_fixture(b, email_type_id, %{"value" => "amy@example.com"})
+      pair = seed_pair(account.id, a, b, 1.0, ["email_match"], "dismissed")
+
+      for _ <- 1..2 do
+        assert %{merged: 0, errors: []} = DuplicateAutomerge.run(account.id)
+        assert active_ids(account.id) == [a.id, b.id]
+        assert Repo.reload!(pair).status == "dismissed"
+      end
+    end
+
+    test "a third contact cannot reunite a dismissed pair, including on reruns", %{
+      account: account
+    } do
+      {a, b, c} = dismissed_chain(account)
+
+      assert %{merged: 1, clusters_merged: 1, errors: []} = DuplicateAutomerge.run(account.id)
+      assert active_ids(account.id) == [a.id, c.id]
+      refute is_nil(Repo.reload!(b).deleted_at)
+
+      assert Repo.get_by!(DuplicateCandidate,
+               account_id: account.id,
+               contact_id: a.id,
+               duplicate_contact_id: c.id
+             ).status == "dismissed"
+
+      assert %{merged: 0, errors: []} = DuplicateAutomerge.run(account.id)
+      assert active_ids(account.id) == [a.id, c.id]
+    end
+
+    test "dry runs honor dismissals and choose tied edges deterministically", %{account: account} do
+      {a, b, c} = dismissed_chain(account)
+
+      groups = fn ->
+        candidates =
+          Repo.all(
+            from d in DuplicateCandidate,
+              where: d.account_id == ^account.id and d.status == "pending"
+          )
+
+        DuplicateDetection.candidate_groups(account.id, candidates)
+      end
+
+      expected = [MapSet.new([a.id, b.id]), MapSet.new([c.id])]
+
+      for _ <- 1..2 do
+        assert groups.() == expected
+
+        assert %{merged: 1, clusters_merged: 1} =
+                 DuplicateAutomerge.run(account.id, dry_run: true)
+
+        assert active_ids(account.id) == [a.id, b.id, c.id]
+        assert groups.() == expected
+      end
+    end
+
+    test "restricted runs honor dismissals without touching contacts outside the set", %{
+      account: account
+    } do
+      {a, b, c} = dismissed_chain(account)
+      x = contact(account, "Xxx Four", "Xxx", "Four")
+      y = contact(account, "Yyy Five", "Yyy", "Five")
+      outside = seed_pair(account.id, x, y, 1.0, ["email_match"])
+
+      assert %{merged: 1, errors: []} =
+               DuplicateAutomerge.run(account.id, restrict_ids: [a.id, b.id, c.id])
+
+      assert active_ids(account.id) == [a.id, c.id, x.id, y.id]
+      assert Repo.reload!(outside).status == "pending"
+    end
+
+    test "another account's dismissal and contacts are untouched", %{account: account} do
+      {other_account, _user} = setup_account()
+      {x, y, z} = dismissed_chain(other_account)
+      a = contact(account, "Aaa One", "Aaa", "One")
+      b = contact(account, "Bbb Two", "Bbb", "Two")
+      seed_pair(account.id, a, b, 1.0, ["email_match"])
+
+      assert %{merged: 1, errors: []} = DuplicateAutomerge.run(account.id)
+      assert active_ids(account.id) == [a.id]
+      assert active_ids(other_account.id) == [x.id, y.id, z.id]
+
+      assert Repo.get_by!(DuplicateCandidate,
+               account_id: other_account.id,
+               contact_id: x.id,
+               duplicate_contact_id: z.id
+             ).status == "dismissed"
     end
   end
 

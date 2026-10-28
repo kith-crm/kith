@@ -1040,12 +1040,18 @@ defmodule Kith.Imports.Sources.MonicaApi do
     end
   end
 
-  defp try_merge_candidate(survivor, candidate, _account_id, _import_job, {c, e, s}) do
+  defp try_merge_candidate(survivor, candidate, account_id, _import_job, {c, e, s}) do
     cond do
       MapSet.member?(s, candidate.id) ->
         {c, e, s}
 
       not definite_duplicate?(survivor, candidate) ->
+        {c, e, s}
+
+      Kith.DuplicateDetection.dismissed_pair?(account_id, survivor.id, candidate.id) ->
+        # A prior merge repoints dismissed pairs from a loser to the survivor,
+        # so re-reading here also protects against transitive matches within
+        # this name group. A same-job retry must preserve the user's decision.
         {c, e, s}
 
       true ->

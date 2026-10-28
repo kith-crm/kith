@@ -1852,6 +1852,89 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert retry.merged == 1
     end
 
+    test "a same-job retry preserves a dismissed name-group match", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts =
+        for id <- [1, 2] do
+          contact_json(
+            id: id,
+            first_name: "Retry",
+            last_name: "Dupe",
+            contact_fields: [contact_field_json(content: "retry@example.com", type_name: "Email")]
+          )
+        end
+
+      stub_contacts(contacts)
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      [a, b] =
+        for source_id <- ["1", "2"],
+            do:
+              Imports.find_import_record(account_id, "monica_api", "contact", source_id).local_entity_id
+
+      :ok = Kith.DuplicateDetection.dismiss_selection(account_id, [a, b], [])
+
+      for _ <- 1..2 do
+        assert {:ok, summary} =
+                 MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                   "auto_merge_duplicates" => true
+                 })
+
+        assert summary.merged == 0
+        assert is_nil(Repo.get!(Contacts.Contact, a).deleted_at)
+        assert is_nil(Repo.get!(Contacts.Contact, b).deleted_at)
+        assert Kith.DuplicateDetection.dismissed_pair?(account_id, b, a)
+      end
+    end
+
+    test "name-group merges preserve a dismissal inherited from a merged-away contact", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts =
+        for id <- [1, 2, 3] do
+          contact_json(
+            id: id,
+            first_name: "Retry",
+            last_name: "Dupe",
+            contact_fields: [contact_field_json(content: "retry@example.com", type_name: "Email")]
+          )
+        end
+
+      stub_contacts(contacts)
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      [a, b, c] =
+        for source_id <- ["1", "2", "3"],
+            do:
+              Imports.find_import_record(account_id, "monica_api", "contact", source_id).local_entity_id
+
+      :ok = Kith.DuplicateDetection.dismiss_selection(account_id, [b, c], [])
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert summary.merged == 1
+      assert is_nil(Repo.get!(Contacts.Contact, a).deleted_at)
+      refute is_nil(Repo.get!(Contacts.Contact, b).deleted_at)
+      assert is_nil(Repo.get!(Contacts.Contact, c).deleted_at)
+      assert Kith.DuplicateDetection.dismissed_pair?(account_id, a, c)
+
+      assert {:ok, retry} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert retry.merged == 0
+      assert is_nil(Repo.get!(Contacts.Contact, c).deleted_at)
+    end
+
     test "honours opts[\"auto_merge_score\"] override", %{user: user, account_id: account_id} do
       contacts = [
         contact_json(

@@ -27,9 +27,10 @@ defmodule Kith.Imports.DuplicateAutomerge do
       at score `1.0`. Two different people routinely share an identical
       first+last name, so a name-only match is left as a pending
       `DuplicateCandidate` for manual review and never auto-merged;
-    * a connected component of *strong* edges with two or more members is a
-      merge target — every internal edge clears the floor and rests on a
-      concrete signal by construction;
+    * strong edges are grouped with the same dismissal-aware algorithm as the
+      duplicates screen. A saved "not duplicates" decision blocks any group
+      that would reunite those contacts, even through a third contact;
+    * a resulting group with two or more members is a merge target;
     * contacts that hang off such a component only through a non-strong edge
       (a sub-floor score, or a name-only match at any score) are left unmerged
       and `Logger.info`-logged.
@@ -122,7 +123,8 @@ defmodule Kith.Imports.DuplicateAutomerge do
   defp merge_pending(account_id, min_score, dry_run, restrict_ids) do
     pairs = pending_pairs(account_id, restrict_ids)
     strong_pairs = Enum.filter(pairs, &strong_edge?(&1, min_score))
-    strong_components = components(strong_pairs)
+    strong_components = DuplicateDetection.candidate_groups(account_id, strong_pairs)
+    full_components = DuplicateDetection.candidate_groups(account_id, pairs)
     contacts_by_id = load_contacts(account_id, strong_components)
 
     {result, merged_union} =
@@ -142,7 +144,7 @@ defmodule Kith.Imports.DuplicateAutomerge do
 
     # Only count contacts left behind by a component that actually merged —
     # a strong cluster held back by the birthdate guard leaves nothing behind.
-    left_behind = left_behind_ids(components(pairs), merged_union)
+    left_behind = left_behind_ids(full_components, merged_union)
     log_left_behind(left_behind)
 
     %{result | left_behind: MapSet.size(left_behind)}
@@ -283,45 +285,6 @@ defmodule Kith.Imports.DuplicateAutomerge do
       [d],
       d.contact_id in ^id_list and d.duplicate_contact_id in ^id_list
     )
-  end
-
-  # Connected components (as a list of id `MapSet`s) over the given edge list,
-  # via union-find. `Kith.DuplicateDetection`'s own clustering is private and
-  # re-queries the DB with dismissed-edge handling; here the input is an
-  # already-loaded, already-filtered list, so a local pass is simpler.
-  defp components([]), do: []
-
-  defp components(pairs) do
-    parent =
-      Enum.reduce(pairs, %{}, fn p, acc ->
-        acc
-        |> Map.put_new(p.contact_id, p.contact_id)
-        |> Map.put_new(p.duplicate_contact_id, p.duplicate_contact_id)
-      end)
-
-    parent =
-      Enum.reduce(pairs, parent, fn p, acc ->
-        union(acc, p.contact_id, p.duplicate_contact_id)
-      end)
-
-    parent
-    |> Map.keys()
-    |> Enum.group_by(&find(parent, &1))
-    |> Enum.map(fn {_root, member_ids} -> MapSet.new(member_ids) end)
-  end
-
-  defp find(parent, node) do
-    case Map.fetch!(parent, node) do
-      ^node -> node
-      next -> find(parent, next)
-    end
-  end
-
-  defp union(parent, a, b) do
-    root_a = find(parent, a)
-    root_b = find(parent, b)
-
-    if root_a == root_b, do: parent, else: Map.put(parent, root_a, root_b)
   end
 
   defp load_contacts(_account_id, []), do: %{}

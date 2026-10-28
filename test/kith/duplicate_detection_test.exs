@@ -20,6 +20,21 @@ defmodule Kith.DuplicateDetectionTest do
     end
   end
 
+  test "dismissed_pair?/3 is order-independent, account-scoped, and excludes pending matches" do
+    {account, _user} = setup_account()
+    {other_account, _user} = setup_account()
+    a = insert(:contact, account: account)
+    b = insert(:contact, account: account)
+    candidate = insert(:duplicate_candidate, account: account, contact: a, duplicate_contact: b)
+
+    refute DuplicateDetection.dismissed_pair?(account.id, a.id, b.id)
+    {:ok, _} = DuplicateDetection.dismiss_candidate(candidate)
+
+    assert DuplicateDetection.dismissed_pair?(account.id, a.id, b.id)
+    assert DuplicateDetection.dismissed_pair?(account.id, b.id, a.id)
+    refute DuplicateDetection.dismissed_pair?(other_account.id, a.id, b.id)
+  end
+
   describe "resolve_after_merge/4" do
     setup do
       Kith.ContactsFixtures.seed_reference_data!()

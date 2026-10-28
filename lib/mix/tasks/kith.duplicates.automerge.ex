@@ -23,6 +23,9 @@ defmodule Mix.Tasks.Kith.Duplicates.Automerge do
   logged — reported as `left_behind`. A component is skipped (reported as
   `skipped`) when two of its members carry different non-empty birthdates.
 
+  Saved "not duplicates" decisions are respected on every run. A third
+  contact cannot connect two dismissed contacts into the same merge group.
+
   This task is **account-wide** — there is no `--restrict` option. Unlike the
   importer's own second pass, which is scoped to the contacts a single import
   run inserted, this considers every pending candidate in the account.

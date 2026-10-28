@@ -16,6 +16,17 @@ defmodule Kith.DuplicateDetection do
     candidate |> DuplicateCandidate.dismiss_changeset() |> Repo.update()
   end
 
+  @doc "Whether this account has saved a not-duplicates decision for the pair."
+  def dismissed_pair?(account_id, one_id, other_id) do
+    {low, high} = if one_id < other_id, do: {one_id, other_id}, else: {other_id, one_id}
+
+    Repo.exists?(
+      from d in DuplicateCandidate,
+        where: d.account_id == ^account_id and d.status == "dismissed",
+        where: d.contact_id == ^low and d.duplicate_contact_id == ^high
+    )
+  end
+
   @cluster_count_ttl :timer.minutes(5)
 
   def pending_candidates_for_contact(account_id, contact_id) do
@@ -257,18 +268,35 @@ defmodule Kith.DuplicateDetection do
 
   defp derive_groups(account_id) do
     pending = pending_candidates(account_id)
-    negatives = pending |> blocking_dismissed(account_id) |> index_negatives()
+    {derive_candidate_groups(account_id, pending), pending}
+  end
 
-    acc =
-      pending
-      # Fully deterministic: scores come from a small fixed set, so ties are
-      # the common case. Without the id tiebreak, which edge wins would
-      # depend on arbitrary row order and clustering would vary between
-      # identical runs.
-      |> Enum.sort_by(&{-&1.score, &1.contact_id, &1.duplicate_contact_id})
-      |> Enum.reduce(%{groups: %{}, of: %{}, next: 0}, &union_pair(&2, &1, negatives))
+  @doc """
+  Groups already account-scoped candidate pairs without joining any pair the
+  account has marked as not duplicates, including through a third contact.
 
-    {acc, pending}
+  Callers may filter the candidate edges first (for example, auto-merge uses
+  only strong edges). Dismissals are still loaded for all of their endpoints.
+  Equal scores are resolved by contact id, matching the duplicates screen.
+  """
+  def candidate_groups(account_id, candidates) do
+    account_id
+    |> derive_candidate_groups(candidates)
+    |> Map.fetch!(:groups)
+    |> Map.values()
+    |> Enum.sort_by(&Enum.min/1)
+  end
+
+  defp derive_candidate_groups(account_id, candidates) do
+    negatives = candidates |> blocking_dismissed(account_id) |> index_negatives()
+
+    candidates
+    # Fully deterministic: scores come from a small fixed set, so ties are
+    # the common case. Without the id tiebreak, which edge wins would
+    # depend on arbitrary row order and clustering would vary between
+    # identical runs.
+    |> Enum.sort_by(&{-&1.score, &1.contact_id, &1.duplicate_contact_id})
+    |> Enum.reduce(%{groups: %{}, of: %{}, next: 0}, &union_pair(&2, &1, negatives))
   end
 
   defp pending_candidates(account_id) do
