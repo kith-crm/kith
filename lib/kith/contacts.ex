@@ -33,6 +33,7 @@ defmodule Kith.Contacts do
   }
 
   alias Kith.Activities.{Activity, Call}
+  alias Kith.Imports.ContactCleanup
   alias Kith.Storage
 
   require Logger
@@ -345,7 +346,22 @@ defmodule Kith.Contacts do
   end
 
   def hard_delete_contact(%Contact{} = contact) do
-    Repo.delete(contact)
+    Repo.transaction(fn ->
+      # Lock the parent before inspecting children: a concurrent FK insert
+      # must not land between mapping cleanup and the cascade.
+      from(c in Contact,
+        where: c.id == ^contact.id and c.account_id == ^contact.account_id,
+        lock: "FOR UPDATE"
+      )
+      |> Repo.one!()
+
+      ContactCleanup.delete_for_contacts(contact.account_id, [contact.id])
+
+      case Repo.delete(contact) do
+        {:ok, deleted} -> deleted
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
 
   @doc """
@@ -356,8 +372,19 @@ defmodule Kith.Contacts do
   """
   def empty_trash(account_id) do
     Repo.transaction(fn ->
+      contact_ids =
+        from(c in Contact,
+          where: c.account_id == ^account_id and not is_nil(c.deleted_at),
+          order_by: c.id,
+          select: c.id,
+          lock: "FOR UPDATE"
+        )
+        |> Repo.all()
+
+      ContactCleanup.delete_for_contacts(account_id, contact_ids)
+
       {count, _} =
-        from(c in Contact, where: c.account_id == ^account_id and not is_nil(c.deleted_at))
+        from(c in Contact, where: c.account_id == ^account_id and c.id in ^contact_ids)
         |> Repo.delete_all()
 
       count

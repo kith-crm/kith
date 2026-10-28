@@ -529,7 +529,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp note_already_imported?(_import_job, %{"uuid" => nil}), do: false
 
   defp note_already_imported?(import_job, %{"uuid" => uuid}) do
-    not is_nil(Imports.find_import_record(import_job.account_id, import_job.source, "note", uuid))
+    not is_nil(mapped_entity(import_job, "note", uuid, Contacts.Note))
   end
 
   defp note_already_imported?(_import_job, _note), do: false
@@ -1350,12 +1350,14 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp message_duplicate?(conversation_id, msg) do
     body = norm(msg["content"] || msg["written_by_me_body"] || "")
     sent_at = parse_datetime(msg["written_at"])
+    direction = if msg["written_by_me"], do: "sent", else: "received"
 
     not is_nil(sent_at) and
       Repo.exists?(
         from(m in Message,
           where:
             m.conversation_id == ^conversation_id and m.sent_at == ^sent_at and
+              m.direction == ^direction and
               fragment("lower(trim(?))", m.body) == ^body
         )
       )

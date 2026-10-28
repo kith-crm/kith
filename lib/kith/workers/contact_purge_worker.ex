@@ -61,16 +61,21 @@ defmodule Kith.Workers.ContactPurgeWorker do
   defp purge_contact(contact) do
     # Create audit log entry synchronously (we're already in an Oban job, no need to double-enqueue).
     # Must insert before deletion since the contact will be cascade-deleted.
-    Kith.AuditLogs.create_audit_log(contact.account_id, %{
-      user_id: nil,
-      user_name: "system",
-      event: "contact_purged",
-      contact_id: contact.id,
-      contact_name: contact.display_name || contact.first_name,
-      metadata: %{reason: "Contact permanently purged after 30-day trash window."}
-    })
+    Repo.transaction(fn ->
+      {:ok, _} =
+        Kith.AuditLogs.create_audit_log(contact.account_id, %{
+          user_id: nil,
+          user_name: "system",
+          event: "contact_purged",
+          contact_id: contact.id,
+          contact_name: contact.display_name || contact.first_name,
+          metadata: %{reason: "Contact permanently purged after 30-day trash window."}
+        })
 
-    # Hard-delete (CASCADE removes all sub-entities)
-    Repo.delete!(contact)
+      # The shared path removes import mappings and cascaded child rows in
+      # the same transaction. Soft-deleted contacts keep their mappings until here.
+      {:ok, deleted} = Kith.Contacts.hard_delete_contact(contact)
+      deleted
+    end)
   end
 end

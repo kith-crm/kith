@@ -363,6 +363,104 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
              ) == 1
     end
 
+    test "a stale note mapping does not prevent restoring a missing note",
+         %{user: user, account_id: account_id} do
+      contact = contact_fixture(account_id)
+      import_job = api_import(account_id, user.id)
+      Imports.record_imported_entity(import_job, "contact", "42", "contact", contact.id)
+      {:ok, note} = Kith.Contacts.create_note(contact, user.id, %{body: "Note 1"})
+      Imports.record_imported_entity(import_job, "note", "n1", "note", note.id)
+      Repo.delete!(note)
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, %{"data" => [note_body(1)], "meta" => %{"last_page" => 1}})
+      end)
+
+      assert :ok =
+               perform_job(MonicaMiscDataWorker, build_args(import_job, notes_plan(contact, 0)))
+
+      restored = Repo.one!(from(n in Kith.Contacts.Note, where: n.contact_id == ^contact.id))
+      assert restored.body == "Note 1"
+      refute restored.id == note.id
+
+      assert Imports.find_import_record(account_id, "monica_api", "note", "n1").local_entity_id ==
+               restored.id
+    end
+
+    test "purging and reimporting a contact restores all ten notes", %{
+      user: user,
+      account_id: account_id
+    } do
+      notes = Enum.map(1..10, &note_body/1)
+
+      api_contact =
+        Kith.MonicaApiFixtures.contact_json(
+          id: 42,
+          first_name: "Mona",
+          number_of_notes: 10,
+          notes: Enum.take(notes, -3)
+        )
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case conn.request_path do
+          "/api/contacts" ->
+            Req.Test.json(conn, Kith.MonicaApiFixtures.contacts_page_json([api_contact]))
+
+          "/api/contacts/42/notes" ->
+            Req.Test.json(conn, %{"data" => notes, "meta" => %{"last_page" => 1}})
+        end
+      end)
+
+      credential = %{
+        url: "https://monica.test",
+        api_key: "test-key",
+        req_options: [plug: {Req.Test, @stub_name}, retry: false]
+      }
+
+      imported_ids =
+        for _ <- 1..2 do
+          job = api_import(account_id, user.id)
+
+          opts =
+            Map.new(
+              ~w(pets calls activities gifts debts tasks reminders conversations),
+              &{&1, false}
+            )
+
+          assert {:ok, summary} =
+                   Kith.Imports.Sources.MonicaApi.crawl(
+                     account_id,
+                     user.id,
+                     credential,
+                     job,
+                     opts
+                   )
+
+          {:ok, job} = Imports.update_import_status(job, "completed")
+          [entry] = summary.misc_data_plan
+
+          assert :ok =
+                   perform_job(
+                     MonicaMiscDataWorker,
+                     build_args(job, [
+                       Map.new(entry, fn {k, v} -> {to_string(k), v} end)
+                     ])
+                   )
+
+          contact = Kith.Contacts.get_contact!(account_id, entry.local_id)
+
+          assert Repo.aggregate(
+                   from(n in Kith.Contacts.Note, where: n.contact_id == ^contact.id),
+                   :count
+                 ) == 10
+
+          {:ok, _} = Kith.Contacts.hard_delete_contact(contact)
+          contact.id
+        end
+
+      assert length(Enum.uniq(imported_ids)) == 2
+    end
+
     test "extra notes keep Monica created_at", %{user: user, account_id: account_id} do
       contact = contact_fixture(account_id)
       import_job = api_import(account_id, user.id)
@@ -970,6 +1068,43 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
   end
 
   describe "conversations" do
+    test "opposite-direction messages with identical text and time both survive retries", %{
+      user: user,
+      account_id: account_id
+    } do
+      contact = contact_fixture(account_id)
+      import_job = api_import(account_id, user.id)
+
+      messages =
+        for {id, sent?} <- [{100, true}, {101, false}, {102, true}] do
+          %{
+            "id" => id,
+            "content" => "OK",
+            "written_by_me" => sent?,
+            "written_at" => "2025-01-01T10:30:15Z"
+          }
+        end
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, %{"data" => [%{"id" => 10, "messages" => messages}]})
+      end)
+
+      plan = [%{"source_id" => "1", "local_id" => contact.id, "endpoints" => ["conversations"]}]
+
+      for _ <- 1..2,
+          do: assert(:ok = perform_job(MonicaMiscDataWorker, build_args(import_job, plan)))
+
+      assert Repo.all(
+               from(m in Kith.Conversations.Message,
+                 where: m.account_id == ^account_id,
+                 select: m.direction,
+                 order_by: m.direction
+               )
+             ) == ["received", "sent"]
+
+      assert Repo.aggregate(Kith.Conversations.Conversation, :count) == 1
+    end
+
     test "a retry of the same import does not duplicate conversations or messages",
          %{user: user, account_id: account_id} do
       contact = contact_fixture(account_id)

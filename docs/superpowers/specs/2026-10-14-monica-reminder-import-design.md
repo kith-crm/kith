@@ -8,6 +8,11 @@
 - **Decision 2026-10-19:** re-importing previously imported contacts is not supported; such contacts are
   skipped (counted in the summary's `skipped`) along with their children. A purged contact is re-created.
   Only a retry of the *same* import job is idempotent.
+- **Permanent deletion:** moving a contact to Trash preserves its import mappings. Direct permanent deletion,
+  Empty Trash, and the nightly purge remove mappings for that contact and its cascaded child rows in the
+  same transaction as deletion. Mappings for data moved to a merge survivor, and activities that survive
+  contact deletion, remain intact. Imported notes with stale mappings are restored when their local row
+  no longer exists.
 - **Related:** [reminder dispatcher design](2026-09-26-reminder-dispatcher-design.md) (the schedule model this
   importer targets).
 
