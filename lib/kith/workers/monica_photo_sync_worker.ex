@@ -16,7 +16,6 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
   require Logger
 
   alias Kith.Contacts
-  alias Kith.DAV.Store
   alias Kith.Imports
   alias Kith.Repo
   alias Kith.Storage
@@ -233,10 +232,11 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
       "content_hash" => content_hash
     }
 
-    with {:ok, _} <- Storage.upload_binary(binary, key),
+    with :ok <- Storage.check_storage_limit(contact.account_id, byte_size(binary), fresh: true),
+         {:ok, _} <- Storage.upload_binary(binary, key),
          {:ok, photo_record} <- Contacts.create_photo(contact, attrs) do
       maybe_record_entity(import_job, uuid, photo_record.id)
-      maybe_set_avatar(contact, key)
+      maybe_set_avatar(contact, photo_record)
 
       Logger.debug(
         "#{@log_prefix} photo #{uuid} → contact #{contact.id}: synced " <>
@@ -266,12 +266,14 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
     end
   end
 
-  defp maybe_set_avatar(%{avatar: nil} = contact, key) do
-    contact
-    |> Ecto.Changeset.change(avatar: key)
-    |> Repo.update!()
+  defp maybe_set_avatar(%{avatar: nil} = contact, photo) do
+    case Contacts.set_avatar(contact, photo) do
+      {:ok, _} ->
+        :ok
 
-    Store.touch(contact.account_id, [contact.id])
+      {:error, reason} ->
+        Logger.warning("Imported photo could not become avatar: #{inspect(reason)}")
+    end
   end
 
   defp maybe_set_avatar(_contact, _key), do: :ok

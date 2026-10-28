@@ -1,6 +1,6 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { dav, propText, responseFor, runPrefix, assertWellFormedXml, USERS, vcard, hrefs } from "../helpers/dav";
+import { dav, propText, responseFor, runPrefix, assertWellFormedXml, USERS, vcard, hrefs, testUid, wireUid, photoBytes } from "../helpers/dav";
 import { loginUser } from "../helpers/auth";
 
 test.describe.configure({ mode: "serial" });
@@ -11,7 +11,7 @@ const unfold = (s: string) => s.replace(/\r\n[ \t]/g, "");
 const withoutRev = (s: string) => s.replace(/^REV:.*\r\n/gm, "");
 const created: string[] = [];
 let bearer = "";
-const fixtureUids: Record<string, string> = { "v30-full": `${prefix}-v30`, "v40-full": `${prefix}-v40`, "apple-ios": `${prefix}-apple`, "davx5-android": `${prefix}-davx5`, "thunderbird": `${prefix}-thunderbird`, "unicode-folding": `${prefix}-unicode` };
+const fixtureUids: Record<string, string> = { "v30-full": testUid(`${prefix}-v30`), "v40-full": testUid(`${prefix}-v40`), "apple-ios": testUid(`${prefix}-apple`), "davx5-android": testUid(`${prefix}-davx5`), "thunderbird": testUid(`${prefix}-thunderbird`), "unicode-folding": testUid(`${prefix}-unicode`) };
 const fullCommon = ["NICKNAME:Enchantress", "ORG:Analytical Engines", "TITLE:Mathematician", "ada@home.example.test", "ada@work.example.test", "+15550001111", "+15550002222", "https://ada.example.test/home", "https://ada.example.test/work", "xmpp:ada@example.test", "CATEGORIES:Computing,Friends\\, close", "ADR;TYPE=HOME:;Suite 2;12 Engine St;London;Greater London;N1;UK", "ADR;TYPE=WORK:;Floor 3;20 Office St;Oxford;Oxon;OX1;UK", "X-CUSTOM:Keep me"];
 const fixtures: Record<string, string[]> = {
   "v30-full": [...fullCommon, "LABEL;TYPE=HOME:PO 42\\nLondon", "AGENT:BEGIN:VCARD\\nFN:Agent Smith\\nEND:VCARD", "KEY;ENCODING=b;TYPE=PGP:AAEC", "X-CHARSET;CHARSET=utf-8:Charset value"],
@@ -54,14 +54,14 @@ async function api(request: APIRequestContext, method: string, path: string, dat
 }
 async function contactId(request: APIRequestContext, first: string) {
   const result = await api(request, "GET", `/api/contacts?q=${encodeURIComponent(first)}`);
-  const contact = result.data.find((c: { first_name: string; birthdate_year_unknown: boolean }) => c.first_name === first && (!first.endsWith(" Ada") || c.birthdate_year_unknown));
+  const contact = result.data.find((c: { first_name: string; display_name: string; birthdate_year_unknown: boolean }) => (c.first_name === first || c.display_name === first) && (!first.endsWith(" Ada") || c.birthdate_year_unknown));
   expect(contact).toBeTruthy(); return contact.id as number;
 }
 test.beforeAll(async ({ request }) => {
   const auth = await request.post("/api/auth/token", { data: USERS.admin });
   expect(auth.status()).toBe(201); bearer = (await auth.json()).token;
   const friend = `${BOOK}${prefix}-friend.vcf`;
-  expect((await put(request, friend, vcard({ fn: `${prefix} Friend`, uid: `urn:uuid:${prefix}-friend` }))).status).toBe(201);
+  expect((await put(request, friend, vcard({ fn: `${prefix} Friend`, uid: wireUid(testUid(`${prefix}-friend`)) }))).status).toBe(201);
   created.push(friend);
 });
 test.afterAll(async ({ request }) => {
@@ -74,7 +74,7 @@ for (const [name, values] of Object.entries(fixtures)) {
     // Unfold bytes before UTF-8 decoding: unicode fixture deliberately cuts inside code points.
     const bytes = readFileSync(`test/playwright/fixtures/carddav/${name}.vcf`);
     const body = bytes.toString("latin1").replace(/\r\n[ \t]/g, "");
-    const input = Buffer.from(body, "latin1").toString("utf8").replaceAll("{{PREFIX}}", prefix);
+    const input = Buffer.from(body, "latin1").toString("utf8").replaceAll("{{PREFIX}}", prefix).replaceAll("{{UID}}", fixtureUids[name]).replaceAll("{{FRIEND_UID}}", testUid(`${prefix}-friend`));
     // Preserve the malformed UTF-8 folds in the actual wire request for unicode.
     let wire = input;
     if (name === "unicode-folding") {
@@ -95,21 +95,22 @@ for (const [name, values] of Object.entries(fixtures)) {
       const g = await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } });
       expect(g.status, g.body).toBe(200); valid(g.body, version);
       const card = unfold(g.body);
-      expect(/^UID(?:;[^:]*)?:([^\r]*)/m.exec(card)?.[1]).toBe(fixtureUids[name]);
+      expect(/^UID(?:;[^:]*)?:([^\r]*)/m.exec(card)?.[1]).toBe(wireUid(fixtureUids[name]));
       for (const value of values) expect(card, `${name} ${version}: ${value}`).toContain(value);
       if (name === "v30-full") expect(card).toMatch(/^BDAY:(?:1815-12-10|18151210)\r$/m);
       if (name === "v40-full") {
         expect(card).toContain("\r\nBDAY:--1210\r\n");
         expect(card).not.toMatch(/^BDAY[^\r\n]*:(?:1604|2000)/m);
         expect(card).toContain(version === "4.0" ? "GENDER:F" : "X-GENDER:Female");
-        expect(card).toContain(version === "4.0" ? `RELATED;TYPE=friend:urn:uuid:${prefix}-friend` : `.X-ABRELATEDNAMES:${prefix} Friend`);
+        expect(card).toContain(version === "4.0" ? `RELATED;TYPE=friend:${wireUid(testUid(`${prefix}-friend`))}` : `.X-ABRELATEDNAMES:${prefix} Friend`);
       }
       if (name.endsWith("-full")) {
         expect(card).toContain(`N:Lovelace;${prefix} Ada;Augusta;;`);
         expect(card).toContain(`FN:${prefix} Ada Augusta Lovelace`);
         expect(card).toContain("NOTE:Line one\\nLine two\\, comma\\; semicolon\\\\literal\\\\n");
-        const photo = /(?:base64,|TYPE=PNG:)([A-Za-z0-9+/=]+)/.exec(input)![1];
-        expect(card).toContain((version === "4.0" ? "PHOTO:data:image/png;base64," : "PHOTO;ENCODING=b;TYPE=PNG:") + photo);
+        const photo = photoBytes(card);
+        expect(photo.subarray(0, 2).toString("hex")).toBe("ffd8");
+        expect(photo.length).toBeLessThanOrEqual(512 * 1024);
         expect(card).toContain("preferred@example.test");
       }
       expect((await put(request, href, g.body)).status).toBe(204);
@@ -133,7 +134,7 @@ test("Apple social profile stays one field over three PUT-backs", async ({ reque
 });
 test("natively deleted children stay deleted after PUT-back", async ({ request }) => {
   const href = `${BOOK}${prefix}-deleted.vcf`; created.push(href);
-  const body = `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${prefix}-deleted\r\nN:Deleted;${prefix} Dee;;;\r\nFN:${prefix} Dee Deleted\r\nIMPP;TYPE=HOME:xmpp:dee@example.test\r\nRELATED;TYPE=friend:urn:uuid:${prefix}-friend\r\nitem1.TEL;TYPE=CELL:+15550009999\r\nitem1.X-ABLabel:Mobile\r\nEMAIL;TYPE=WORK:keep@example.test\r\nEND:VCARD\r\n`;
+  const body = `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${testUid(`${prefix}-deleted`)}\r\nN:Deleted;${prefix} Dee;;;\r\nFN:${prefix} Dee Deleted\r\nIMPP;TYPE=HOME:xmpp:dee@example.test\r\nRELATED;TYPE=friend:${wireUid(testUid(`${prefix}-friend`))}\r\nitem1.TEL;TYPE=CELL:+15550009999\r\nitem1.X-ABLabel:Mobile\r\nEMAIL;TYPE=WORK:keep@example.test\r\nEND:VCARD\r\n`;
   expect((await put(request, href, body)).status).toBe(201);
   const id = await contactId(request, prefix + " Dee");
   for (const field of (await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data)
@@ -151,8 +152,8 @@ test("natively deleted children stay deleted after PUT-back", async ({ request }
 test("relationships to archived and trashed targets survive unchanged PUT-backs", async ({ request }) => {
   for (const hidden of ["archived", "trashed"]) {
     const target = `${BOOK}${prefix}-${hidden}-target.vcf`; const href = `${BOOK}${prefix}-${hidden}-owner.vcf`;
-    expect((await put(request, target, vcard({ fn: `${prefix} ${hidden} Target`, uid: `urn:uuid:${prefix}-${hidden}-target` }))).status).toBe(201);
-    expect((await put(request, href, `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${prefix}-${hidden}-owner\r\nN:Owner;${prefix} owner-${hidden};;;\r\nFN:${prefix} owner-${hidden} Owner\r\nRELATED;TYPE=friend:urn:uuid:${prefix}-${hidden}-target\r\nEND:VCARD\r\n`)).status).toBe(201);
+    expect((await put(request, target, vcard({ fn: `${prefix} ${hidden} Target`, uid: wireUid(testUid(`${prefix}-${hidden}-target`)) }))).status).toBe(201);
+    expect((await put(request, href, `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${testUid(`${prefix}-${hidden}-owner`)}\r\nN:Owner;${prefix} owner-${hidden};;;\r\nFN:${prefix} owner-${hidden} Owner\r\nRELATED;TYPE=friend:${wireUid(testUid(`${prefix}-${hidden}-target`))}\r\nEND:VCARD\r\n`)).status).toBe(201);
     created.push(href);
     const id = await contactId(request, `${prefix} owner-${hidden}`);
     const before = (await api(request, "GET", `/api/contacts/${id}/relationships`)).data;
@@ -173,7 +174,7 @@ test("relationships to archived and trashed targets survive unchanged PUT-backs"
 });
 test("an embedded AGENT vCard does not truncate the card", async ({ request }) => {
   const href = `${BOOK}${prefix}-agent.vcf`; created.push(href);
-  const body = `BEGIN:VCARD\r\nVERSION:3.0\r\nUID:${prefix}-agent\r\nN:Card;${prefix} Agent;;;\r\nFN:${prefix} Agent Card\r\nAGENT:BEGIN:VCARD\\nFN:Agent\\nEND:VCARD\r\nNOTE:after the agent\r\nEMAIL;TYPE=WORK:after@example.test\r\nEND:VCARD\r\n`;
+  const body = `BEGIN:VCARD\r\nVERSION:3.0\r\nUID:${testUid(`${prefix}-agent`)}\r\nN:Card;${prefix} Agent;;;\r\nFN:${prefix} Agent Card\r\nAGENT:BEGIN:VCARD\\nFN:Agent\\nEND:VCARD\r\nNOTE:after the agent\r\nEMAIL;TYPE=WORK:after@example.test\r\nEND:VCARD\r\n`;
   expect((await put(request, href, body)).status).toBe(201);
   const card = unfold((await dav(request, "GET", href)).body);
   expect(card).toContain("NOTE:after the agent\r\n");
@@ -182,7 +183,7 @@ test("an embedded AGENT vCard does not truncate the card", async ({ request }) =
 });
 test("native names serialize without unsupported prefix and suffix", async ({ request }) => {
   const href = `${BOOK}${prefix}-rename.vcf`; created.push(href);
-  const body = `BEGIN:VCARD\r\nVERSION:3.0\r\nUID:${prefix}-rename\r\nN:Lovelace;${prefix} Rena;Augusta;Countess;PhD\r\nFN:Countess ${prefix} Rena Augusta Lovelace PhD\r\nEND:VCARD\r\n`;
+  const body = `BEGIN:VCARD\r\nVERSION:3.0\r\nUID:${testUid(`${prefix}-rename`)}\r\nN:Lovelace;${prefix} Rena;Augusta;Countess;PhD\r\nFN:Countess ${prefix} Rena Augusta Lovelace PhD\r\nEND:VCARD\r\n`;
   expect((await put(request, href, body)).status).toBe(201);
   const id = await contactId(request, prefix + " Rena");
   await api(request, "PATCH", `/api/contacts/${id}`, { contact: { first_name: `${prefix} Grace`, middle_name: "", last_name: "Hopper" } });
@@ -256,7 +257,7 @@ test("reserialized PUT requires a GET for its validator", async ({ request }) =>
 
 test("escaped structured values survive", async ({ request }) => {
   const href = `${BOOK}${prefix}-escaped.vcf`; created.push(href);
-  const body = `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${prefix}-escaped\r\nN:Family\\;Last;${prefix} Given\\;First;Middle\\,Name;Dr;Jr\r\nFN:${prefix} Given\\;First Middle\\,Name Family\\;Last\r\nADR;TYPE=HOME:;Suite\\;2;Street\\;3;City\\,Town;Region;Zip;Country\r\nNOTE:literal \\\\n\r\nEND:VCARD\r\n`;
+  const body = `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${testUid(`${prefix}-escaped`)}\r\nN:Family\\;Last;${prefix} Given\\;First;Middle\\,Name;Dr;Jr\r\nFN:${prefix} Given\\;First Middle\\,Name Family\\;Last\r\nADR;TYPE=HOME:;Suite\\;2;Street\\;3;City\\,Town;Region;Zip;Country\r\nNOTE:literal \\\\n\r\nEND:VCARD\r\n`;
   expect((await put(request, href, body)).status).toBe(201);
   const card = unfold((await dav(request, "GET", href)).body);
   expect(card).toContain(`N:Family\\;Last;${prefix} Given\\;First;Middle\\,Name;;`);
@@ -284,16 +285,12 @@ test("one strong tag for both versions, listings and conditional requests", asyn
   expect(write.status).toBe(204);
   expect((await dav(request, "PUT", href, { headers: { ...headers, "If-Match": g4.headers.etag }, body: g4.body })).status).toBe(412);
 });
-test("text UID is escaped and folded without injecting properties", async ({ request }) => {
-  const href = `${BOOK}${prefix}-text-uid.vcf`; created.push(href);
+test("non-UUID text UID is rejected without creating a contact", async ({ request }) => {
+  const href = `${BOOK}${prefix}-text-uid.vcf`;
   const uid = "客".repeat(40) + `\\;${prefix}\\nFN:Injected`;
   const body = `BEGIN:VCARD\r\nVERSION:4.0\r\nUID;VALUE=text:${uid}\r\nN:UID;${prefix} Text;;;\r\nFN:${prefix} Text UID\r\nEND:VCARD\r\n`;
-  expect((await put(request, href, body)).status).toBe(201);
-  for (const version of ["3.0", "4.0"]) {
-    const g = await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } });
-    expect(g.status).toBe(200); valid(g.body, version);
-    expect(unfold(g.body)).toContain(`${version === "4.0" ? "UID;VALUE=text" : "UID"}:${uid}`);
-  }
+  expect((await put(request, href, body)).status).toBe(403);
+  expect((await dav(request, "GET", href)).status).toBe(404);
 });
 
 test("unmapped extras retain syntax across versions while mapped parameters and groups are dropped", async ({ request }) => {
@@ -324,4 +321,89 @@ test("encoded resource names remain usable through discovered hrefs", async ({ r
     created.splice(created.indexOf(expected), 1);
     expect((await dav(request, "GET", discovered!)).status).toBe(404);
   }
+});
+
+test("avatar upload crops EXIF-oriented images and DAV serves only the selected rendition", async ({ page, request }) => {
+  test.setTimeout(60_000);
+  const name = `${prefix} Crop`;
+  const href = `${BOOK}${prefix}-crop.vcf`;
+  expect((await put(request, href, vcard({ fn: name }))).status).toBe(201);
+  created.push(href);
+  const id = await contactId(request, name);
+  await loginUser(page, USERS.admin.email);
+  await page.goto(`/contacts/${id}`);
+  await expect(page.locator("[data-phx-main]")).toHaveClass(/phx-connected/);
+  const raw = Buffer.from(await page.evaluate(() => {
+    const canvas = document.createElement("canvas"); canvas.width = 1024; canvas.height = 512;
+    const context = canvas.getContext("2d")!;
+    context.fillStyle = "red"; context.fillRect(0, 0, 512, 512);
+    context.fillStyle = "blue"; context.fillRect(512, 0, 512, 512);
+    return canvas.toDataURL("image/jpeg", 0.95).split(",")[1];
+  }), "base64");
+  // Minimal EXIF APP1: TIFF orientation6 rotates the raw1024x512 image clockwise.
+  const exif = Buffer.from("45786966000049492a0008000000010012010300010000000600000000000000", "hex");
+  const marker = Buffer.from([0xff, 0xe1, 0, exif.length + 2]);
+  const source = Buffer.concat([raw.subarray(0, 2), marker, exif, raw.subarray(2)]);
+  await page.getByTitle("Change avatar", { exact: true }).click();
+  await page.getByLabel("Choose avatar image").setInputFiles({ name: "landmarks.jpg", mimeType: "image/jpeg", buffer: source });
+  const editor = page.locator("#avatar-crop-editor");
+  await expect(editor).toHaveAttribute("data-ready", "true");
+  await expect(page.locator("#save-avatar-crop")).toBeEnabled();
+  expect(await page.locator("#avatar-crop-image").evaluate((image: HTMLImageElement) => [image.naturalWidth, image.naturalHeight])).toEqual([512, 1024]);
+  await page.getByLabel("Move photo with arrow keys").focus();
+  for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowDown");
+  await page.getByRole("button", { name: "Save avatar", exact: true }).click();
+  await expect(page.locator("#avatar-crop-dialog")).toHaveCount(0);
+  await expect(page.getByText("Avatar updated.", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.locator("[data-phx-main]")).toHaveClass(/phx-connected/);
+  const image = page.locator(`#contact-avatar-${id} img`);
+  await expect(image).toBeVisible();
+  const card = await dav(request, "GET", href);
+  expect(card.status).toBe(200);
+  const bytes = photoBytes(card.body);
+  expect(bytes.length).toBeLessThanOrEqual(512 * 1024);
+  expect(unfold(card.body).match(/^PHOTO/gm)).toHaveLength(1);
+  const pixel = await page.evaluate(async encoded => {
+    const image = new Image(); image.src = `data:image/jpeg;base64,${encoded}`; await image.decode();
+    const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext("2d")!; context.drawImage(image, 0, 0);
+    return { width: image.width, height: image.height, rgb: [...context.getImageData(image.width / 2, image.height / 2, 1, 1).data] };
+  }, bytes.toString("base64"));
+  expect(pixel.width).toBe(pixel.height); expect(pixel.width).toBeLessThanOrEqual(512);
+  expect(pixel.rgb[2]).toBeGreaterThan(200); expect(pixel.rgb[0]).toBeLessThan(30);
+  const photos = (await api(request, "GET", `/api/contacts/${id}/photos`)).data;
+  expect(photos).toHaveLength(1);
+  const before = card.headers.etag;
+  await page.getByTitle("Change avatar", { exact: true }).click();
+  await page.getByLabel("Choose avatar image").setInputFiles({ name: "cancelled.jpg", mimeType: "image/jpeg", buffer: source });
+  await expect(editor).toHaveAttribute("data-ready", "true");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect((await dav(request, "GET", href)).headers.etag).toBe(before);
+  expect((await api(request, "GET", `/api/contacts/${id}/photos`)).data).toHaveLength(1);
+  // A normal timeline upload stays original-sized and becomes an avatar only
+  // after the user chooses and crops it through the same editor.
+  await page.getByRole("button", { name: "Add timeline entry", exact: true }).click();
+  await page.getByRole("button", { name: "+ Photo", exact: true }).click();
+  await page.locator("#photo-upload-form input[type=file]").setInputFiles({ name: "timeline.jpg", mimeType: "image/jpeg", buffer: source });
+  await page.locator("#photo-upload-form").getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(page.locator("#photo-upload-form")).toHaveCount(0);
+  const timeline = (await api(request, "GET", `/api/contacts/${id}/photos`)).data.find((photo: {file_name: string}) => photo.file_name === "timeline.jpg");
+  expect(timeline).toBeTruthy();
+  expect(photoBytes((await dav(request, "GET", href)).body)).toEqual(bytes);
+  await page.getByTitle("Change avatar", { exact: true }).click();
+  await page.locator(`button[phx-click="pick-avatar-photo"][phx-value-id="${timeline.id}"]`).click();
+  await expect(editor).toHaveAttribute("data-ready", "true");
+  await page.getByLabel("Move photo with arrow keys").focus();
+  for (let i = 0; i < 30; i++) await page.keyboard.press("ArrowUp");
+  await page.getByRole("button", { name: "Save avatar", exact: true }).click();
+  await expect(page.locator("#avatar-crop-dialog")).toHaveCount(0);
+  const updatedCard = await dav(request, "GET", href);
+  expect(unfold(updatedCard.body).match(/^PHOTO/gm)).toHaveLength(1);
+  expect(photoBytes(updatedCard.body)).not.toEqual(bytes);
+  const originalDimensions = await page.locator(`#photo-${timeline.id} img`).evaluate(async (image: HTMLImageElement) => {
+    await image.decode(); return [image.naturalWidth, image.naturalHeight];
+  });
+  expect(originalDimensions).toEqual([512, 1024]);
+
 });

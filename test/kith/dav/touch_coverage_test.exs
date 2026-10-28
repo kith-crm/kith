@@ -29,6 +29,9 @@ defmodule Kith.DAV.TouchCoverageTest do
     Contacts.tag_contact(a, tag)
     relationship = relationship_fixture(b, a, rt.id)
     photo = photo_fixture(a)
+    binary = Image.new!(24, 24, color: :red) |> Image.write!(:memory, suffix: ".png")
+    {:ok, _} = Kith.Storage.upload_binary(binary, photo.storage_key)
+    on_exit(fn -> Kith.Storage.delete(photo.storage_key) end)
     Store.ensure_rows(account)
 
     %{

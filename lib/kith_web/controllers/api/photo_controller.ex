@@ -84,7 +84,7 @@ defmodule KithWeb.API.PhotoController do
             {:error, :not_found}
 
           photo ->
-            Kith.Repo.delete(photo)
+            Contacts.delete_photo(photo)
             send_resp(conn, 204, "")
         end
 

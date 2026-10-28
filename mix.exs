@@ -107,6 +107,7 @@ defmodule Kith.MixProject do
       {:gen_smtp, "~> 1.2"},
 
       # Storage
+      {:image, "~> 0.72"},
       {:ex_aws, "~> 2.7"},
       {:ex_aws_s3, "~> 2.5"},
       {:sweet_xml, "~> 0.7"},

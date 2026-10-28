@@ -16,9 +16,12 @@ defmodule KithWeb.DAV.ReportTest do
        %{account_id: account_id} = context do
     contact = ContactsFixtures.contact_fixture(account_id)
     photo = ContactsFixtures.photo_fixture(contact)
-    {:ok, _} = Kith.Storage.upload_binary(<<1, 2, 3>>, photo.storage_key)
+    original = Image.new!(40, 30, color: :blue) |> Image.write!(:memory, suffix: ".png")
+    {:ok, _} = Kith.Storage.upload_binary(original, photo.storage_key)
     on_exit(fn -> Kith.Storage.delete(photo.storage_key) end)
-    {:ok, _} = Contacts.set_avatar(contact, photo)
+    {:ok, updated} = Contacts.set_avatar(contact, photo)
+    {:ok, avatar} = Kith.Storage.read(updated.avatar)
+    on_exit(fn -> Kith.Storage.delete(updated.avatar) end)
 
     query =
       ~s(<card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:prop><card:address-data/></d:prop><card:filter/></card:addressbook-query>)
@@ -26,7 +29,51 @@ defmodule KithWeb.DAV.ReportTest do
     for body <- [multiget_body([contact_path(contact)]), query, sync_collection_body()] do
       conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
       assert conn.status == 207
-      assert conn.resp_body =~ "PHOTO;ENCODING=b;TYPE=JPEG:AQID"
+      unfolded = String.replace(conn.resp_body, ~r/\r?\n[ \t]/, "")
+      assert unfolded =~ "PHOTO;ENCODING=b;TYPE=JPEG:#{Base.encode64(avatar)}"
+    end
+  end
+
+  test "PHOTO presence and absence filters use only the selected avatar", c do
+    avatar_contact = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Avatar"})
+    timeline_only = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Timeline"})
+    no_photo = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "None"})
+    original = Image.new!(40, 30, color: :green) |> Image.write!(:memory, suffix: ".png")
+
+    for contact <- [avatar_contact, timeline_only] do
+      photo = ContactsFixtures.photo_fixture(contact)
+      {:ok, _} = Kith.Storage.upload_binary(original, photo.storage_key)
+      on_exit(fn -> Kith.Storage.delete(photo.storage_key) end)
+
+      if contact.id == avatar_contact.id do
+        {:ok, updated} = Contacts.set_avatar(contact, photo)
+        on_exit(fn -> Kith.Storage.delete(updated.avatar) end)
+        # A second timeline photo must not create another PHOTO property.
+        ContactsFixtures.photo_fixture(contact)
+      end
+    end
+
+    for version <- ["3.0", "4.0"] do
+      query = fn inner ->
+        body =
+          ~s(<card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:prop><card:address-data version="#{version}"/></d:prop><card:filter><card:prop-filter name="PHOTO">#{inner}</card:prop-filter></card:filter></card:addressbook-query>)
+
+        authed_dav(c, "REPORT", "/dav/addressbooks/default/", body)
+      end
+
+      present = query.("")
+      assert present.status == 207
+      assert count_responses(present.resp_body) == 1
+      assert present.resp_body =~ contact_path(avatar_contact)
+      assert length(Regex.scan(~r/PHOTO[;:]/, present.resp_body)) == 1
+      refute present.resp_body =~ contact_path(timeline_only)
+
+      absent = query.("<card:is-not-defined/>")
+      assert absent.status == 207
+      assert count_responses(absent.resp_body) == 2
+      assert absent.resp_body =~ contact_path(timeline_only)
+      assert absent.resp_body =~ contact_path(no_photo)
+      refute absent.resp_body =~ contact_path(avatar_contact)
     end
   end
 

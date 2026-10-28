@@ -10,7 +10,8 @@ ARG ALPINE_VERSION=3.23.5
 # =============================================================================
 FROM hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-alpine-${ALPINE_VERSION} AS builder
 
-RUN apk add --no-cache git build-base nodejs npm
+RUN apk add --no-cache git build-base nodejs npm vips-dev pkgconf
+ENV VIX_COMPILATION_MODE=PLATFORM_PROVIDED_LIBVIPS
 
 ENV MIX_ENV=prod
 
@@ -55,6 +56,7 @@ RUN apk add --no-cache \
     libcrypto3 \
     libstdc++ \
     libgcc \
+    vips \
     ncurses-libs \
     ca-certificates \
     curl \

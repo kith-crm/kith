@@ -10,6 +10,8 @@ defmodule Kith.VCard.Serializer do
   - Special characters (semicolons, commas, backslashes, newlines) must be escaped
   """
 
+  alias Kith.DAV.UID
+
   @crlf "\r\n"
 
   @doc """
@@ -65,7 +67,7 @@ defmodule Kith.VCard.Serializer do
   end
 
   @doc false
-  def uid_for(%{dav: %{uid: uid}}, _version) when is_binary(uid), do: uid
+  def uid_for(%{dav: %{uid: uid}}, _version) when is_binary(uid), do: UID.urn(uid)
   def uid_for(_, _version), do: nil
 
   defp extras(%{dav: %{extras: extras}}) when is_list(extras), do: extras
@@ -135,10 +137,7 @@ defmodule Kith.VCard.Serializer do
   # RFC 2426 cannot represent a missing year. Use the reduced-date extension
   # understood by Thunderbird and DAVx5 instead of displaying a synthetic year.
   defp bday_line(%{birthdate: date, birthdate_year_unknown: true}, :v30) do
-    [
-      "BDAY:--" <> Calendar.strftime(date, "%m%d"),
-      "X-KITH-BDAY:--" <> Calendar.strftime(date, "%m%d")
-    ]
+    "BDAY:--" <> Calendar.strftime(date, "%m%d")
   end
 
   defp bday_line(%{birthdate: date}, :v40), do: "BDAY:" <> Calendar.strftime(date, "%Y%m%d")
@@ -249,7 +248,6 @@ defmodule Kith.VCard.Serializer do
         nil
 
       uid ->
-        uid = if String.contains?(uid, ":"), do: uid, else: "urn:uuid:" <> uid
         name = if version == :v30, do: "X-KITH-RELATED", else: "RELATED"
         identifier_line("#{name};TYPE=#{type}", uid, version)
     end

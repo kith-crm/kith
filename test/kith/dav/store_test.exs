@@ -80,14 +80,17 @@ defmodule Kith.DAV.StoreTest do
     assert Store.list_changed_since(c.account, Store.sync_state(c.account).token) == []
   end
 
-  test "get_related matches urn:uuid:X against stored X and X against stored urn:uuid:X", c do
+  test "get_related resolves equivalent UUID forms and rejects ambiguous duplicates", c do
     Store.ensure_rows(c.account)
     [x, y | _] = c.contacts
-    {:ok, _} = Store.put_identity(Repo.get!(ContactDav, x.id), %{uid: "X"})
-    assert Store.get_related(c.account, "urn:uuid:X").id == x.id
-    {:ok, _} = Store.put_identity(Repo.get!(ContactDav, y.id), %{uid: "urn:uuid:X"})
-    assert Store.get_related(c.account, "X").id == x.id
-    assert Store.get_related(c.account, "urn:uuid:X").id == y.id
+    x = Repo.get!(ContactDav, x.id)
+    assert Store.get_related(c.account, "URN:UUID:" <> String.upcase(x.uid)).id == x.contact_id
+    assert Store.get_related(c.account, x.uid).id == x.contact_id
+
+    assert {:error, _} =
+             Store.put_identity(Repo.get!(ContactDav, y.id), %{uid: "urn:uuid:" <> x.uid})
+
+    assert Store.get_related(c.account, "not-a-uuid") == nil
   end
 
   test "ensure_rows and floors are isolated and later touches overtake the floor", c do

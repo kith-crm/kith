@@ -107,8 +107,10 @@ unless Repo.get_by(Contact, account_id: admin.account_id, first_name: "Client", 
     {1, _} = Contacts.tag_contact(seed, tag)
   end
 
-  # Reuse the local image fixture so photo checks need no external service.
-  photo_data = File.read!(Path.expand("../support/fixtures/sample_avatar.jpg", __DIR__))
+  # Generate a real decodable image so photo checks need no external service.
+  photo_data =
+    Image.new!(640, 480, color: [30, 100, 180]) |> Image.write!(:memory, suffix: ".jpg")
+
   key = Kith.Storage.generate_key(admin.account_id, "photos", "client-seed.jpg")
   {:ok, _} = Kith.Storage.upload_binary(photo_data, key)
 

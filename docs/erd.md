@@ -1,6 +1,6 @@
 # Kith v1 — Entity Relationship Diagram
 
-> **47 application tables** (distinct migration-created tables; excludes Oban and Ecto metadata) | PostgreSQL 16+ | Elixir/Phoenix migrations
+> **48 application tables** (distinct migration-created tables; excludes Oban and Ecto metadata) | PostgreSQL 16+ | Elixir/Phoenix migrations
 >
 > Every table includes `id bigserial PRIMARY KEY`, `inserted_at timestamptz NOT NULL DEFAULT now()`,
 > `updated_at timestamptz NOT NULL DEFAULT now()` unless explicitly noted otherwise.
@@ -45,11 +45,19 @@ erDiagram
     contacts ||--o| contact_dav : "has DAV identity"
     accounts ||--o{ contact_dav : "owns"
     accounts ||--o| dav_sync_floors : "sync floor"
+    accounts ||--o{ avatar_assets : "owns avatar renditions"
+
+    avatar_assets {
+        text storage_key PK
+        bigint account_id FK
+        integer byte_size
+        string content_hash
+    }
 
     contact_dav {
         bigint contact_id PK,FK
         bigint account_id FK
-        text uid
+        uuid uid
         text resource_name
         bigint revision
         text_array extras
@@ -268,9 +276,14 @@ erDiagram
         bigint contact_id FK
         bigint account_id FK
         string file_name
-        string file_path
+        string storage_key
         integer file_size
         string content_type
+        text avatar_storage_key
+        integer avatar_file_size
+        string avatar_signature
+        string avatar_content_hash
+        map avatar_crop
     }
 
     life_events {
@@ -747,15 +760,21 @@ Reference data, seeded. Rows with `account_id = NULL` are global defaults.
 | `contact_id` | `bigint` | NO | — | `FK → contacts(id) ON DELETE CASCADE` |
 | `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
 | `file_name` | `varchar(255)` | NO | — | |
-| `file_path` | `varchar(255)` | NO | — | |
+| `storage_key` | `varchar(255)` | NO | — | Original image |
 | `file_size` | `integer` | NO | — | |
 | `content_type` | `varchar(255)` | NO | — | |
+| `avatar_storage_key` | `text` | YES | — | Processed square JPEG rendition |
+| `avatar_file_size` | `integer` | YES | — | Rendition byte size |
+| `avatar_signature` | `varchar(255)` | YES | — | Source, crop and processor version digest |
+| `avatar_content_hash` | `varchar(255)` | YES | — | Rendition digest for unchanged DAV PUT-back |
+| `avatar_crop` | `jsonb` | YES | — | Oriented source crop for reproducible rendition repair |
 | `inserted_at` | `timestamptz` | NO | `now()` | |
 | `updated_at` | `timestamptz` | NO | `now()` | |
 
 **Indexes:**
 
 - `photos_contact_id_index` — on `(contact_id)`
+- `photos_account_id_avatar_storage_key_index` — on `(account_id, avatar_storage_key)`
 
 ---
 
@@ -936,7 +955,7 @@ Protocol identity and revision state. No surrogate `id` or timestamps.
 |---|---|---|---|---|
 | `contact_id` | `bigint` | NO | — | `PRIMARY KEY`, `FK → contacts(id) ON DELETE CASCADE` |
 | `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
-| `uid` | `text` | NO | — | Account-unique, including hidden contacts |
+| `uid` | `uuid` | NO | — | Account-unique canonical UUID, including hidden contacts |
 | `resource_name` | `text` | NO | — | Account-unique |
 | `revision` | `bigint` | NO | `nextval('contact_dav_revision_seq')` | |
 | `extras` | `text[]` | NO | `'{}'` | Ungrouped unmapped vCard properties |
@@ -962,6 +981,26 @@ Hard-delete invalidation floor per account. No surrogate `id` or timestamps.
 **Indexes:**
 
 - `dav_sync_floors_pkey` — PRIMARY KEY on `(account_id)`
+
+---
+
+### 30. `avatar_assets`
+
+Rendition ownership and byte accounting independent of source-photo rows. A
+trashed merge loser may still reference a rendition after source deduplication.
+No surrogate `id` or timestamps.
+
+| Column | Postgres Type | Nullable | Default | Constraints |
+|---|---|---|---|---|
+| `storage_key` | `text` | NO | — | `PRIMARY KEY` |
+| `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
+| `byte_size` | `integer` | NO | — | Encoded rendition size |
+| `content_hash` | `varchar(255)` | NO | — | SHA-256 digest of encoded bytes |
+
+**Indexes:**
+
+- `avatar_assets_pkey` — PRIMARY KEY on `(storage_key)`
+- `avatar_assets_account_id_index` — on `(account_id)`
 
 ---
 

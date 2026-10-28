@@ -37,12 +37,17 @@ defmodule Kith.VCard.Parser do
 
     cond do
       String.valid?(data) ->
-        {:ok, data |> split_vcards() |> Enum.map(&parse_vcard/1) |> Enum.reject(&is_nil/1)}
+        {:ok,
+         data |> split_vcards() |> Enum.map(&parse_vcard(&1, opts)) |> Enum.reject(&is_nil/1)}
 
       # Imports (`per_card: true`): a card that is not UTF-8 becomes an
       # `{:error, reason}` entry, so one bad card does not reject the whole file
       Keyword.get(opts, :per_card, false) ->
-        {:ok, data |> split_vcards() |> Enum.map(&parse_valid_vcard/1) |> Enum.reject(&is_nil/1)}
+        {:ok,
+         data
+         |> split_vcards()
+         |> Enum.map(&parse_valid_vcard(&1, opts))
+         |> Enum.reject(&is_nil/1)}
 
       true ->
         {:error, "Invalid UTF-8"}
@@ -74,11 +79,11 @@ defmodule Kith.VCard.Parser do
 
   # ── Single vCard Parsing ───────────────────────────────────────────────
 
-  defp parse_valid_vcard(block) do
-    if String.valid?(block), do: parse_vcard(block), else: {:error, "Invalid UTF-8"}
+  defp parse_valid_vcard(block, opts) do
+    if String.valid?(block), do: parse_vcard(block, opts), else: {:error, "Invalid UTF-8"}
   end
 
-  defp parse_vcard(block) do
+  defp parse_vcard(block, opts) do
     lines = String.split(block, "\n", trim: true)
 
     base = %{
@@ -89,6 +94,8 @@ defmodule Kith.VCard.Parser do
       nickname: nil,
       birthdate: nil,
       birthdate_year_unknown: false,
+      standard_bday?: false,
+      legacy_bday: nil,
       company: nil,
       occupation: nil,
       description: nil,
@@ -106,7 +113,10 @@ defmodule Kith.VCard.Parser do
       photo: nil
     }
 
-    lines |> Enum.reduce(base, &parse_line/2) |> in_document_order()
+    lines
+    |> Enum.reduce(base, &parse_line/2)
+    |> in_document_order()
+    |> resolve_birthdate(opts)
   end
 
   # Prepend while parsing and restore document order once to keep parsing linear.
@@ -140,17 +150,13 @@ defmodule Kith.VCard.Parser do
   defp apply_property(acc, "NICKNAME", _params, value),
     do: %{acc | nickname: unescape(value)}
 
-  defp apply_property(acc, name, params, value) when name in ["BDAY", "X-KITH-BDAY"] do
-    date = parse_date(value)
-
-    year_unknown =
-      date != nil and (String.starts_with?(value, "--") or apple_omit_year?(params, date))
-
-    # Apple's omitted-year syntax uses a placeholder year, not a real birth year.
-    date = if year_unknown, do: Date.new!(2000, date.month, date.day), else: date
-
-    %{acc | birthdate: date, birthdate_year_unknown: year_unknown}
+  defp apply_property(acc, "BDAY", params, value) do
+    {date, year_unknown} = birthdate(value, params)
+    %{acc | birthdate: date, birthdate_year_unknown: year_unknown, standard_bday?: true}
   end
+
+  defp apply_property(acc, "X-KITH-BDAY", params, value),
+    do: %{acc | legacy_bday: birthdate(value, params)}
 
   defp apply_property(acc, "ORG", _params, value) do
     company = value |> split_components(";") |> List.first() |> unescape()
@@ -365,6 +371,28 @@ defmodule Kith.VCard.Parser do
 
   defp sanitize_photo_type(ct) when ct in @allowed_photo_types, do: ct
   defp sanitize_photo_type(_), do: "image/jpeg"
+
+  # BDAY wins even when a legacy extension follows it. DAV ignores the
+  # extension entirely, so removing BDAY cannot resurrect a cached birthday.
+  defp resolve_birthdate(acc, opts) do
+    acc =
+      case {acc.standard_bday?, Keyword.get(opts, :legacy_bday, true), acc.legacy_bday} do
+        {false, true, {date, unknown}} ->
+          %{acc | birthdate: date, birthdate_year_unknown: unknown}
+
+        _ ->
+          acc
+      end
+
+    Map.drop(acc, [:standard_bday?, :legacy_bday])
+  end
+
+  defp birthdate(value, params) do
+    date = parse_date(value)
+    unknown = date != nil and (String.starts_with?(value, "--") or apple_omit_year?(params, date))
+    date = if unknown, do: Date.new!(2000, date.month, date.day), else: date
+    {date, unknown}
+  end
 
   # ── Helpers ────────────────────────────────────────────────────────────
 

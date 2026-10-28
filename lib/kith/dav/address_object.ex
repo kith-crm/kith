@@ -2,6 +2,7 @@ defmodule Kith.DAV.AddressObject do
   @moduledoc "Atomic writes to account-scoped address objects."
   import Plug.Conn
   alias Kith.{Contacts, Repo}
+  alias Kith.Contacts.Avatar
   alias Kith.DAV.{Store, VCardAdapter, XMLBuilder}
   alias Kith.VCard.{Extras, Parser}
 
@@ -141,7 +142,7 @@ defmodule Kith.DAV.AddressObject do
   end
 
   defp transaction(aid, fun) do
-    Store.transaction(aid, fun)
+    Avatar.with_cleanup(fn -> Store.transaction(aid, fun) end)
   rescue
     e in Postgrex.Error ->
       if e.postgres[:code] == :deadlock_detected,

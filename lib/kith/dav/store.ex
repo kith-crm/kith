@@ -3,14 +3,14 @@ defmodule Kith.DAV.Store do
   import Ecto.Query
   alias Kith.{Contacts, Repo}
   alias Kith.Contacts.Contact
-  alias Kith.DAV.ContactDav
+  alias Kith.DAV.{ContactDav, UID}
 
   def ensure_rows(account_id) do
     transact(account_id, fn ->
       Repo.query!(
         """
         INSERT INTO contact_dav (contact_id, account_id, uid, resource_name)
-        SELECT id, account_id, uid, uid || '.vcf'
+        SELECT id, account_id, uid::uuid, uid || '.vcf'
         FROM (
           SELECT c.id, c.account_id, gen_random_uuid()::text AS uid
           FROM contacts c LEFT JOIN contact_dav d ON d.contact_id = c.id
@@ -84,19 +84,14 @@ defmodule Kith.DAV.Store do
     |> Map.new(&{&1.dav.resource_name, &1})
   end
 
-  def get_by_uid(account_id, uid),
-    do: base(account_id) |> where([c, d], d.uid == ^uid) |> Repo.one()
-
-  def get_related(account_id, value) do
-    stripped = String.replace_prefix(value, "urn:uuid:", "")
-    variants = Enum.uniq([value, stripped, "urn:uuid:" <> stripped])
-
-    base(account_id)
-    |> where([c, d], d.uid in ^variants)
-    |> order_by([c, d], fragment("array_position(?::text[], ?)", ^variants, d.uid))
-    |> limit(1)
-    |> Repo.one()
+  def get_by_uid(account_id, uid) do
+    case UID.normalize(uid) do
+      {:ok, canonical} -> base(account_id) |> where([c, d], d.uid == ^canonical) |> Repo.one()
+      _ -> nil
+    end
   end
+
+  def get_related(account_id, value), do: get_by_uid(account_id, value)
 
   @doc "Re-reads a contact under a row lock; call inside a transaction."
   def lock(%Contact{id: id, account_id: account_id}) do

@@ -130,14 +130,36 @@ test.describe("02 auth: authentication", () => {
   });
 
   test("A5: 11th failure for one IP+email is 429 with Retry-After; others unaffected", async ({ request }) => {
-    const victim = `${runPrefix()}-ratelimit-${Date.now()}@carddav.test`;
-    for (let i = 1; i <= 10; i++) {
-      const res = await raw(request, "PROPFIND", "/dav/", basic(victim, `wrong-${i}`), PROPFIND_ETAG);
-      expect(res.status, `attempt ${i}`).toBe(401);
+    test.setTimeout(60_000);
+    let locked: DavResponse | undefined;
+    // Hammer uses fixed Unix-epoch buckets, not a rolling five-minute window.
+    // Restart once only when server Date headers prove this sequence crossed
+    // a bucket boundary; a wrong result within one bucket must still fail.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const probe = await raw(request, "PROPFIND", "/dav/", {}, PROPFIND_ETAG);
+      expect401(probe);
+      const start = Date.parse(probe.headers.date);
+      expect(Number.isFinite(start), "server Date header").toBe(true);
+      const bucket = Math.floor(start / 300_000);
+      const victim = `${runPrefix()}-ratelimit-${Date.now()}-${attempt}@carddav.test`;
+      for (let i = 1; i <= 10; i++) {
+        const res = await raw(request, "PROPFIND", "/dav/", basic(victim, `wrong-${i}`), PROPFIND_ETAG);
+        expect(res.status, `attempt ${i}: ${res.body}`).toBe(401);
+      }
+      const candidate = await raw(request, "PROPFIND", "/dav/", basic(victim, "wrong-11"), PROPFIND_ETAG);
+      const end = Date.parse(candidate.headers.date);
+      expect(Number.isFinite(end), "server Date header").toBe(true);
+      if (Math.floor(end / 300_000) !== bucket) {
+        console.info(`A5 crossed fixed bucket: ${probe.headers.date} → ${candidate.headers.date}`);
+        expect(attempt, "rate-limit sequence repeatedly crossed a bucket boundary").toBe(0);
+        continue;
+      }
+      expect(candidate.status, candidate.body).toBe(429);
+      locked = candidate;
+      break;
     }
-    const locked = await raw(request, "PROPFIND", "/dav/", basic(victim, "wrong-11"), PROPFIND_ETAG);
-    expect(locked.status).toBe(429);
-    const retryAfter = Number(locked.headers["retry-after"]);
+    expect(locked, "a complete rate-limit sequence within one fixed bucket").toBeTruthy();
+    const retryAfter = Number(locked!.headers["retry-after"]);
     expect(Number.isInteger(retryAfter)).toBe(true);
     expect(retryAfter).toBeGreaterThan(0);
     expect(retryAfter).toBeLessThanOrEqual(300);

@@ -71,6 +71,24 @@ defmodule KithWeb.API.ContactControllerTest do
   # ── Create contact (TEST-10-03) ─────────────────────────────────────
 
   describe "POST /api/contacts (TEST-10-03)" do
+    test "rejects raw avatar storage keys instead of bypassing image processing", %{conn: conn} do
+      user = user_fixture()
+
+      response =
+        conn
+        |> authed_conn(user)
+        |> post(~p"/api/contacts", %{
+          "contact" => %{
+            "first_name" => "Unprocessed",
+            "avatar" => "#{user.account_id}/photos/original.jpg"
+          }
+        })
+        |> json_response(422)
+
+      assert Map.has_key?(response["errors"], "avatar")
+      assert Kith.Contacts.count_contacts(user.account_id) == 0
+    end
+
     test "creates a contact with valid body → 201 with Location header", %{conn: conn} do
       user = user_fixture()
       conn = authed_conn(conn, user)
@@ -125,6 +143,25 @@ defmodule KithWeb.API.ContactControllerTest do
   # ── Update contact (TEST-10-04) ─────────────────────────────────────
 
   describe "PATCH /api/contacts/:id (TEST-10-04)" do
+    test "rejects raw avatar assignment without changing the contact or DAV token", %{conn: conn} do
+      user = user_fixture()
+      contact = contact_fixture(user.account_id)
+      Kith.DAV.Store.ensure_rows(user.account_id)
+      before = Kith.DAV.Store.sync_state(user.account_id)
+
+      response =
+        conn
+        |> authed_conn(user)
+        |> patch(~p"/api/contacts/#{contact.id}", %{
+          "contact" => %{"avatar" => "#{user.account_id}/photos/original.jpg"}
+        })
+        |> json_response(422)
+
+      assert Map.has_key?(response["errors"], "avatar")
+      assert Kith.Repo.get!(Kith.Contacts.Contact, contact.id).avatar == nil
+      assert Kith.DAV.Store.sync_state(user.account_id) == before
+    end
+
     test "updates a contact field → 200", %{conn: conn} do
       user = user_fixture()
       conn = authed_conn(conn, user)

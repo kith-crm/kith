@@ -25,7 +25,7 @@ defmodule Kith.VCard.SerializerTest do
     end
   end
 
-  test "stored scheme-looking CR identities escape content-line controls" do
+  test "invalid stored identities cannot inject content lines" do
     for version <- [:v30, :v40], separator <- ["\r", "\r\n"] do
       identity = "urn:test:hello" <> separator <> "FN:Injected"
       target = %{display_name: "Target", dav: %{uid: identity}}
@@ -45,8 +45,8 @@ defmodule Kith.VCard.SerializerTest do
       refute Regex.match?(~r/(?<!\r)\n|\r(?!\n)/, card)
       assert length(Regex.scan(~r/^FN:/m, card)) == 1
       {:ok, [parsed]} = Kith.VCard.Parser.parse(card)
-      assert parsed.uid == "urn:test:hello\nFN:Injected"
-      assert hd(parsed.related).value == parsed.uid
+      assert parsed.uid == nil
+      assert parsed.related == []
     end
   end
 
@@ -571,7 +571,7 @@ defmodule Kith.VCard.SerializerTest do
               display_name: "Bob",
               first_name: "Bob",
               last_name: nil,
-              dav: %{uid: "stored-bob"}
+              dav: %{uid: "b2000000-0000-4000-8000-000000000002"}
             },
             relationship_type: %{name: "Friend"}
           }
@@ -579,7 +579,12 @@ defmodule Kith.VCard.SerializerTest do
       }
 
       vcard = Serializer.serialize(contact, version: :v40)
-      assert String.contains?(vcard, "RELATED;TYPE=friend:urn:uuid:stored-bob\r\n")
+
+      assert String.contains?(
+               vcard,
+               "RELATED;TYPE=friend:urn:uuid:b2000000-0000-4000-8000-000000000002\r\n"
+             )
+
       refute String.contains?(vcard, "X-ABRELATEDNAMES")
     end
 

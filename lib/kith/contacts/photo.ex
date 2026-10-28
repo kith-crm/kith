@@ -9,6 +9,11 @@ defmodule Kith.Contacts.Photo do
     field :content_type, :string
     field :is_private, :boolean, default: false
     field :content_hash, :string
+    field :avatar_storage_key, :string
+    field :avatar_file_size, :integer
+    field :avatar_signature, :string
+    field :avatar_crop, :map
+    field :avatar_content_hash, :string
 
     belongs_to :contact, Kith.Contacts.Contact
     belongs_to :account, Kith.Accounts.Account

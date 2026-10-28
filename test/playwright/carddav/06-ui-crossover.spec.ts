@@ -1,3 +1,4 @@
+import { wireUid } from "../helpers/dav";
 import { test, expect, type APIRequestContext, type Page, type Locator } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { dav, discoverHref, USERS, hrefs, responseFor, propText, vcard, runPrefix, assertWellFormedXml } from "../helpers/dav";
@@ -460,7 +461,7 @@ test("U6: merging A into B in the UI removes A's href and gives B the merged fie
   const afterB = await getOk(request, hrefB);
   expect(afterB.etag).not.toBe(beforeB.etag);
   await expectSyncChanged(request, state.token, hrefB, afterB.etag);
-  expect(afterB.body).toContain(`UID:${uuidB}\r\n`);
+  expect(afterB.body).toContain(`UID:${wireUid(uuidB)}\r\n`);
   const tels = lines(afterB.body, "TEL");
   const emails = lines(afterB.body, "EMAIL");
   expect(tels, afterB.body).toHaveLength(1);
@@ -527,7 +528,7 @@ test("U8: DELETE over DAV puts the contact in the UI Trash; a UI restore brings 
   await restoreFromTrash(name);
 
   const card = await getOk(request, href);
-  expect(card.body).toContain(`UID:${uuid}\r\n`);
+  expect(card.body).toContain(`UID:${wireUid(uuid)}\r\n`);
   expect(card.body).toContain(`FN:${name}\r\n`);
   await expectSyncChanged(request, state.token, href, card.etag);
 });
@@ -541,7 +542,7 @@ test("U9: a contact PUT to <uuid>.vcf and edited in the UI is served at that hre
 
   let card = await expectWriteVisible(request, href, () => editContact(id, { first_name: name, last_name: "UiEdited" }));
   expect(card.body).toContain(`FN:${name} UiEdited\r\n`);
-  expect(card.body).toContain(`UID:${uuid}\r\n`);
+  expect(card.body).toContain(`UID:${wireUid(uuid)}\r\n`);
 
   card = await expectWriteVisible(request, href, () => addContactField(id, /email/i, `${P}-u9@example.test`));
   expect(lines(card.body, "EMAIL").join("\n")).toContain(`${P}-u9@example.test`);

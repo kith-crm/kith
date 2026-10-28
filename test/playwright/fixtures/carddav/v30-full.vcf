@@ -1,6 +1,6 @@
 BEGIN:VCARD
 VERSION:3.0
-UID:{{PREFIX}}-v30
+UID:{{UID}}
 N:Lovelace;{{PREFIX}} Ada;Augusta;Countess;PhD
 FN:{{PREFIX}} Countess Ada Augusta Lovelace PhD
 NICKNAME:Enchantress

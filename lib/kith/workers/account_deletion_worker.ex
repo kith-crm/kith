@@ -14,6 +14,7 @@ defmodule Kith.Workers.AccountDeletionWorker do
 
   import Ecto.Query
   alias Kith.Repo
+  alias Kith.Storage.AccountCleanup
 
   require Logger
 
@@ -59,34 +60,6 @@ defmodule Kith.Workers.AccountDeletionWorker do
     end
   end
 
-  defp delete_stored_files(account_id) do
-    # Delete photo files
-    from(p in Kith.Contacts.Photo,
-      join: c in Kith.Contacts.Contact,
-      on: p.contact_id == c.id,
-      where: c.account_id == ^account_id,
-      select: p.storage_key
-    )
-    |> Repo.all()
-    |> Enum.each(&safe_delete_file/1)
-
-    # Delete document files
-    from(d in Kith.Contacts.Document,
-      join: c in Kith.Contacts.Contact,
-      on: d.contact_id == c.id,
-      where: c.account_id == ^account_id,
-      select: d.storage_key
-    )
-    |> Repo.all()
-    |> Enum.each(&safe_delete_file/1)
-  end
-
-  defp safe_delete_file(nil), do: :ok
-
-  defp safe_delete_file(key) do
-    case Kith.Storage.delete(key) do
-      :ok -> :ok
-      {:error, reason} -> Logger.warning("Failed to delete file #{key}: #{inspect(reason)}")
-    end
-  end
+  defp delete_stored_files(account_id),
+    do: AccountCleanup.wipe_for_account(account_id)
 end

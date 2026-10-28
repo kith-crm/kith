@@ -1,4 +1,5 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
+import { testUid } from "../helpers/dav";
 import { randomUUID } from "node:crypto";
 import {
   dav, discoverHref,
@@ -152,7 +153,7 @@ const clientHref = `${BOOK}${P}-r2.vcf`;
 let defaultHref = "";
 
 test.beforeAll(async ({ request }) => {
-  await put(request, clientHref, vcard({ fn: `${P} Rtwo Client`, uid: `${P}-r2-uid` }));
+  await put(request, clientHref, vcard({ fn: `${P} Rtwo Client`, uid: testUid(`${P}-r2-uid`) }));
   await put(request, uuidHref, vcard({ fn: `${P} Ruuid Apple`, uid: uuidName.replace(".vcf", "") }));
   defaultHref = (await apiContact(request, `${P}`, "Rdefault")).href;
 });

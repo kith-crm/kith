@@ -18,6 +18,14 @@ and resource name, sequence revision and unmapped extras. Generate UUID identiti
 and matching `<uuid>.vcf` names for local contacts; reserve identities while
 contacts are archived or trashed. PUT to hidden identities returns 409.
 
+DAV-supplied identities are restricted to UUIDs. Normalize bare UUIDs and UUID
+URNs, including case variants, to a PostgreSQL UUID before storage, uniqueness
+checks and relationship lookup. Generated cards emit UUID URNs consistently.
+Resource names remain independent of identities. This deliberately rejects
+non-UUID identities allowed by the general vCard specification. The migration
+audits incompatible or colliding legacy identities rather than replacing them,
+and advances revisions to invalidate representations changed by serialization.
+
 Use application-level `Kith.DAV.Store.touch/2` calls instead of triggers.
 `Store.ensure_rows/1` lazily supplies missing identities before DAV reads.
 Account advisory transaction locks serialize revision allocation and commits

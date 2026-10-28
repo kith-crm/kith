@@ -195,7 +195,9 @@ It supports PROPFIND, GET, PUT, DELETE and the `addressbook-query`,
 `addressbook-multiget` and `sync-collection` reports, with vCard 3.0 and 4.0.
 
 Account-scoped UUID identities are independent of contact IDs. Quoted revision
-ETags support conditional writes. Trashed and archived contacts are reported
+ETags support conditional writes. DAV accepts only UUID identities, normalizing
+bare UUIDs and UUID URNs to one canonical value; other supplied identity formats
+are rejected. Resource filenames remain independent of identities. Trashed and archived contacts are reported
 removed; restoration reuses the href. PUT to a hidden contact returns 409,
 and duplicate UIDs remain reserved even while hidden. Sync tokens use
 `https://kith.app/ns/sync/<revision>`; malformed, future or below-floor tokens
@@ -210,6 +212,14 @@ an empty string to satisfy the database NOT NULL constraint. Yearless birthdays
 emit `BDAY:--MMDD` in both versions: standard 4.0 syntax and an explicit 3.0
 interoperability extension that avoids Thunderbird displaying a synthetic year.
 Strict legacy 3.0 consumers may reject it; Apple sentinel input remains accepted.
+Generated cards do not duplicate BDAY in a custom extension. Legacy birthday
+extensions remain an import fallback; standard BDAY is authoritative for DAV updates.
+
+The web avatar picker supports square cropping and repositioning. Server-side
+processing creates a static JPEG of at most 512 × 512 pixels and 512 KiB while
+retaining the source photo. Imports use a centered square crop. Only the selected
+avatar is exposed through the standard PHOTO property; timeline photos are
+excluded. PHOTO query filters inspect the same representation returned by DAV.
 
 Unmapped ungrouped properties survive verbatim. Grouped properties and parameters
 on mapped properties are lost; retained extras are not converted between versions.
