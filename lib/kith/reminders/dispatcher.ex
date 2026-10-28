@@ -152,8 +152,6 @@ defmodule Kith.Reminders.Dispatcher do
   defp send_on_day(reminder, today, now), do: send_notice(reminder, "on_day", 0, today, now)
 
   defp send_notice(reminder, kind, days_before, today, now) do
-    deceased? = reminder.contact.deceased
-
     attrs = %{
       reminder_id: reminder.id,
       account_id: reminder.account_id,
@@ -161,13 +159,13 @@ defmodule Kith.Reminders.Dispatcher do
       occurrence_date: reminder.next_reminder_date,
       kind: kind,
       days_before: days_before,
-      status: if(deceased?, do: "dismissed", else: "pending"),
+      status: "pending",
       scheduled_for: now,
       fired_at: now
     }
 
     Repo.transaction(fn ->
-      handle_insert_result(insert_instance(attrs), reminder, today, kind, deceased?)
+      handle_insert_result(insert_instance(attrs), reminder, today, kind)
     end)
   end
 
@@ -188,8 +186,7 @@ defmodule Kith.Reminders.Dispatcher do
          {:ok, %ReminderInstance{id: nil}},
          reminder,
          today,
-         "on_day",
-         _deceased?
+         "on_day"
        ) do
     move_past_sent(reminder, today)
     :already_sent
@@ -199,18 +196,21 @@ defmodule Kith.Reminders.Dispatcher do
          {:ok, %ReminderInstance{id: nil}},
          _reminder,
          _today,
-         _kind,
-         _deceased?
+         _kind
        ),
        do: :already_sent
 
-  defp handle_insert_result({:ok, instance}, reminder, today, kind, deceased?) do
+  defp handle_insert_result({:ok, instance}, reminder, today, kind) do
     if kind == "on_day", do: advance(reminder, today)
-    unless deceased?, do: Oban.insert!(ReminderEmailWorker.new(%{instance_id: instance.id}))
+
+    Oban.insert!(
+      ReminderEmailWorker.new(%{instance_id: instance.id, snooze_count: instance.snooze_count})
+    )
+
     :sent
   end
 
-  defp handle_insert_result({:error, changeset}, _reminder, _today, _kind, _deceased?),
+  defp handle_insert_result({:error, changeset}, _reminder, _today, _kind),
     do: Repo.rollback(changeset)
 
   # Advance past *today*, not just past the fired occurrence: after missed
@@ -234,7 +234,7 @@ defmodule Kith.Reminders.Dispatcher do
       join: r in assoc(i, :reminder),
       join: c in assoc(i, :contact),
       where: i.status == "snoozed" and i.snoozed_until <= ^now,
-      where: r.active == true and is_nil(c.deleted_at),
+      where: r.active == true and is_nil(c.deleted_at) and c.is_archived == false,
       select: i.id
     )
     |> Repo.all()
@@ -246,11 +246,20 @@ defmodule Kith.Reminders.Dispatcher do
   # Conditional update so two overlapping runs can't both re-send.
   defp wake(instance_id, now) do
     Repo.transaction(fn ->
-      {count, _} =
-        from(i in ReminderInstance, where: i.id == ^instance_id and i.status == "snoozed")
+      {_count, snooze_counts} =
+        from(i in ReminderInstance,
+          where: i.id == ^instance_id and i.status == "snoozed" and i.snoozed_until <= ^now,
+          select: i.snooze_count
+        )
         |> Repo.update_all(set: [status: "pending", fired_at: now, snoozed_until: nil])
 
-      if count == 1, do: Oban.insert!(ReminderEmailWorker.new(%{instance_id: instance_id}))
+      # Return the count from the winning update: a late job from an earlier
+      # snooze must never send once this instance becomes pending again.
+      for snooze_count <- snooze_counts do
+        Oban.insert!(
+          ReminderEmailWorker.new(%{instance_id: instance_id, snooze_count: snooze_count})
+        )
+      end
     end)
   end
 

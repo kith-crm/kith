@@ -493,14 +493,21 @@ defmodule Kith.RemindersTest do
       assert length(results) == 1
     end
 
-    test "excludes deceased contacts", %{account_id: account_id, user: user} do
+    test "includes deceased contacts and counts their reminders", %{
+      account_id: account_id,
+      user: user
+    } do
       deceased_contact = contact_fixture(account_id, %{deceased: true})
 
-      reminder_fixture(account_id, deceased_contact.id, user.id, %{
-        next_reminder_date: Date.add(Date.utc_today(), 7)
-      })
+      reminder =
+        reminder_fixture(account_id, deceased_contact.id, user.id, %{
+          title: "Visit grave",
+          next_reminder_date: Date.add(Date.utc_today(), 7)
+        })
 
-      assert Reminders.upcoming(account_id, 30) == []
+      assert [upcoming] = Reminders.upcoming(account_id, 30)
+      assert upcoming.id == reminder.id
+      assert Reminders.upcoming_count(account_id) == 1
     end
 
     test "excludes soft-deleted contacts", %{account_id: account_id, user: user} do

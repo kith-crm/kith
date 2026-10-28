@@ -4,7 +4,11 @@ defmodule Kith.Workers.ReminderEmailWorker do
 
   Inserted by `Kith.Reminders.Dispatcher` in the same transaction that records
   the instance, so a retry only resends the email and never creates another
-  instance. After the final attempt fails, the instance is marked `failed`;
+  instance. Each attempt rechecks that the instance is pending, the reminder
+  is active, and the contact is neither deleted nor archived. Its `snooze_count`
+  must also match the queued job, so a delayed earlier notice cannot send when
+  a later snooze wakes the same instance. A deceased contact remains eligible.
+  After the final attempt fails, the instance is marked `failed`;
   a stay-in-touch reminder is re-armed one interval from today in the same
   transaction, since with no pending instance nothing else would re-arm it.
   """
@@ -18,14 +22,43 @@ defmodule Kith.Workers.ReminderEmailWorker do
   alias Kith.{Repo, TimeHelper}
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"instance_id" => id}, attempt: attempt, max_attempts: max}) do
+  def perform(%Oban.Job{args: %{"instance_id" => id} = args, attempt: attempt, max_attempts: max}) do
+    # Jobs queued before snooze generations were added belong to the initial
+    # notice. They remain deliverable until the instance is snoozed once.
+    snooze_count = Map.get(args, "snooze_count", 0)
+
     case ReminderInstance |> Repo.get(id) |> Repo.preload(reminder: :contact) do
-      nil -> {:discard, "instance deleted"}
-      instance -> deliver(instance, attempt >= max)
+      nil ->
+        {:discard, "instance deleted"}
+
+      %ReminderInstance{status: status} when status != "pending" ->
+        {:discard, "instance no longer pending"}
+
+      %{reminder: nil} ->
+        {:discard, "reminder deleted"}
+
+      %{reminder: %{active: false}} ->
+        {:discard, "reminder inactive"}
+
+      %{reminder: %{contact: nil}} ->
+        {:discard, "contact deleted"}
+
+      %{reminder: %{contact: %{deleted_at: deleted_at}}} when not is_nil(deleted_at) ->
+        {:discard, "contact soft-deleted"}
+
+      %{reminder: %{contact: %{is_archived: true}}} ->
+        {:discard, "contact archived"}
+
+      instance ->
+        deliver(instance, snooze_count, attempt >= max)
     end
   end
 
-  defp deliver(instance, last_attempt?) do
+  defp deliver(%ReminderInstance{snooze_count: current}, snooze_count, _last_attempt?)
+       when current != snooze_count,
+       do: {:discard, "notice superseded by snooze"}
+
+  defp deliver(instance, _snooze_count, last_attempt?) do
     reminder = instance.reminder
 
     case Repo.get(User, reminder.creator_id) do

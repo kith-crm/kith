@@ -39,7 +39,8 @@ defmodule Kith.Reminders.DispatcherTest do
   end
 
   defp instances(reminder),
-    do: Repo.all(from i in ReminderInstance, where: i.reminder_id == ^reminder.id, order_by: i.id)
+    do:
+      Repo.all(from(i in ReminderInstance, where: i.reminder_id == ^reminder.id, order_by: i.id))
 
   defp set_next!(reminder, date) do
     Repo.update_all(from(r in Reminder, where: r.id == ^reminder.id),
@@ -54,7 +55,7 @@ defmodule Kith.Reminders.DispatcherTest do
 
     assert [%{kind: "on_day", days_before: 0, status: "pending"} = i] = instances(r)
     assert i.occurrence_date == ctx.today
-    assert_enqueued(worker: ReminderEmailWorker, args: %{instance_id: i.id})
+    assert_enqueued(worker: ReminderEmailWorker, args: %{instance_id: i.id, snooze_count: 0})
     assert Repo.get!(Reminder, r.id).next_reminder_date == Date.add(ctx.today, 7)
 
     assert :ok = Dispatcher.run(DateTime.add(ctx.after_send, 3600))
@@ -145,7 +146,7 @@ defmodule Kith.Reminders.DispatcherTest do
     assert Repo.get!(Reminder, r.id).next_reminder_date == Date.shift(ctx.today, month: 1)
   end
 
-  test "a deceased contact's birthday is dismissed, not emailed, and advanced", ctx do
+  test "a deceased contact's birthday is sent and advanced", ctx do
     {:ok, contact} = Kith.Contacts.update_contact(ctx.contact, %{deceased: true})
 
     r =
@@ -158,8 +159,8 @@ defmodule Kith.Reminders.DispatcherTest do
 
     assert :ok = Dispatcher.run(ctx.after_send)
 
-    assert [%{status: "dismissed"}] = instances(r)
-    refute_enqueued(worker: ReminderEmailWorker)
+    assert [%{status: "pending"} = instance] = instances(r)
+    assert_enqueued(worker: ReminderEmailWorker, args: %{instance_id: instance.id})
     assert Repo.get!(Reminder, r.id).next_reminder_date == Date.shift(ctx.today, year: 1)
   end
 
@@ -184,14 +185,74 @@ defmodule Kith.Reminders.DispatcherTest do
     [i] = instances(r)
 
     Repo.update_all(from(x in ReminderInstance, where: x.id == ^i.id),
-      set: [status: "snoozed", snoozed_until: DateTime.add(ctx.after_send, 60)]
+      set: [status: "snoozed", snoozed_until: DateTime.add(ctx.after_send, 60), snooze_count: 1]
     )
 
     Repo.delete_all(Oban.Job)
     assert :ok = Dispatcher.run(DateTime.add(ctx.after_send, 120))
 
     assert %{status: "pending", snoozed_until: nil} = Repo.get!(ReminderInstance, i.id)
-    assert_enqueued(worker: ReminderEmailWorker, args: %{instance_id: i.id})
+    assert_enqueued(worker: ReminderEmailWorker, args: %{instance_id: i.id, snooze_count: 1})
+  end
+
+  describe "ended snooze eligibility" do
+    for blocked <- [:archived, :deleted, :inactive] do
+      test "an ended snooze stays snoozed while #{blocked}", ctx do
+        r = create!(ctx, %{type: "one_time", anchor_date: ctx.today})
+        :ok = Dispatcher.run(ctx.after_send)
+        [instance] = instances(r)
+        ended = DateTime.add(ctx.after_send, 60)
+
+        instance
+        |> Ecto.Changeset.change(status: "snoozed", snoozed_until: ended)
+        |> Repo.update!()
+
+        block_snooze(ctx.contact, r, unquote(blocked))
+        Repo.delete_all(Oban.Job)
+
+        for seconds <- [120, 3600] do
+          assert :ok = Dispatcher.run(DateTime.add(ctx.after_send, seconds))
+          assert %{status: "snoozed", snoozed_until: ^ended} = Repo.reload!(instance)
+          refute_enqueued(worker: ReminderEmailWorker)
+        end
+      end
+    end
+
+    test "a deceased contact's snooze wakes once and is eligible again after unarchiving", ctx do
+      {:ok, contact} = Kith.Contacts.update_contact(ctx.contact, %{deceased: true})
+      r = create!(ctx, %{type: "one_time", anchor_date: ctx.today, title: "Visit grave"})
+      :ok = Dispatcher.run(ctx.after_send)
+      [instance] = instances(r)
+
+      instance
+      |> Ecto.Changeset.change(
+        status: "snoozed",
+        snoozed_until: DateTime.add(ctx.after_send, 60)
+      )
+      |> Repo.update!()
+
+      {:ok, contact} = Kith.Contacts.archive_contact(contact)
+      Repo.delete_all(Oban.Job)
+      :ok = Dispatcher.run(DateTime.add(ctx.after_send, 120))
+      assert Repo.reload!(instance).status == "snoozed"
+      refute_enqueued(worker: ReminderEmailWorker)
+
+      {:ok, _} = Kith.Contacts.unarchive_contact(contact)
+      :ok = Dispatcher.run(DateTime.add(ctx.after_send, 3600))
+      :ok = Dispatcher.run(DateTime.add(ctx.after_send, 7200))
+
+      assert %{status: "pending", snoozed_until: nil} = Repo.reload!(instance)
+      assert [%{args: %{"instance_id" => id}}] = all_enqueued(worker: ReminderEmailWorker)
+      assert id == instance.id
+    end
+
+    defp block_snooze(contact, _reminder, :archived), do: Kith.Contacts.archive_contact(contact)
+
+    defp block_snooze(contact, _reminder, :deleted),
+      do: Kith.Contacts.soft_delete_contact(contact)
+
+    defp block_snooze(_contact, reminder, :inactive),
+      do: Reminders.update_reminder(reminder, %{active: false})
   end
 
   test "uses the account's local date in a timezone ahead of UTC", ctx do

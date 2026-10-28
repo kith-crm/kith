@@ -304,7 +304,7 @@ defmodule Kith.Reminders do
 
   @doc """
   Returns reminders due within `window_days` for an account.
-  Excludes deceased, deleted, and archived contacts.
+  Excludes deleted and archived contacts. Deceased status does not suppress reminders.
   """
   def upcoming(account_id, window_days \\ 30) do
     today = Date.utc_today()
@@ -318,7 +318,6 @@ defmodule Kith.Reminders do
       join: c in assoc(r, :contact),
       where: is_nil(c.deleted_at),
       where: c.is_archived == false,
-      where: c.deceased == false,
       order_by: [asc: r.next_reminder_date],
       preload: [:contact]
     )
@@ -339,8 +338,7 @@ defmodule Kith.Reminders do
       where: r.next_reminder_date <= ^cutoff,
       join: c in assoc(r, :contact),
       where: is_nil(c.deleted_at),
-      where: c.is_archived == false,
-      where: c.deceased == false
+      where: c.is_archived == false
     )
     |> Repo.aggregate(:count)
   end

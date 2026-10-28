@@ -119,8 +119,9 @@ Only `active` reminders whose contact is not soft-deleted and not archived:
    sorted descending (e.g. 30, 7), the rule's window is `[next − days_before, next − next_smaller_days_before)`, where
    the smallest rule's window ends at `next`. The notice is due if `local_today` is inside the window and no instance
    exists for (`next_reminder_date`, `days_before`). Example: a reminder created 5 days out gets only the 7-day notice.
-3. **Ended snoozes:** instances with `status = "snoozed"` and `snoozed_until <= now`. These are sent again, set back to
-   `pending`, and get a new `fired_at`.
+3. **Ended snoozes:** instances with `status = "snoozed"` and `snoozed_until <= now`, whose reminder remains active
+   and whose contact is neither deleted nor archived. These are sent again, set back to `pending`, and get a new
+   `fired_at`. While archived, an instance stays snoozed and becomes eligible again after unarchiving.
 
 ### Sending one notice (a single transaction)
 
@@ -129,13 +130,23 @@ Only `active` reminders whose contact is not soft-deleted and not archived:
 2. If it's an **on-day** notice on a `recurring` or `birthday` reminder, set `next_reminder_date =
    Occurrences.advance_after(schedule, occurrence_date)`. `one_time` keeps its date as history. `stay_in_touch` waits
    for a resolve or dismiss.
-3. **Deceased contact:** insert the instance as `dismissed`, send nothing, and still advance (step 2).
-4. Otherwise, insert a `ReminderEmailWorker` job (`Oban.insert` inside the same transaction) addressed to the
+3. Insert a `ReminderEmailWorker` job (`Oban.insert` inside the same transaction) addressed to the
    reminder's **creator**. If the creator no longer exists, skip the email and log it.
 
 ### `ReminderEmailWorker`
 
-It sends one email for one instance. On failure it retries with Oban's backoff, using the same `max_attempts` as today's
+Deceased status alone never suppresses a reminder: reminders may commemorate a contact or prompt a grave visit.
+Such reminders remain visible in upcoming lists and counts, dispatch, and wake after snoozing normally.
+
+It sends one email for one instance. Before every attempt, it reloads the current state and discards the job if the
+instance is no longer pending, the reminder is inactive, or the contact is deleted or archived.
+
+Each queued email carries the instance's `snooze_count`; a count that no longer matches is discarded even if the
+instance has returned to pending. This prevents a delayed pre-snooze job from sending alongside the wake-up job.
+Jobs created before this field was added are treated as count zero.
+
+On failure it retries
+with Oban's backoff, using the same `max_attempts` as today's
 `ReminderNotificationWorker`. A retry never
 touches instances. After the final attempt, the instance becomes `failed`. The email subject and text keep today's
 wording (`email_subject/5`). It writes the `reminder_fired` audit log entry, as today.
@@ -206,7 +217,9 @@ Run on the pinned toolchain (mise: Elixir 1.19.5 / OTP 28.5), with the test data
   - advance-notice windows (5 days out → only the 7-day notice)
   - an ended snooze re-sends and goes back to `pending`
   - stay-in-touch waits while an instance is pending, and resolve/dismiss advance it from today
-  - deceased → dismissed and advanced
+  - deceased → visible, emailed, and advanced normally
+  - eligibility changes after enqueue and between email retries suppress delivery
+  - archived snoozes remain snoozed until the contact is unarchived
   - soft-deleted or archived contacts skipped
   - **recurring and birthday reminders advance after firing** (regression for §1.1)
   - the email goes only to the creator; a missing creator is skipped and logged
