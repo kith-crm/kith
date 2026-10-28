@@ -43,14 +43,14 @@ defmodule KithWeb.ContactLive.ClusterMergeS3Test do
 
   test "an avatar's URL is unchanged after toggling a member off and on", ctx do
     e =
-      ContactsFixtures.contact_fixture(ctx.account_id, %{
+      contact_with_avatar(ctx.account_id, %{
         first_name: "Mona",
         last_name: "Vale",
         avatar: "avatars/a.png"
       })
 
     f =
-      ContactsFixtures.contact_fixture(ctx.account_id, %{
+      contact_with_avatar(ctx.account_id, %{
         first_name: "Mona",
         last_name: "Vale",
         avatar: "avatars/b.png"
@@ -82,5 +82,13 @@ defmodule KithWeb.ContactLive.ClusterMergeS3Test do
     live |> element("input[phx-click='toggle-member'][phx-value-id='#{f.id}']") |> render_click()
     live |> element("input[phx-click='toggle-member'][phx-value-id='#{f.id}']") |> render_click()
     assert_same_url_modulo_hour_rollover(before, src.())
+  end
+
+  # These rendering fixtures intentionally model legacy keys without invoking
+  # the upload pipeline; public writes must go through avatar processing.
+  defp contact_with_avatar(account_id, attrs) do
+    {avatar, attrs} = Map.pop(attrs, :avatar)
+    contact = ContactsFixtures.contact_fixture(account_id, attrs)
+    contact |> Ecto.Changeset.change(avatar: avatar) |> Kith.Repo.update!()
   end
 end

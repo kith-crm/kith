@@ -13,7 +13,7 @@ defmodule Kith.Storage.AccountCleanup do
   iterate their `storage_key` values.
   """
 
-  alias Kith.Contacts.{Contact, Document, Photo}
+  alias Kith.Contacts.{AvatarAsset, Contact, Document, Photo}
   alias Kith.Imports.Import
   alias Kith.{Repo, Storage}
 
@@ -41,9 +41,18 @@ defmodule Kith.Storage.AccountCleanup do
         join: c in Contact,
         on: p.contact_id == c.id,
         where: c.account_id == ^account_id,
-        select: p.storage_key
+        select: [p.storage_key, p.avatar_storage_key]
       )
     )
+    |> List.flatten()
+    |> Kernel.++(
+      Repo.all(from c in Contact, where: c.account_id == ^account_id, select: c.avatar)
+    )
+    |> Kernel.++(
+      Repo.all(from a in AvatarAsset, where: a.account_id == ^account_id, select: a.storage_key)
+    )
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
   end
 
   defp document_keys(account_id) do
@@ -77,6 +86,11 @@ defmodule Kith.Storage.AccountCleanup do
   defp safe_delete(key) do
     case Storage.delete(key) do
       :ok ->
+        Repo.delete_all(from a in AvatarAsset, where: a.storage_key == ^key)
+        :ok
+
+      {:error, reason} when reason in [:not_found, :enoent] ->
+        Repo.delete_all(from a in AvatarAsset, where: a.storage_key == ^key)
         :ok
 
       {:error, reason} ->

@@ -68,3 +68,6 @@ erl_crash.dump
 
 
 .worktrees/
+
+# Isolated CardDAV live harness state, storage and artifacts.
+/.carddav-task10/

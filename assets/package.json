@@ -2,8 +2,9 @@
   "name": "kith-assets",
   "private": true,
   "dependencies": {
-    "trix": "^2.1.0",
     "@alpinejs/csp": "^3.14.0",
-    "tailwindcss-animate": "^1.0.7"
+    "cropperjs": "^1.7.0",
+    "tailwindcss-animate": "^1.0.7",
+    "trix": "^2.1.0"
   }
 }

@@ -23,7 +23,8 @@ defmodule Kith.DAV.CardDAVPlug do
 
   alias Kith.Contacts
   alias Kith.Contacts.Contact
-  alias Kith.DAV.{Auth, VCardAdapter, XMLBuilder, XMLParser}
+  alias Kith.DAV.{AddressObject, AddressQuery, Auth, Store, VCardAdapter, XMLBuilder, XMLParser}
+  alias Kith.Repo
 
   @behaviour Plug
 
@@ -36,6 +37,7 @@ defmodule Kith.DAV.CardDAVPlug do
     getetag: "<d:getetag/>",
     getcontenttype: "<d:getcontenttype/>",
     getlastmodified: "<d:getlastmodified/>",
+    address_data: "<card:address-data/>",
     addressbook_home_set: "<card:addressbook-home-set/>",
     supported_address_data: "<card:supported-address-data/>",
     supported_report_set: "<d:supported-report-set/>",
@@ -48,6 +50,9 @@ defmodule Kith.DAV.CardDAVPlug do
     supported_collation_set: "<card:supported-collation-set/>"
   }
 
+  @max_resource_size 1_048_576
+  @drain_limit 16 * 1_048_576
+
   @impl Plug
   def init(opts), do: opts
 
@@ -57,38 +62,60 @@ defmodule Kith.DAV.CardDAVPlug do
     if conn.halted, do: conn, else: route(conn)
   end
 
-  # ── Routing ────────────────────────────────────────────────────────────
-
   defp route(conn) do
     path = conn.request_path |> String.trim_trailing("/")
     dispatch(conn, conn.method, path_segments(path))
   end
 
   defp dispatch(conn, "OPTIONS", _), do: handle_options(conn)
-  defp dispatch(conn, "PROPFIND", ["dav"]), do: handle_root_propfind(conn)
-  defp dispatch(conn, "PROPFIND", ["dav", "principals"]), do: handle_principal_propfind(conn)
-  defp dispatch(conn, "PROPFIND", ["dav", "addressbooks"]), do: handle_home_propfind(conn)
+  defp dispatch(conn, "PROPFIND", ["dav"]), do: propfind(conn, &handle_root_propfind/2)
+
+  defp dispatch(conn, "PROPFIND", ["dav", "principals"]),
+    do: propfind(conn, &handle_principal_propfind/2)
+
+  defp dispatch(conn, "PROPFIND", ["dav", "addressbooks"]),
+    do: propfind(conn, &handle_home_propfind/2)
 
   defp dispatch(conn, "PROPFIND", ["dav", "addressbooks", "default"]),
-    do: handle_addressbook_propfind(conn)
+    do: propfind(conn, &handle_addressbook_propfind/2)
 
   defp dispatch(conn, "PROPFIND", ["dav", "addressbooks", "default", _uid]),
-    do: handle_contact_propfind(conn)
+    do: propfind(conn, &handle_contact_propfind/2)
 
   defp dispatch(conn, "REPORT", ["dav", "addressbooks", "default"]), do: handle_report(conn)
 
-  defp dispatch(conn, "GET", ["dav", "addressbooks", "default", uid]),
-    do: handle_get_contact(conn, uid)
+  # RFC 6352 §8.7: addressbook-multiget may target an address object
+  defp dispatch(conn, "REPORT", ["dav", "addressbooks", "default", raw]),
+    do: handle_member_report(conn, raw)
 
-  defp dispatch(conn, "PUT", ["dav", "addressbooks", "default", uid]),
-    do: handle_put_contact(conn, uid)
+  # Existing resources that support no report: 403 supported-report
+  defp dispatch(conn, "REPORT", segments)
+       when segments in [["dav"], ["dav", "principals"], ["dav", "addressbooks"]],
+       do: with_body(conn, &unsupported_report/2)
 
-  defp dispatch(conn, "DELETE", ["dav", "addressbooks", "default", uid]),
-    do: handle_delete_contact(conn, uid)
+  defp dispatch(conn, "GET", ["dav", "addressbooks", "default", raw]),
+    do: handle_get_contact(conn, raw)
+
+  defp dispatch(conn, "PUT", ["dav", "addressbooks", "default", raw]),
+    do: authorize(conn, :update, fn -> handle_put_contact(conn, raw) end)
+
+  defp dispatch(conn, "DELETE", ["dav", "addressbooks", "default", raw]),
+    do: authorize(conn, :delete, fn -> handle_delete_contact(conn, raw) end)
 
   # RFC 4918 §8.2: PROPPATCH stub — live properties cannot be modified
   defp dispatch(conn, "PROPPATCH", ["dav", "addressbooks", "default"]),
     do: handle_proppatch(conn)
+
+  # RFC 9110 §15.5.6: a collection exists but cannot be deleted or replaced
+  # over DAV, so DELETE / PUT there is a 405 with Allow, not a 404.
+  defp dispatch(conn, method, ["dav", "addressbooks", "default"])
+       when method in ["DELETE", "PUT"],
+       do: method_not_allowed(conn, "OPTIONS, PROPFIND, PROPPATCH, REPORT")
+
+  defp dispatch(conn, method, segments)
+       when method in ["DELETE", "PUT"] and
+              segments in [["dav"], ["dav", "principals"], ["dav", "addressbooks"]],
+       do: method_not_allowed(conn, "OPTIONS, PROPFIND")
 
   # Redirect .well-known/carddav appearing as sub-path (Thunderbird fallback per RFC 6764)
   defp dispatch(conn, _, segments) do
@@ -101,27 +128,77 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
+  defp method_not_allowed(conn, allow) do
+    conn
+    |> put_resp_header("allow", allow)
+    |> send_resp(405, "Method Not Allowed")
+  end
+
   defp path_segments(path) do
     path |> String.split("/") |> Enum.reject(&(&1 == ""))
   end
 
   defp account_id(conn), do: conn.assigns.current_scope.account.id
 
-  # ── OPTIONS ────────────────────────────────────────────────────────────
+  defp authorize(conn, action, fun) do
+    if Kith.Policy.can?(conn.assigns.current_scope.user, action, :contact),
+      do: fun.(),
+      else: send_resp(conn, 403, "Forbidden")
+  end
 
   defp handle_options(conn) do
     conn
     |> put_resp_header("dav", "1, 2, 3, addressbook")
-    |> put_resp_header("allow", "OPTIONS, GET, PUT, DELETE, PROPFIND, REPORT")
+    |> put_resp_header("allow", "OPTIONS, GET, PUT, DELETE, PROPFIND, PROPPATCH, REPORT")
     |> send_resp(200, "")
   end
 
-  # ── Root PROPFIND ──────────────────────────────────────────────────────
+  # Parses the PROPFIND body and hands the request type to `handler`.
+  # A body that is not well-formed XML is a 400 (RFC 4918 §8.7).
+  defp propfind(conn, handler) do
+    with_body(conn, fn conn, body ->
+      case XMLParser.parse_propfind(body) do
+        {:ok, request_type} -> handler.(conn, request_type)
+        {:error, _} -> send_resp(conn, 400, "Bad Request")
+      end
+    end)
+  end
 
-  defp handle_root_propfind(conn) do
-    {:ok, body, conn} = read_body(conn)
-    {:ok, request_type} = XMLParser.parse_propfind(body)
+  # Reads a request body (XML or vCard) of at most the advertised max-resource-size;
+  # anything larger is a 413, never a MatchError.
+  # Bandit ignores `:length` for a chunked body and returns it whole, so the
+  # size of what was read is checked too.
+  defp with_body(conn, fun) do
+    case read_body(conn, length: @max_resource_size) do
+      {:ok, body, conn} when byte_size(body) <= @max_resource_size ->
+        fun.(conn, body)
 
+      {:ok, _too_big, conn} ->
+        send_resp(conn, 413, "Request Entity Too Large")
+
+      {:more, _partial, conn} ->
+        conn |> drain_body(@drain_limit) |> send_resp(413, "Request Entity Too Large")
+
+      {:error, _} ->
+        send_resp(conn, 400, "Bad Request")
+    end
+  end
+
+  # Reads and discards the rest of an oversized body (bounded) before the 413,
+  # so the connection is clean and a client still uploading reads the answer
+  # instead of a reset (RFC 9112 §9.6). Past the bound the connection is closed.
+  defp drain_body(conn, budget) when budget <= 0,
+    do: put_resp_header(conn, "connection", "close")
+
+  defp drain_body(conn, budget) do
+    case read_body(conn, length: @max_resource_size) do
+      {:ok, _rest, conn} -> conn
+      {:more, chunk, conn} -> drain_body(conn, budget - byte_size(chunk))
+      {:error, _} -> put_resp_header(conn, "connection", "close")
+    end
+  end
+
+  defp handle_root_propfind(conn, request_type) do
     props = [
       current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
       resourcetype: XMLBuilder.resourcetype("<d:collection/>")
@@ -132,12 +209,7 @@ defmodule Kith.DAV.CardDAVPlug do
     send_dav_response(conn, 207, xml)
   end
 
-  # ── Principal PROPFIND ─────────────────────────────────────────────────
-
-  defp handle_principal_propfind(conn) do
-    {:ok, body, conn} = read_body(conn)
-    {:ok, request_type} = XMLParser.parse_propfind(body)
-
+  defp handle_principal_propfind(conn, request_type) do
     props = [
       current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
       principal_url: XMLBuilder.principal_url("/dav/principals/"),
@@ -151,12 +223,7 @@ defmodule Kith.DAV.CardDAVPlug do
     send_dav_response(conn, 207, xml)
   end
 
-  # ── Home set PROPFIND ──────────────────────────────────────────────────
-
-  defp handle_home_propfind(conn) do
-    {:ok, body, conn} = read_body(conn)
-    {:ok, request_type} = XMLParser.parse_propfind(body)
-
+  defp handle_home_propfind(conn, request_type) do
     home_props = [
       current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
       resourcetype: XMLBuilder.resourcetype("<d:collection/>"),
@@ -170,23 +237,27 @@ defmodule Kith.DAV.CardDAVPlug do
       supported_address_data: XMLBuilder.supported_address_data()
     ]
 
-    xml =
-      XMLBuilder.multistatus([
-        XMLBuilder.response("/dav/addressbooks/", build_propstats(request_type, home_props)),
-        XMLBuilder.response(
-          "/dav/addressbooks/default/",
-          build_propstats(request_type, default_props)
-        )
-      ])
+    home = XMLBuilder.response("/dav/addressbooks/", build_propstats(request_type, home_props))
 
-    send_dav_response(conn, 207, xml)
+    # RFC 4918 §9.1: Depth 0 is the home set alone. A missing Depth header keeps
+    # the historical behaviour of listing the child address book.
+    responses =
+      if get_req_header(conn, "depth") == ["0"] do
+        [home]
+      else
+        [
+          home,
+          XMLBuilder.response(
+            "/dav/addressbooks/default/",
+            build_propstats(request_type, default_props)
+          )
+        ]
+      end
+
+    send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
   end
 
-  # ── Address book PROPFIND ──────────────────────────────────────────────
-
-  defp handle_addressbook_propfind(conn) do
-    {:ok, body, conn} = read_body(conn)
-    {:ok, request_type} = XMLParser.parse_propfind(body)
+  defp handle_addressbook_propfind(conn, request_type) do
     depth = get_req_header(conn, "depth") |> List.first("0")
 
     # RFC 4918 §9.1.4: Reject Depth: infinity
@@ -205,8 +276,8 @@ defmodule Kith.DAV.CardDAVPlug do
   end
 
   defp handle_addressbook_propfind_depth(conn, request_type, depth) do
+    responses = [addressbook_response(conn, request_type)]
     contacts = list_contacts_for_propfind(conn)
-    responses = [addressbook_response(conn, request_type, contacts)]
 
     responses =
       if depth != "0" do
@@ -222,331 +293,301 @@ defmodule Kith.DAV.CardDAVPlug do
     etag = compute_etag(contact)
 
     props = [
+      current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
       getetag: XMLBuilder.getetag(etag),
       getcontenttype: XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
       getlastmodified: XMLBuilder.getlastmodified(contact.updated_at)
     ]
 
     XMLBuilder.response(
-      "/dav/addressbooks/default/kith-contact-#{contact.id}.vcf",
+      Store.href(contact),
       build_propstats(request_type, props)
     )
   end
 
-  # ── Contact PROPFIND ───────────────────────────────────────────────────
-
-  defp handle_contact_propfind(conn) do
-    {:ok, body, conn} = read_body(conn)
-    {:ok, request_type} = XMLParser.parse_propfind(body)
+  defp handle_contact_propfind(conn, request_type) do
     uid = List.last(path_segments(conn.request_path))
 
-    case find_contact_by_uid(conn, uid) do
+    case find_contact_by_name(conn, uid) do
       nil ->
         send_resp(conn, 404, "Not Found")
 
       contact ->
-        etag = compute_etag(contact)
-
-        props = [
-          current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
-          getetag: XMLBuilder.getetag(etag),
-          getcontenttype: XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
-          getlastmodified: XMLBuilder.getlastmodified(contact.updated_at)
-        ]
-
-        propstats = build_propstats(request_type, props)
-        xml = XMLBuilder.multistatus([XMLBuilder.response(conn.request_path, propstats)])
+        xml = XMLBuilder.multistatus([contact_member_response(contact, request_type)])
         send_dav_response(conn, 207, xml)
     end
   end
 
-  # ── REPORT ─────────────────────────────────────────────────────────────
+  defp handle_report(conn), do: with_body(conn, &report/2)
 
-  defp handle_report(conn) do
-    {:ok, body, conn} = read_body(conn)
-
-    cond do
-      String.contains?(body, "addressbook-multiget") ->
-        handle_multiget_report(conn, body)
-
-      String.contains?(body, "sync-collection") ->
-        handle_sync_collection_report(conn, body)
-
-      String.contains?(body, "addressbook-query") ->
-        handle_addressbook_query_report(conn, body)
-
-      true ->
-        send_resp(conn, 400, "Unsupported REPORT type")
+  defp report(conn, body) do
+    case XMLParser.parse_report(body) do
+      {:ok, {:multiget, request}} -> handle_multiget_report(conn, request)
+      {:ok, {:sync_collection, request}} -> handle_sync_collection_report(conn, request)
+      {:ok, {:query, request}} -> handle_addressbook_query_report(conn, request)
+      {:ok, _} -> send_precondition_failed(conn, "<d:supported-report/>")
+      {:error, _} -> send_resp(conn, 400, "Bad Request")
     end
   end
 
-  defp handle_multiget_report(conn, body) do
-    {:ok, hrefs} = XMLParser.parse_addressbook_multiget(body)
-    version = XMLParser.parse_requested_vcard_version(body)
+  defp handle_member_report(conn, name) do
+    case find_contact_by_name(conn, name) do
+      nil ->
+        send_resp(conn, 404, "Not Found")
+
+      _contact ->
+        with_body(conn, &member_report/2)
+    end
+  end
+
+  defp member_report(conn, body) do
+    case XMLParser.parse_report(body) do
+      {:ok, {:multiget, request}} -> handle_multiget_report(conn, request)
+      {:ok, _other} -> send_precondition_failed(conn, "<d:supported-report/>")
+      {:error, _} -> send_resp(conn, 400, "Bad Request")
+    end
+  end
+
+  defp unsupported_report(conn, body) do
+    case XMLParser.parse_report(body) do
+      {:ok, _report} -> send_precondition_failed(conn, "<d:supported-report/>")
+      {:error, _} -> send_resp(conn, 400, "Bad Request")
+    end
+  end
+
+  defp send_precondition_failed(conn, condition) do
+    conn
+    |> put_resp_content_type("application/xml")
+    |> send_resp(403, XMLBuilder.error_body(condition, "Precondition failed"))
+  end
+
+  defp with_limit(conn, request, handler) do
+    case Integer.parse(request.limit) do
+      {limit, ""} when limit > 0 -> handler.(conn, %{request | limit: limit})
+      _ -> send_resp(conn, 400, "Bad Request")
+    end
+  end
+
+  defp handle_multiget_report(conn, request) do
+    Store.ensure_rows(account_id(conn))
+    names = Enum.map(request.hrefs, &resource_name/1)
+
+    contacts =
+      Store.get_by_resource_names(account_id(conn), Enum.reject(names, &is_nil/1))
+      |> Map.values()
+      |> Repo.preload(Contacts.dav_preloads())
+      |> Map.new(&{&1.dav.resource_name, &1})
 
     responses =
-      Enum.map(hrefs, fn href ->
-        uid = href |> String.split("/") |> List.last()
-
-        case find_contact_by_uid(conn, uid) do
-          nil ->
-            XMLBuilder.response(href, [
-              XMLBuilder.propstat([], "HTTP/1.1 404 Not Found")
-            ])
-
-          contact ->
-            vcard = VCardAdapter.contact_to_vcard(contact, version: version)
-            etag = compute_etag(contact)
-
-            XMLBuilder.response(href, [
-              XMLBuilder.propstat([
-                XMLBuilder.getetag(etag),
-                XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
-                XMLBuilder.address_data(vcard)
-              ])
-            ])
-        end
+      Enum.zip(request.hrefs, names)
+      |> Enum.map(fn {href, name} ->
+        multiget_response(Map.get(contacts, name), href, request)
       end)
 
     send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
   end
 
-  defp handle_sync_collection_report(conn, body) do
-    {:ok, client_token} = XMLParser.parse_sync_collection(body)
-    version = XMLParser.parse_requested_vcard_version(body)
-    aid = account_id(conn)
+  defp handle_sync_collection_report(conn, %{limit: limit} = request) when is_binary(limit),
+    do: with_limit(conn, request, &handle_sync_collection_report/2)
 
-    {active_responses, deleted_responses} =
-      case parse_sync_token(client_token) do
-        nil ->
-          # Initial sync: return all contacts, no deletions
-          contacts = list_contacts_for_dav(conn)
-          {Enum.map(contacts, &sync_contact_response(&1, version)), []}
+  defp handle_sync_collection_report(conn, request) do
+    Store.ensure_rows(account_id(conn))
+    state = Store.sync_state(account_id(conn))
 
-        since ->
-          # Incremental sync: only changes since token timestamp
-          modified = Contacts.list_contacts_modified_since(aid, since)
-          deleted = Contacts.list_contacts_deleted_since(aid, since)
+    case parse_sync_token(request.token) do
+      :invalid ->
+        send_precondition_failed(conn, "<d:valid-sync-token/>")
 
-          active = Enum.map(modified, &sync_contact_response(&1, version))
+      since when is_integer(since) and (since < state.floor or since > state.token) ->
+        send_precondition_failed(conn, "<d:valid-sync-token/>")
 
-          removed =
-            Enum.map(deleted, fn contact ->
-              XMLBuilder.response_deleted(
-                "/dav/addressbooks/default/kith-contact-#{contact.id}.vcf"
+      since ->
+        send_sync_changes(conn, request, state, since)
+    end
+  end
+
+  defp send_sync_changes(conn, request, state, since) do
+    contacts = Store.list_changed_since(account_id(conn), since || 0)
+    contacts = if is_nil(since), do: Enum.filter(contacts, &visible?/1), else: contacts
+
+    if request.limit && length(contacts) > request.limit do
+      send_dav_response(
+        conn,
+        507,
+        XMLBuilder.error_body("<d:number-of-matches-within-limits/>", "Too many changes")
+      )
+    else
+      responses = Enum.map(contacts, &member_report_response(&1, request))
+
+      send_dav_response(
+        conn,
+        207,
+        XMLBuilder.multistatus(responses, sync_token: "https://kith.app/ns/sync/#{state.token}")
+      )
+    end
+  end
+
+  defp multiget_response(nil, href, _request), do: XMLBuilder.response_deleted(href)
+  defp multiget_response(contact, _href, request), do: member_report_response(contact, request)
+
+  defp member_report_response(contact, request) do
+    if visible?(contact),
+      do: report_contact_response(contact, request),
+      else: XMLBuilder.response_deleted(Store.href(contact))
+  end
+
+  defp report_contact_response(contact, request, prepared_card \\ nil) do
+    props = [
+      getetag: XMLBuilder.getetag(compute_etag(contact)),
+      getcontenttype: XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
+      getlastmodified: XMLBuilder.getlastmodified(contact.updated_at)
+    ]
+
+    props =
+      if request.props == :allprop or
+           (is_tuple(request.props) and :address_data in elem(request.props, 1)) do
+        props ++
+          [
+            address_data:
+              XMLBuilder.address_data(
+                prepared_card ||
+                  VCardAdapter.contact_to_vcard(contact,
+                    version: request.version,
+                    preloaded: true
+                  )
               )
-            end)
-
-          {active, removed}
+          ]
+      else
+        props
       end
 
-    token = generate_sync_token()
-    xml = XMLBuilder.multistatus(active_responses ++ deleted_responses, sync_token: token)
-    send_dav_response(conn, 207, xml)
+    props =
+      if request.props == :propname,
+        do: props ++ [address_data: empty_prop(:address_data)],
+        else: props
+
+    XMLBuilder.response(Store.href(contact), build_propstats(request.props, props))
   end
 
-  defp sync_contact_response(contact, version) do
-    etag = compute_etag(contact)
-    vcard = VCardAdapter.contact_to_vcard(contact, version: version, include_photo: false)
+  defp handle_addressbook_query_report(conn, %{limit: limit} = request) when is_binary(limit),
+    do: with_limit(conn, request, &handle_addressbook_query_report/2)
 
-    XMLBuilder.response(
-      "/dav/addressbooks/default/kith-contact-#{contact.id}.vcf",
-      [
-        XMLBuilder.propstat([
-          XMLBuilder.getetag(etag),
-          XMLBuilder.address_data(vcard)
-        ])
-      ]
-    )
+  defp handle_addressbook_query_report(conn, request) do
+    Store.ensure_rows(account_id(conn))
+
+    case AddressQuery.validate(request.filter) do
+      {:error, condition} ->
+        name =
+          if condition == :supported_collation,
+            do: "supported-collation",
+            else: "supported-filter"
+
+        send_precondition_failed(conn, "<card:#{name}/>")
+
+      :ok ->
+        include_photo = Enum.any?(request.filter.prop_filters, &(&1.name == "PHOTO"))
+
+        matching =
+          list_contacts_for_dav(conn)
+          |> Enum.flat_map(&query_match(&1, request, include_photo))
+
+        responses =
+          matching
+          |> Enum.take(request.limit || length(matching))
+          |> Enum.map(fn {contact, card} -> report_contact_response(contact, request, card) end)
+
+        responses =
+          if request.limit && length(matching) > request.limit do
+            responses ++
+              [
+                "<d:response><d:href>/dav/addressbooks/default/</d:href><d:status>HTTP/1.1 507 Insufficient Storage</d:status><d:error><d:number-of-matches-within-limits/></d:error></d:response>"
+              ]
+          else
+            responses
+          end
+
+        send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
+    end
   end
 
-  # ── addressbook-query REPORT (RFC 6352 §8.6) ──────────────────────────
+  defp query_match(contact, request, include_photo) do
+    card =
+      VCardAdapter.contact_to_vcard(contact,
+        version: request.version,
+        preloaded: true,
+        include_photo: include_photo
+      )
 
-  defp handle_addressbook_query_report(conn, body) do
-    {:ok, filters} = XMLParser.parse_addressbook_query(body)
-    version = XMLParser.parse_requested_vcard_version(body)
-    contacts = list_contacts_for_dav(conn)
-
-    matching =
-      Enum.filter(contacts, fn contact ->
-        Enum.all?(filters, &contact_matches_filter?(contact, &1))
-      end)
-
-    responses = Enum.map(matching, &sync_contact_response(&1, version))
-    send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
+    if AddressQuery.matches?(card, request.filter),
+      do: [{contact, if(include_photo, do: card)}],
+      else: []
   end
 
-  defp contact_matches_filter?(contact, %{property: prop, match: text, match_type: type}) do
-    value = contact_property_value(contact, prop)
-    match_text(value, text, type)
+  defp none_match?(header, etag) do
+    header == "*" or
+      Enum.any?(
+        String.split(header, ~r/\s*,\s*/),
+        &(String.replace_prefix(&1, "W/", "") == "\"#{etag}\"")
+      )
   end
-
-  defp contact_property_value(contact, "FN") do
-    [contact.first_name, contact.last_name]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.join(" ")
-  end
-
-  defp contact_property_value(contact, "N") do
-    [contact.last_name, contact.first_name] |> Enum.reject(&is_nil/1) |> Enum.join(";")
-  end
-
-  defp contact_property_value(contact, prop) when prop in ["EMAIL", "TEL"] do
-    protocol = if prop == "EMAIL", do: "mailto", else: "tel"
-
-    contact.contact_fields
-    |> Enum.filter(fn cf ->
-      cf.contact_field_type.protocol &&
-        String.starts_with?(cf.contact_field_type.protocol, protocol)
-    end)
-    |> Enum.map_join("\n", & &1.value)
-  end
-
-  defp contact_property_value(_contact, _prop), do: ""
-
-  defp match_text(value, text, "contains"),
-    do: String.contains?(String.downcase(value), String.downcase(text))
-
-  defp match_text(value, text, "starts-with"),
-    do: String.starts_with?(String.downcase(value), String.downcase(text))
-
-  defp match_text(value, text, "ends-with"),
-    do: String.ends_with?(String.downcase(value), String.downcase(text))
-
-  defp match_text(value, text, "equals"), do: String.downcase(value) == String.downcase(text)
-
-  defp match_text(value, text, _),
-    do: String.contains?(String.downcase(value), String.downcase(text))
-
-  # ── GET ────────────────────────────────────────────────────────────────
 
   defp handle_get_contact(conn, uid) do
     version = requested_vcard_version(conn)
 
-    case find_contact_by_uid(conn, uid) do
+    case find_contact_by_name(conn, uid) do
       nil ->
         send_resp(conn, 404, "Not Found")
 
       contact ->
-        vcard = VCardAdapter.contact_to_vcard(contact, version: version)
+        vcard = VCardAdapter.contact_to_vcard(contact, version: version, preloaded: true)
         etag = compute_etag(contact)
         content_type = vcard_content_type(version)
 
-        conn
-        |> put_resp_content_type(content_type, "utf-8")
-        |> put_resp_header("etag", "\"#{etag}\"")
-        |> send_resp(200, vcard)
-    end
-  end
-
-  # ── PUT ────────────────────────────────────────────────────────────────
-
-  defp handle_put_contact(conn, uid) do
-    # RFC 6352 §5.1: Content-Type MUST be text/vcard
-    content_type = get_req_header(conn, "content-type") |> List.first("")
-
-    if String.starts_with?(content_type, "text/vcard") do
-      {:ok, body, conn} = read_body(conn)
-      do_put_contact(conn, uid, body)
-    else
-      send_resp(conn, 415, "Unsupported Media Type")
-    end
-  end
-
-  defp do_put_contact(conn, uid, body) do
-    aid = account_id(conn)
-
-    case VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: aid) do
-      :error ->
-        xml = XMLBuilder.precondition_error("valid-address-data", "Invalid vCard format")
-        send_dav_response(conn, 422, xml)
-
-      {scalar_attrs, nested_data} ->
-        existing = find_contact_by_uid(conn, uid)
-        put_contact(conn, aid, existing, scalar_attrs, nested_data)
-    end
-  end
-
-  defp put_contact(conn, aid, nil, scalar_attrs, nested_data) do
-    with {:ok, contact} <- Contacts.create_contact(aid, scalar_attrs),
-         {:ok, _} <- Contacts.replace_contact_children(contact, aid, nested_data) do
-      contact = Contacts.touch_contact!(contact)
-      etag = compute_etag(contact)
-
-      conn
-      |> put_resp_header("etag", "\"#{etag}\"")
-      |> send_resp(201, "")
-    else
-      {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
-    end
-  end
-
-  defp put_contact(conn, aid, contact, scalar_attrs, nested_data) do
-    # RFC 7232 §3.2: If-None-Match: * means "only if resource does NOT exist"
-    if get_req_header(conn, "if-none-match") == ["*"] do
-      send_resp(conn, 412, "Precondition Failed")
-    else
-      put_update_contact(conn, aid, contact, scalar_attrs, nested_data)
-    end
-  end
-
-  defp put_update_contact(conn, aid, contact, scalar_attrs, nested_data) do
-    case check_if_match(conn, contact) do
-      :precondition_failed ->
-        send_resp(conn, 412, "Precondition Failed")
-
-      :ok ->
-        with {:ok, updated} <- Contacts.update_contact(contact, scalar_attrs),
-             {:ok, _} <- Contacts.replace_contact_children(updated, aid, nested_data) do
-          updated = Contacts.touch_contact!(updated)
-          etag = compute_etag(updated)
-
+        conn =
           conn
+          |> put_resp_content_type(content_type, "utf-8")
           |> put_resp_header("etag", "\"#{etag}\"")
-          |> send_resp(204, "")
-        else
-          {:error, _} -> send_resp(conn, 422, "Invalid vCard data")
-        end
+
+        if Enum.any?(get_req_header(conn, "if-none-match"), &none_match?(&1, etag)),
+          do: send_resp(conn, 304, ""),
+          else: send_resp(conn, 200, vcard)
     end
   end
 
-  # ── DELETE ─────────────────────────────────────────────────────────────
+  defp handle_put_contact(conn, raw) do
+    media_type =
+      get_req_header(conn, "content-type")
+      |> List.first("")
+      |> String.split(";")
+      |> hd()
+      |> String.trim()
+      |> String.downcase()
 
-  defp handle_delete_contact(conn, uid) do
-    case find_contact_by_uid(conn, uid) do
-      nil ->
-        send_resp(conn, 404, "Not Found")
+    cond do
+      not AddressObject.valid_name?(raw) ->
+        send_resp(conn, 400, "Bad Request")
 
-      contact ->
-        # RFC 7232 §3.1: If-Match — only delete if ETag matches
-        case check_if_match(conn, contact) do
-          :precondition_failed ->
-            send_resp(conn, 412, "Precondition Failed")
+      media_type not in ["text/vcard", "text/x-vcard"] ->
+        send_resp(conn, 415, "Unsupported Media Type")
 
-          :ok ->
-            Contacts.soft_delete_contact(contact)
-            send_resp(conn, 204, "")
-        end
+      true ->
+        with_body(conn, &AddressObject.put(&1, raw, &2))
     end
   end
 
-  # ── Helpers ────────────────────────────────────────────────────────────
+  defp handle_delete_contact(conn, raw), do: AddressObject.delete(conn, raw)
 
-  # ── PROPPATCH stub (RFC 4918 §8.2) ────────────────────────────────────
+  defp handle_proppatch(conn),
+    do: authorize(conn, :update, fn -> with_body(conn, &proppatch/2) end)
 
-  defp handle_proppatch(conn) do
-    {:ok, body, conn} = read_body(conn)
-
-    case XMLParser.parse_propfind(body) do
-      {:ok, {:prop, props}} ->
+  defp proppatch(conn, body) do
+    case XMLParser.parse_proppatch(body) do
+      {:ok, props} ->
         # All properties are live (server-managed) — cannot be modified (RFC 4918 §9.2)
-        prop_names =
-          Enum.map(props, &Atom.to_string/1) |> Enum.map(&String.replace(&1, "_", "-"))
-
         xml =
           XMLBuilder.multistatus([
             XMLBuilder.response("/dav/addressbooks/default/", [
-              XMLBuilder.propstat_forbidden(prop_names)
+              XMLBuilder.propstat(Enum.map(props, &empty_prop/1), "HTTP/1.1 403 Forbidden")
             ])
           ])
 
@@ -557,88 +598,68 @@ defmodule Kith.DAV.CardDAVPlug do
     end
   end
 
-  # RFC 7232 §3.1: If-Match precondition check
-  defp check_if_match(conn, contact) do
-    case get_req_header(conn, "if-match") |> List.first() do
+  defp find_contact_by_name(conn, raw) do
+    Store.ensure_rows(account_id(conn))
+
+    case Store.get_by_resource_name(account_id(conn), URI.decode(raw)) do
       nil ->
-        :ok
+        nil
 
-      "*" ->
-        :ok
-
-      if_match ->
-        if if_match == "\"#{compute_etag(contact)}\"", do: :ok, else: :precondition_failed
+      contact ->
+        if visible?(contact), do: Repo.preload(contact, Contacts.dav_preloads()), else: nil
     end
   end
 
-  defp find_contact_by_uid(conn, uid) do
-    # UID format: "kith-contact-123.vcf"
-    case Regex.run(~r/kith-contact-(\d+)\.vcf/, uid) do
-      [_, id_str] ->
-        Contacts.get_contact(account_id(conn), String.to_integer(id_str))
+  defp visible?(contact), do: is_nil(contact.deleted_at) and not contact.is_archived
 
-      _ ->
-        nil
+  defp resource_name(href) do
+    path = URI.parse(href).path || ""
+
+    case String.split(path, "/", trim: true) do
+      ["dav", "addressbooks", "default", name] -> URI.decode(name)
+      _ -> nil
     end
   end
 
   defp list_contacts_for_dav(conn) do
+    Store.ensure_rows(account_id(conn))
     Contacts.list_contacts(account_id(conn), preload: Contacts.dav_preloads())
   end
 
   defp list_contacts_for_propfind(conn) do
+    Store.ensure_rows(account_id(conn))
     import Ecto.Query
 
     Contact
     |> Kith.Scope.scope_active(account_id(conn))
     |> where([c], c.is_archived == false)
-    |> select([c], map(c, [:id, :updated_at]))
-    |> Kith.Repo.all()
+    |> preload(:dav)
+    |> Repo.all()
   end
 
-  defp compute_etag(%{id: id, updated_at: updated_at}) do
-    data = "#{id}-#{DateTime.to_unix(updated_at)}"
-
-    :crypto.hash(:md5, data)
-    |> Base.encode16(case: :lower)
-  end
-
-  defp generate_sync_token do
-    "https://kith.app/ns/sync/#{DateTime.to_unix(DateTime.utc_now())}"
-  end
+  defp compute_etag(%{dav: %{revision: revision}}), do: to_string(revision)
 
   defp parse_sync_token(nil), do: nil
   defp parse_sync_token(""), do: nil
 
   defp parse_sync_token(token) do
-    with [_, ts] <- Regex.run(~r{/ns/sync/(\d+)$}, token),
-         {unix, ""} <- Integer.parse(ts),
-         {:ok, dt} <- DateTime.from_unix(unix) do
-      dt
-    else
-      _ -> nil
+    case Regex.run(~r/\Ahttps:\/\/kith\.app\/ns\/sync\/(\d+)\z/, token) do
+      [_, revision] -> String.to_integer(revision)
+      _ -> :invalid
     end
   end
 
-  defp addressbook_response(_conn, request_type, contacts) do
-    ctag =
-      case contacts do
-        [] ->
-          DateTime.to_unix(DateTime.utc_now()) |> to_string()
-
-        contacts ->
-          contacts
-          |> Enum.map(& &1.updated_at)
-          |> Enum.max(DateTime)
-          |> DateTime.to_unix()
-          |> to_string()
-      end
+  defp addressbook_response(conn, request_type) do
+    Store.ensure_rows(account_id(conn))
+    state = Store.sync_state(account_id(conn))
+    ctag = to_string(state.token)
 
     props = [
       current_user_principal: XMLBuilder.current_user_principal("/dav/principals/"),
       resourcetype: XMLBuilder.resourcetype("<d:collection/><card:addressbook/>"),
       displayname: XMLBuilder.displayname("Kith Contacts"),
       getctag: XMLBuilder.getctag(ctag),
+      sync_token: XMLBuilder.sync_token("https://kith.app/ns/sync/" <> ctag),
       supported_address_data: XMLBuilder.supported_address_data(),
       max_resource_size: XMLBuilder.max_resource_size(1_048_576),
       supported_collation_set: XMLBuilder.supported_collation_set(),
@@ -658,8 +679,6 @@ defmodule Kith.DAV.CardDAVPlug do
       "</d:supported-report-set>"
   end
 
-  # ── PROPFIND property filtering (RFC 4918 §9.1) ───────────────────────
-
   # Builds propstat elements based on the PROPFIND request type.
   # `available_props` is a keyword list of `[{atom_key, xml_string}]`.
   # Returns a list of propstat XML strings.
@@ -672,7 +691,7 @@ defmodule Kith.DAV.CardDAVPlug do
         elements =
           available_props
           |> Keyword.keys()
-          |> Enum.map(fn key -> Map.get(@prop_empty_elements, key, "<d:#{key}/>") end)
+          |> Enum.map(&empty_prop/1)
 
         [XMLBuilder.propstat(elements)]
 
@@ -688,7 +707,7 @@ defmodule Kith.DAV.CardDAVPlug do
         missing =
           MapSet.difference(requested_set, available_keys)
           |> MapSet.to_list()
-          |> Enum.map(fn key -> Map.get(@prop_empty_elements, key, "<d:#{key}/>") end)
+          |> Enum.map(&empty_prop/1)
 
         propstats = []
         propstats = if found != [], do: [XMLBuilder.propstat(found) | propstats], else: propstats
@@ -701,6 +720,11 @@ defmodule Kith.DAV.CardDAVPlug do
         Enum.reverse(propstats)
     end
   end
+
+  # Empty element naming a prop: known atoms use their canonical prefix,
+  # unknown `{namespace, name}` props keep their own namespace (RFC 4918 §9.1).
+  defp empty_prop({ns, name}), do: XMLBuilder.empty_element(ns, name)
+  defp empty_prop(key), do: Map.fetch!(@prop_empty_elements, key)
 
   defp requested_vcard_version(conn) do
     accept = get_req_header(conn, "accept") |> List.first("")

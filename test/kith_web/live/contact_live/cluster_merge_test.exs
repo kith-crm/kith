@@ -271,14 +271,14 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   describe "avatar values (#3)" do
     defp mona_pair(ctx) do
       e =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Mona",
           last_name: "Vale",
           avatar: "avatars/mona-e.jpg"
         })
 
       f =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Mona",
           last_name: "Vale",
           avatar: "avatars/mona-f.jpg"
@@ -332,11 +332,11 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
     test "the same avatar file as a chip and as a choice renders with distinct ids", ctx do
       same = %{first_name: "Mona", last_name: "Vale", avatar: "avatars/same.jpg"}
-      e = ContactsFixtures.contact_fixture(ctx.account_id, same)
-      f = ContactsFixtures.contact_fixture(ctx.account_id, same)
+      e = contact_with_avatar(ctx.account_id, same)
+      f = contact_with_avatar(ctx.account_id, same)
 
       g =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Mona",
           last_name: "Vale",
           avatar: "avatars/other.jpg"
@@ -406,7 +406,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
     test "changing the selection discards an explicit choice", ctx do
       c =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Sarah",
           last_name: "Kim",
           company: "Notion"
@@ -541,13 +541,13 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     test "a genuinely contested required field offers candidates but no Leave empty option",
          ctx do
       c =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "David",
           last_name: "Kim"
         })
 
       d =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Priya",
           last_name: "Kim"
         })
@@ -580,7 +580,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
     test "merging with a member unchecked dismisses that pair", ctx do
       c =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Sarah", last_name: "Kim"})
+        contact_with_avatar(ctx.account_id, %{first_name: "Sarah", last_name: "Kim"})
 
       candidate!(ctx.account_id, ctx.b, c)
 
@@ -668,7 +668,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     # `cast_entry_id("Aliases", id)` end to end, which a render-only test can't.
     test "unchecking an alias keeps it off the merged contact", ctx do
       c =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Sarah",
           last_name: "Kim",
           aliases: ["007", "Bond"]
@@ -899,7 +899,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     # selected and mergeable.
     test "choosing a deselected member's id does not adopt their immich group", ctx do
       c =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Sarah",
           last_name: "Kim",
           company: "Deselected Co"
@@ -1101,7 +1101,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     # `:clear`, so offering one is offering a value that silently disappears.
     test "a member id is never offered as a first-met-through candidate", ctx do
       outsider =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Mutual",
           last_name: "Friend"
         })
@@ -1292,7 +1292,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
   describe "manual entry" do
     test "a contact in no cluster renders alone", ctx do
-      loner = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+      loner = contact_with_avatar(ctx.account_id, %{first_name: "Dana"})
 
       {:ok, _live, html} = live(ctx.conn, "/contacts/duplicates/cluster/#{loner.id}")
 
@@ -1302,9 +1302,9 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
 
     test "merge is disabled until a second member is added", ctx do
-      loner = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+      loner = contact_with_avatar(ctx.account_id, %{first_name: "Dana"})
 
-      mate = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dara"})
+      mate = contact_with_avatar(ctx.account_id, %{first_name: "Dara"})
 
       {:ok, live, _html} = live(ctx.conn, "/contacts/duplicates/cluster/#{loner.id}")
 
@@ -1321,7 +1321,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
 
     test "the manual screen says nothing about matches or duplicates", ctx do
-      loner = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+      loner = contact_with_avatar(ctx.account_id, %{first_name: "Dana"})
 
       {:ok, _live, html} = live(ctx.conn, "/contacts/duplicates/cluster/#{loner.id}")
 
@@ -1354,10 +1354,10 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     # rows are the reason to open it at all.
     test "identity stays open across an edit on a fully resolved cluster", ctx do
       c =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Priya", last_name: "Nair"})
+        contact_with_avatar(ctx.account_id, %{first_name: "Priya", last_name: "Nair"})
 
       d =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Priya", last_name: "Nair"})
+        contact_with_avatar(ctx.account_id, %{first_name: "Priya", last_name: "Nair"})
 
       candidate!(ctx.account_id, c, d)
 
@@ -1436,7 +1436,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   describe "add contact search" do
     test "searching excludes current members, offers a new match", ctx do
       third =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Sarah", last_name: "Kim"})
+        contact_with_avatar(ctx.account_id, %{first_name: "Sarah", last_name: "Kim"})
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
@@ -1448,7 +1448,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
 
     test "adding a contact puts it in the strip, checked", ctx do
-      dana = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+      dana = contact_with_avatar(ctx.account_id, %{first_name: "Dana"})
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
@@ -1470,7 +1470,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       Kith.Repo.update!(Ecto.Changeset.change(ctx.a, occupation: "Engineer"))
 
       third =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Sarah",
           last_name: "Kim",
           occupation: "Designer"
@@ -1493,7 +1493,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
 
     test "a query shorter than the threshold returns nothing", ctx do
-      dana = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+      dana = contact_with_avatar(ctx.account_id, %{first_name: "Dana"})
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
@@ -1520,7 +1520,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       # A same-account match the search must offer, so the refute below is
       # about account scoping and not about there being nothing to find.
       mine =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Sarah", last_name: "Park"})
+        contact_with_avatar(ctx.account_id, %{first_name: "Sarah", last_name: "Park"})
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
@@ -1531,7 +1531,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
 
     test "adding the same contact twice leaves one member entry", ctx do
-      dana = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+      dana = contact_with_avatar(ctx.account_id, %{first_name: "Dana"})
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
@@ -1563,17 +1563,17 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   describe "merge selected (?with=)" do
     test "does not pre-select cluster members the user never picked", ctx do
       alice =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Alice",
           last_name: "Smith"
         })
 
       bob =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Bob", last_name: "Jones"})
+        contact_with_avatar(ctx.account_id, %{first_name: "Bob", last_name: "Jones"})
 
       # Dana is a pending duplicate of Alice, but the user did not tick her.
       dana =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Alice",
           last_name: "Smyth"
         })
@@ -1595,7 +1595,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     test "a ?with= id that is already in the lead's detected cluster is still selected",
          ctx do
       alice =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Alice",
           last_name: "Smith"
         })
@@ -1604,7 +1604,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       # her — she must end up selected even though she's already a member
       # via the detected cluster (so absent from `extra`).
       dana =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Alice",
           last_name: "Smyth"
         })
@@ -1619,13 +1619,13 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
     test "a plain cluster URL still selects the whole cluster", ctx do
       alice =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Alice",
           last_name: "Smith"
         })
 
       dana =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Alice",
           last_name: "Smyth"
         })
@@ -1640,7 +1640,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
     test "caps the ?with= list", ctx do
       lead =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Lead",
           last_name: "Contact"
         })
@@ -1648,7 +1648,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       others =
         for i <- 1..60,
             do:
-              ContactsFixtures.contact_fixture(ctx.account_id, %{
+              contact_with_avatar(ctx.account_id, %{
                 first_name: "Extra#{i}",
                 last_name: "X"
               })
@@ -1663,13 +1663,13 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
     test "hand-picked merges offer Cancel, not 'Not duplicates'", ctx do
       alice =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{
+        contact_with_avatar(ctx.account_id, %{
           first_name: "Alice",
           last_name: "Smith"
         })
 
       bob =
-        ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Bob", last_name: "Jones"})
+        contact_with_avatar(ctx.account_id, %{first_name: "Bob", last_name: "Jones"})
 
       [lead, other] = Enum.sort([alice.id, bob.id])
 
@@ -1727,7 +1727,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
   describe "untrusted event payloads" do
     test "add-member ignores an id that is not among the offered results", ctx do
-      outsider = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Zoe"})
+      outsider = contact_with_avatar(ctx.account_id, %{first_name: "Zoe"})
 
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
@@ -1774,7 +1774,7 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     end
 
     test "an oversized id in the with param is dropped, not sent to the database", ctx do
-      loner = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Zoe"})
+      loner = contact_with_avatar(ctx.account_id, %{first_name: "Zoe"})
 
       {:ok, _live, html} =
         live(ctx.conn, "/contacts/duplicates/cluster/#{loner.id}?with=99999999999999999999")
@@ -1815,5 +1815,13 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert input =~ ~s(value="")
       refute input =~ ~s(value="12345")
     end
+  end
+
+  # These rendering fixtures intentionally model legacy keys without invoking
+  # the upload pipeline; public writes must go through avatar processing.
+  defp contact_with_avatar(account_id, attrs) do
+    {avatar, attrs} = Map.pop(attrs, :avatar)
+    contact = ContactsFixtures.contact_fixture(account_id, attrs)
+    contact |> Ecto.Changeset.change(avatar: avatar) |> Kith.Repo.update!()
   end
 end

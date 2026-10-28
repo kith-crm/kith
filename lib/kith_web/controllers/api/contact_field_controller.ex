@@ -41,9 +41,7 @@ defmodule KithWeb.API.ContactFieldController do
     with true <- Policy.can?(user, :create, :contact_field),
          {:ok, contact} <- fetch_contact(account_id, contact_id),
          {:ok, field} <-
-           %ContactField{contact_id: contact.id, account_id: account_id}
-           |> ContactField.changeset(attrs)
-           |> Repo.insert() do
+           Contacts.create_contact_field(contact, attrs) do
       conn
       |> put_status(201)
       |> put_resp_header("location", "/api/contact_fields/#{field.id}")
@@ -68,7 +66,7 @@ defmodule KithWeb.API.ContactFieldController do
     with true <- Policy.can?(user, :update, :contact_field),
          field when not is_nil(field) <-
            ContactField |> TenantScope.scope_to_account(account_id) |> Repo.get(id),
-         {:ok, updated} <- field |> ContactField.changeset(attrs) |> Repo.update() do
+         {:ok, updated} <- Contacts.update_contact_field(field, attrs) do
       json(conn, %{data: contact_field_json(updated)})
     else
       false -> {:error, :forbidden}
@@ -91,7 +89,7 @@ defmodule KithWeb.API.ContactFieldController do
     with true <- Policy.can?(user, :delete, :contact_field),
          field when not is_nil(field) <-
            ContactField |> TenantScope.scope_to_account(account_id) |> Repo.get(id),
-         {:ok, _field} <- Repo.delete(field) do
+         {:ok, _field} <- Contacts.delete_contact_field(field) do
       send_resp(conn, 204, "")
     else
       false -> {:error, :forbidden}

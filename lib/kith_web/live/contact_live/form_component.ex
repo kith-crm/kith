@@ -102,14 +102,13 @@ defmodule KithWeb.ContactLive.FormComponent do
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">
-              First Name *
+              First Name
             </label>
             <input
               type="text"
               name="contact[first_name]"
               value={Ecto.Changeset.get_field(@changeset, :first_name)}
               class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-disabled)] focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20 transition-colors duration-150"
-              required
             />
             <p
               :for={msg <- changeset_errors(@changeset, :first_name)}

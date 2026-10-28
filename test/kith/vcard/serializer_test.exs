@@ -3,6 +3,53 @@ defmodule Kith.VCard.SerializerTest do
 
   alias Kith.VCard.Serializer
 
+  test "yearless birthday exports a reduced date without a synthetic year" do
+    contact = %Kith.Contacts.Contact{
+      display_name: "Yearless Birthday",
+      first_name: "Yearless",
+      last_name: "Birthday",
+      birthdate: ~D[2000-07-14],
+      birthdate_year_unknown: true,
+      addresses: [],
+      contact_fields: [],
+      gender: nil,
+      tags: [],
+      relationships: []
+    }
+
+    for version <- [:v30, :v40] do
+      card = Serializer.serialize(contact, version: version)
+      assert card =~ "\r\nBDAY:--0714\r\n"
+      refute card =~ "1604"
+      refute card =~ "2000"
+    end
+  end
+
+  test "invalid stored identities cannot inject content lines" do
+    for version <- [:v30, :v40], separator <- ["\r", "\r\n"] do
+      identity = "urn:test:hello" <> separator <> "FN:Injected"
+      target = %{display_name: "Target", dav: %{uid: identity}}
+
+      contact = %Kith.Contacts.Contact{
+        display_name: "Owner",
+        first_name: "Owner",
+        dav: %{uid: identity},
+        addresses: [],
+        contact_fields: [],
+        gender: nil,
+        tags: [],
+        relationships: [%{id: 1, related_contact: target, relationship_type: %{name: "Friend"}}]
+      }
+
+      card = Serializer.serialize(contact, version: version, include_uid: true)
+      refute Regex.match?(~r/(?<!\r)\n|\r(?!\n)/, card)
+      assert length(Regex.scan(~r/^FN:/m, card)) == 1
+      {:ok, [parsed]} = Kith.VCard.Parser.parse(card)
+      assert parsed.uid == nil
+      assert parsed.related == []
+    end
+  end
+
   describe "serialize/1" do
     test "generates valid vCard 3.0 with all fields" do
       contact = %{
@@ -520,14 +567,24 @@ defmodule Kith.VCard.SerializerTest do
           %{
             id: 1,
             related_contact_id: 42,
-            related_contact: %{display_name: "Bob", first_name: "Bob", last_name: nil},
+            related_contact: %{
+              display_name: "Bob",
+              first_name: "Bob",
+              last_name: nil,
+              dav: %{uid: "b2000000-0000-4000-8000-000000000002"}
+            },
             relationship_type: %{name: "Friend"}
           }
         ]
       }
 
       vcard = Serializer.serialize(contact, version: :v40)
-      assert String.contains?(vcard, "RELATED;TYPE=friend:urn:uuid:kith-contact-42\r\n")
+
+      assert String.contains?(
+               vcard,
+               "RELATED;TYPE=friend:urn:uuid:b2000000-0000-4000-8000-000000000002\r\n"
+             )
+
       refute String.contains?(vcard, "X-ABRELATEDNAMES")
     end
 
@@ -556,5 +613,65 @@ defmodule Kith.VCard.SerializerTest do
       assert String.contains?(vcard, "PHOTO:data:image/png;base64,#{b64}")
       refute String.contains?(vcard, "ENCODING=b")
     end
+  end
+
+  test "folded output never splits a UTF-8 sequence" do
+    contact = %{
+      first_name: "小明😀 مرحبا",
+      last_name: "王",
+      nickname: nil,
+      birthdate: nil,
+      company: nil,
+      occupation: nil,
+      description: String.duplicate("漢字😀مرحباשלום", 20)
+    }
+
+    card = Serializer.serialize(contact)
+    assert String.valid?(card)
+
+    for line <- String.split(card, "\r\n") do
+      assert byte_size(line) <= 75
+      assert String.valid?(line)
+    end
+  end
+
+  test "a native field without a protocol does not crash serialization" do
+    contact = %{
+      first_name: "Native",
+      last_name: "Field",
+      nickname: nil,
+      birthdate: nil,
+      company: nil,
+      occupation: nil,
+      description: nil,
+      contact_fields: [
+        %{
+          value: "Private native field",
+          label: nil,
+          contact_field_type: %{protocol: nil, vcard_label: nil}
+        }
+      ]
+    }
+
+    card = Serializer.serialize(contact)
+    assert card =~ "FN:Native Field"
+    refute card =~ "Private native field"
+  end
+
+  test "vCard 4.0 dates and REV use basic date/timestamp syntax" do
+    contact = %{
+      first_name: "Valid",
+      last_name: "Vcard",
+      nickname: nil,
+      birthdate: ~D[1990-06-15],
+      company: nil,
+      occupation: nil,
+      description: nil,
+      updated_at: ~U[2026-10-20 20:30:00Z]
+    }
+
+    card = Serializer.serialize(contact, version: :v40)
+    assert card =~ "BDAY:19900615\r\n"
+    assert card =~ "REV:20261020T203000Z\r\n"
   end
 end

@@ -33,7 +33,8 @@ defmodule Kith.Contacts.Merge do
 
   alias Ecto.Multi
   alias Kith.AuditLogs
-  alias Kith.Contacts.{Address, Contact, ContactField, MergeFields, Tag}
+  alias Kith.Contacts.{Address, Avatar, Contact, ContactField, MergeFields, Tag}
+  alias Kith.DAV.Store
   alias Kith.Repo
 
   # Policy, array, Immich and coupled-flag fields are computed rather than
@@ -119,21 +120,27 @@ defmodule Kith.Contacts.Merge do
   values fail changeset validation on the survivor.
   """
   def run(scope, survivor_id, loser_ids, resolution) do
-    Repo.transaction(fn ->
-      with {:ok, members} <- lock_and_load(scope, survivor_id, loser_ids),
-           survivor = Enum.find(members, &(&1.id == survivor_id)),
-           {:ok, resolution} <- validate_fields(members, resolution),
-           :ok <- validate_drop(members, resolution) do
-        run_merge(scope, members, survivor, resolution)
-      else
-        {:error, reason} -> Repo.rollback(reason)
-      end
+    Avatar.with_cleanup(fn ->
+      Store.transaction(scope.account.id, fn ->
+        run_locked(scope, survivor_id, loser_ids, resolution)
+      end)
     end)
   end
 
+  defp run_locked(scope, survivor_id, loser_ids, resolution) do
+    with {:ok, members} <- lock_and_load(scope, survivor_id, loser_ids),
+         survivor = Enum.find(members, &(&1.id == survivor_id)),
+         {:ok, resolution} <- validate_fields(members, resolution),
+         :ok <- validate_drop(members, resolution) do
+      run_merge(scope, members, survivor, resolution)
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
   # Everything below this point runs inside the `SELECT ... FOR UPDATE`
-  # transaction opened by `run/4` above — the lock and every validation and
-  # write must stay inside that one enclosing `Repo.transaction`.
+  # account transaction opened by `run/4` above — the lock and every validation
+  # and write must stay inside that one enclosing transaction.
   defp run_merge(scope, members, survivor, resolution) do
     losers = Enum.reject(members, &(&1.id == survivor.id))
 
@@ -142,6 +149,16 @@ defmodule Kith.Contacts.Merge do
     # and every dropped row's owner_id would read back as the survivor
     # regardless of which member actually held it.
     member_ids = Enum.map(members, & &1.id)
+    account_id = scope.account.id
+
+    incoming_owner_ids =
+      Repo.all(
+        from(r in Kith.Contacts.Relationship,
+          where: r.account_id == ^account_id and r.related_contact_id in ^member_ids,
+          select: r.contact_id
+        )
+      )
+
     dropped_records = describe_dropped(Repo, resolution, member_ids)
 
     # A dropped record owned by a loser must not be remapped onto the
@@ -162,6 +179,7 @@ defmodule Kith.Contacts.Merge do
     |> Repo.transaction()
     |> case do
       {:ok, %{last_talked_to: survivor, remap_first_met_reminders: first_met}} ->
+        Store.touch(survivor.account_id, Enum.uniq(member_ids ++ incoming_owner_ids))
         # The first-met step may have carried the opt-in flag onto the
         # survivor after `:survivor` was read, so fold it into the result.
         %{survivor | first_met_reminder: first_met.first_met_reminder}
@@ -184,12 +202,25 @@ defmodule Kith.Contacts.Merge do
 
     Multi.new()
     |> Multi.run(:survivor, fn _repo, _changes -> apply_fields(survivor, resolution) end)
-    |> Multi.run(:remap_photos, fn repo, _changes ->
+    |> Multi.run(:remap_photos, fn repo, %{survivor: resolved} ->
+      # Preserve the selected rendition if its original row loses photo dedupe.
+      selected_photo =
+        if resolved.avatar do
+          repo.one(
+            from p in Kith.Contacts.Photo,
+              where:
+                p.account_id == ^account_id and p.contact_id in ^Enum.map(members, & &1.id) and
+                  p.avatar_storage_key == ^resolved.avatar
+          )
+        end
+
       # unique_index(:photos, [:contact_id, :content_hash]) means a blanket
       # move would raise whenever any two members share a hash — including
       # two losers colliding with each other, not just a loser vs. the
       # survivor. Dedupe across the whole cluster before moving.
+      stage_loser_photo_files(repo, account_id, loser_ids)
       dedupe_and_move(repo, "photos", "content_hash", loser_ids, survivor.id, account_id)
+      restore_selected_rendition(repo, selected_photo, survivor.id, account_id)
       {:ok, :done}
     end)
     |> Multi.run(:remap_immich_candidates, fn repo, _changes ->
@@ -719,6 +750,47 @@ defmodule Kith.Contacts.Merge do
       stored = Map.fetch!(member, field)
       stored == value or (is_binary(stored) and String.trim(stored) == value)
     end)
+  end
+
+  defp stage_loser_photo_files(repo, account_id, loser_ids) do
+    from(p in Kith.Contacts.Photo,
+      where: p.account_id == ^account_id and p.contact_id in ^loser_ids,
+      select: [p.storage_key, p.avatar_storage_key]
+    )
+    |> repo.all()
+    |> List.flatten()
+    |> Enum.each(&Avatar.stage_retired/1)
+  end
+
+  defp restore_selected_rendition(_repo, nil, _survivor_id, _account_id), do: :ok
+
+  defp restore_selected_rendition(repo, selected, survivor_id, account_id) do
+    if is_nil(repo.get(Kith.Contacts.Photo, selected.id)) and selected.content_hash do
+      query =
+        from(p in Kith.Contacts.Photo,
+          where:
+            p.contact_id == ^survivor_id and p.account_id == ^account_id and
+              p.content_hash == ^selected.content_hash
+        )
+
+      query
+      |> select([p], p.avatar_storage_key)
+      |> repo.all()
+      |> Enum.each(&Avatar.stage_retired/1)
+
+      query
+      |> repo.update_all(
+        set: [
+          avatar_storage_key: selected.avatar_storage_key,
+          avatar_file_size: selected.avatar_file_size,
+          avatar_signature: selected.avatar_signature,
+          avatar_crop: selected.avatar_crop,
+          avatar_content_hash: selected.avatar_content_hash
+        ]
+      )
+    end
+
+    :ok
   end
 
   # Moves every `table` row owned by a loser onto the survivor, first deleting

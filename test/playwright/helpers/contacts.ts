@@ -9,7 +9,7 @@ export async function createContact(
 ): Promise<number> {
   await page.goto("/contacts/new");
   await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(300);
+  await expect(page.locator("[data-phx-main]")).toHaveClass(/phx-connected/);
 
   await page.getByLabel(/first name/i).fill(opts.firstName);
   if (opts.lastName) {
@@ -34,7 +34,7 @@ export async function goToContact(
 ): Promise<void> {
   await page.goto(`/contacts/${contactId}`);
   await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(300);
+  await expect(page.locator("[data-phx-main]")).toHaveClass(/phx-connected/);
 }
 
 /**

@@ -9,9 +9,8 @@ defmodule KithWeb.API.ContactExportController do
   use KithWeb, :controller
 
   alias Kith.Contacts
+  alias Kith.DAV.Store
   alias Kith.VCard.Serializer
-
-  @vcard_preloads [:addresses, :gender, contact_fields: :contact_field_type]
 
   @doc """
   Export a single contact as a vCard 3.0 file.
@@ -21,8 +20,9 @@ defmodule KithWeb.API.ContactExportController do
   def show(conn, %{"id" => id}) do
     user = conn.assigns.current_api_user
     account_id = user.account_id
+    Store.ensure_rows(account_id)
 
-    case Contacts.get_contact(account_id, id, preload: @vcard_preloads) do
+    case Contacts.get_contact(account_id, id, preload: Contacts.dav_preloads()) do
       nil ->
         conn
         |> put_status(404)
@@ -35,7 +35,7 @@ defmodule KithWeb.API.ContactExportController do
         })
 
       contact ->
-        vcard = Serializer.serialize(contact)
+        vcard = Serializer.serialize(contact, include_uid: true)
         filename = safe_filename(contact.display_name || "contact")
 
         conn
@@ -59,6 +59,7 @@ defmodule KithWeb.API.ContactExportController do
   def bulk(conn, params) do
     user = conn.assigns.current_api_user
     account_id = user.account_id
+    Store.ensure_rows(account_id)
     ids = Map.get(params, "ids", nil)
 
     Kith.AuditLogs.log_event(account_id, user, :data_exported,
@@ -79,21 +80,25 @@ defmodule KithWeb.API.ContactExportController do
     stream =
       if ids do
         validated_ids = Enum.map(ids, &parse_id/1) |> Enum.reject(&is_nil/1)
-        Contacts.stream_contacts_by_ids(account_id, validated_ids, preload: @vcard_preloads)
+
+        Contacts.stream_contacts_by_ids(account_id, validated_ids,
+          preload: Contacts.dav_preloads()
+        )
       else
-        Contacts.stream_all_contacts(account_id, preload: @vcard_preloads)
+        Contacts.stream_all_contacts(account_id, preload: Contacts.dav_preloads())
       end
 
-    Kith.Repo.transaction(fn ->
-      stream
-      |> Stream.each(fn contact ->
-        vcard = Serializer.serialize(contact)
-        {:ok, _conn} = chunk(conn, vcard)
-      end)
-      |> Stream.run()
-    end)
+    {:ok, conn} =
+      Kith.Repo.transaction(fn -> Enum.reduce_while(stream, conn, &chunk_contact/2) end)
 
     conn
+  end
+
+  defp chunk_contact(contact, conn) do
+    case chunk(conn, Serializer.serialize(contact, include_uid: true)) do
+      {:ok, conn} -> {:cont, conn}
+      {:error, _closed} -> {:halt, conn}
+    end
   end
 
   defp safe_filename(name) do

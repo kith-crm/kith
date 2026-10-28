@@ -41,6 +41,61 @@ defmodule Kith.Accounts do
     if User.valid_password?(user, password), do: user
   end
 
+  @verified_password_ttl :timer.minutes(5)
+
+  @doc """
+  Like `get_user_by_email_and_password/2`, but remembers a successful check for
+  a few minutes so a chatty client (CardDAV sends Basic credentials on every
+  request) does not pay the deliberately slow password hash each time.
+
+  The remembered entry is keyed by an HMAC (random per-boot key) of the user's
+  current `hashed_password` and the password, so changing the password invalidates it.
+  The user row is read on every call, so confirmation and deletion are always
+  current. Only successes are remembered; a wrong password always pays the full
+  hash.
+  """
+  def get_user_by_email_and_verified_password(email, password)
+      when is_binary(email) and is_binary(password) do
+    user = Repo.get_by(User, email: email) |> Repo.preload(:account)
+
+    case user do
+      %User{hashed_password: hashed} when is_binary(hashed) and byte_size(password) > 0 ->
+        key = {:verified_password, verified_password_digest(hashed, password)}
+
+        if verified_password_cached?(key),
+          do: user,
+          else: verify_and_remember(user, password, key)
+
+      _ ->
+        if User.valid_password?(user, password), do: user
+    end
+  end
+
+  # HMAC under a random per-boot key that lives only in this node's memory: the
+  # cached digest cannot be tested against guesses offline, even by someone who
+  # holds both the cache contents and `users.hashed_password`.
+  defp verified_password_digest(hashed, password) do
+    :crypto.mac(:hmac, :sha256, verified_password_key(), [hashed, 0, password])
+  end
+
+  defp verified_password_key do
+    :persistent_term.get({__MODULE__, :verified_password_key})
+  end
+
+  @doc false
+  def init_verified_password_key do
+    :persistent_term.put({__MODULE__, :verified_password_key}, :crypto.strong_rand_bytes(32))
+  end
+
+  defp verified_password_cached?(key), do: match?({:ok, true}, Cachex.get(:kith_cache, key))
+
+  defp verify_and_remember(user, password, key) do
+    if User.valid_password?(user, password) do
+      Cachex.put(:kith_cache, key, true, ttl: @verified_password_ttl)
+      user
+    end
+  end
+
   @doc """
   Gets a single user. Preloads account.
   """

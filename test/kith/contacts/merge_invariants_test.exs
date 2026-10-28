@@ -39,6 +39,10 @@ defmodule Kith.Contacts.MergeInvariantsTest do
     audit_logs
   )
 
+  # DAV identity belongs to the original contact, including a soft-deleted merge loser.
+  # Moving it would change identity or collide with the survivor's primary key.
+  @retained_with_original_contact ~w(contact_dav)
+
   test "every table with a contact_id is handled by the merge engine" do
     %{rows: rows} =
       Repo.query!("""
@@ -54,7 +58,8 @@ defmodule Kith.Contacts.MergeInvariantsTest do
       Kith.Contacts.Merge.__owned_schemas__()
       |> Enum.map(& &1.__schema__(:source))
 
-    unhandled = tables -- (owned_tables ++ @handled_by_dedicated_step)
+    unhandled =
+      tables -- (owned_tables ++ @handled_by_dedicated_step ++ @retained_with_original_contact)
 
     assert unhandled == [],
            """

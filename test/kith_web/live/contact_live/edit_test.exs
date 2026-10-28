@@ -35,16 +35,37 @@ defmodule KithWeb.ContactLive.EditTest do
       assert updated.first_name == "Updated"
     end
 
+    test "family-only contacts allow unrelated edits without requiring a given name", %{
+      conn: conn,
+      account_id: account_id
+    } do
+      contact = contact_fixture(account_id, %{first_name: "", last_name: "Family Only"})
+      {:ok, view, _html} = live(conn, ~p"/contacts/#{contact.id}/edit")
+      refute has_element?(view, "input[name='contact[first_name]'][required]")
+
+      view
+      |> form("#contact-form", %{contact: %{occupation: "Updated occupation"}})
+      |> render_submit()
+
+      assert_redirect(view, ~p"/contacts/#{contact.id}")
+      updated = Kith.Contacts.get_contact!(account_id, contact.id)
+      assert updated.first_name == ""
+      assert updated.last_name == "Family Only"
+      assert updated.display_name == "Family Only"
+      assert updated.occupation == "Updated occupation"
+    end
+
     test "shows validation errors for invalid data", %{conn: conn, contact: contact} do
       {:ok, view, _html} = live(conn, ~p"/contacts/#{contact.id}/edit")
 
       html =
         view
-        |> form("#contact-form", %{contact: %{first_name: ""}})
+        |> form("#contact-form", %{contact: %{first_name: "", last_name: ""}})
         |> render_submit()
 
       # Should stay on the page with errors, not crash
       assert html =~ "contact-form"
+      assert has_element?(view, "#contact-form", "can't be blank")
     end
   end
 end

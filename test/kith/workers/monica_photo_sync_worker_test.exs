@@ -13,8 +13,14 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
   import Kith.MonicaApiFixtures
 
   @stub_name :monica_photo_sync_stub
-  @pixel_data_url "data:image/jpeg;base64,#{Base.encode64(<<0xFF, 0xD8, 0xFF, 0xE0>>)}"
-  @other_pixel_data_url "data:image/png;base64,#{Base.encode64(<<0x89, 0x50, 0x4E, 0x47>>)}"
+  defp pixel_data_url,
+    do:
+      "data:image/jpeg;base64," <> Base.encode64(Kith.AvatarFixtures.image_binary(suffix: ".jpg"))
+
+  defp other_pixel_data_url,
+    do:
+      "data:image/png;base64," <>
+        Base.encode64(Kith.AvatarFixtures.image_binary(color: [20, 150, 20]))
 
   setup do
     user = user_fixture()
@@ -70,7 +76,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       photo =
         photo_json(
           id: 35,
-          data_url: @pixel_data_url,
+          data_url: pixel_data_url(),
           contact: contact_short_json(964, Ecto.UUID.generate(), "PhotoPerson", "Test")
         )
 
@@ -85,7 +91,8 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       assert photo_row.content_hash != nil
 
       reloaded_contact = Repo.get!(Contacts.Contact, contact.id)
-      assert reloaded_contact.avatar == photo_row.storage_key
+      assert reloaded_contact.avatar == photo_row.avatar_storage_key
+      assert reloaded_contact.avatar != photo_row.storage_key
 
       updated = Imports.get_import!(import_job.id)
       assert updated.sync_summary["total"] == 1
@@ -107,7 +114,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       photo =
         photo_json(
           id: 100,
-          data_url: @pixel_data_url,
+          data_url: pixel_data_url(),
           contact: contact_short_json(9999, Ecto.UUID.generate(), "Unknown", "Person")
         )
 
@@ -142,12 +149,12 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       photos = [
         photo_json(
           id: 1,
-          data_url: @pixel_data_url,
+          data_url: pixel_data_url(),
           contact: contact_short_json(501, Ecto.UUID.generate(), "Old", "Test")
         ),
         photo_json(
           id: 2,
-          data_url: @other_pixel_data_url,
+          data_url: other_pixel_data_url(),
           contact: contact_short_json(502, Ecto.UUID.generate(), "New", "Test")
         )
       ]
@@ -213,7 +220,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       photo =
         photo_json(
           id: 300,
-          data_url: @pixel_data_url,
+          data_url: pixel_data_url(),
           contact: contact_short_json(300, Ecto.UUID.generate(), "Dup", "Person")
         )
 
@@ -246,14 +253,14 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       page1_photo =
         photo_json(
           id: 401,
-          data_url: @pixel_data_url,
+          data_url: pixel_data_url(),
           contact: contact_short_json(401, Ecto.UUID.generate(), "PageA", "Test")
         )
 
       page2_photo =
         photo_json(
           id: 402,
-          data_url: @other_pixel_data_url,
+          data_url: other_pixel_data_url(),
           contact: contact_short_json(402, Ecto.UUID.generate(), "PageB", "Test")
         )
 

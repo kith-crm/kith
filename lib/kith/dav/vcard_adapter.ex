@@ -4,15 +4,17 @@ defmodule Kith.DAV.VCardAdapter do
   for the CardDAV server.
 
   Delegates to the existing `Kith.VCard.Serializer` and `Kith.VCard.Parser`
-  modules, adding a UID property for CardDAV identification and adapting the
+  modules, loading stored CardDAV identities and adapting the
   parser output into changeset-compatible attribute maps.
   """
 
   alias Kith.Contacts
   alias Kith.Contacts.Contact
+  alias Kith.DAV.{Store, UID}
   alias Kith.Repo
   alias Kith.Storage
   alias Kith.VCard.{Parser, Serializer}
+  require Logger
 
   @doc """
   Converts a Kith contact to a vCard string with a CardDAV UID.
@@ -21,15 +23,23 @@ defmodule Kith.DAV.VCardAdapter do
 
   Options:
     - `:version` — `:v30` (default) for vCard 3.0, `:v40` for vCard 4.0
+    - `:preloaded` — use the caller's loaded DAV snapshot (default: false)
   """
   def contact_to_vcard(%Contact{} = contact, opts \\ []) do
     version = Keyword.get(opts, :version, :v30)
     include_photo = Keyword.get(opts, :include_photo, true)
-    contact = Repo.preload(contact, Contacts.dav_preloads())
+
+    contact =
+      if Keyword.get(opts, :preloaded, false) do
+        contact
+      else
+        Store.ensure_rows(contact.account_id)
+        Repo.preload(contact, Contacts.dav_preloads(), force: true)
+      end
+
     contact = if include_photo, do: maybe_load_avatar_data(contact), else: contact
 
-    vcard = Serializer.serialize(contact, version: version)
-    inject_uid(vcard, contact.id, version)
+    Serializer.serialize(contact, version: version, include_uid: true)
   end
 
   @doc """
@@ -41,8 +51,17 @@ defmodule Kith.DAV.VCardAdapter do
   `nested_data` contains `:emails`, `:phones`, `:urls`, `:addresses`, `:uid`.
   """
   def vcard_to_attrs(vcard_string, opts \\ []) do
-    case Parser.parse(vcard_string) do
-      {:ok, [parsed | _]} -> build_attrs(parsed, opts)
+    case Parser.parse(vcard_string, legacy_bday: false) do
+      {:ok, [parsed | _]} -> normalize_identity(parsed, opts)
+      _ -> :error
+    end
+  end
+
+  defp normalize_identity(%{uid: nil} = parsed, opts), do: build_attrs(parsed, opts)
+
+  defp normalize_identity(parsed, opts) do
+    case UID.normalize(parsed.uid) do
+      {:ok, uid} -> build_attrs(%{parsed | uid: uid}, opts)
       _ -> :error
     end
   end
@@ -61,14 +80,15 @@ defmodule Kith.DAV.VCardAdapter do
 
   defp build_scalar_attrs(parsed) do
     %{
-      "first_name" => parsed.first_name,
+      "first_name" => parsed.first_name || if(is_nil(parsed.last_name), do: parsed.display_name),
       "last_name" => parsed.last_name,
       "middle_name" => parsed.middle_name,
       "nickname" => parsed.nickname,
       "company" => parsed.company,
       "occupation" => parsed.occupation,
       "description" => parsed.description,
-      "birthdate" => parsed.birthdate && Date.to_iso8601(parsed.birthdate)
+      "birthdate" => parsed.birthdate && Date.to_iso8601(parsed.birthdate),
+      "birthdate_year_unknown" => parsed.birthdate_year_unknown
     }
   end
 
@@ -87,17 +107,6 @@ defmodule Kith.DAV.VCardAdapter do
   end
 
   # ── Private ────────────────────────────────────────────────────────────
-
-  # Inserts a UID line after the VERSION line in the serialized vCard.
-  defp inject_uid(vcard, contact_id, :v30) do
-    uid_line = "UID:kith-contact-#{contact_id}"
-    String.replace(vcard, "VERSION:3.0\r\n", "VERSION:3.0\r\n#{uid_line}\r\n")
-  end
-
-  defp inject_uid(vcard, contact_id, :v40) do
-    uid_line = "UID:urn:uuid:kith-contact-#{contact_id}"
-    String.replace(vcard, "VERSION:4.0\r\n", "VERSION:4.0\r\n#{uid_line}\r\n")
-  end
 
   defp maybe_strip_nils(attrs, opts) do
     if Keyword.get(opts, :strip_nils, true) do
@@ -119,7 +128,18 @@ defmodule Kith.DAV.VCardAdapter do
         ct = Storage.content_type(key)
         %{contact | avatar_data: %{binary: binary, content_type: ct}}
 
-      _ ->
+      {:ok, _oversized} ->
+        Logger.warning(
+          "CardDAV avatar for contact #{contact.id} exceeds the processed size limit"
+        )
+
+        contact
+
+      {:error, reason} ->
+        Logger.warning(
+          "CardDAV avatar for contact #{contact.id} could not be read: #{inspect(reason)}"
+        )
+
         contact
     end
   end

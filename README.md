@@ -16,7 +16,8 @@ Kith helps you keep track of the people who matter most — their birthdays, how
 - **Reminders** — birthday alerts, stay-in-touch nudges, and recurring reminders
 - **Photo sync** — read-only integration with [Immich](https://immich.app) photo servers
 - **Import/export** — vCard and Monica CRM import support
-- **CardDAV/CalDAV** — sync contacts with your phone or email client
+- **CardDAV** — sync contacts with your phone or email client
+  Set up `https://<host>/dav` (or discovery via `/.well-known/carddav`) with Basic auth using your account email and password; see [setup and client limits](docs/carddav.md).
 - **REST API** — bearer token auth, cursor pagination, compound documents
 - **Multi-account** — account-scoped multitenancy with full data isolation
 - **Background jobs** — powered by Oban with 9 queues and nightly cron tasks

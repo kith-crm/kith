@@ -50,7 +50,7 @@
 
 ### Deferred — v1.5
 
-Tasks, Journal, Pets, Gifts, Debt tracking, Weather, CardDAV/CalDAV, Conversations & messages, Reminder snooze, Duplicate contact detection, Customizable emotions / activity categories / life event types, `private` note enforcement, Previous name/alias search, Per-record privacy controls.
+Tasks, Journal, Pets, Gifts, Debt tracking, Weather, CalDAV, Conversations & messages, Reminder snooze, Duplicate contact detection, Customizable emotions / activity categories / life event types, `private` note enforcement, Previous name/alias search, Per-record privacy controls.
 
 ### Deferred — v2
 
@@ -186,13 +186,47 @@ REST over GraphQL. Phoenix controllers with JSON serializers (e.g., `Jason`-base
 
 - **vCard** — import/export individual contacts and bulk
 
-### Protocol Support (v1.1 roadmap)
+### CardDAV (shipped)
 
-- **CardDAV** — sync contacts with external address books
-- **CalDAV** — sync reminders/events with calendar apps
-- Well-known redirects: `/.well-known/carddav`, `/.well-known/caldav`
+The Plug-based server exposes one address book at `/dav/addressbooks/default/`,
+with discovery via `/.well-known/carddav` or `/dav`. Confirmed users authenticate
+with email/password Basic auth; administrators and editors write, viewers read.
+It supports PROPFIND, GET, PUT, DELETE and the `addressbook-query`,
+`addressbook-multiget` and `sync-collection` reports, with vCard 3.0 and 4.0.
 
-> No mature Elixir CardDAV/CalDAV server library exists. Will be evaluated for v1.1 as either a minimal Plug-based implementation or a sidecar approach.
+Account-scoped UUID identities are independent of contact IDs. Quoted revision
+ETags support conditional writes. DAV accepts only UUID identities, normalizing
+bare UUIDs and UUID URNs to one canonical value; other supplied identity formats
+are rejected. Resource filenames remain independent of identities. Trashed and archived contacts are reported
+removed; restoration reuses the href. PUT to a hidden contact returns 409,
+and duplicate UIDs remain reserved even while hidden. Sync tokens use
+`https://kith.app/ns/sync/<revision>`; malformed, future or below-floor tokens
+receive 403 `valid-sync-token` and require an initial sync. Hard deletion advances
+the account floor. Application writes touch revisions under account advisory
+locks; merges and DAV writes acquire this lock before contact row locks, and
+merges also touch incoming relationship owners.
+
+Contacts require at least one of first or last name; family-only contacts are
+accepted by DAV and all three contact forms. A missing first name is stored as
+an empty string to satisfy the database NOT NULL constraint. Yearless birthdays
+emit `BDAY:--MMDD` in both versions: standard 4.0 syntax and an explicit 3.0
+interoperability extension that avoids Thunderbird displaying a synthetic year.
+Strict legacy 3.0 consumers may reject it; Apple sentinel input remains accepted.
+Generated cards do not duplicate BDAY in a custom extension. Legacy birthday
+extensions remain an import fallback; standard BDAY is authoritative for DAV updates.
+
+The web avatar picker supports square cropping and repositioning. Server-side
+processing creates a static JPEG of at most 512 × 512 pixels and 512 KiB while
+retaining the source photo. Imports use a centered square crop. Only the selected
+avatar is exposed through the standard PHOTO property; timeline photos are
+excluded. PHOTO query filters inspect the same representation returned by DAV.
+
+Unmapped ungrouped properties survive verbatim. Grouped properties and parameters
+on mapped properties are lost; retained extras are not converted between versions.
+See [CardDAV setup and limits](../docs/carddav.md) and the
+[actual client results](../docs/carddav-client-checklist.md): DAVx5/Android passed
+S1–S12; Thunderbird has conflict and invalid-token recovery failures and partial
+category display. CalDAV remains unimplemented on the roadmap.
 
 ---
 
@@ -621,7 +655,7 @@ The following must be completed **before the first migration file is written:**
 ## 17. Roadmap
 
 ### v1.5
-Tasks, Journal, Pets, Gifts, Debt tracking, Weather at contact locations, CardDAV/CalDAV evaluation, Conversations & messages, Reminder snooze, Duplicate contact detection (automated), Customizable emotions/activity categories/life event types, `private` note enforcement (access control), Previous name/alias search.
+Tasks, Journal, Pets, Gifts, Debt tracking, Weather at contact locations, CalDAV evaluation, Conversations & messages, Reminder snooze, Duplicate contact detection (automated), Customizable emotions/activity categories/life event types, `private` note enforcement (access control), Previous name/alias search.
 
 ### v2
 Hosted/managed offering, mobile app (iOS/Android — REST API is ready from day one), advanced conversation integrations.

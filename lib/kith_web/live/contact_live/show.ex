@@ -7,7 +7,11 @@ defmodule KithWeb.ContactLive.Show do
 
   alias Kith.AuditLogs
   alias Kith.Contacts
+  alias Kith.Contacts.Avatar
+  alias Kith.DAV.Store
   alias Kith.DuplicateDetection
+  alias Kith.Repo
+  alias Kith.Storage
 
   @impl true
   def mount(_params, _session, socket) do
@@ -24,9 +28,11 @@ defmodule KithWeb.ContactLive.Show do
      |> assign(:next_reminder, nil)
      |> assign(:show_avatar_picker, false)
      |> assign(:avatar_photos, [])
+     |> assign(:avatar_crop, nil)
      |> allow_upload(:avatar,
        accept: ~w(.jpg .jpeg .png .gif .webp),
        max_entries: 1,
+       auto_upload: true,
        max_file_size: 10_000_000
      )}
   end
@@ -159,53 +165,38 @@ defmodule KithWeb.ContactLive.Show do
   end
 
   def handle_event("pick-avatar-photo", %{"id" => id}, socket) do
-    contact = socket.assigns.contact
-    photo = Contacts.get_photo!(contact.account_id, String.to_integer(id))
-    {:ok, updated_contact} = Contacts.set_avatar(contact, photo)
-
-    updated_contact =
-      Kith.Repo.preload(updated_contact, [:tags, :gender, :first_met_through], force: true)
-
-    {:noreply,
-     socket
-     |> assign(:contact, updated_contact)
-     |> assign(:show_avatar_picker, false)
-     |> put_flash(:info, "Avatar updated.")}
+    {:noreply, open_avatar_crop(socket, id)}
   end
 
   def handle_event("validate-avatar", _params, socket) do
-    {:noreply, socket}
+    crop =
+      case socket.assigns.uploads.avatar.entries do
+        [%{valid?: true} = entry | _] -> {:upload, entry.ref}
+        _ -> nil
+      end
+
+    {:noreply, assign(socket, :avatar_crop, crop)}
   end
 
-  def handle_event("upload-avatar", _params, socket) do
-    contact = socket.assigns.contact
+  def handle_event("cancel-avatar-upload", %{"ref" => ref}, socket) do
+    {:noreply, socket |> cancel_upload(:avatar, ref) |> assign(:avatar_crop, nil)}
+  end
 
-    [photo] =
-      consume_uploaded_entries(socket, :avatar, fn %{path: path}, entry ->
-        key = "contacts/#{contact.id}/photos/#{entry.uuid}-#{entry.client_name}"
-        {:ok, _} = Kith.Storage.upload(path, key)
-
-        {:ok, photo} =
-          Contacts.create_photo(contact, %{
-            file_name: entry.client_name,
-            storage_key: key,
-            file_size: entry.client_size,
-            content_type: entry.client_type
-          })
-
-        {:ok, photo}
+  def handle_event("cancel-avatar-crop", _params, socket) do
+    socket =
+      Enum.reduce(socket.assigns.uploads.avatar.entries, socket, fn entry, socket ->
+        cancel_upload(socket, :avatar, entry.ref)
       end)
 
-    {:ok, updated_contact} = Contacts.set_avatar(contact, photo)
+    {:noreply, assign(socket, :avatar_crop, nil)}
+  end
 
-    updated_contact =
-      Kith.Repo.preload(updated_contact, [:tags, :gender, :first_met_through], force: true)
-
-    {:noreply,
-     socket
-     |> assign(:contact, updated_contact)
-     |> assign(:show_avatar_picker, false)
-     |> put_flash(:info, "Avatar updated.")}
+  def handle_event("upload-avatar", %{"crop" => crop}, socket) do
+    if Kith.Policy.can?(socket.assigns.current_scope.user, :update, :contact) do
+      socket |> save_avatar_crop(crop) |> avatar_crop_result(socket)
+    else
+      {:noreply, put_flash(socket, :error, "You cannot change this avatar.")}
+    end
   end
 
   def handle_event("remove-tag", %{"tag_id" => tag_id}, socket) do
@@ -222,6 +213,10 @@ defmodule KithWeb.ContactLive.Show do
   end
 
   @impl true
+  def handle_info({:crop_avatar, photo_id}, socket) do
+    {:noreply, open_avatar_crop(socket, Integer.to_string(photo_id))}
+  end
+
   def handle_info({:avatar_updated, updated_contact}, socket) do
     updated_contact =
       Kith.Repo.preload(updated_contact, [:tags, :gender, :first_met_through], force: true)
@@ -296,4 +291,86 @@ defmodule KithWeb.ContactLive.Show do
       end
     end)
   end
+
+  defp open_avatar_crop(socket, id) do
+    if Kith.Policy.can?(socket.assigns.current_scope.user, :update, :contact) do
+      photo = Contacts.get_photo!(socket.assigns.account_id, String.to_integer(id))
+
+      if photo.contact_id == socket.assigns.contact.id,
+        do: assign(socket, :avatar_crop, {:photo, photo}),
+        else: put_flash(socket, :error, "Photo not found.")
+    else
+      put_flash(socket, :error, "You cannot change this avatar.")
+    end
+  end
+
+  defp save_avatar_crop(%{assigns: %{avatar_crop: {:photo, photo}}} = socket, crop) do
+    Contacts.set_avatar(socket.assigns.contact, photo, crop: crop)
+  end
+
+  defp save_avatar_crop(%{assigns: %{avatar_crop: {:upload, _}}} = socket, crop) do
+    results =
+      consume_uploaded_entries(socket, :avatar, fn %{path: path}, entry ->
+        {:ok, save_uploaded_avatar(socket.assigns.contact, path, entry, crop)}
+      end)
+
+    case results do
+      [result] -> result
+      _ -> {:error, :upload_incomplete}
+    end
+  end
+
+  defp save_avatar_crop(_socket, _crop), do: {:error, :missing_photo}
+
+  defp save_uploaded_avatar(contact, path, entry, crop) do
+    key = Storage.generate_key(contact.account_id, "photos", entry.client_name)
+
+    Avatar.with_cleanup(fn ->
+      Store.transaction(contact.account_id, fn ->
+        insert_uploaded_avatar!(contact, path, entry, crop, key)
+      end)
+    end)
+  end
+
+  defp insert_uploaded_avatar!(contact, path, entry, crop, key) do
+    with :ok <- Storage.check_storage_limit(contact.account_id, entry.client_size),
+         {:ok, _} <- Storage.upload(path, key),
+         :ok <- Avatar.stage_created(key),
+         {:ok, photo} <-
+           Contacts.create_photo(contact, %{
+             file_name: entry.client_name,
+             storage_key: key,
+             file_size: entry.client_size,
+             content_type: entry.client_type
+           }),
+         {:ok, updated} <- Contacts.set_avatar(contact, photo, crop: crop) do
+      updated
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp avatar_crop_result({:ok, contact}, socket) do
+    contact = Repo.preload(contact, [:tags, :gender, :first_met_through], force: true)
+
+    {:noreply,
+     socket
+     |> assign(:contact, contact)
+     |> assign(:avatar_crop, nil)
+     |> assign(:show_avatar_picker, false)
+     |> assign(:avatar_photos, Contacts.list_photos(contact.id))
+     |> put_flash(:info, "Avatar updated.")}
+  end
+
+  defp avatar_crop_result({:error, _reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:avatar_crop, nil)
+     |> put_flash(:error, "Could not save this avatar. Choose a valid image and try again.")}
+  end
+
+  defp avatar_upload_error(:too_large), do: "Choose an image smaller than 10 MB."
+  defp avatar_upload_error(:not_accepted), do: "Choose a JPEG, PNG, GIF, or WebP image."
+  defp avatar_upload_error(:too_many_files), do: "Choose one avatar image at a time."
+  defp avatar_upload_error(_error), do: "This image could not be uploaded."
 end
