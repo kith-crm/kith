@@ -235,7 +235,6 @@ defmodule KithWeb.DAV.PropfindTest do
         |> put_req_header("depth", "0")
         |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
 
-      Process.sleep(1000)
       {:ok, _} = Contacts.update_contact(contact, %{first_name: "Changed"})
 
       conn2 =
@@ -635,7 +634,8 @@ defmodule KithWeb.DAV.PropfindTest do
       refute conn.resp_body =~ "getlastmodified"
     end
 
-    test "requesting unknown property ignores it, serves known props", context do
+    # Ruling R10: unknown props get a 404 propstat (RFC 4918 §9.1), see CDV-06.
+    test "requesting unknown property reports it as 404, serves known props", context do
       body = """
       <?xml version="1.0" encoding="UTF-8"?>
       <d:propfind xmlns:d="DAV:">
@@ -653,8 +653,9 @@ defmodule KithWeb.DAV.PropfindTest do
       assert conn.status == 207
       # Known prop is still served
       assert conn.resp_body =~ "getetag"
-      # Unknown props are silently ignored (not in atom table)
-      refute conn.resp_body =~ "unknown-property"
+      # Unknown props are reported in a 404 propstat
+      assert conn.resp_body =~ "unknown-property"
+      assert conn.resp_body =~ "404 Not Found"
     end
 
     test "propname request returns empty property elements", context do
@@ -673,6 +674,224 @@ defmodule KithWeb.DAV.PropfindTest do
       assert conn.resp_body =~ "<card:addressbook-home-set/>"
       # Empty elements should NOT contain nested href values
       refute conn.resp_body =~ "<d:current-user-principal><d:href>"
+    end
+  end
+
+  # ── CardDAV e2e regressions (docs/carddav-e2e.md) ─────────────────────
+
+  describe "CardDAV e2e regressions" do
+    test "CDV-01: OPTIONS Allow lists PROPPATCH", context do
+      for path <- ["/dav/", "/dav/addressbooks/default/"] do
+        conn = authed_dav(context, "OPTIONS", path)
+        [allow] = get_resp_header(conn, "allow")
+        methods = allow |> String.split(",") |> Enum.map(&String.trim/1)
+        assert "PROPPATCH" in methods
+      end
+    end
+
+    test "CDV-02: PROPFIND on the home set honours Depth 0", context do
+      conn =
+        context.conn
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("depth", "0")
+        |> dav_request("PROPFIND", "/dav/addressbooks/", propfind_body())
+
+      assert conn.status == 207
+      assert count_responses(conn.resp_body) == 1
+      assert conn.resp_body =~ "<d:href>/dav/addressbooks/</d:href>"
+
+      conn =
+        context.conn
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("depth", "1")
+        |> dav_request("PROPFIND", "/dav/addressbooks/", propfind_body())
+
+      assert count_responses(conn.resp_body) == 2
+    end
+
+    test "CDV-03: address book offers a URI sync-token property", context do
+      body = """
+      <?xml version="1.0" encoding="UTF-8"?>
+      <d:propfind xmlns:d="DAV:"><d:prop><d:sync-token/></d:prop></d:propfind>
+      """
+
+      conn =
+        context.conn
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("depth", "0")
+        |> dav_request("PROPFIND", "/dav/addressbooks/default/", body)
+
+      assert conn.status == 207
+      refute conn.resp_body =~ "404 Not Found"
+      assert [_, token] = Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, conn.resp_body)
+      assert token =~ ~r/^[a-z][a-z0-9+.-]*:\S+$/i
+    end
+
+    test "CDV-03: the PROPFIND sync-token round-trips through sync-collection", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+
+      propfind = """
+      <d:propfind xmlns:d="DAV:"><d:prop><d:sync-token/></d:prop></d:propfind>
+      """
+
+      conn =
+        context.conn
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("depth", "0")
+        |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind)
+
+      [_, token] = Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, conn.resp_body)
+
+      sync = fn ->
+        body = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <d:sync-collection xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+          <d:sync-token>#{token}</d:sync-token>
+          <d:sync-level>1</d:sync-level>
+          <d:prop><d:getetag/></d:prop>
+        </d:sync-collection>
+        """
+
+        authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+      end
+
+      unchanged = sync.()
+      assert unchanged.status == 207
+      assert count_responses(unchanged.resp_body) == 0
+
+      {:ok, _} = Contacts.update_contact(contact, %{first_name: "Changed"})
+
+      changed = sync.()
+      assert changed.status == 207
+      assert changed.resp_body =~ "<d:href>#{contact_path(contact)}</d:href>"
+    end
+
+    test "CDV-04: malformed or non-UTF-8 PROPFIND and PROPPATCH bodies return 400", context do
+      malformed = ~s(<d:propfind xmlns:d="DAV:"><d:prop><d:getetag></d:prop>)
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+
+      for path <- [
+            "/dav/",
+            "/dav/principals/",
+            "/dav/addressbooks/",
+            "/dav/addressbooks/default/",
+            contact_path(contact)
+          ] do
+        conn = authed_dav(context, "PROPFIND", path, malformed)
+        assert conn.status == 400, path
+      end
+
+      latin1 =
+        <<"<?xml version=\"1.0\" encoding=\"UTF-8\"?><d:propfind xmlns:d=\"DAV:\"><d:prop>",
+          "<d:displayname>", 0xE9, "</d:displayname></d:prop></d:propfind>">>
+
+      assert authed_dav(context, "PROPFIND", "/dav/addressbooks/default/", latin1).status == 400
+
+      conn =
+        authed_dav(
+          context,
+          "PROPPATCH",
+          "/dav/addressbooks/default/",
+          "<d:propertyupdate xmlns:d="
+        )
+
+      assert conn.status == 400
+    end
+
+    test "CDV-05: Apple A: prefix and default xmlns give the same result as d:", context do
+      d =
+        authed_dav(
+          context,
+          "PROPFIND",
+          "/dav/",
+          ~s(<d:propfind xmlns:d="DAV:"><d:allprop/></d:propfind>)
+        )
+
+      assert d.resp_body =~ "<d:current-user-principal><d:href>/dav/principals/</d:href>"
+
+      for body <- [
+            ~s(<A:propfind xmlns:A="DAV:"><A:allprop/></A:propfind>),
+            ~s(<propfind xmlns="DAV:"><allprop/></propfind>)
+          ] do
+        assert authed_dav(context, "PROPFIND", "/dav/", body).resp_body == d.resp_body
+      end
+
+      body = """
+      <propfind xmlns="DAV:"><prop><resourcetype/>
+        <getctag xmlns="http://calendarserver.org/ns/"/></prop></propfind>
+      """
+
+      conn = authed_dav(context, "PROPFIND", "/dav/addressbooks/default/", body)
+      assert conn.resp_body =~ "<cs:getctag>"
+      refute conn.resp_body =~ "404 Not Found"
+    end
+
+    test "CDV-06: unknown props are reported in a 404 propstat with their namespace", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+
+      body = """
+      <d:propfind xmlns:d="DAV:"><d:prop><d:getetag/><x:bogus xmlns:x="urn:x"/></d:prop></d:propfind>
+      """
+
+      conn = authed_dav(context, "PROPFIND", contact_path(contact), body)
+      assert conn.status == 207
+
+      assert [_, not_found] =
+               Regex.run(~r{<d:propstat>((?:(?!</d:propstat>).)*404 Not Found)}s, conn.resp_body)
+
+      assert not_found =~ ~r{<(\w+):bogus xmlns:\1="urn:x"/>}
+      refute not_found =~ "getetag"
+    end
+
+    test "CDV-07: PROPFIND/PROPPATCH bodies over max-resource-size return 413", context do
+      padding = String.duplicate("x", 1_048_577)
+      body = ~s(<d:propfind xmlns:d="DAV:"><!--#{padding}--><d:allprop/></d:propfind>)
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+
+      for path <- [
+            "/dav/",
+            "/dav/principals/",
+            "/dav/addressbooks/",
+            "/dav/addressbooks/default/",
+            contact_path(contact)
+          ] do
+        assert authed_dav(context, "PROPFIND", path, body).status == 413, path
+      end
+
+      update = ~s(<d:propertyupdate xmlns:d="DAV:"><!--#{padding}--></d:propertyupdate>)
+      assert authed_dav(context, "PROPPATCH", "/dav/addressbooks/default/", update).status == 413
+    end
+
+    test "CDV-08: the ctag of an empty address book is stable over time", context do
+      body = """
+      <d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
+        <d:prop><cs:getctag/></d:prop>
+      </d:propfind>
+      """
+
+      ctag = fn ->
+        conn = authed_dav(context, "PROPFIND", "/dav/addressbooks/default/", body)
+        [_, value] = Regex.run(~r{<cs:getctag>([^<]+)</cs:getctag>}, conn.resp_body)
+        value
+      end
+
+      first = ctag.()
+      Process.sleep(1_100)
+      assert ctag.() == first
+    end
+
+    test "CDV-06: PROPPATCH echoes every prop with its own namespace", context do
+      body = """
+      <d:propertyupdate xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
+        <d:set><d:prop><cs:getctag>1</cs:getctag><x:color xmlns:x="urn:x">red</x:color></d:prop></d:set>
+      </d:propertyupdate>
+      """
+
+      conn = authed_dav(context, "PROPPATCH", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+      assert conn.resp_body =~ "<cs:getctag/>"
+      assert conn.resp_body =~ ~r{<(\w+):color xmlns:\1="urn:x"/>}
+      refute conn.resp_body =~ "<d:getctag/>"
     end
   end
 end

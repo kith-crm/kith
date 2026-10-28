@@ -107,6 +107,8 @@ defmodule KithWeb.Router do
     get "/contacts", ContactController, :index
     post "/contacts", ContactController, :create
     post "/contacts/merge", ContactController, :merge
+    # Before /contacts/:id, which would otherwise match "export.vcf" (CDV-116)
+    get "/contacts/export.vcf", ContactExportController, :bulk
     get "/contacts/:id", ContactController, :show
     patch "/contacts/:id", ContactController, :update
     put "/contacts/:id", ContactController, :update
@@ -280,7 +282,6 @@ defmodule KithWeb.Router do
     delete "/life_event_types/:id", LifeEventTypeController, :delete
 
     # Export endpoints
-    get "/contacts/export.vcf", ContactExportController, :bulk
     get "/contacts/:id/export.vcf", ContactExportController, :show
     get "/export", ExportController, :create
 

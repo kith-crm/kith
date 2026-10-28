@@ -50,6 +50,9 @@ defmodule KithWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # CDV-29: refuse chunked DAV bodies before Plug.Parsers could buffer them
+  plug KithWeb.Plugs.DavRequireContentLength
+
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],

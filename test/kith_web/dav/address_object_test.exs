@@ -201,26 +201,26 @@ defmodule KithWeb.DAV.AddressObjectTest do
       vcard = build_vcard("New", "Contact")
 
       conn =
-        authed_dav(context, "PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", vcard)
+        authed_dav(context, "PUT", "/dav/addressbooks/default/new-999999.vcf", vcard)
 
       assert conn.status == 201
     end
 
-    test "response MUST include ETag header on creation (RFC 6352 §5.1)", context do
+    test "reserialized creation omits ETag (RFC 6352 §6.3.2.3)", context do
       vcard = build_vcard("New", "Contact")
 
       conn =
-        authed_dav(context, "PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", vcard)
+        authed_dav(context, "PUT", "/dav/addressbooks/default/new-999999.vcf", vcard)
 
       assert conn.status == 201
-      assert get_resp_header(conn, "etag") != []
+      assert get_resp_header(conn, "etag") == []
     end
 
     test "created resource MUST be retrievable via GET", context do
       vcard = build_vcard("Created", "ViaDAV", nickname: "Davy")
 
       conn1 =
-        authed_dav(context, "PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", vcard)
+        authed_dav(context, "PUT", "/dav/addressbooks/default/new-999999.vcf", vcard)
 
       assert conn1.status == 201
 
@@ -230,12 +230,12 @@ defmodule KithWeb.DAV.AddressObjectTest do
         |> put_req_header("depth", "1")
         |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
 
-      [[_, id_str]] = Regex.scan(~r{kith-contact-(\d+)\.vcf}, conn2.resp_body)
+      [[_, id_str]] = Regex.scan(~r{new-(\d+)\.vcf}, conn2.resp_body)
 
       conn3 =
         build_conn()
         |> basic_auth(context.user.email, dav_password())
-        |> dav_request("GET", "/dav/addressbooks/default/kith-contact-#{id_str}.vcf")
+        |> dav_request("GET", "/dav/addressbooks/default/new-#{id_str}.vcf")
 
       assert conn3.status == 200
       assert conn3.resp_body =~ "Created"
@@ -246,7 +246,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
       invalid = "BEGIN:VCARD\r\nVERSION:3.0\r\nNOTE:no name\r\nEND:VCARD\r\n"
 
       conn =
-        authed_dav(context, "PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", invalid)
+        authed_dav(context, "PUT", "/dav/addressbooks/default/new-999999.vcf", invalid)
 
       assert conn.status in 400..499
     end
@@ -267,14 +267,14 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert conn.status == 204
     end
 
-    test "response MUST include updated ETag header (RFC 6352 §5.1)",
+    test "reserialized update omits ETag (RFC 6352 §6.3.2.3)",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id)
       vcard = build_vcard("Updated", "Contact")
 
       conn = authed_dav(context, "PUT", contact_path(contact), vcard)
 
-      assert get_resp_header(conn, "etag") != []
+      assert get_resp_header(conn, "etag") == []
     end
 
     test "updated properties MUST be reflected in subsequent GET",
@@ -310,7 +310,8 @@ defmodule KithWeb.DAV.AddressObjectTest do
       Process.sleep(1000)
       vcard = build_vcard("Updated", "Name")
       conn2 = authed_dav(context, "PUT", contact_path(contact), vcard)
-      [etag_after] = get_resp_header(conn2, "etag")
+      assert conn2.status == 204
+      [etag_after] = authed_dav(context, "GET", contact_path(contact)) |> get_resp_header("etag")
 
       assert etag_before != etag_after
     end
@@ -458,7 +459,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         build_conn()
         |> basic_auth(context.user.email, dav_password())
         |> put_req_header("if-none-match", "*")
-        |> dav_request("PUT", "/dav/addressbooks/default/kith-contact-999999.vcf", vcard)
+        |> dav_request("PUT", "/dav/addressbooks/default/new-999999.vcf", vcard)
 
       assert conn.status == 201
     end
@@ -479,27 +480,11 @@ defmodule KithWeb.DAV.AddressObjectTest do
       conn = authed_dav(context, "PUT", path, vcard)
       assert conn.status == 201
 
-      # The server assigns its own UID, so we need to find the contact
-      # via PROPFIND to get its actual path
-      conn_list =
-        build_conn()
-        |> basic_auth(context.user.email, dav_password())
-        |> put_req_header("depth", "1")
-        |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
-
-      # Extract the contact href from PROPFIND response
-      [href] =
-        Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
-          conn_list.resp_body,
-          capture: :all_but_first
-        )
-        |> List.flatten()
-
+      # R2: the resource is served at the href the client chose
       conn_get =
         build_conn()
         |> basic_auth(context.user.email, dav_password())
-        |> dav_request("GET", href)
+        |> dav_request("GET", path)
 
       assert conn_get.status == 200
       assert conn_get.resp_body =~ "jane@example.com"
@@ -616,7 +601,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         authed_dav(
           context,
           "PUT",
-          "/dav/addressbooks/default/kith-contact-999999.vcf",
+          "/dav/addressbooks/default/new-999999.vcf",
           vcard
         )
 
@@ -631,7 +616,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/new-\d+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -688,7 +673,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         authed_dav(
           context,
           "PUT",
-          "/dav/addressbooks/default/kith-contact-999999.vcf",
+          "/dav/addressbooks/default/new-999999.vcf",
           vcard
         )
 
@@ -702,7 +687,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/new-\d+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -770,7 +755,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         authed_dav(
           context,
           "PUT",
-          "/dav/addressbooks/default/kith-contact-999999.vcf",
+          "/dav/addressbooks/default/new-999999.vcf",
           vcard
         )
 
@@ -784,7 +769,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/new-\d+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -1132,7 +1117,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         authed_dav(
           context,
           "PUT",
-          "/dav/addressbooks/default/kith-contact-999999.vcf",
+          "/dav/addressbooks/default/new-999999.vcf",
           vcard
         )
 
@@ -1146,7 +1131,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/new-\d+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -1177,7 +1162,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         authed_dav(
           context,
           "PUT",
-          "/dav/addressbooks/default/kith-contact-999999.vcf",
+          "/dav/addressbooks/default/new-999999.vcf",
           vcard
         )
 
@@ -1191,7 +1176,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       [href] =
         Regex.scan(
-          ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
+          ~r{<d:href>(/dav/addressbooks/default/new-\d+\.vcf)</d:href>},
           conn_list.resp_body,
           capture: :all_but_first
         )
@@ -1207,10 +1192,783 @@ defmodule KithWeb.DAV.AddressObjectTest do
   end
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # CardDAV e2e regressions — address-object CRUD (Task 4)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  describe "CDV-12: client-chosen resource names (R2)" do
+    test "CDV-12: a PUT to <uuid>.vcf is served at that href and keeps its UID",
+         %{account_id: account_id} = context do
+      uuid = "6F1C2B0A-3D4E-4F50-8A9B-0C1D2E3F4A5B"
+      href = "/dav/addressbooks/default/#{uuid}.vcf"
+
+      put1 = authed_dav(context, "PUT", href, build_vcard("Ada", "Uuid", uid: uuid))
+      assert put1.status == 201
+      assert get_resp_header(put1, "etag") == []
+
+      get = authed_dav(context, "GET", href)
+      assert get.status == 200
+      assert get.resp_body =~ "UID:#{uuid}\r\n"
+      assert [_] = get_resp_header(get, "etag")
+
+      listing =
+        context
+        |> Map.put(:conn, put_req_header(build_conn(), "depth", "1"))
+        |> authed_dav("PROPFIND", "/dav/addressbooks/default/", propfind_body())
+
+      assert listing.resp_body =~ "<d:href>#{href}</d:href>"
+
+      count = Contacts.count_contacts(account_id)
+      put2 = authed_dav(context, "PUT", href, build_vcard("Ada", "Edited", uid: uuid))
+      assert put2.status == 204
+      assert Contacts.count_contacts(account_id) == count
+      assert authed_dav(context, "GET", href).resp_body =~ "Edited"
+
+      multiget =
+        authed_dav(context, "REPORT", "/dav/addressbooks/default/", multiget_body([href]))
+
+      assert multiget.resp_body =~ "<d:href>#{href}</d:href>"
+      assert multiget.resp_body =~ "Edited"
+
+      sync = authed_dav(context, "REPORT", "/dav/addressbooks/default/", sync_collection_body())
+      assert sync.resp_body =~ "<d:href>#{href}</d:href>"
+
+      assert authed_dav(context, "DELETE", href).status == 204
+      assert authed_dav(context, "GET", href).status == 404
+
+      # R25: a token is a sync position, not a forgeable timestamp
+      [old_token] =
+        Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, sync.resp_body,
+          capture: :all_but_first
+        )
+
+      sync_body =
+        String.replace(
+          sync_collection_body(),
+          "<d:sync-token/>",
+          "<d:sync-token>#{old_token}</d:sync-token>"
+        )
+
+      deleted = authed_dav(context, "REPORT", "/dav/addressbooks/default/", sync_body)
+      assert deleted.resp_body =~ "<d:href>#{href}</d:href>"
+    end
+
+    test "CDV-12: a client name with a space is percent-encoded in hrefs", context do
+      href = "/dav/addressbooks/default/a%20b.vcf"
+      assert authed_dav(context, "PUT", href, build_vcard("Space", "Name")).status == 201
+      assert authed_dav(context, "GET", href).status == 200
+
+      listing =
+        context
+        |> Map.put(:conn, put_req_header(build_conn(), "depth", "1"))
+        |> authed_dav("PROPFIND", "/dav/addressbooks/default/", propfind_body())
+
+      assert listing.resp_body =~ "<d:href>#{href}</d:href>"
+    end
+
+    test "CDV-12: a UI contact keeps its kith-contact-N href and UID",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      get = authed_dav(context, "GET", contact_path(contact))
+      assert get.status == 200
+      assert get.resp_body =~ "UID:kith-contact-#{contact.id}\r\n"
+    end
+  end
+
+  describe "CDV-13: unsafe resource names" do
+    test "CDV-13: dot segments, encoded slashes, control characters and bad escapes are refused",
+         %{account_id: account_id} = context do
+      long = String.duplicate("a", 252) <> ".vcf"
+
+      for segment <-
+            ["..", "%2E%2E", ".", "a%2Fb.vcf", "a%5Cb.vcf", "a%00b.vcf", "a%0Ab.vcf"] ++
+              ["%ZZ.vcf", "%FF.vcf", long] do
+        path = "/dav/addressbooks/default/" <> segment
+        put = authed_dav(context, "PUT", path, build_vcard("Evil", "Name"))
+        assert put.status in 400..499, "PUT #{segment} -> #{put.status}"
+
+        get = build_conn() |> basic_auth(context.user.email, dav_password())
+        assert dav_request(get, "GET", path).status in 400..499
+      end
+
+      assert Contacts.count_contacts(account_id) == 0
+    end
+  end
+
+  describe "CDV-14: If-Match lists and weak tags" do
+    test "CDV-14: an If-Match list matches any strong tag; W/ tags and non-members fail",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Kay"})
+      [etag] = authed_dav(context, "GET", contact_path(contact)) |> get_resp_header("etag")
+
+      put = fn if_match, first ->
+        build_conn()
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("if-match", if_match)
+        |> dav_request("PUT", contact_path(contact), build_vcard(first, "List"))
+      end
+
+      assert put.("W/#{etag}", "Weak").status == 412
+      assert put.(~s("a", "b"), "None").status == 412
+      assert put.(~s("a", #{etag}), "Listed").status == 204
+      assert Contacts.get_contact(account_id, contact.id).first_name == "Listed"
+    end
+  end
+
+  describe "CDV-15: If-Match on a missing resource" do
+    test "CDV-15: PUT with If-Match to a missing href is 412 and creates nothing",
+         %{account_id: account_id} = context do
+      for if_match <- [~s("whatever"), "*"] do
+        conn =
+          build_conn()
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("if-match", if_match)
+          |> dav_request(
+            "PUT",
+            "/dav/addressbooks/default/missing.vcf",
+            build_vcard("No", "Body")
+          )
+
+        assert conn.status == 412
+      end
+
+      assert Contacts.count_contacts(account_id) == 0
+    end
+  end
+
+  describe "CDV-16: GET with If-None-Match" do
+    test "CDV-16: GET with a matching If-None-Match is 304 with the ETag and no body",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      [etag] = authed_dav(context, "GET", contact_path(contact)) |> get_resp_header("etag")
+
+      get = fn inm ->
+        build_conn()
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("if-none-match", inm)
+        |> dav_request("GET", contact_path(contact))
+      end
+
+      for inm <- [etag, "W/#{etag}", ~s("other", #{etag}), "*"] do
+        conn = get.(inm)
+        assert conn.status == 304, "If-None-Match: #{inm} -> #{conn.status}"
+        assert conn.resp_body == ""
+        assert get_resp_header(conn, "etag") == [etag]
+      end
+
+      assert get.(~s("other")).status == 200
+    end
+  end
+
+  test "CDV-57: a reserialized PUT never returns a strong validator", context do
+    body = build_vcard("Reserialized", "Probe")
+    href = "/dav/addressbooks/default/cdv57.vcf"
+    put = authed_dav(context, "PUT", href, body)
+    get = authed_dav(context, "GET", href)
+    assert get.resp_body != body
+    assert get_resp_header(put, "etag") == []
+    assert [_] = get_resp_header(get, "etag")
+  end
+
+  describe "CDV-17: same-second ETags (R4)" do
+    test "CDV-17: a create and two edits inside one second give three distinct ETags",
+         context do
+      href = "/dav/addressbooks/default/same-second.vcf"
+
+      put = fn vcard ->
+        response = authed_dav(context, "PUT", href, vcard)
+        {response, authed_dav(context, "GET", href)}
+      end
+
+      {c, gc} = put.(build_vcard("Same", "Second", phone: "+15550000001"))
+      {e1, ge1} = put.(build_vcard("Same", "Edited", phone: "+15550000001"))
+      # Only a child (TEL) changes here, no scalar field.
+      {e2, ge2} = put.(build_vcard("Same", "Edited", phone: "+15550000002"))
+      assert [c.status, e1.status, e2.status] == [201, 204, 204]
+
+      etags = Enum.flat_map([gc, ge1, ge2], &get_resp_header(&1, "etag"))
+      assert length(Enum.uniq(etags)) == 3
+      assert get_resp_header(authed_dav(context, "GET", href), "etag") == [List.last(etags)]
+    end
+
+    test "CDV-17: touch_contact!/1 always yields a new ETag revision",
+         %{account_id: account_id} do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      t1 = Contacts.touch_contact!(contact)
+      t2 = Contacts.touch_contact!(t1)
+      assert t1.dav_revision != contact.dav_revision
+      assert t2.dav_revision != t1.dav_revision
+    end
+  end
+
+  describe "CDV-18: PUT to a trashed contact's href (R18)" do
+    defp all_rows(account_id) do
+      import Ecto.Query
+      Kith.Repo.all(from c in Kith.Contacts.Contact, where: c.account_id == ^account_id)
+    end
+
+    test "CDV-18: a client-named trashed contact is restored in place, not duplicated",
+         %{account_id: account_id} = context do
+      href = "/dav/addressbooks/default/trashed-uuid.vcf"
+
+      assert authed_dav(context, "PUT", href, build_vcard("Tr", "Ashed", uid: "trashed-uuid")).status ==
+               201
+
+      [%{id: id}] = all_rows(account_id)
+      assert authed_dav(context, "DELETE", href).status == 204
+
+      conn =
+        build_conn()
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("if-none-match", "*")
+        |> dav_request("PUT", href, build_vcard("Tr", "Back", uid: "trashed-uuid"))
+
+      assert conn.status == 201
+      assert [%{id: ^id, deleted_at: nil, last_name: "Back"}] = all_rows(account_id)
+      assert authed_dav(context, "GET", href).resp_body =~ "UID:trashed-uuid\r\n"
+    end
+
+    test "CDV-18: a trashed UI contact PUT at kith-contact-N.vcf is restored in place",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      {:ok, _} = Contacts.soft_delete_contact(contact)
+
+      conn = authed_dav(context, "PUT", contact_path(contact), build_vcard("Ui", "Back"))
+      assert conn.status == 201
+      assert [%{id: id, deleted_at: nil, last_name: "Back"}] = all_rows(account_id)
+      assert id == contact.id
+      assert authed_dav(context, "GET", contact_path(contact)).status == 200
+    end
+  end
+
+  describe "CDV-19: legacy text/x-vcard" do
+    defp put_with_type(context, path, content_type, body) do
+      build_conn()
+      |> basic_auth(context.user.email, dav_password())
+      |> put_req_header("content-type", content_type)
+      |> dispatch(KithWeb.Endpoint, "PUT", path, body)
+    end
+
+    test "CDV-19: PUT with text/x-vcard is accepted; application/json is 415", context do
+      vcard = build_vcard("Legacy", "Type")
+
+      assert put_with_type(context, "/dav/addressbooks/default/x1.vcf", "text/x-vcard", vcard).status ==
+               201
+
+      assert put_with_type(
+               context,
+               "/dav/addressbooks/default/x2.vcf",
+               "Text/X-VCard; charset=utf-8",
+               vcard
+             ).status == 201
+
+      assert put_with_type(
+               context,
+               "/dav/addressbooks/default/x3.vcf",
+               "application/json",
+               ~s({"fn": "Json"})
+             ).status ==
+               415
+    end
+  end
+
+  describe "CDV-20: PUT body size (R8)" do
+    test "CDV-20: a PUT body over max-resource-size is 413 and creates nothing",
+         %{account_id: account_id} = context do
+      for size <- [1_048_577, 9 * 1024 * 1024] do
+        big = build_vcard("Big", "Body", note: String.duplicate("x", size))
+        conn = authed_dav(context, "PUT", "/dav/addressbooks/default/big-#{size}.vcf", big)
+        assert conn.status == 413
+      end
+
+      assert Contacts.count_contacts(account_id) == 0
+    end
+  end
+
+  describe "CDV-112: cards with no given name" do
+    defp put112(context, name, lines) do
+      href = "/dav/addressbooks/default/cdv112-#{name}.vcf"
+      {href, authed_dav(context, "PUT", href, card(lines))}
+    end
+
+    defp stored112(%{account_id: account_id}, name),
+      do: Contacts.get_contact_by_dav_name(account_id, "cdv112-#{name}.vcf")
+
+    defp served112(context, href) do
+      conn = authed_dav(context, "GET", href)
+      assert conn.status == 200
+      lines = String.split(conn.resp_body, "\r\n")
+      {conn, lines}
+    end
+
+    test "CDV-112: family-name-only N moves the name to first_name", context do
+      {href, conn} = put112(context, "family", ["N:Cher;;;;", "FN:Cher"])
+      assert conn.status == 201
+      c = stored112(context, "family")
+      assert {c.first_name, c.last_name} == {"Cher", nil}
+      {_, lines} = served112(context, href)
+      assert "FN:Cher" in lines
+      assert "N:;Cher;;;" in lines
+    end
+
+    test "CDV-112: FN with no N becomes the first name", context do
+      {href, conn} = put112(context, "fn", ["FN:Madonna"])
+      assert conn.status == 201
+      c = stored112(context, "fn")
+      assert {c.first_name, c.last_name} == {"Madonna", nil}
+      {_, lines} = served112(context, href)
+      assert "FN:Madonna" in lines
+      assert "N:;Madonna;;;" in lines
+    end
+
+    test "CDV-112: an organisation card uses FN, else ORG", context do
+      {href, conn} = put112(context, "org", ["N:;;;;", "FN:Acme Corp", "ORG:Acme Corp"])
+      assert conn.status == 201
+      assert stored112(context, "org").first_name == "Acme Corp"
+      {_, lines} = served112(context, href)
+      assert "FN:Acme Corp" in lines
+
+      {_, conn} = put112(context, "orgonly", ["N:;;;;", "FN:", "ORG:Initech"])
+      assert conn.status == 201
+      assert stored112(context, "orgonly").first_name == "Initech"
+    end
+
+    test "CDV-112: NICKNAME is the last fallback", context do
+      {_, conn} = put112(context, "nick", ["N:;;;;", "FN:", "NICKNAME:Sparky"])
+      assert conn.status == 201
+      assert stored112(context, "nick").first_name == "Sparky"
+    end
+
+    test "CDV-112: a card with no name at all is still 422 and creates nothing",
+         %{account_id: account_id} = context do
+      {_, conn} = put112(context, "nothing", ["N:;;;;", "FN:", "EMAIL:x@example.com"])
+      assert conn.status == 422
+      assert conn.resp_body =~ "valid-address-data"
+      assert Contacts.count_contacts(account_id) == 0
+    end
+
+    # R4: every successful write moves the ETag (REV is in the card), so
+    # idempotence is about content: after the one rewrite (N:Cher;;;; ->
+    # N:;Cher;;;) PUT-backs of the served card change nothing but REV.
+    test "CDV-112: re-PUTting the same body or the served card is content-stable", context do
+      no_rev = fn lines -> Enum.reject(lines, &String.starts_with?(&1, "REV:")) end
+      {href, conn} = put112(context, "idem", ["N:Cher;;;;", "FN:Cher"])
+      assert conn.status == 201
+
+      # same body again
+      assert authed_dav(context, "PUT", href, card(["N:Cher;;;;", "FN:Cher"])).status == 204
+      {_, lines1} = served112(context, href)
+      assert "N:;Cher;;;" in lines1
+
+      # a client re-PUTs the card it received: the second and third GET are equal
+      body = Enum.join(lines1, "\r\n")
+      assert authed_dav(context, "PUT", href, body).status == 204
+      {_, lines2} = served112(context, href)
+      assert authed_dav(context, "PUT", href, Enum.join(lines2, "\r\n")).status == 204
+      {_, lines3} = served112(context, href)
+
+      assert no_rev.(lines2) == no_rev.(lines1)
+      assert no_rev.(lines3) == no_rev.(lines1)
+      c = stored112(context, "idem")
+      assert {c.first_name, c.last_name} == {"Cher", nil}
+    end
+  end
+
+  describe "CDV-21: unstorable vCard data" do
+    defp card(lines),
+      do: Enum.join(["BEGIN:VCARD", "VERSION:3.0" | lines] ++ ["END:VCARD", ""], "\r\n")
+
+    test "CDV-21: values too long to store are a 4xx valid-address-data and create nothing",
+         %{account_id: account_id} = context do
+      long = String.duplicate("9", 400)
+
+      for {lines, i} <-
+            Enum.with_index([
+              ["N:Long;Tel;;;", "FN:Tel Long", "TEL:#{long}"],
+              ["N:Long;Adr;;;", "FN:Adr Long", "ADR:;;#{long};City;;;"],
+              ["N:Long;#{long};;;", "FN:Name Long"],
+              ["N:Bad;Utf;;;", "FN:Bad Utf", "EMAIL:a\xFFb@example.com"]
+            ]) do
+        conn = authed_dav(context, "PUT", "/dav/addressbooks/default/long-#{i}.vcf", card(lines))
+        assert conn.status in 400..499, "case #{i} -> #{conn.status}"
+        assert conn.resp_body =~ "valid-address-data"
+      end
+
+      assert Contacts.count_contacts(account_id) == 0
+    end
+
+    test "CDV-21: a rejected update leaves the contact and its children unchanged",
+         %{account_id: account_id} = context do
+      href = "/dav/addressbooks/default/keep.vcf"
+      ok = card(["N:Keep;Kim;;;", "FN:Kim Keep", "TEL:+15550001111"])
+      assert authed_dav(context, "PUT", href, ok).status == 201
+
+      bad = card(["N:Changed;Kim;;;", "FN:Kim Changed", "TEL:#{String.duplicate("9", 400)}"])
+      assert authed_dav(context, "PUT", href, bad).status in 400..499
+
+      body = authed_dav(context, "GET", href).resp_body
+      assert body =~ "N:Keep;Kim"
+      assert body =~ "+15550001111"
+      assert Contacts.count_contacts(account_id) == 1
+    end
+
+    test "CDV-21: an empty EMAIL or TEL value is skipped, not a 500", context do
+      href = "/dav/addressbooks/default/empty.vcf"
+      vcard = card(["N:Empty;Em;;;", "FN:Em Empty", "EMAIL;TYPE=INTERNET:", "TEL:"])
+      assert authed_dav(context, "PUT", href, vcard).status == 201
+      assert authed_dav(context, "GET", href).resp_body =~ "FN:Em Empty"
+    end
+  end
+
+  describe "CDV-22: DELETE or PUT on a collection" do
+    test "CDV-22: DELETE and PUT on the collections are 405 with Allow and delete nothing",
+         %{account_id: account_id} = context do
+      ContactsFixtures.contact_fixture(account_id)
+
+      for path <- [
+            "/dav/addressbooks/default/",
+            "/dav/addressbooks/",
+            "/dav/principals/",
+            "/dav/"
+          ],
+          method <- ["DELETE", "PUT"] do
+        conn =
+          build_conn()
+          |> basic_auth(context.user.email, dav_password())
+          |> dav_request(method, path, build_vcard("Col", "Lection"))
+
+        assert conn.status == 405, "#{method} #{path} -> #{conn.status}"
+        [allow] = get_resp_header(conn, "allow")
+        assert allow =~ "PROPFIND"
+        refute allow =~ method
+      end
+
+      assert Contacts.count_contacts(account_id) == 1
+    end
+  end
+
+  describe "CDV-23: chunked bodies and max-resource-size (R8)" do
+    # Bandit reads a `Transfer-Encoding: chunked` body whole and ignores
+    # read_body's `:length`; this adapter does the same.
+    defmodule ChunkedAdapter do
+      @moduledoc false
+      @behaviour Plug.Conn.Adapter
+      alias Plug.Adapters.Test.Conn, as: T
+
+      @impl true
+      def read_req_body(%{req_body: body} = state, _opts),
+        do: {:ok, body, %{state | req_body: ""}}
+
+      @impl true
+      defdelegate send_resp(s, st, h, b), to: T
+      @impl true
+      defdelegate send_file(s, st, h, p, o, l), to: T
+      @impl true
+      defdelegate send_chunked(s, st, h), to: T
+      @impl true
+      defdelegate chunk(s, b), to: T
+      @impl true
+      defdelegate inform(s, st, h), to: T
+      @impl true
+      defdelegate upgrade(s, p, o), to: T
+      @impl true
+      defdelegate push(s, p, h), to: T
+      @impl true
+      defdelegate get_peer_data(s), to: T
+      @impl true
+      defdelegate get_sock_data(s), to: T
+      @impl true
+      defdelegate get_ssl_data(s), to: T
+      @impl true
+      defdelegate get_http_protocol(s), to: T
+    end
+
+    defp chunked(context, method, path, content_type, body) do
+      conn = build_conn(method, path, body)
+      {_, state} = conn.adapter
+
+      %{conn | adapter: {ChunkedAdapter, state}}
+      |> basic_auth(context.user.email, dav_password())
+      |> put_req_header("content-type", content_type)
+      |> put_req_header("depth", "0")
+      |> KithWeb.Endpoint.call([])
+    end
+
+    test "CDV-23: a chunked PUT or PROPFIND body over max-resource-size is 413",
+         %{account_id: account_id} = context do
+      note = String.duplicate("x", 2 * 1024 * 1024)
+      vcard = build_vcard("Chunked", "Big", note: note)
+      put = chunked(context, :put, "/dav/addressbooks/default/chunked.vcf", "text/vcard", vcard)
+      assert put.status == 413
+      assert Contacts.count_contacts(account_id) == 0
+
+      xml = ~s(<d:propfind xmlns:d="DAV:"><!--#{note}--><d:allprop/></d:propfind>)
+      assert chunked(context, :propfind, "/dav/", "application/xml", xml).status == 413
+    end
+  end
+
+  describe "CDV-26: client-held kith-contact-N names cannot shadow (R20)" do
+    defp last_contact_id do
+      [[v]] = Ecto.Adapters.SQL.query!(Kith.Repo, "SELECT last_value FROM contacts_id_seq").rows
+      v
+    end
+
+    # R20 as revised by CDV-32: the client name is stored; contact N, inserted
+    # later by any path (here a raw insert with an explicit id), gets
+    # `kith-contact-N-k.vcf` from the insert trigger instead of shadowing.
+    test "CDV-26: a PUT-create at a future kith-contact-N.vcf cannot shadow contact N",
+         %{account_id: account_id} = context do
+      n = last_contact_id() + 10_000_000
+      href = "/dav/addressbooks/default/kith-contact-#{n}.vcf"
+
+      put =
+        authed_dav(context, "PUT", href, build_vcard("Client", "Named", uid: "kith-contact-#{n}"))
+
+      assert put.status == 201
+
+      Kith.Repo.insert!(%Kith.Contacts.Contact{id: n, account_id: account_id, first_name: "Ui"})
+      assert authed_dav(context, "GET", href).resp_body =~ "FN:Client Named\r\n"
+
+      alt = authed_dav(context, "GET", "/dav/addressbooks/default/kith-contact-#{n}-k.vcf")
+      assert alt.status == 200
+      assert alt.resp_body =~ "FN:Ui\r\n"
+      assert Contacts.count_contacts(account_id) == 2
+    end
+
+    test "CDV-26: an already-issued kith-contact-N.vcf name (another account's id) is accepted",
+         %{account_id: account_id} = context do
+      other = ContactsFixtures.contact_fixture(Kith.AccountsFixtures.user_fixture().account.id)
+      href = "/dav/addressbooks/default/kith-contact-#{other.id}.vcf"
+      assert authed_dav(context, "PUT", href, build_vcard("Copied", "Card")).status == 201
+      assert authed_dav(context, "GET", href).resp_body =~ "Copied"
+      assert Contacts.count_contacts(account_id) == 1
+    end
+  end
+
+  describe "CDV-27: archived contacts are hidden from DAV (R5, R21)" do
+    test "CDV-27: GET, PROPFIND, multiget and DELETE treat an archived contact as missing",
+         %{account_id: account_id} = context do
+      ui = ContactsFixtures.contact_fixture(account_id)
+      {:ok, _} = Contacts.archive_contact(ui)
+
+      href = "/dav/addressbooks/default/archived.vcf"
+      assert authed_dav(context, "PUT", href, build_vcard("Arch", "Ived")).status == 201
+
+      {:ok, _} =
+        Contacts.archive_contact(Contacts.get_contact_by_dav_name(account_id, "archived.vcf"))
+
+      for path <- [contact_path(ui), href] do
+        assert authed_dav(context, "GET", path).status == 404
+
+        propfind = build_conn() |> basic_auth(context.user.email, dav_password())
+        assert dav_request(propfind, "PROPFIND", path, propfind_body()).status == 404
+
+        multiget = build_conn() |> basic_auth(context.user.email, dav_password())
+
+        body =
+          dav_request(multiget, "REPORT", "/dav/addressbooks/default/", multiget_body([path])).resp_body
+
+        assert body =~ "404 Not Found"
+        refute body =~ "BEGIN:VCARD"
+
+        delete = build_conn() |> basic_auth(context.user.email, dav_password())
+        assert dav_request(delete, "DELETE", path).status == 404
+      end
+
+      assert Contacts.list_archived_contacts(account_id) |> length() == 2
+    end
+
+    test "CDV-27: a PUT to an archived contact's href unarchives and overwrites it in place",
+         %{account_id: account_id} = context do
+      ui = ContactsFixtures.contact_fixture(account_id)
+      {:ok, _} = Contacts.archive_contact(ui)
+
+      conn = authed_dav(context, "PUT", contact_path(ui), build_vcard("Back", "Again"))
+      assert conn.status == 201
+      contact = Contacts.get_contact(account_id, ui.id)
+      assert %{is_archived: false, first_name: "Back"} = contact
+      assert Contacts.count_contacts(account_id) == 1
+    end
+  end
+
+  describe "CDV-28: no-uid-conflict (RFC 6352 §6.3.2.1)" do
+    test "CDV-28: a create whose UID is already used by another href is 409 no-uid-conflict",
+         %{account_id: account_id} = context do
+      a = "/dav/addressbooks/default/uid-a.vcf"
+
+      assert authed_dav(context, "PUT", a, build_vcard("Uid", "One", uid: "shared-uid")).status ==
+               201
+
+      dup =
+        authed_dav(
+          context,
+          "PUT",
+          "/dav/addressbooks/default/uid-b.vcf",
+          build_vcard("Uid", "Two", uid: "shared-uid")
+        )
+
+      assert dup.status == 409
+      assert dup.resp_body =~ "<card:no-uid-conflict><d:href>#{a}</d:href></card:no-uid-conflict>"
+
+      ui = ContactsFixtures.contact_fixture(account_id)
+
+      for uid <- ["kith-contact-#{ui.id}", "urn:uuid:kith-contact-#{ui.id}"] do
+        conn =
+          authed_dav(
+            context,
+            "PUT",
+            "/dav/addressbooks/default/uid-c.vcf",
+            build_vcard("Uid", "Three", uid: uid)
+          )
+
+        assert conn.status == 409
+        assert conn.resp_body =~ "<d:href>#{contact_path(ui)}</d:href>"
+      end
+
+      assert Contacts.count_contacts(account_id) == 2
+    end
+
+    test "CDV-28: re-PUTting the same href with its own UID is not a conflict", context do
+      a = "/dav/addressbooks/default/uid-self.vcf"
+
+      assert authed_dav(context, "PUT", a, build_vcard("Self", "One", uid: "self-uid")).status ==
+               201
+
+      assert authed_dav(context, "PUT", a, build_vcard("Self", "Two", uid: "self-uid")).status ==
+               204
+    end
+  end
+
+  describe "CDV-29: chunked request bodies on DAV paths" do
+    test "CDV-29: a chunked request to /dav or /.well-known/carddav is 411 before any body read",
+         %{account_id: account_id} = context do
+      for {method, path} <- [
+            {"PUT", "/dav/addressbooks/default/chunk.vcf"},
+            {"PROPFIND", "/dav/"},
+            {"PROPFIND", "/.well-known/carddav"}
+          ] do
+        conn =
+          build_conn()
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("transfer-encoding", "chunked")
+          |> dav_request(method, path, build_vcard("Chunk", "Ed"))
+
+        assert conn.status == 411, "#{method} #{path} -> #{conn.status}"
+        assert get_resp_header(conn, "connection") == ["close"]
+      end
+
+      assert Contacts.count_contacts(account_id) == 0
+    end
+  end
+
+  describe "CDV-34: only the canonical kith-contact-N name resolves" do
+    test "CDV-34: kith-contact-0N.vcf does not alias contact N; it is an ordinary client name",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Canon"})
+      alias_href = "/dav/addressbooks/default/kith-contact-0#{contact.id}.vcf"
+
+      assert authed_dav(context, "GET", alias_href).status == 404
+      assert authed_dav(context, "DELETE", alias_href).status == 404
+
+      put = authed_dav(context, "PUT", alias_href, build_vcard("Zero", "Padded"))
+      assert put.status == 201
+      assert Contacts.get_contact(account_id, contact.id).first_name == "Canon"
+      assert Contacts.count_contacts(account_id) == 2
+
+      dup =
+        authed_dav(
+          context,
+          "PUT",
+          "/dav/addressbooks/default/zero-uid.vcf",
+          build_vcard("Zero", "Uid", uid: "kith-contact-0#{contact.id}")
+        )
+
+      assert dup.status == 201
+    end
+  end
+
+  describe "CDV-35: no-uid-conflict on restore/unarchive" do
+    test "CDV-35: a PUT that would restore a trashed or archived contact whose UID is now taken is 409",
+         %{account_id: account_id} = context do
+      a = "/dav/addressbooks/default/restore-a.vcf"
+      b = "/dav/addressbooks/default/restore-b.vcf"
+      assert authed_dav(context, "PUT", a, build_vcard("Re", "A", uid: "taken-uid")).status == 201
+      assert authed_dav(context, "DELETE", a).status == 204
+      assert authed_dav(context, "PUT", b, build_vcard("Re", "B", uid: "taken-uid")).status == 201
+
+      restore = authed_dav(context, "PUT", a, build_vcard("Re", "A2", uid: "taken-uid"))
+      assert restore.status == 409
+
+      assert restore.resp_body =~
+               "<card:no-uid-conflict><d:href>#{b}</d:href></card:no-uid-conflict>"
+
+      assert authed_dav(context, "GET", a).status == 404
+
+      c = "/dav/addressbooks/default/restore-c.vcf"
+      assert authed_dav(context, "PUT", c, build_vcard("Re", "C", uid: "c-uid")).status == 201
+      archived = Contacts.get_contact_by_dav_name(account_id, "restore-c.vcf")
+      {:ok, _} = Contacts.archive_contact(archived)
+
+      assert authed_dav(
+               context,
+               "PUT",
+               "/dav/addressbooks/default/restore-d.vcf",
+               build_vcard("Re", "D", uid: "c-uid")
+             ).status == 201
+
+      unarchive = authed_dav(context, "PUT", c, build_vcard("Re", "C2", uid: "c-uid"))
+      assert unarchive.status == 409
+      assert Contacts.get_contact(account_id, archived.id).is_archived
+    end
+  end
+
+  describe "CDV-36: one visible contact per UID" do
+    test "CDV-36: restoring from the UI a contact whose UID is now taken keeps one holder",
+         %{account_id: account_id} = context do
+      a = "/dav/addressbooks/default/ui-restore-a.vcf"
+      assert authed_dav(context, "PUT", a, build_vcard("Ui", "A", uid: "ui-uid")).status == 201
+      trashed = Contacts.get_contact_by_dav_name(account_id, "ui-restore-a.vcf")
+      {:ok, _} = Contacts.soft_delete_contact(trashed)
+
+      assert authed_dav(
+               context,
+               "PUT",
+               "/dav/addressbooks/default/ui-restore-b.vcf",
+               build_vcard("Ui", "B", uid: "ui-uid")
+             ).status == 201
+
+      assert {:ok, restored} = Contacts.restore_contact(Kith.Repo.reload!(trashed))
+      assert restored.dav_uid == nil
+      assert authed_dav(context, "GET", a).resp_body =~ "UID:kith-contact-#{trashed.id}\r\n"
+    end
+  end
+
+  describe "CDV-37: an early 413 leaves the connection readable" do
+    defp unread(conn) do
+      {Plug.Adapters.Test.Conn, %{req_body: rest}} = conn.adapter
+      byte_size(rest)
+    end
+
+    test "CDV-37: the rest of an oversized body is drained before the 413; past the bound the connection closes",
+         context do
+      drainable = build_vcard("Big", "Body", note: String.duplicate("x", 2_000_000))
+      conn = authed_dav(context, "PUT", "/dav/addressbooks/default/drain.vcf", drainable)
+      assert conn.status == 413
+      assert unread(conn) == 0
+      assert get_resp_header(conn, "connection") == []
+
+      huge = build_vcard("Huge", "Body", note: String.duplicate("x", 20 * 1_048_576))
+      conn = authed_dav(context, "PUT", "/dav/addressbooks/default/huge.vcf", huge)
+      assert conn.status == 413
+      assert get_resp_header(conn, "connection") == ["close"]
+    end
+  end
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # Helpers
   # ═══════════════════════════════════════════════════════════════════════════
 
-  # Creates a contact via PUT and returns {href, conn} for the created resource
+  # Creates a contact via PUT and returns {href, conn} for the created resource.
+  # R2: the server keeps the client-chosen href, so href is the PUT path.
   defp put_and_find(context, vcard) do
     path = "/dav/addressbooks/default/kith-contact-new-#{System.unique_integer([:positive])}.vcf"
     conn = authed_dav(context, "PUT", path, vcard)
@@ -1222,14 +1980,79 @@ defmodule KithWeb.DAV.AddressObjectTest do
       |> put_req_header("depth", "1")
       |> dav_request("PROPFIND", "/dav/addressbooks/default/", propfind_body())
 
-    [href] =
-      Regex.scan(
-        ~r{<d:href>(/dav/addressbooks/default/kith-contact-\d+\.vcf)</d:href>},
-        conn_list.resp_body,
-        capture: :all_but_first
-      )
-      |> List.flatten()
+    assert conn_list.resp_body =~ "<d:href>#{path}</d:href>"
 
-    {href, conn}
+    {path, conn}
+  end
+
+  test "CDV-75: UTF-8 is validated after unfolding, malformed sequences still fail", context do
+    bytes = File.read!("test/playwright/fixtures/carddav/unicode-folding.vcf")
+    refute String.valid?(bytes)
+    href = "/dav/addressbooks/default/unicode-folded.vcf"
+    assert authed_dav(context, "PUT", href, bytes).status == 201
+    get = authed_dav(context, "GET", href)
+    assert get.status == 200
+    assert String.replace(get.resp_body, "\r\n ", "") =~ "小明😀 مرحبا"
+    bad = build_vcard("Invalid", "Utf8") |> String.replace("Invalid", <<255>>)
+
+    assert authed_dav(context, "PUT", "/dav/addressbooks/default/invalid-utf8.vcf", bad).status ==
+             422
+  end
+
+  test "CDV-90 (reverses CDV-82): one strong ETag serves both vCard versions and every listing",
+       context do
+    href = "/dav/addressbooks/default/variant-etags.vcf"
+    assert authed_dav(context, "PUT", href, build_vcard("Variant", "Probe")).status == 201
+
+    get = fn version, headers ->
+      conn =
+        Enum.reduce(
+          headers,
+          put_req_header(build_conn(), "accept", "text/vcard; version=#{version}"),
+          fn {key, value}, conn -> put_req_header(conn, key, value) end
+        )
+
+      authed_dav(%{context | conn: conn}, "GET", href)
+    end
+
+    g3 = get.("3.0", [])
+    g4 = get.("4.0", [])
+    [t3] = get_resp_header(g3, "etag")
+    [t4] = get_resp_header(g4, "etag")
+    assert g3.resp_body != g4.resp_body
+    assert t3 == t4
+    assert Enum.join(get_resp_header(g4, "vary"), ",") =~ "accept"
+
+    propfind =
+      authed_dav(
+        %{context | conn: put_req_header(build_conn(), "depth", "0")},
+        "PROPFIND",
+        href,
+        ~s(<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>)
+      )
+
+    assert propfind.resp_body =~ "<d:getetag>#{t4}</d:getetag>"
+
+    for version <- ["3.0", "4.0"] do
+      report =
+        authed_dav(
+          context,
+          "REPORT",
+          "/dav/addressbooks/default/",
+          ~s(<c:addressbook-multiget xmlns:c="urn:ietf:params:xml:ns:carddav" xmlns:d="DAV:"><d:prop><d:getetag/><c:address-data content-type="text/vcard" version="#{version}"/></d:prop><d:href>#{href}</d:href></c:addressbook-multiget>)
+        )
+
+      assert report.resp_body =~ "<d:getetag>#{t4}</d:getetag>"
+      assert get.(version, [{"if-none-match", t3}]).status == 304
+    end
+
+    write_context = %{context | conn: put_req_header(build_conn(), "if-match", t3)}
+    assert authed_dav(write_context, "PUT", href, g4.resp_body).status == 204
+    assert authed_dav(write_context, "PUT", href, g4.resp_body).status == 412
+    [current] = get.("4.0", []) |> get_resp_header("etag")
+    assert [current] == get.("3.0", []) |> get_resp_header("etag")
+    assert get.("3.0", [{"if-none-match", t3}]).status == 200
+    none_context = %{context | conn: put_req_header(build_conn(), "if-none-match", current)}
+    assert authed_dav(none_context, "PUT", href, g4.resp_body).status == 412
   end
 end

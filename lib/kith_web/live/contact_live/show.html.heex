@@ -254,9 +254,12 @@
               <div :if={@contact.birthdate} class="flex justify-between gap-4">
                 <dt class="text-[var(--color-text-tertiary)] shrink-0">Birthday</dt>
                 <dd class="text-end">
-                  <KithUI.date_display date={@contact.birthdate} />
+                  <KithUI.date_display
+                    date={@contact.birthdate}
+                    year_unknown={@contact.birthdate_year_unknown}
+                  />
                   <span
-                    :if={age = compute_age(@contact.birthdate)}
+                    :if={age = compute_age(@contact)}
                     class="text-[var(--color-text-tertiary)]"
                   >
                     ({age})
@@ -375,9 +378,12 @@
             <div :if={@contact.birthdate} class="flex justify-between gap-4">
               <dt class="text-[var(--color-text-tertiary)] shrink-0">Birthday</dt>
               <dd class="text-end">
-                <KithUI.date_display date={@contact.birthdate} />
+                <KithUI.date_display
+                  date={@contact.birthdate}
+                  year_unknown={@contact.birthdate_year_unknown}
+                />
                 <span
-                  :if={age = compute_age(@contact.birthdate)}
+                  :if={age = compute_age(@contact)}
                   class="text-[var(--color-text-tertiary)]"
                 >
                   ({age})

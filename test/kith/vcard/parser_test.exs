@@ -474,4 +474,148 @@ defmodule Kith.VCard.ParserTest do
       assert hd(parsed.addresses).city == "Portland"
     end
   end
+
+  test "CDV-74: escaping is decoded once and escaped structure delimiters stay in components" do
+    assert Parser.unescape(~S(literal \\n)) == ~S(literal \n)
+
+    body =
+      "BEGIN:VCARD\nVERSION:4.0\n" <>
+        ~S(N:Family\;Last;Given\;First;Middle\,Name;Dr;Jr) <>
+        "\n" <>
+        ~S(ADR;TYPE=HOME:;Suite\;2;Street\;3;City\,Town;Region;Zip;Country) <>
+        "\n" <>
+        ~S(CATEGORIES:Ends\\,Next) <> "\nEND:VCARD\n"
+
+    assert {:ok, [parsed]} = Parser.parse(body)
+    assert parsed.last_name == "Family;Last"
+    assert parsed.first_name == "Given;First"
+    assert parsed.middle_name == "Middle,Name"
+    assert hd(parsed.addresses).line2 == "Suite;2"
+    assert hd(parsed.addresses).line1 == "Street;3"
+    assert hd(parsed.addresses).country == "Country"
+    assert parsed.categories == ["Ends\\", "Next"]
+  end
+
+  test "CDV-89: quoted parameter values may contain separators" do
+    data =
+      "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Q\r\nTEL;TYPE=\"work,voice\":+15550007777\r\nADR;TYPE=home;LABEL=\"a;b:c\":;;1 Main St;Town;;;\r\nEMAIL;X-NOTE=\"x:y\";TYPE=home:q@example.test\r\nEND:VCARD\r\n"
+
+    assert {:ok, [parsed]} = Parser.parse(data)
+    assert [%{value: "+15550007777", label: "Work"}] = parsed.phones
+    assert [%{label: "Home", line1: "1 Main St", city: "Town"}] = parsed.addresses
+    assert [%{value: "q@example.test", label: "Home"}] = parsed.emails
+
+    assert Enum.map(parsed.properties, & &1["head"]) == [
+             "VERSION",
+             "FN",
+             "TEL;TYPE=\"work,voice\"",
+             "ADR;TYPE=home;LABEL=\"a;b:c\"",
+             "EMAIL;X-NOTE=\"x:y\";TYPE=home"
+           ]
+  end
+
+  test "CDV-91: an embedded AGENT vCard does not end the card" do
+    data =
+      "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Agent Card\r\nAGENT:BEGIN:VCARD\\nFN:Agent\\nEND:VCARD\r\nNOTE:after the agent\r\nEMAIL:after@example.test\r\nEND:VCARD\r\nBEGIN:VCARD\r\nVERSION:3.0\r\nFN:Second\r\nEND:VCARD\r\n"
+
+    assert {:ok, [parsed, second]} = Parser.parse(data)
+    assert parsed.description == "after the agent"
+    assert [%{value: "after@example.test"}] = parsed.emails
+
+    assert %{"value" => "BEGIN:VCARD\\nFN:Agent\\nEND:VCARD"} =
+             Enum.find(parsed.properties, &(&1["name"] == "AGENT"))
+
+    assert second.display_name == "Second"
+  end
+
+  describe "CDV-95: card delimiters tolerate a BOM, trailing blanks and any line ending" do
+    test "a BOM-prefixed two-card file keeps both cards" do
+      data =
+        "\uFEFFBEGIN:VCARD\r\nVERSION:3.0\r\nFN:First\r\nEND:VCARD\r\nBEGIN:VCARD\r\nVERSION:3.0\r\nFN:Second\r\nEND:VCARD\r\n"
+
+      assert {:ok, [a, b]} = Parser.parse(data)
+      assert {a.display_name, b.display_name} == {"First", "Second"}
+    end
+
+    test "trailing spaces and tabs on BEGIN and END do not merge cards" do
+      data =
+        "BEGIN:VCARD \r\nVERSION:3.0\r\nFN:A\r\nEND:VCARD \r\nBEGIN:VCARD\t\r\nVERSION:3.0\r\nFN:B\r\nEND:VCARD\t\r\n"
+
+      assert {:ok, [a, b]} = Parser.parse(data)
+      assert {a.display_name, b.display_name} == {"A", "B"}
+    end
+
+    test "CRLF, LF and lone CR line endings, mixed" do
+      data = "BEGIN:VCARD\rVERSION:3.0\nFN:Mixed\r\nEMAIL:m@example.test\rEND:VCARD\n"
+      assert {:ok, [card]} = Parser.parse(data)
+      assert card.display_name == "Mixed"
+      assert [%{value: "m@example.test"}] = card.emails
+    end
+
+    test "an escaped AGENT vCard still does not end the card" do
+      data =
+        "\uFEFFBEGIN:VCARD\r\nVERSION:3.0\r\nFN:Agent Card\r\nAGENT:BEGIN:VCARD\\nEND:VCARD\r\nNOTE:after\r\nEND:VCARD \r\n"
+
+      assert {:ok, [card]} = Parser.parse(data)
+      assert card.description == "after"
+    end
+  end
+
+  describe "scaling" do
+    # Counts BEAM reductions of the calling process rather than wall-clock time,
+    # so the guard is deterministic under load (no scheduler or CI noise).
+    defp parse_reductions(line_fun, n) do
+      card =
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Big\r\n" <>
+          Enum.map_join(1..n, "\r\n", line_fun) <> "\r\nEND:VCARD\r\n"
+
+      {:reductions, before} = Process.info(self(), :reductions)
+      assert {:ok, [_]} = Parser.parse(card)
+      {:reductions, after_} = Process.info(self(), :reductions)
+      after_ - before
+    end
+
+    # Appending with `list ++ [x]` makes a card of n lines O(n^2): 4x the lines
+    # cost ~16x the work. Linear parsing stays near 4x; 9x leaves a wide margin.
+    for {name, line} <- [
+          {"unknown properties", "X-PERF-@N@:value @N@"},
+          {"EMAIL lines", "EMAIL:e@N@@example.test"},
+          {"TEL lines", "TEL;TYPE=CELL:+1555@N@"}
+        ] do
+      test "CDV-108: parsing #{name} is linear in the number of lines" do
+        template = unquote(line)
+        line_fun = &String.replace(template, "@N@", to_string(&1))
+
+        small = max(parse_reductions(line_fun, 5_000), 1)
+        large = parse_reductions(line_fun, 20_000)
+
+        assert large < small * 9,
+               "5000 lines: #{small} reductions, 20000 lines: #{large} (#{Float.round(large / small, 1)}x)"
+      end
+    end
+  end
+
+  describe "CDV-117: per-card encoding" do
+    test "a file with one non-UTF-8 card: strict parse refuses it, per_card isolates the card" do
+      card = fn name ->
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nN:#{name};A;;;\r\nFN:A #{name}\r\nEND:VCARD\r\n"
+      end
+
+      data = card.("One") <> card.(<<"Zo", 0xEB>>) <> card.("Three")
+
+      # DAV (a single card per PUT, CDV-75) keeps the strict whole-body check.
+      assert Parser.parse(data) == {:error, "Invalid UTF-8"}
+
+      assert {:ok, [%{last_name: "One"}, {:error, "Invalid UTF-8"}, %{last_name: "Three"}]} =
+               Parser.parse(data, per_card: true)
+
+      # A fold that splits a code point is still repaired per card (CDV-75).
+      folded =
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nN:" <>
+          <<0xC3>> <> "\r\n " <> <<0xBC>> <> "nal;A;;;\r\nFN:A\r\nEND:VCARD\r\n"
+
+      assert {:ok, [%{last_name: "ünal"}, {:error, "Invalid UTF-8"}]} =
+               Parser.parse(folded <> card.(<<0xFF>>), per_card: true)
+    end
+  end
 end

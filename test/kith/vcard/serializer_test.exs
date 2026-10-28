@@ -557,4 +557,141 @@ defmodule Kith.VCard.SerializerTest do
       refute String.contains?(vcard, "ENCODING=b")
     end
   end
+
+  test "CDV-76: folded output never splits a UTF-8 sequence" do
+    contact = %{
+      first_name: "小明😀 مرحبا",
+      last_name: "王",
+      nickname: nil,
+      birthdate: nil,
+      company: nil,
+      occupation: nil,
+      description: String.duplicate("漢字😀مرحباשלום", 20)
+    }
+
+    card = Serializer.serialize(contact)
+    assert String.valid?(card)
+
+    for line <- String.split(card, "\r\n") do
+      assert byte_size(line) <= 75
+      assert String.valid?(line)
+    end
+  end
+
+  test "CDV-77: a native field without a protocol does not crash serialization" do
+    contact = %{
+      first_name: "Native",
+      last_name: "Field",
+      nickname: nil,
+      birthdate: nil,
+      company: nil,
+      occupation: nil,
+      description: nil,
+      contact_fields: [
+        %{
+          value: "Private native field",
+          label: nil,
+          contact_field_type: %{protocol: nil, vcard_label: nil}
+        }
+      ]
+    }
+
+    card = Serializer.serialize(contact)
+    assert card =~ "FN:Native Field"
+    refute card =~ "Private native field"
+  end
+
+  test "CDV-78: preference-only EMAIL metadata survives a 3.0 PUT-back" do
+    contact = %{
+      dav_vcard: %{
+        "properties" => [
+          %{"name" => "EMAIL", "head" => "EMAIL;TYPE=PREF", "value" => "pref@example.test"}
+        ]
+      }
+    }
+
+    lines = ["BEGIN:VCARD", "VERSION:3.0", "EMAIL:pref@example.test", "END:VCARD"]
+    assert "EMAIL;TYPE=PREF:pref@example.test" in Kith.VCard.Metadata.merge(lines, contact, :v30)
+  end
+
+  test "CDV-81: vCard 4.0 dates and REV use basic date/timestamp syntax" do
+    contact = %{
+      first_name: "Valid",
+      last_name: "Vcard",
+      nickname: nil,
+      birthdate: ~D[1990-06-15],
+      company: nil,
+      occupation: nil,
+      description: nil,
+      updated_at: ~U[2026-10-20 20:30:00Z]
+    }
+
+    card = Serializer.serialize(contact, version: :v40)
+    assert card =~ "BDAY:19900615\r\n"
+    assert card =~ "REV:20261020T203000Z\r\n"
+  end
+
+  test "CDV-85: category metadata survives association ordering changes" do
+    contact = %{
+      first_name: "Category",
+      last_name: "Order",
+      nickname: nil,
+      birthdate: nil,
+      company: nil,
+      occupation: nil,
+      description: nil,
+      tags: [%{name: "Friends, close"}, %{name: "Computing"}],
+      dav_vcard: %{
+        "properties" => [
+          %{
+            "name" => "CATEGORIES",
+            "head" => "CATEGORIES",
+            "value" => "Computing,Friends\\, close"
+          }
+        ]
+      }
+    }
+
+    assert Serializer.serialize(contact) =~ "CATEGORIES:Computing,Friends\\, close"
+    contact = %{contact | tags: [%{name: "Changed"}]}
+    assert Serializer.serialize(contact) =~ "CATEGORIES:Changed"
+    refute Serializer.serialize(contact) =~ "CATEGORIES:Computing"
+  end
+
+  describe "retained metadata scaling" do
+    # n EMAIL lines, retained in the opposite order: matching each native line
+    # by scanning every retained property is O(n^2) (n = 3200: ~5 s); a lookup
+    # is linear. 4x the lines should cost ~4x, quadratic code ~16x.
+    defp merge_reductions(n) do
+      lines =
+        ["BEGIN:VCARD", "VERSION:3.0"] ++
+          Enum.map(1..n, &"EMAIL;TYPE=WORK:e#{&1}@example.test") ++ ["END:VCARD"]
+
+      properties =
+        for i <- n..1//-1 do
+          %{
+            "name" => "EMAIL",
+            "head" => "EMAIL;X-KEEP=1;TYPE=WORK",
+            "value" => "e#{i}@example.test"
+          }
+        end
+
+      # Reductions, not wall-clock time: deterministic under load.
+      {:reductions, before} = Process.info(self(), :reductions)
+      merged = Kith.VCard.Metadata.merge(lines, %{dav_vcard: %{"properties" => properties}}, :v30)
+      {:reductions, after_} = Process.info(self(), :reductions)
+
+      # The retained parameters were applied to every line.
+      assert Enum.count(merged, &String.starts_with?(&1, "EMAIL;X-KEEP=1;TYPE=WORK:")) == n
+      after_ - before
+    end
+
+    test "CDV-109: restoring retained properties is linear in the number of lines" do
+      small = max(merge_reductions(800), 1)
+      large = merge_reductions(3200)
+
+      assert large < small * 9,
+             "800 lines: #{small} reductions, 3200 lines: #{large} (#{Float.round(large / small, 1)}x)"
+    end
+  end
 end

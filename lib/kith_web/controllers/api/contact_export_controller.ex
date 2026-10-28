@@ -35,7 +35,7 @@ defmodule KithWeb.API.ContactExportController do
         })
 
       contact ->
-        vcard = Serializer.serialize(contact)
+        vcard = contact |> Contacts.load_dav_vcard() |> Serializer.serialize()
         filename = safe_filename(contact.display_name || "contact")
 
         conn
@@ -84,16 +84,19 @@ defmodule KithWeb.API.ContactExportController do
         Contacts.stream_all_contacts(account_id, preload: @vcard_preloads)
       end
 
-    Kith.Repo.transaction(fn ->
-      stream
-      |> Stream.each(fn contact ->
-        vcard = Serializer.serialize(contact)
-        {:ok, _conn} = chunk(conn, vcard)
-      end)
-      |> Stream.run()
-    end)
+    # Return the conn of the last chunk (CDV-116): the adapter state it carries
+    # is what a test (and any later plug) sees as the response.
+    {:ok, conn} =
+      Kith.Repo.transaction(fn -> Enum.reduce_while(stream, conn, &chunk_contact/2) end)
 
     conn
+  end
+
+  defp chunk_contact(contact, conn) do
+    case chunk(conn, Serializer.serialize(contact)) do
+      {:ok, conn} -> {:cont, conn}
+      {:error, _closed} -> {:halt, conn}
+    end
   end
 
   defp safe_filename(name) do
