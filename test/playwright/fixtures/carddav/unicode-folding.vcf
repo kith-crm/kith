@@ -1,6 +1,6 @@
 BEGIN:VCARD
 VERSION:4.0
-UID:{{PREFIX}}-unicode
+UID:{{UID}}
 N:王;{{PREFIX}} 小明😀 مرحبا;שלום;;
 FN:{{PREFIX}} 小明😀 مرحبا שלום 王
 NOTE:漢字😀مرحباשלום漢字😀مرحباשלום漢字😀مر

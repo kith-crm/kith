@@ -44,25 +44,24 @@ defmodule KithWeb.API.ContactExportControllerTest do
     relationship_fixture(contact, target, type.id)
     Kith.DAV.Store.ensure_rows(user.account_id)
     dav = Kith.Repo.get!(Kith.DAV.ContactDav, contact.id)
+    uid = Ecto.UUID.generate()
 
-    Kith.Repo.update!(
-      Ecto.Changeset.change(dav, uid: "external-identity", extras: ["X-CUSTOM:kept"])
-    )
+    Kith.Repo.update!(Ecto.Changeset.change(dav, uid: uid, extras: ["X-CUSTOM:kept"]))
 
     single = get(conn, ~p"/api/contacts/#{contact.id}/export.vcf")
     assert single.status == 200
-    assert single.resp_body =~ "UID:external-identity\r\n"
+    assert single.resp_body =~ "UID:urn:uuid:#{uid}\r\n"
     assert single.resp_body =~ "X-ABRELATEDNAMES:Bob\r\n"
     assert single.resp_body =~ "X-CUSTOM:kept\r\nEND:VCARD"
 
     bulk = get(recycle(conn), ~p"/api/contacts/export.vcf")
     assert bulk.status == 200
-    assert bulk.resp_body =~ "UID:external-identity\r\n"
+    assert bulk.resp_body =~ "UID:urn:uuid:#{uid}\r\n"
     assert bulk.resp_body =~ "X-ABRELATEDNAMES:Bob\r\n"
 
     target_dav = Kith.Repo.get!(Kith.DAV.ContactDav, target.id)
     card = Kith.DAV.VCardAdapter.contact_to_vcard(contact, version: :v40)
-    assert card =~ "UID;VALUE=text:external-identity\r\n"
+    assert card =~ "UID:urn:uuid:#{uid}\r\n"
     assert card =~ "RELATED;TYPE=friend:urn:uuid:#{target_dav.uid}\r\n"
     assert card =~ "X-CUSTOM:kept\r\nEND:VCARD"
   end

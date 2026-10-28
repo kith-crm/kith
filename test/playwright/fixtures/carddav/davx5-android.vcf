@@ -1,6 +1,6 @@
 BEGIN:VCARD
 VERSION:4.0
-UID:{{PREFIX}}-davx5
+UID:{{UID}}
 PRODID:-//bitfire web engineering//DAVx5//EN
 N:Android;{{PREFIX}} Amira;;;
 FN:{{PREFIX}} Amira Android

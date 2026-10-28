@@ -1309,7 +1309,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
              context,
              "PUT",
              contact_path(contact),
-             build_vcard("Changed", "Name", uid: "different")
+             build_vcard("Changed", "Name", uid: Ecto.UUID.generate())
            ).status == 409
   end
 
@@ -1348,18 +1348,23 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
     body =
       String.replace(
-        build_vcard("Extra", "Fields", uid: "extra-uid"),
+        build_vcard("Extra", "Fields", uid: "b2000000-0000-4000-8000-000000000002"),
         "END:VCARD",
         "X-CUSTOM:verbatim\r\nitem1.X-CUSTOM:drop\r\nEND:VCARD"
       )
 
     assert authed_dav(context, "PUT", path, body).status == 201
     stored = authed_dav(context, "GET", path).resp_body
-    assert stored =~ "UID:extra-uid"
+    assert stored =~ "UID:urn:uuid:b2000000-0000-4000-8000-000000000002"
     assert stored =~ "X-CUSTOM:verbatim"
     refute stored =~ "item1.X-CUSTOM"
 
-    assert authed_dav(context, "PUT", path, build_vcard("Extra", "Fields", uid: "extra-uid")).status ==
+    assert authed_dav(
+             context,
+             "PUT",
+             path,
+             build_vcard("Extra", "Fields", uid: "b2000000-0000-4000-8000-000000000002")
+           ).status ==
              204
 
     refute authed_dav(context, "GET", path).resp_body =~ "X-CUSTOM"

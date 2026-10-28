@@ -1,9 +1,11 @@
 # Real CardDAV client checklist
 
-Run on 2026-10-23 against a fresh isolated harness at port 4527, never the
+Historical native run on 2026-10-23 against a fresh isolated harness at port 4527, never the
 normal development database. Scripted vdirsyncer results are separate from
 actual application UI observations below. Local screenshots and request logs
-are ignored under `.carddav-task11/`.
+are ignored under `.carddav-task11/`. Follow-up validation for the UUID and
+avatar changes is recorded at the end; the historical native results do not
+establish native-client acceptance of those later changes.
 
 ## Setup
 
@@ -105,3 +107,49 @@ Prior validation on fresh isolated seed: affected Playwright `05-vcard` **19
 passed**, expanded vdirsyncer **all steps passed**, full ExUnit **1897 tests,
 0 failures**. `mix quality`, format checks and warning-free compilation passed.
 These automated results do not change the recorded Thunderbird failures.
+
+## UUID and avatar follow-up (2026-10-28)
+
+The follow-up restricts DAV identities to UUIDs, removes duplicate birthday
+output, fixes PHOTO filtering, and processes selected avatars into bounded
+square JPEGs. Original timeline photos remain unchanged. A rendition registry
+preserves accounting and backfill behavior when merges deduplicate source rows.
+
+- Final ExUnit run: **1954 tests, 0 failures**. Tests cover identity and birthday
+  regressions, PHOTO filtering, real image decoding/cropping/orientation,
+  transactional file cleanup, quotas, both merge choices, source deletion,
+  restored snapshots and resumable backfill.
+- `mix quality`: exit 0, including warning-free compile, formatting, strict
+  Credo and Dialyzer. Two existing Dialyzer warnings remain skipped, with zero
+  unnecessary skips. Sobelow still reports existing findings; this is not a
+  zero-finding security scan.
+- Fresh disposable database creation and all migrations passed; the disposable
+  database was dropped. UUID migration up/down and invalid/colliding identity
+  preflight have separate regression coverage.
+- Production Docker build and an in-container image-processing smoke passed:
+  a 1200 × 800 source produced a 512 × 512 JPEG of 4708 bytes.
+- Real-browser acceptance exercises keyboard repositioning, EXIF orientation,
+  upload, selection of an existing timeline photo, save/reload, cancel without
+  mutation, preservation of original dimensions, and the decoded DAV PHOTO.
+- A separate collaborative-browser session also uploaded and saved an avatar;
+  an existing 24 × 24 source remained 24 × 24, confirming no upscaling. Running
+  the backfill twice for that account reported one normalized avatar and zero
+  failures both times.
+- Final full CardDAV Playwright suite: **106 passed, 1 expected TOTP skip**,
+  including all request performance budgets. The suite uses explicit LiveView
+  readiness and a single standard addressbook query to discover test contacts.
+- Expanded vdirsyncer smoke: **all steps passed**, including client and server
+  writes, conflict resolution, idempotency, application phone/tag changes,
+  trash/archive, restore, and empty-trash recovery without resurrection.
+
+Native Android verification was attempted on the Pixel_7 Android 14 emulator
+with DAVx5. Repeated Pixel Launcher and DAVx5 "isn't responding" dialogs and
+UI Automator failures prevented reliable account setup. One clean cold restart
+with software rendering was also attempted; native creation/edit/photo checks
+remain **unverified** for this follow-up. The task-owned emulator was stopped.
+An iPhone and an iOS simulator were unavailable, so iOS behavior also remains
+**unverified**. Do not substitute the synthetic Apple fixture for this check.
+
+Browser console diagnostics also reproduced an existing Alpine command-palette
+expression error on an ordinary Favorite toggle before any crop interaction.
+That issue is separate from the successful avatar scenarios and remains open.

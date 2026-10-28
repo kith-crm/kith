@@ -1,6 +1,6 @@
 BEGIN:VCARD
 VERSION:4.0
-UID:{{PREFIX}}-thunderbird
+UID:{{UID}}
 PRODID:-//Mozilla.org/NONSGML Mozilla Addressbook//EN
 N:Thunderbird;{{PREFIX}} Theo;;;
 FN:{{PREFIX}} Theo Thunderbird

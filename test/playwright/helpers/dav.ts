@@ -1,4 +1,5 @@
 import { type APIRequestContext } from "@playwright/test";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 export const PASSWORD = "ValidP@ssword123!";
@@ -151,11 +152,29 @@ export function decodeXml(s: string): string {
 /** Discover a stored resource by a unique name fragment; IDs never determine hrefs. */
 export async function discoverHref(request: APIRequestContext, name: string): Promise<string> {
   const book = "/dav/addressbooks/default/";
-  const listing = await dav(request, "PROPFIND", book, { headers: { Depth: "1" } });
-  if (listing.status !== 207) throw new Error(`PROPFIND: ${listing.status}`);
-  for (const href of hrefs(listing.body).filter((h) => h.endsWith(".vcf"))) {
-    const card = await dav(request, "GET", href);
-    if (card.status === 200 && card.body.replace(/\r\n[ \t]/g, "").includes(name)) return href;
-  }
-  throw new Error(`No DAV resource for ${name}`);
+  const text = name.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+  // Query the unique FN fragment instead of fetching every member separately.
+  // This stays bounded in HTTP requests as repeated isolated runs add fixtures.
+  const result = await dav(request, "REPORT", book, {
+    body: `<card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:prop><d:getetag/></d:prop><card:filter><card:prop-filter name="FN"><card:text-match match-type="contains">${text}</card:text-match></card:prop-filter></card:filter></card:addressbook-query>`,
+  });
+  if (result.status !== 207) throw new Error(`FN query: ${result.status}: ${result.body.slice(0, 300)}`);
+  const matches = hrefs(result.body).filter(href => href.endsWith(".vcf"));
+  if (matches.length !== 1) throw new Error(`Expected one DAV resource for ${name}, found ${matches.length}`);
+  return matches[0];
+}
+
+/** Stable UUID for named fixtures; names stay readable without becoming DAV identities. */
+export function testUid(seed: string): string {
+  const hex = createHash("sha256").update(seed).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+export function wireUid(uuid: string): string {
+  return "urn:uuid:" + uuid.replace(/^urn:uuid:/i, "").toLowerCase();
+}
+export function photoBytes(card: string): Buffer {
+  const unfolded = card.replace(/\r\n[ \t]/g, "");
+  const photo = unfolded.match(/^PHOTO(?:;[^:\r\n]*)?:(?:data:image\/[^;]+;base64,)?([^\r\n]+)\r?$/m);
+  if (!photo) throw new Error("Missing PHOTO");
+  return Buffer.from(photo[1], "base64");
 }

@@ -1,3 +1,4 @@
+import { wireUid } from "../helpers/dav";
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
@@ -145,7 +146,7 @@ test.describe("03 crud: application-named resource", () => {
   test("K2: PUT or DELETE with a stale If-Match is 412 and changes nothing", async ({ request }) => {
     const stale = `"stale-${Date.now()}"`;
     const p = await put(request, href, vcard({ fn: `${fn} K2` }), { "If-Match": stale });
-    expect(p.status).toBe(412);
+    expect(p.status, p.body).toBe(412);
     const d = await dav(request, "DELETE", href, { headers: { "If-Match": stale } });
     expect(d.status).toBe(412);
     const g = await get(request, href);
@@ -215,7 +216,7 @@ test.describe("03 crud: client-named resource", () => {
 
     const g = await get(request, href);
     expect(g.status, g.body).toBe(200);
-    expect(g.body).toContain(`UID:${uuid}\r\n`);
+    expect(g.body).toContain(`UID:${wireUid(uuid)}\r\n`);
     expect(g.headers["etag"]).toMatch(STRONG_ETAG);
     expect(await members(request)).toContain(href);
   });
@@ -228,7 +229,7 @@ test.describe("03 crud: client-named resource", () => {
     expect(after.length).toBe(before.length);
     const g = await get(request, href);
     expect(g.body).toContain(`FN:${fn} Edited`);
-    expect(g.body).toContain(`UID:${uuid}\r\n`);
+    expect(g.body).toContain(`UID:${wireUid(uuid)}\r\n`);
   });
 
   test("C5: DELETE <uuid>.vcf is 204; GET is then 404", async ({ request }) => {

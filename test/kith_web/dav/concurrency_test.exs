@@ -18,12 +18,12 @@ defmodule KithWeb.DAV.ConcurrencyTest do
     %{user: user, account_id: user.account_id}
   end
 
-  defp request(user, method, href, headers \\ []) do
+  defp request(user, method, href, headers \\ [], opts \\ []) do
     Sandbox.unboxed_run(Repo, fn ->
       headers
       |> Enum.reduce(build_conn(), fn {key, value}, conn -> put_req_header(conn, key, value) end)
       |> basic_auth(user.email, dav_password())
-      |> dav_request(method, href, build_vcard("Concurrent", "Card"))
+      |> dav_request(method, href, build_vcard("Concurrent", "Card", opts))
     end)
   end
 
@@ -44,6 +44,25 @@ defmodule KithWeb.DAV.ConcurrencyTest do
     for _ <- tasks, do: assert_receive({:ready, _})
     Enum.each(tasks, &send(&1.pid, :go))
     assert Enum.map(tasks, &Task.await(&1, 10_000).status) |> Enum.sort() == [201, 204]
+    assert Sandbox.unboxed_run(Repo, fn -> Contacts.count_contacts(aid) end) == 1
+  end
+
+  test "concurrent creates with equivalent UUID forms have one winner", %{
+    user: user,
+    account_id: aid
+  } do
+    uuid = Ecto.UUID.generate()
+
+    tasks =
+      [String.upcase(uuid), "urn:uuid:" <> uuid]
+      |> Enum.with_index()
+      |> Enum.map(fn {uid, index} ->
+        Task.async(fn ->
+          request(user, "PUT", "/dav/addressbooks/default/uuid-race-#{index}.vcf", [], uid: uid)
+        end)
+      end)
+
+    assert Enum.map(tasks, &Task.await(&1, 10_000).status) |> Enum.sort() == [201, 409]
     assert Sandbox.unboxed_run(Repo, fn -> Contacts.count_contacts(aid) end) == 1
   end
 

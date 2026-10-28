@@ -144,7 +144,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
 
     uploaded_photos =
       consume_uploaded_entries(socket, :photo, fn %{path: path}, entry ->
-        key = "contacts/#{contact_id}/photos/#{entry.uuid}-#{entry.client_name}"
+        key = Storage.generate_key(socket.assigns.account_id, "photos", entry.client_name)
         {:ok, _} = Storage.upload(path, key)
 
         {:ok, photo} =
@@ -300,11 +300,9 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
     Activities.delete_activity(activity) |> normalize_result()
   end
 
-  # Same cleanup as PhotosGalleryComponent: drop the stored file, then the row
-  # (delete_photo also clears the contact's avatar if it pointed here).
+  # Domain deletion clears selected avatars and retires files after commit.
   defp delete_entry(:photo, id, assigns) do
     photo = Contacts.get_photo!(assigns.account_id, id)
-    Storage.delete(photo.storage_key)
     Contacts.delete_photo(photo) |> normalize_result()
   end
 
@@ -391,6 +389,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             <div x-data="{ open: false }" class="relative">
               <button
                 @click="open = !open"
+                aria-label="Add timeline entry"
                 class="inline-flex items-center justify-center size-8 rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer"
               >
                 <.icon name="hero-plus-mini" class="size-4" />

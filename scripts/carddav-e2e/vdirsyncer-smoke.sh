@@ -10,6 +10,8 @@ BASE="${PLAYWRIGHT_BASE_URL:-http://127.0.0.1:4527}"
 USER_EMAIL="dav-other@carddav.test"
 PASSWORD="${DAV_PASSWORD:-ValidP@ssword123!}"
 RUN="vds-$(date +%s)"
+A_UID="$(python3 -I -c 'import uuid;print(uuid.uuid4())')"
+B_UID="$(python3 -I -c 'import uuid;print(uuid.uuid4())')"
 BOOK="$BASE/dav/addressbooks/default/"
 
 umask 077
@@ -48,7 +50,7 @@ trap cleanup EXIT
 # print "UID|FN" for a vCard on stdin if its FN carries the run prefix
 card_key() {
   tr -d '\r' | awk -v r="$RUN" '
-    /^UID:/ {u=substr($0,5)} /^FN:/ {f=substr($0,4)}
+    /^UID:/ {u=substr($0,5); sub(/^urn:uuid:/,"",u)} /^FN:/ {f=substr($0,4)}
     END { if (f ~ r) print u "|" f }'
 }
 
@@ -107,8 +109,8 @@ VDS="$D/venv/bin/vdirsyncer"
 "$VDS" --version
 
 step "seed server with 2 cards over DAV"
-card "$RUN-a" "$RUN Alpha" >"$D/a.vcf"
-card "$RUN-b" "$RUN Bravo" >"$D/b.vcf"
+card "$A_UID" "$RUN Alpha" >"$D/a.vcf"
+card "$B_UID" "$RUN Bravo" >"$D/b.vcf"
 for n in a b; do
   s="$(put_status "$RUN-$n.vcf" "$D/$n.vcf")" || fail "seed PUT $n failed"
   [[ "$s" =~ ^(201|204)$ ]] || fail "seed PUT $n -> $s"
@@ -145,12 +147,12 @@ step "1. discover + sync"
 LOCAL="$(find "$D/local" -mindepth 1 -maxdepth 1 -type d | head -1)"
 [ -n "$LOCAL" ] || fail "no local collection directory"
 assert_agree "1 initial sync" 2
-expect_line "$D/local.txt" "$RUN-a|$RUN Alpha" "1"
-expect_line "$D/local.txt" "$RUN-b|$RUN Bravo" "1"
+expect_line "$D/local.txt" "$A_UID|$RUN Alpha" "1"
+expect_line "$D/local.txt" "$B_UID|$RUN Bravo" "1"
 
 step "2. local edit, local add (UUID filename), local delete"
-A="$(grep -l "^UID:$RUN-a" "$LOCAL"/*.vcf | head -1)"
-B="$(grep -l "^UID:$RUN-b" "$LOCAL"/*.vcf | head -1)"
+A="$(grep -El "^UID:(urn:uuid:)?$A_UID" "$LOCAL"/*.vcf | head -1)"
+B="$(grep -El "^UID:(urn:uuid:)?$B_UID" "$LOCAL"/*.vcf | head -1)"
 [ -n "$A" ] && [ -n "$B" ] || fail "seeded cards not synced down"
 sed -i.bak -e "s/^FN:.*/FN:$RUN Alpha Edited/" -e "s/^N:.*/N:;$RUN Alpha Edited;;;/" "$A" && rm -f "$A.bak"
 NEWUUID="$(python3 -I -c 'import uuid;print(uuid.uuid4())')"
@@ -163,8 +165,8 @@ rm -f "$B"
 assert_agree "2 local edit/add/delete" 2
 # explicit expectations, so agreement cannot hold vacuously
 for f in server local; do
-  expect_no_match "$D/$f.txt" "^$RUN-b|" "2 delete ($f)"
-  expect_line "$D/$f.txt" "$RUN-a|$RUN Alpha Edited" "2 edit ($f)"
+  expect_no_match "$D/$f.txt" "^$B_UID|" "2 delete ($f)"
+  expect_line "$D/$f.txt" "$A_UID|$RUN Alpha Edited" "2 edit ($f)"
   expect_line "$D/$f.txt" "$NEWUUID|$RUN Charlie" "2 add keeps its UID ($f)"
 done
 list_hrefs "$D/hrefs2" || fail "listing failed"
@@ -172,23 +174,23 @@ expect_line "$D/hrefs2" "/dav/addressbooks/default/$NEWUUID.vcf" "2 UUID-named a
 echo "PASS: 2 expectations (b gone, Alpha edited, Charlie at its UUID href and UID)"
 
 step "3. server-side change (curl PUT) then sync"
-card "$RUN-a" "$RUN Alpha ServerEdit" >"$D/a2.vcf"
+card "$A_UID" "$RUN Alpha ServerEdit" >"$D/a2.vcf"
 s="$(put_status "$RUN-a.vcf" "$D/a2.vcf")" || fail "server PUT failed"
 [[ "$s" =~ ^(200|201|204)$ ]] || fail "server PUT -> $s"
 "$VDS" sync kith
 assert_agree "3 server edit" 2
-A="$(grep -l "^UID:$RUN-a" "$LOCAL"/*.vcf | head -1)"
+A="$(grep -El "^UID:(urn:uuid:)?$A_UID" "$LOCAL"/*.vcf | head -1)"
 grep -q "^FN:$RUN Alpha ServerEdit" "$A" || fail "3: local file does not show the server-side edit"
 echo "PASS: 3 expectation (local file shows ServerEdit)"
 
 step "4. conflicting edit on both sides, a wins"
 sed -i.bak -e "s/^FN:.*/FN:$RUN Alpha LocalWins/" -e "s/^N:.*/N:;$RUN Alpha LocalWins;;;/" "$A" && rm -f "$A.bak"
-card "$RUN-a" "$RUN Alpha ServerLoses" >"$D/a3.vcf"
+card "$A_UID" "$RUN Alpha ServerLoses" >"$D/a3.vcf"
 s="$(put_status "$RUN-a.vcf" "$D/a3.vcf")" || fail "conflict server PUT failed"
 [[ "$s" =~ ^(200|201|204)$ ]] || fail "conflict server PUT -> $s"
 "$VDS" sync kith
 assert_agree "4 conflict" 2
-expect_line "$D/server.txt" "$RUN-a|$RUN Alpha LocalWins" "4 local edit wins on the server"
+expect_line "$D/server.txt" "$A_UID|$RUN Alpha LocalWins" "4 local edit wins on the server"
 expect_no_match "$D/server.txt" "ServerLoses" "4"
 
 step "5. unchanged repeat sync is idempotent"
@@ -197,7 +199,7 @@ cp "$D/server.txt" "$D/before-repeat.txt"
 assert_agree "5 repeat sync" 2
 diff -u "$D/before-repeat.txt" "$D/server.txt" || fail "5 repeat changed state"
 step "S4 local phone/note edit preserves client extras"
-C="$(grep -l "^UID:$NEWUUID" "$LOCAL"/*.vcf | head -1)"
+C="$(grep -El "^UID:(urn:uuid:)?$NEWUUID" "$LOCAL"/*.vcf | head -1)"
 sed -i.bak -e 's/^TEL:.*/TEL:+15550654321/' -e 's/^NOTE:.*/NOTE:CLI client edited note/' "$C"
 rm -f "$C.bak"
 "$VDS" sync kith
@@ -206,7 +208,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 app_action() {
   (cd "$ROOT"; source .carddav-task10/env; mix run scripts/carddav-e2e/app-action.exs "$1" "$USER_EMAIL" ${2:+"$2"}) >"$D/app-action.log" 2>&1 || { cat "$D/app-action.log"; fail "application action $1"; }
 }
-app_action assert-trash "$RUN-b"
+app_action assert-trash "$B_UID"
 dcurl "$BOOK$NEWUUID.vcf" >"$D/charlie-server.vcf"
 for line in '+15550654321' 'NOTE:CLI client edited note' 'X-CLI-EXTRA:retained'; do
   grep -q "$line" "$D/charlie-server.vcf" || fail "S3/S4 missing $line"
@@ -214,16 +216,16 @@ done
 step "S5 application phone and tag rename"
 app_action edit "$NEWUUID"
 "$VDS" sync kith
-C="$(grep -l "^UID:$NEWUUID" "$LOCAL"/*.vcf | head -1)"
+C="$(grep -El "^UID:(urn:uuid:)?$NEWUUID" "$LOCAL"/*.vcf | head -1)"
 grep -q '+15550999999' "$C" || fail "S5 phone not synchronized"
 grep -q "Renamed CLI tag $NEWUUID" "$C" || fail "S5 tag rename not synchronized"
 step "S7 application trash and archive"
-app_action trash "$RUN-a"
+app_action trash "$A_UID"
 app_action archive "$NEWUUID"
 "$VDS" sync --force-delete kith
 assert_agree "S7 hidden contacts disappear" 0
 step "S11 application restore"
-app_action restore "$RUN-a"
+app_action restore "$A_UID"
 "$VDS" sync kith
 assert_agree "S11 restored contact reappears" 1
 step "S10 application empty trash and resync"

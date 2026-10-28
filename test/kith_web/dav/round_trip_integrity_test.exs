@@ -4,7 +4,6 @@ defmodule KithWeb.DAV.RoundTripIntegrityTest do
   import Kith.ContactsFixtures
   alias Kith.{Contacts, Repo}
   alias Kith.DAV.{Store, VCardAdapter}
-  alias Kith.VCard.Parser
 
   setup :setup_dav_user
 
@@ -44,42 +43,15 @@ defmodule KithWeb.DAV.RoundTripIntegrityTest do
       assert Enum.map(Contacts.list_relationships(owner.id), & &1.id) == [List.last(rels).id]
     end
 
-    test "#{version} scheme-looking text identities cannot inject UID or RELATED lines", c do
-      for {escaped, identity} <- [
-            {"urn:test:hello\\nFN:Injected", "urn:test:hello\nFN:Injected"},
-            {"urn:test:semi\\;comma\\,slash\\\\end", "urn:test:semi;comma,slash\\end"}
-          ] do
+    test "#{version} invalid identities cannot create contacts or inject properties", c do
+      for identity <- ["urn:test:hello\\nFN:Injected", "not-a-uuid", "urn:uuid:bad"] do
         href = "/dav/addressbooks/default/#{System.unique_integer([:positive])}.vcf"
 
         body =
-          "BEGIN:VCARD\r\nVERSION:4.0\r\nUID;VALUE=text:#{escaped}\r\nFN:Alice\r\nN:;Alice;;;\r\nEND:VCARD\r\n"
+          "BEGIN:VCARD\r\nVERSION:4.0\r\nUID;VALUE=text:#{identity}\r\nFN:Alice\r\nN:;Alice;;;\r\nEND:VCARD\r\n"
 
-        assert authed_dav(c, "PUT", href, body).status == 201
-        target = Store.get_by_resource_name(c.account_id, Path.basename(href))
-        owner = contact_fixture(c.account_id)
-
-        {:ok, type} =
-          Contacts.create_relationship_type(c.account_id, %{
-            name: "Friend #{System.unique_integer([:positive])}",
-            reverse_name: "Friend"
-          })
-
-        relationship_fixture(owner, target, type.id)
-
-        for contact <- [target, owner] do
-          for _ <- 1..2 do
-            card = VCardAdapter.contact_to_vcard(contact, version: unquote(version))
-            assert length(Regex.scan(~r/^FN:/m, card)) == 1
-            refute Regex.match?(~r/(?<!\r)\n|\r(?!\n)/, card)
-            {:ok, [parsed]} = Parser.parse(card)
-
-            if contact.id == target.id,
-              do: assert(parsed.uid == identity),
-              else: assert(hd(parsed.related).value == identity)
-
-            assert authed_dav(c, "PUT", contact_path(contact), card).status == 204
-          end
-        end
+        assert authed_dav(c, "PUT", href, body).status == 403
+        assert Store.get_by_resource_name(c.account_id, Path.basename(href)) == nil
       end
     end
   end

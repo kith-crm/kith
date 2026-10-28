@@ -638,4 +638,22 @@ defmodule Kith.VCard.ParserTest do
       assert parsed.birthdate_year_unknown
     end
   end
+
+  test "standard BDAY wins over the legacy fallback regardless of line order" do
+    for properties <- [
+          "BDAY:1990-07-20\r\nX-KITH-BDAY:--0615",
+          "X-KITH-BDAY:--0615\r\nBDAY:1990-07-20"
+        ] do
+      card = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Birthday\r\n#{properties}\r\nEND:VCARD\r\n"
+      assert {:ok, [parsed]} = Parser.parse(card)
+      assert parsed.birthdate == ~D[1990-07-20]
+      refute parsed.birthdate_year_unknown
+    end
+
+    card = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Birthday\r\nX-KITH-BDAY:--0615\r\nEND:VCARD\r\n"
+    assert {:ok, [%{birthdate: ~D[2000-06-15]}]} = Parser.parse(card)
+
+    assert {:ok, [%{birthdate: nil, birthdate_year_unknown: false}]} =
+             Parser.parse(card, legacy_bday: false)
+  end
 end

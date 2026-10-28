@@ -474,7 +474,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
       contact: contact,
       account_id: account_id
     } do
-      photo = photo_fixture(contact, %{"file_name" => "beach.jpg"})
+      {photo, _bytes} = Kith.AvatarFixtures.stored_photo(contact)
       {:ok, _} = Kith.Contacts.set_avatar(contact, photo)
 
       {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")

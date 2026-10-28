@@ -26,20 +26,19 @@ defmodule Kith.VCard.ExtrasTest do
     end
   end
 
-  test "RELATED emits urn:uuid: for a bare uid and the uid itself when it has a scheme" do
-    for {uid, expected} <- [
-          {"abc", "urn:uuid:abc"},
-          {"mailto:a@example.test", "mailto:a@example.test"}
-        ] do
-      rel = %{
-        id: 1,
-        related_contact_id: 2,
-        relationship_type: %{name: "Friend"},
-        related_contact: %{dav: %{uid: uid}}
-      }
+  test "RELATED emits the canonical UUID URN" do
+    uid = "b2000000-0000-4000-8000-000000000002"
 
-      assert Serializer.serialize(Map.put(contact(), :relationships, [rel]), version: :v40) =~
-               "RELATED;TYPE=friend:#{expected}"
+    rel = %{
+      id: 1,
+      related_contact_id: 2,
+      relationship_type: %{name: "Friend"},
+      related_contact: %{dav: %{uid: uid}}
+    }
+
+    for version <- [:v30, :v40] do
+      assert Serializer.serialize(Map.put(contact(), :relationships, [rel]), version: version) =~
+               ";TYPE=friend:urn:uuid:#{uid}"
     end
   end
 
@@ -52,14 +51,14 @@ defmodule Kith.VCard.ExtrasTest do
       company: nil,
       occupation: nil,
       description: nil,
-      dav: %{uid: "stored", extras: ["X-CUSTOM:one"]}
+      dav: %{uid: "b2000000-0000-4000-8000-000000000002", extras: ["X-CUSTOM:one"]}
     }
   end
 
-  test "stored UID is emitted unchanged and missing identity never derives from contact id" do
+  test "stored UUID is emitted as a URN and missing identity never derives from contact id" do
     for version <- [:v30, :v40] do
       card = Serializer.serialize(contact(), version: version, include_uid: true)
-      assert card =~ "stored\r\n"
+      assert card =~ "UID:urn:uuid:b2000000-0000-4000-8000-000000000002\r\n"
       refute Serializer.serialize(contact(), version: version, include_uid: false) =~ "UID"
 
       refute Serializer.serialize(Map.put(Map.delete(contact(), :dav), :id, 42),

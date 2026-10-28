@@ -136,7 +136,7 @@ authenticated user and confirmed email. All LiveView routes are in the
 
 ## Database
 
-PostgreSQL 15+. 47 application tables (distinct migration-created tables; excludes Oban and Ecto metadata). Bigserial PKs. UTC timestamps everywhere.
+PostgreSQL 15+. 48 application tables (distinct migration-created tables; excludes Oban and Ecto metadata). Bigserial PKs except protocol identities and avatar asset keys. UTC timestamps everywhere.
 Cloak encryption vault for sensitive fields (API keys).
 
 ## Environment

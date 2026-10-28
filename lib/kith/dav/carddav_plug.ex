@@ -25,7 +25,6 @@ defmodule Kith.DAV.CardDAVPlug do
   alias Kith.Contacts.Contact
   alias Kith.DAV.{AddressObject, AddressQuery, Auth, Store, VCardAdapter, XMLBuilder, XMLParser}
   alias Kith.Repo
-  alias Kith.VCard.Serializer
 
   @behaviour Plug
 
@@ -437,7 +436,7 @@ defmodule Kith.DAV.CardDAVPlug do
       else: XMLBuilder.response_deleted(Store.href(contact))
   end
 
-  defp report_contact_response(contact, request) do
+  defp report_contact_response(contact, request, prepared_card \\ nil) do
     props = [
       getetag: XMLBuilder.getetag(compute_etag(contact)),
       getcontenttype: XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
@@ -451,10 +450,11 @@ defmodule Kith.DAV.CardDAVPlug do
           [
             address_data:
               XMLBuilder.address_data(
-                VCardAdapter.contact_to_vcard(contact,
-                  version: request.version,
-                  preloaded: true
-                )
+                prepared_card ||
+                  VCardAdapter.contact_to_vcard(contact,
+                    version: request.version,
+                    preloaded: true
+                  )
               )
           ]
       else
@@ -485,19 +485,16 @@ defmodule Kith.DAV.CardDAVPlug do
         send_precondition_failed(conn, "<card:#{name}/>")
 
       :ok ->
+        include_photo = Enum.any?(request.filter.prop_filters, &(&1.name == "PHOTO"))
+
         matching =
           list_contacts_for_dav(conn)
-          |> Enum.filter(fn contact ->
-            AddressQuery.matches?(
-              Serializer.serialize(contact, version: request.version, include_uid: true),
-              request.filter
-            )
-          end)
+          |> Enum.flat_map(&query_match(&1, request, include_photo))
 
         responses =
           matching
           |> Enum.take(request.limit || length(matching))
-          |> Enum.map(&report_contact_response(&1, request))
+          |> Enum.map(fn {contact, card} -> report_contact_response(contact, request, card) end)
 
         responses =
           if request.limit && length(matching) > request.limit do
@@ -511,6 +508,19 @@ defmodule Kith.DAV.CardDAVPlug do
 
         send_dav_response(conn, 207, XMLBuilder.multistatus(responses))
     end
+  end
+
+  defp query_match(contact, request, include_photo) do
+    card =
+      VCardAdapter.contact_to_vcard(contact,
+        version: request.version,
+        preloaded: true,
+        include_photo: include_photo
+      )
+
+    if AddressQuery.matches?(card, request.filter),
+      do: [{contact, if(include_photo, do: card)}],
+      else: []
   end
 
   defp none_match?(header, etag) do

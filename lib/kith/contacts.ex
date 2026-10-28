@@ -12,6 +12,8 @@ defmodule Kith.Contacts do
   alias Kith.Contacts.{
     ActivityTypeCategory,
     Address,
+    Avatar,
+    AvatarProcessor,
     CallDirection,
     Contact,
     ContactField,
@@ -287,6 +289,7 @@ defmodule Kith.Contacts do
   def create_contact(account_id, attrs) do
     %Contact{account_id: account_id}
     |> Contact.create_changeset(attrs)
+    |> reject_raw_avatar()
     |> Repo.insert()
     |> sync_derived_reminders(%Contact{})
   end
@@ -294,9 +297,22 @@ defmodule Kith.Contacts do
   def update_contact(%Contact{} = contact, attrs) do
     contact
     |> Contact.update_changeset(attrs)
+    |> reject_raw_avatar()
     |> Repo.update()
     |> sync_derived_reminders(contact)
     |> touched_contact(contact)
+  end
+
+  # Avatar assignment requires source validation and bounded processing. Merge
+  # resolution uses its trusted changeset path to retain an existing rendition.
+  defp reject_raw_avatar(changeset) do
+    case Ecto.Changeset.fetch_change(changeset, :avatar) do
+      {:ok, key} when not is_nil(key) ->
+        Ecto.Changeset.add_error(changeset, :avatar, "must be selected from a processed photo")
+
+      _ ->
+        changeset
+    end
   end
 
   # Every path that sets or clears a birthdate or first-met date (UI, REST API,
@@ -352,19 +368,24 @@ defmodule Kith.Contacts do
   end
 
   def hard_delete_contact(%Contact{} = contact) do
-    Repo.transaction(fn ->
-      Store.record_hard_delete(contact.account_id)
-      owners = incoming_relationship_owner_ids(contact.account_id, [contact.id])
-
-      case Repo.delete(contact) do
-        {:ok, deleted} ->
-          Store.touch(contact.account_id, owners)
-          deleted
-
-        {:error, reason} ->
-          Repo.rollback(reason)
-      end
+    Avatar.with_cleanup(fn ->
+      Store.transaction(contact.account_id, fn -> hard_delete_locked(contact) end)
     end)
+  end
+
+  defp hard_delete_locked(contact) do
+    Store.record_hard_delete(contact.account_id)
+    owners = incoming_relationship_owner_ids(contact.account_id, [contact.id])
+    stage_contact_files(contact.account_id, [contact.id])
+
+    case Repo.delete(contact) do
+      {:ok, deleted} ->
+        Store.touch(contact.account_id, owners)
+        deleted
+
+      {:error, reason} ->
+        Repo.rollback(reason)
+    end
   end
 
   @doc """
@@ -374,15 +395,39 @@ defmodule Kith.Contacts do
   cannot interleave.
   """
   def empty_trash(account_id) do
-    Repo.transaction(fn ->
-      Store.record_hard_delete(account_id)
-      query = from(c in Contact, where: c.account_id == ^account_id and not is_nil(c.deleted_at))
-      ids = Repo.all(from(c in query, select: c.id))
-      owners = incoming_relationship_owner_ids(account_id, ids)
-      {count, _} = Repo.delete_all(from(c in query, where: c.id in ^ids))
-      Store.touch(account_id, owners)
-      count
+    Avatar.with_cleanup(fn ->
+      Store.transaction(account_id, fn ->
+        Store.record_hard_delete(account_id)
+
+        query =
+          from(c in Contact, where: c.account_id == ^account_id and not is_nil(c.deleted_at))
+
+        ids = Repo.all(from(c in query, select: c.id))
+        owners = incoming_relationship_owner_ids(account_id, ids)
+        stage_contact_files(account_id, ids)
+        {count, _} = Repo.delete_all(from(c in query, where: c.id in ^ids))
+        Store.touch(account_id, owners)
+        count
+      end)
     end)
+  end
+
+  defp stage_contact_files(account_id, ids) do
+    photo_keys =
+      Repo.all(
+        from p in Photo,
+          where: p.account_id == ^account_id and p.contact_id in ^ids,
+          select: [p.storage_key, p.avatar_storage_key]
+      )
+      |> List.flatten()
+
+    avatar_keys =
+      Repo.all(
+        from c in Contact, where: c.account_id == ^account_id and c.id in ^ids, select: c.avatar
+      )
+
+    Enum.each(Enum.uniq(photo_keys ++ avatar_keys), &Avatar.stage_retired/1)
+    Storage.bust_usage_cache(account_id)
   end
 
   # Snapshot before FK cascades remove the incoming edges; the account lock is held.
@@ -737,8 +782,16 @@ defmodule Kith.Contacts do
     %Photo{contact_id: contact.id, account_id: contact.account_id}
     |> Photo.changeset(attrs)
     |> Repo.insert()
+    |> invalidate_photo_usage(contact.account_id)
     |> touched(contact.account_id, [contact.id])
   end
+
+  defp invalidate_photo_usage({:ok, _} = result, account_id) do
+    Storage.bust_usage_cache(account_id)
+    result
+  end
+
+  defp invalidate_photo_usage(result, _account_id), do: result
 
   def photo_exists_by_hash?(contact_id, content_hash) when is_binary(content_hash) do
     Photo
@@ -749,29 +802,40 @@ defmodule Kith.Contacts do
   def photo_exists_by_hash?(_contact_id, _content_hash), do: false
 
   def delete_photo(%Photo{} = photo) do
+    Avatar.with_cleanup(fn ->
+      Store.transaction(photo.account_id, fn -> delete_photo_locked(photo) end)
+    end)
+  end
+
+  defp delete_photo_locked(photo) do
     contact = Repo.get!(Contact, photo.contact_id)
+    photo = Repo.get!(Photo, photo.id)
 
-    with {:ok, _} <- Repo.delete(photo) do
-      if contact.avatar == photo.storage_key do
-        contact |> Ecto.Changeset.change(avatar: nil) |> Repo.update!()
-      end
-
-      touched({:ok, photo}, contact.account_id, [contact.id])
+    if avatar_photo?(contact, photo) do
+      contact |> Ecto.Changeset.change(avatar: nil) |> Repo.update!()
     end
+
+    deleted = Repo.delete!(photo)
+    Avatar.stage_retired(photo.storage_key)
+    Avatar.stage_retired(photo.avatar_storage_key)
+    Store.touch(contact.account_id, [contact.id])
+    Storage.bust_usage_cache(photo.account_id)
+    deleted
   end
 
-  def set_avatar(%Contact{} = contact, %Photo{} = photo) do
-    contact
-    |> Ecto.Changeset.change(avatar: photo.storage_key)
-    |> Repo.update()
-    |> touched(contact.account_id, [contact.id])
-  end
+  def avatar_photo?(%Contact{} = contact, %Photo{} = photo),
+    do: Avatar.selected?(contact, photo)
+
+  def set_avatar(%Contact{} = contact, %Photo{} = photo, opts \\ []),
+    do: Avatar.set(contact, photo, opts)
 
   def clear_avatar(%Contact{} = contact) do
-    contact
-    |> Ecto.Changeset.change(avatar: nil)
-    |> Repo.update()
-    |> touched(contact.account_id, [contact.id])
+    Store.transaction(contact.account_id, fn ->
+      contact = Store.lock(contact) || Repo.rollback(:not_found)
+      updated = contact |> Ecto.Changeset.change(avatar: nil) |> Repo.update!()
+      Store.touch(contact.account_id, [contact.id])
+      updated
+    end)
   end
 
   ## Reference Data
@@ -1485,43 +1549,51 @@ defmodule Kith.Contacts do
   def import_contact(_account_id, {:error, reason}), do: {:error, reason}
 
   def import_contact(account_id, %{} = parsed) do
-    Repo.transaction(fn ->
-      contact_attrs = %{
-        first_name: parsed.first_name,
-        last_name: parsed.last_name,
-        nickname: parsed.nickname,
-        birthdate: parsed.birthdate,
-        birthdate_year_unknown: Map.get(parsed, :birthdate_year_unknown, false),
-        company: parsed.company,
-        occupation: parsed.occupation,
-        description: parsed.description,
-        account_id: account_id
-      }
-
-      contact =
-        %Contact{}
-        |> Contact.create_changeset(contact_attrs)
-        |> Ecto.Changeset.put_change(:account_id, account_id)
-        |> insert_or_rollback()
-
-      # Create email contact fields
-      create_imported_contact_fields(contact, account_id, parsed.emails, "mailto")
-
-      # Create phone contact fields
-      create_imported_contact_fields(contact, account_id, parsed.phones, "tel")
-
-      # Create URL contact fields
-      create_imported_contact_fields(contact, account_id, parsed.urls, "https")
-
-      # Create addresses
-      Enum.each(parsed.addresses, fn addr ->
-        %Address{}
-        |> Address.changeset(Map.merge(addr, %{contact_id: contact.id, account_id: account_id}))
-        |> insert_or_rollback()
-      end)
-
-      contact
+    Avatar.with_cleanup(fn ->
+      Store.transaction(account_id, fn -> import_contact_locked(account_id, parsed) end)
     end)
+  end
+
+  defp import_contact_locked(account_id, parsed) do
+    contact_attrs = %{
+      first_name: parsed.first_name,
+      last_name: parsed.last_name,
+      nickname: parsed.nickname,
+      birthdate: parsed.birthdate,
+      birthdate_year_unknown: Map.get(parsed, :birthdate_year_unknown, false),
+      company: parsed.company,
+      occupation: parsed.occupation,
+      description: parsed.description,
+      account_id: account_id
+    }
+
+    contact =
+      %Contact{}
+      |> Contact.create_changeset(contact_attrs)
+      |> Ecto.Changeset.put_change(:account_id, account_id)
+      |> insert_or_rollback()
+
+    # Create email contact fields
+    create_imported_contact_fields(contact, account_id, parsed.emails, "mailto")
+
+    # Create phone contact fields
+    create_imported_contact_fields(contact, account_id, parsed.phones, "tel")
+
+    # Create URL contact fields
+    create_imported_contact_fields(contact, account_id, parsed.urls, "https")
+
+    # Create addresses
+    Enum.each(parsed.addresses, fn addr ->
+      %Address{}
+      |> Address.changeset(Map.merge(addr, %{contact_id: contact.id, account_id: account_id}))
+      |> insert_or_rollback()
+    end)
+
+    if photo = Map.get(parsed, :photo) do
+      maybe_import_vcard_photo(contact, account_id, photo)
+    end
+
+    Repo.reload!(contact)
   end
 
   defp create_imported_contact_fields(contact, account_id, fields, protocol) do
@@ -1859,26 +1931,52 @@ defmodule Kith.Contacts do
     max_bytes = Application.get_env(:kith, :max_vcard_photo_bytes, 2 * 1024 * 1024)
 
     with {:ok, binary} <- Base.decode64(String.replace(b64_data, ~r/\s/, "")),
-         true <- byte_size(binary) <= max_bytes,
-         hash <- :crypto.hash(:sha256, binary) |> Base.encode16(case: :lower),
-         false <- photo_exists_by_hash?(contact.id, hash) do
-      upload_and_set_avatar(contact, account_id, binary, ct, hash)
+         true <- byte_size(binary) <= max_bytes do
+      if Avatar.current_bytes?(contact, binary),
+        do: :ok,
+        else: import_avatar_bytes(contact, account_id, binary, ct)
     else
-      _ -> :ok
+      _ -> Repo.rollback(:invalid_photo)
     end
   end
 
-  defp maybe_import_vcard_photo(%{id: id}, _account_id, _photo) do
-    require Logger
-    Logger.debug("Skipping unsupported vCard PHOTO format for contact #{id}")
-    :ok
+  defp maybe_import_vcard_photo(_contact, _account_id, _photo),
+    do: Repo.rollback(:unsupported_photo)
+
+  defp import_avatar_bytes(contact, account_id, binary, ct) do
+    hash = Avatar.hash(binary)
+
+    photo =
+      Repo.one(
+        from p in Photo,
+          where:
+            p.contact_id == ^contact.id and p.account_id == ^account_id and
+              p.content_hash == ^hash
+      )
+
+    if photo do
+      case set_avatar(contact, photo) do
+        {:ok, _} -> :ok
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    else
+      upload_and_set_avatar(contact, account_id, binary, ct, hash)
+    end
   end
 
   defp upload_and_set_avatar(contact, account_id, binary, ct, hash) do
+    # Validate before creating either an original photo row or a stored object.
+    case AvatarProcessor.prepare(binary) do
+      {:ok, _} -> :ok
+      {:error, reason} -> Repo.rollback(reason)
+    end
+
     ext = photo_extension(ct)
     key = Storage.generate_key(account_id, "photos", "carddav-import#{ext}")
 
-    with {:ok, _} <- Storage.upload_binary(binary, key),
+    with :ok <- Storage.check_storage_limit(account_id, byte_size(binary), fresh: true),
+         {:ok, _} <- Storage.upload_binary(binary, key),
+         :ok <- Avatar.stage_created(key),
          {:ok, photo} <-
            create_photo(contact, %{
              "file_name" => "carddav-photo#{ext}",
@@ -1887,10 +1985,11 @@ defmodule Kith.Contacts do
              "content_type" => ct,
              "content_hash" => hash,
              "account_id" => account_id
-           }) do
-      set_avatar(contact, photo)
+           }),
+         {:ok, _} <- set_avatar(contact, photo) do
+      :ok
     else
-      _ -> :ok
+      {:error, reason} -> Repo.rollback(reason)
     end
   end
 

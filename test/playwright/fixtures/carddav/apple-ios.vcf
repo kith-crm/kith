@@ -1,6 +1,6 @@
 BEGIN:VCARD
 VERSION:3.0
-UID:{{PREFIX}}-apple
+UID:{{UID}}
 N:Apple;{{PREFIX}} Alice;;;
 FN:{{PREFIX}} Alice Apple
 PRODID:-//Apple Inc.//iPhone OS 18.0//EN

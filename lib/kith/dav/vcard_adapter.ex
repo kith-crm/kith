@@ -10,10 +10,11 @@ defmodule Kith.DAV.VCardAdapter do
 
   alias Kith.Contacts
   alias Kith.Contacts.Contact
-  alias Kith.DAV.Store
+  alias Kith.DAV.{Store, UID}
   alias Kith.Repo
   alias Kith.Storage
   alias Kith.VCard.{Parser, Serializer}
+  require Logger
 
   @doc """
   Converts a Kith contact to a vCard string with a CardDAV UID.
@@ -50,8 +51,17 @@ defmodule Kith.DAV.VCardAdapter do
   `nested_data` contains `:emails`, `:phones`, `:urls`, `:addresses`, `:uid`.
   """
   def vcard_to_attrs(vcard_string, opts \\ []) do
-    case Parser.parse(vcard_string) do
-      {:ok, [parsed | _]} -> build_attrs(parsed, opts)
+    case Parser.parse(vcard_string, legacy_bday: false) do
+      {:ok, [parsed | _]} -> normalize_identity(parsed, opts)
+      _ -> :error
+    end
+  end
+
+  defp normalize_identity(%{uid: nil} = parsed, opts), do: build_attrs(parsed, opts)
+
+  defp normalize_identity(parsed, opts) do
+    case UID.normalize(parsed.uid) do
+      {:ok, uid} -> build_attrs(%{parsed | uid: uid}, opts)
       _ -> :error
     end
   end
@@ -118,7 +128,18 @@ defmodule Kith.DAV.VCardAdapter do
         ct = Storage.content_type(key)
         %{contact | avatar_data: %{binary: binary, content_type: ct}}
 
-      _ ->
+      {:ok, _oversized} ->
+        Logger.warning(
+          "CardDAV avatar for contact #{contact.id} exceeds the processed size limit"
+        )
+
+        contact
+
+      {:error, reason} ->
+        Logger.warning(
+          "CardDAV avatar for contact #{contact.id} could not be read: #{inspect(reason)}"
+        )
+
         contact
     end
   end

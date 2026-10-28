@@ -48,21 +48,81 @@ Yearless birthdays use `BDAY:--MMDD` in both versions. This is standard in
 vCard 4.0 and an interoperability extension in 3.0, whose original date syntax
 requires a year. It avoids synthetic years appearing in Thunderbird. Strict
 legacy 3.0 consumers may reject it. Incoming Apple year-omission forms remain
-accepted. The 3.0 output also retains `X-KITH-BDAY:--MMDD`.
+accepted. Generated cards contain only the standard `BDAY` property. Legacy
+`X-KITH-BDAY` remains an import fallback; DAV updates use `BDAY`, including its
+absence when a client clears the birthday, rather than a stale extension.
 
 ## Data model and writes
 
 `contact_dav` belongs to a contact and account. It stores an account-unique
-UID, account-unique resource name, revision, and ungrouped unmapped properties
-in `extras`. New local identities are UUIDs with matching `<uuid>.vcf` names;
-client-supplied resource names and UIDs are retained. Discover hrefs through
-PROPFIND; contact IDs do not determine DAV identity.
+UUID, account-unique resource name, revision, and ungrouped unmapped properties
+in `extras`. New local identities are UUIDs with matching `<uuid>.vcf` names.
+DAV PUT accepts a hyphenated UUID or `urn:uuid:<uuid>`, including uppercase
+forms, and stores the canonical lowercase bare UUID. Other supplied UID formats
+are rejected with `valid-address-data`. This UUID-only restriction deliberately
+does not support every UID permitted by the vCard standard. A missing UID keeps
+the existing identity on update, or generates one on creation.
+
+Generated `UID` values and identity-bearing relationship references use
+`urn:uuid:<uuid>`. Equivalent bare/prefixed or case variants claim the same
+identity, and an update cannot change that identity. Client-supplied resource
+names stay independent of UUIDs and are preserved. Discover hrefs through
+PROPFIND; contact IDs do not determine DAV identity. Database relationships
+continue to use contact IDs as foreign keys.
 
 Trashed and archived contacts keep their identities reserved. PUT to their
 href returns 409. Duplicate UIDs return `no-uid-conflict` with the holder href.
 
 Family-only contacts are accepted; at least one first or last name is required.
 A missing first name is stored as an empty string.
+
+### UUID migration
+
+The UUID migration audits stored identities before converting the UID column
+to PostgreSQL `uuid`. It stops for non-UUID values or account-scoped collisions
+between equivalent bare, prefixed, or differently cased UUIDs. It does not
+replace identities or rename resources. Resolve incompatible legacy data before
+retrying the migration; do not silently generate replacement IDs for contacts
+already synchronized to clients.
+
+### Contact avatars
+
+The selected avatar is served in the standard `PHOTO` property in both vCard
+versions. Timeline photos are not included unless selected as the avatar.
+Web uploads and selection of an existing photo provide a square crop preview.
+The server applies the crop after correcting orientation, limits the output to
+512 × 512 pixels without upscaling, and produces a static JPEG of at most
+512 KiB. Imports without an interactive crop use a centered square. The source
+photo is retained unchanged; the processed rendition has its own storage key
+and crop/cache metadata on the source photo row. An account-scoped
+`avatar_assets` registry records each rendition's size and digest independently
+of the source row. Merges can deduplicate source photos while preserving an
+avatar still referenced by a trashed contact, without losing storage accounting
+or making the backfill fail.
+
+Avatar processing happens when the avatar is assigned, not during DAV reads.
+Failed processing preserves the previous avatar. Replacing or clearing the
+avatar participates in DAV revision tracking. GET, multiget, sync and query
+responses use the selected rendition, and PHOTO filters inspect the same
+representation that the response serves.
+
+Contact creation/update APIs reject assigning a raw avatar storage key, which
+would bypass image validation. Use the web avatar picker or an embedded DAV
+PHOTO to assign an avatar. Remote PHOTO URI fetching is not implemented;
+unsupported PHOTO formats are rejected rather than silently accepted.
+
+After applying the schema migrations, convert existing avatars with:
+
+```bash
+mix kith.avatars.backfill
+# To limit the conversion to one account:
+mix kith.avatars.backfill --account-id 123
+```
+
+The backfill is resumable and skips avatars already converted. It preserves
+unreadable sources and reports failures instead of silently marking them as
+processed. Resolve reported failures before considering avatar conversion
+complete.
 
 Every successful vCard-visible write must call `Kith.DAV.Store.touch/2`.
 `Store.ensure_rows/1` runs before DAV reads.
