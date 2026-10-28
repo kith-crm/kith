@@ -57,6 +57,34 @@ The approved design collection is in `docs/design/email-templates/index.html`.
 Its Python generator produces reference mockups; the Mix task above exercises
 the implementation and should be used when reviewing code changes.
 
+### Verify captured messages
+
+After generating and sending previews with `--mailpit`, verify the actual SMTP
+messages using Python's standard library:
+
+```bash
+python3 docs/design/email-templates/verify_mailpit.py /tmp/kith-email-previews
+```
+
+The verifier selects only fictional `preview@example.test` messages. It compares
+the delivered HTML and plain-text parts with the generated files, checks the
+inline PNG and CID resolution through Mailpit, and validates absolute action
+links. It does not clear the inbox or send messages. Evidence is exported to
+`/tmp/kith-mailpit-verification` as `.eml`, HTML, and `mime-results.json` files.
+
+Keep run-specific verification results in PR comments rather than committing
+generated evidence. When reviewing the captured messages, check narrow and
+desktop widths, light/dark browser preference, and images shown/omitted. Check
+for overflow, heading/CTA visibility, logo decoding, and the Kith text fallback.
+The ExUnit suite additionally covers optional descriptions, escaping, locales,
+and account-local date timing.
+
+Dark browser preference preserves the email's explicit light palette. It does
+not reproduce Gmail or Outlook's forced color inversion. Removing image sources
+simulates unavailable images, rather than each client's image-blocking UI.
+Mailpit is the local SMTP mailbox; MinIO provides object storage and is not
+needed for these checks.
+
 ### Template ownership and behavior
 
 - `Kith.Emails` builds multipart emails and attaches the logo. `Kith.Emails.Template`
