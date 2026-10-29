@@ -22,7 +22,7 @@ defmodule KithWeb.API.ContactExportController do
     account_id = user.account_id
     Store.ensure_rows(account_id)
 
-    case Contacts.get_contact(account_id, id, preload: Contacts.dav_preloads()) do
+    case Contacts.get_contact(account_id, id, preload: Contacts.export_preloads()) do
       nil ->
         conn
         |> put_status(404)
@@ -82,10 +82,10 @@ defmodule KithWeb.API.ContactExportController do
         validated_ids = Enum.map(ids, &parse_id/1) |> Enum.reject(&is_nil/1)
 
         Contacts.stream_contacts_by_ids(account_id, validated_ids,
-          preload: Contacts.dav_preloads()
+          preload: Contacts.export_preloads()
         )
       else
-        Contacts.stream_all_contacts(account_id, preload: Contacts.dav_preloads())
+        Contacts.stream_all_contacts(account_id, preload: Contacts.export_preloads())
       end
 
     {:ok, conn} =

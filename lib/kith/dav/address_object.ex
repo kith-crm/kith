@@ -2,16 +2,14 @@ defmodule Kith.DAV.AddressObject do
   @moduledoc "Atomic writes to account-scoped address objects."
   import Plug.Conn
   alias Kith.{Contacts, Repo}
-  alias Kith.Contacts.Avatar
+  alias Kith.Contacts.{Avatar, Write}
   alias Kith.DAV.{Store, VCardAdapter, XMLBuilder}
-  alias Kith.VCard.{Extras, Parser}
 
   def put(conn, raw, body) do
     with {:ok, name} <- resource_name(raw),
-         {:ok, [_card]} <- Parser.parse(body),
          {attrs, children} <-
            VCardAdapter.vcard_to_attrs(body, strip_nils: false, account_id: account_id(conn)) do
-      write(conn, name, attrs, children, Extras.extract(body), true)
+      write(conn, name, attrs, children, true)
     else
       {:error, :name} -> send_resp(conn, 400, "Bad Request")
       _ -> invalid(conn)
@@ -29,7 +27,7 @@ defmodule Kith.DAV.AddressObject do
          not Regex.match?(~r/[\x00-\x1f\x7f]/, name), do: {:ok, name}, else: {:error, :name}
   end
 
-  defp write(conn, name, attrs, children, extras, retry?) do
+  defp write(conn, name, attrs, children, retry?) do
     aid = account_id(conn)
 
     result =
@@ -40,9 +38,6 @@ defmodule Kith.DAV.AddressObject do
         validate_write!(conn, contact, children.uid, aid)
         {status, updated} = save_contact(contact, aid, name, attrs, children.uid)
         unwrap(Contacts.replace_contact_children(updated, aid, children))
-        updated = Repo.preload(updated, :dav, force: true)
-        unwrap(Store.put_extras(updated.dav, extras))
-        Store.touch(aid, [updated.id])
         status
       end)
 
@@ -56,7 +51,7 @@ defmodule Kith.DAV.AddressObject do
             uid_conflict(conn, Store.get_by_uid(aid, children.uid))
 
           Keyword.has_key?(changeset.errors, :resource_name) && retry? ->
-            write(conn, name, attrs, children, extras, false)
+            write(conn, name, attrs, children, false)
 
           true ->
             invalid(conn)
@@ -142,7 +137,7 @@ defmodule Kith.DAV.AddressObject do
   end
 
   defp transaction(aid, fun) do
-    Avatar.with_cleanup(fn -> Store.transaction(aid, fun) end)
+    Write.from_dav(fn -> Avatar.with_cleanup(fn -> Store.transaction(aid, fun) end) end)
   rescue
     e in Postgrex.Error ->
       if e.postgres[:code] == :deadlock_detected,
@@ -150,27 +145,26 @@ defmodule Kith.DAV.AddressObject do
         else: reraise(e, __STACKTRACE__)
   end
 
-  defp locked(aid, name) do
-    case Store.get_by_resource_name(aid, name) do
-      nil -> nil
-      contact -> Store.lock(contact)
-    end
-  end
+  defp locked(aid, name), do: Store.lock_resource(aid, name)
 
   defp matches?(conn, contact) do
-    etag = "\"#{contact.dav.revision}\""
+    etags = Enum.map(Store.current_etags(contact), &("\"" <> &1 <> "\""))
     matches = get_req_header(conn, "if-match")
     none = get_req_header(conn, "if-none-match")
 
-    (matches == [] ||
-       Enum.any?(matches, fn h ->
-         String.trim(h) == "*" || etag in String.split(String.trim(h), ~r/\s*,\s*/)
-       end)) &&
-      not Enum.any?(none, fn h ->
-        String.trim(h) == "*" ||
+    provided = Enum.flat_map(matches, &String.split(&1, ~r/\s*,\s*/))
+    current? = not contact.dav.requires_precondition or Enum.any?(provided, &(&1 in etags))
+
+    (current? and
+       (matches == [] ||
+          Enum.any?(matches, fn header ->
+            header == "*" || Enum.any?(String.split(header, ~r/\s*,\s*/), &(&1 in etags))
+          end))) &&
+      not Enum.any?(none, fn header ->
+        header == "*" ||
           Enum.any?(
-            String.split(String.trim(h), ~r/\s*,\s*/),
-            &(String.replace_prefix(&1, "W/", "") == etag)
+            String.split(header, ~r/\s*,\s*/),
+            &(String.replace_prefix(&1, "W/", "") in etags)
           )
       end)
   end

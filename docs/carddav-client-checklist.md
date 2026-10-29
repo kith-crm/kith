@@ -153,3 +153,125 @@ An iPhone and an iOS simulator were unavailable, so iOS behavior also remains
 Browser console diagnostics also reproduced an existing Alpine command-palette
 expression error on an ordinary Favorite toggle before any crop interaction.
 That issue is separate from the successful avatar scenarios and remains open.
+
+
+## Data-boundary revision (2026-10-29)
+
+The architecture now separates native shared fields, private Kith data, and
+client-only vCard properties. A client NOTE is independent of Kith description;
+custom native field types and gender remain private. The implementation and
+current acceptance record are in [the data-boundary plan](plan/carddav-data-boundary.md#15-remaining-slice-execution-record-2026-10-2829).
+The results in earlier sections are historical and do not establish acceptance
+of this revision.
+
+Fresh native attempts used disposable profiles and the existing Pixel_7 Android
+14 emulator. A disposable Thunderbird application copy stalled before profile
+initialization; no native scenario ran. The shared installation and personal
+profile/process were preserved. Android booted but System UI repeatedly ANRed
+over DAVx5 4.5.21-ose, and UI Automator could not obtain a root node. A later cold
+retry also timed out. The task-owned emulator was stopped without wiping or
+saving over its state. Logs, samples and screenshots remain in ignored
+`.carddav-task10/boundary-native/`, including `android-initial.png` and
+`android-after-retry.png`. These are blocked attempts, not passes. No iOS device
+or simulator was available. Fresh UUID, avatar, relationship and NOTE/private
+boundary native-client acceptance remains a release gate.
+
+Final full CardDAV Playwright: **106 passed, one expected TOTP skip, zero
+failures**, including every original performance threshold. The 987,845-byte
+card took 4,237 ms for first PUT, 3,675 ms for unchanged PUT and 1,368 ms for GET
+in the full run (each limit is 5 seconds). PROPFIND took 172 ms; initial sync
+2,377/2,275 ms; 200-resource multiget 123 ms; single-match query 437 ms; single
+GET 88 ms. Large-card timings use warning-level server logging to avoid debug
+SQL payload formatting; request payloads, assertions and original thresholds
+remain unchanged. Fresh fixture creation used the real APIs with one outer
+transaction per contact. Automated evidence is retained in ignored
+`.carddav-task10/boundary-playwright-final.log` and
+`.carddav-task10/boundary-cap-canonical-template.log`.
+
+Final ExUnit: **2,109 tests, zero failures** on the finished source, using a
+disposable test partition. Final expanded vdirsyncer smoke also **passed, exit
+0**, including private description/custom-field invariance, client NOTE
+independence, conflicts, repeated sync, native edits, merge, hiding/restoration
+and empty-trash recovery. Evidence:
+`.carddav-task10/boundary-vdirsyncer-final.log`. The task-owned server, synthetic
+live-test database and current temporary storage were safely removed afterward;
+ignored diagnostic/native evidence was retained. Standard development-environment
+`mix quality` passed, including warning-free compilation, formatting, strict
+Credo and Dialyzer. Two existing Dialyzer skips remain with zero unnecessary
+skips; Sobelow retains existing findings. No suppressions were added. The
+disposable ExUnit database was also dropped; the default test database was not
+reset or migrated. Native-client acceptance remains open as described above.
+
+
+## Thunderbird ESR recovery and community harness (2026-10-29)
+
+The later retry recovered native startup with a fresh official **153.6.0esr**
+build, mounted read-only, and an isolated profile. Code-signature verification
+passed. The personal/shared Thunderbird 158 installation and running process
+were preserved. The exact earlier copied-158 dyld stall cause remains unknown.
+
+Real native discovery found a missing property in Kith's home listing:
+`current-user-privilege-set` was returned empty/404 for the child address book,
+so Thunderbird excluded it. The child now advertises the same read/write
+metadata as the direct book response. Authorization policy is unchanged.
+Focused PROPFIND validation passed **64 tests, zero failures**; `mix quality`
+passed with the existing Dialyzer skips and Sobelow findings.
+
+Targeted native vCard 3 checks on ESR 153.6 passed:
+
+- Root URL discovery through well-known/principal/home traversal and initial sync.
+- UUID/href, selected avatar and forward/reverse relationship preservation.
+- Actual native photo decode at 480 × 480, plus birthday/shared fields/client NOTE.
+- Native UI name/phone/NOTE edits reaching Kith while private description remains intact.
+- Two repeat syncs preserving exact DAV bytes, ETag and unchanged native row identities.
+- Private description and account-created EMAIL-mimic edits leaving DAV unchanged;
+  native NOTE stays independent and private values stay absent.
+- Kith phone/company edits appearing in the native UI.
+- Native DELETE to Kith trash, followed by Kith restore at the same UUID/href
+  without duplicates, retaining avatar, relationship and private state.
+
+Evidence and exact launch/procedure details are retained in ignored
+`.carddav-task10/boundary-native/esr-retry/RESULTS.md`, including
+`native-edit-assertions.json`, `native-delete-restore-assertions.json` and UI
+screenshots. The task-owned client was quit and its DMG detached. This targeted
+result supersedes the earlier startup block for ESR 153.6; native vCard 4
+preference, shared Thunderbird 158, Android and Apple Contacts remain unverified.
+The full historical conflict/auth/sync-floor matrix was not repeated.
+
+An independent, reproducible [community harness](carddav-community-testing.md)
+is now available. The unmodified upstream baseline reproduced **26 passed,
+62 failed, 5 setup errors, 22 ignored**, with nonzero exit **67**. Those failures
+remain visible and are triaged separately from native acceptance; this is not
+a full protocol-conformance pass.
+
+
+## Remaining interoperability gates (2026-10-29 correctness slice)
+
+The latest local request fixes reject invalid PROPFIND selector combinations and
+return structured `supported-address-data` errors for unsupported PUT media types.
+They do not establish new native-client acceptance. See [plan section 17](plan/carddav-data-boundary.md#17-remaining-correctness-and-interoperability-plan-2026-10-29)
+for current automated evidence and priorities. Targeted ESR v3 results above
+remain historical evidence; native v4 preference, Thunderbird 158, Android,
+Apple Contacts and the complete conflict/auth/sync-floor matrix remain open.
+
+For the next native run, use disposable profiles and an exclusively owned fresh
+harness. Keep the shared personal Thunderbird installation/profile untouched;
+verify process command and ownership before termination. For ACL acceptance,
+use distinct real users/roles/accounts instead of the community baseline's
+same-account aliases. Record actual statuses and client UI recovery separately.
+
+
+## Revised-plan automated coverage (2026-10-29)
+
+Principal discovery now returns canonical per-user URLs while retaining the
+current-user alias. Distinct real users/roles and an unrelated account are covered
+by HTTP ExUnit regressions for principal reports, ACL errors, expansion and role
+privileges. Kith's Playwright discovery assertions follow those URLs and verify
+resource-specific Allow headers, including absence of unsupported class-2 locking.
+No upstream fixture or assertion changed.
+
+These automated checks do not establish new native-client acceptance. Repeat
+native discovery, v3/v4 round trips and the full conflict/auth/floor matrix using
+disposable profiles before release; preserve the personal Thunderbird installation
+and profile. General ACL grant support and editable property storage remain open
+product/standards decisions. See plan section 17 for final automated/live evidence.

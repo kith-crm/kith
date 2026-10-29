@@ -190,10 +190,10 @@ defmodule KithWeb.DAV.TestHelpers do
     user = Kith.AccountsFixtures.user_fixture()
     scope = Kith.Accounts.Scope.for_user(user)
 
-    # Ensure global ContactFieldTypes exist for DAV contact field round-trips
+    # Require the migration-created trusted types for DAV shared field round-trips
     ensure_contact_field_types()
 
-    # Seed genders for gender round-trip tests
+    # Seed private genders to verify that client metadata remains independent
     seed_genders()
 
     %{
@@ -218,32 +218,18 @@ defmodule KithWeb.DAV.TestHelpers do
     end
   end
 
-  defp ensure_contact_field_types do
-    alias Kith.Contacts.ContactFieldType
-    alias Kith.Repo
+  @doc "Returns a trusted built-in type; custom protocol mimics remain private."
+  def shared_field_type!(key) do
     import Ecto.Query
 
-    # Seeds store protocols with colons ("mailto:", "tel:", "https://").
-    # Only insert if no types exist for each protocol scheme.
-    for {name, protocol, seeded, vcard_label} <- [
-          {"Email", "mailto", "mailto:", "EMAIL"},
-          {"Phone", "tel", "tel:", "TEL"},
-          {"Website", "https", "https://", nil},
-          {"IMPP", "impp", "impp:", "IMPP"}
-        ] do
-      unless Repo.one(
-               from(t in ContactFieldType,
-                 where: like(t.protocol, ^"#{protocol}%"),
-                 limit: 1
-               )
-             ) do
-        Repo.insert!(%ContactFieldType{
-          name: name,
-          protocol: seeded,
-          vcard_label: vcard_label,
-          position: 0
-        })
-      end
-    end
+    Kith.Repo.one!(
+      from(t in Kith.Contacts.ContactFieldType,
+        where: is_nil(t.account_id) and t.system_key == ^key
+      )
+    )
+  end
+
+  defp ensure_contact_field_types do
+    Enum.each(["email", "phone", "website"], &shared_field_type!/1)
   end
 end

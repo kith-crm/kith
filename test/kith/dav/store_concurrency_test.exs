@@ -31,7 +31,7 @@ defmodule Kith.DAV.StoreConcurrencyTest do
       Task.async(fn ->
         Sandbox.unboxed_run(Repo, fn ->
           Repo.transaction(fn ->
-            Store.touch(account, [x.id])
+            assert {:ok, _} = Kith.Contacts.update_contact(x, %{first_name: "Concurrent first"})
             send(parent, :locked)
 
             receive do
@@ -50,7 +50,8 @@ defmodule Kith.DAV.StoreConcurrencyTest do
         Sandbox.unboxed_run(Repo, fn ->
           %{rows: [[pid]]} = Repo.query!("SELECT pg_backend_pid()")
           send(parent, {:backend, pid})
-          Store.touch(account, [y.id])
+          assert {:ok, _} = Kith.Contacts.update_contact(y, %{first_name: "Concurrent second"})
+          :ok
         end)
       end)
 

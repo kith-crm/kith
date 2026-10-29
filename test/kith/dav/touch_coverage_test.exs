@@ -3,7 +3,7 @@ defmodule Kith.DAV.TouchCoverageTest do
   import Kith.AccountsFixtures
   import Kith.ContactsFixtures
   alias Kith.Contacts
-  alias Kith.DAV.{Store, ContactDav}
+  alias Kith.DAV.{Store, ContactDav, FieldRegistry}
 
   setup do
     user = user_fixture()
@@ -24,7 +24,9 @@ defmodule Kith.DAV.TouchCoverageTest do
 
     {:ok, a} = Contacts.update_contact(a, %{gender_id: gender.id})
     address = address_fixture(a)
-    field = contact_field_fixture(a, cft.id)
+    shared_type = FieldRegistry.canonical_type!(:emails)
+    field = contact_field_fixture(a, shared_type.id)
+    contact_field_fixture(a, cft.id, %{"value" => "private@example.com"})
     {:ok, tag} = Contacts.create_tag(account, %{name: "Tag"})
     Contacts.tag_contact(a, tag)
     relationship = relationship_fixture(b, a, rt.id)
@@ -42,6 +44,7 @@ defmodule Kith.DAV.TouchCoverageTest do
       gender: gender,
       rt: rt,
       cft: cft,
+      shared_type: shared_type,
       address: address,
       field: field,
       tag: tag,
@@ -52,10 +55,10 @@ defmodule Kith.DAV.TouchCoverageTest do
 
   for {label, operation, expected} <- [
         {"update_contact", :update_contact, :both},
-        {"soft_delete_contact", :soft_delete_contact, :a},
-        {"restore_contact", :restore_contact, :a},
-        {"archive_contact", :archive_contact, :a},
-        {"unarchive_contact", :unarchive_contact, :a},
+        {"soft_delete_contact", :soft_delete_contact, :both},
+        {"restore_contact", :restore_contact, :both},
+        {"archive_contact", :archive_contact, :both},
+        {"unarchive_contact", :unarchive_contact, :both},
         {"create_address", :create_address, :a},
         {"update_address", :update_address, :a},
         {"delete_address", :delete_address, :a},
@@ -64,10 +67,10 @@ defmodule Kith.DAV.TouchCoverageTest do
         {"delete_contact_field", :delete_contact_field, :a},
         {"tag_contact", :tag_contact, :a},
         {"untag_contact", :untag_contact, :a},
-        {"create_relationship", :create_relationship, :a},
-        {"delete_relationship", :delete_relationship, :b},
-        {"create_photo", :create_photo, :a},
-        {"delete_photo", :delete_photo, :a},
+        {"create_relationship", :create_relationship, :both},
+        {"delete_relationship", :delete_relationship, :both},
+        {"create_photo", :create_photo, :none},
+        {"delete_photo", :delete_photo, :none},
         {"set_avatar", :set_avatar, :a},
         {"clear_avatar", :clear_avatar, :a},
         {"update_tag", :update_tag, :a},
@@ -75,16 +78,17 @@ defmodule Kith.DAV.TouchCoverageTest do
         {"delete_tag", :delete_tag, :a},
         {"delete_tag_with_removal", :delete_tag_with_removal, :a},
         {"merge_tags", :merge_tags, :a},
-        {"update_gender", :update_gender, :a},
+        {"update_gender", :update_gender, :none},
         {"delete_gender refuses in-use records", :delete_gender, :none},
-        {"update_relationship_type", :update_relationship_type, :b},
+        {"update_relationship_type", :update_relationship_type, :none},
         {"delete_relationship_type refuses in-use records", :delete_relationship_type, :none},
-        {"update_contact_field_type", :update_contact_field_type, :a},
+        {"update_contact_field_type", :update_contact_field_type, :none},
         {"delete_contact_field_type refuses in-use records", :delete_contact_field_type, :none},
         {"DisplayNameRecomputeWorker touches recomputed contacts", :display_worker, :both},
         {"failed update leaves revisions unchanged", :failed_update, :none}
       ] do
     test "#{label} touches exactly affected contacts", c do
+      c = prepare_operation(unquote(operation), c)
       before = revisions(c)
       run_operation(unquote(operation), c)
 
@@ -101,6 +105,23 @@ defmodule Kith.DAV.TouchCoverageTest do
       end
     end
   end
+
+  defp prepare_operation(:restore_contact, c) do
+    {:ok, a} = Contacts.soft_delete_contact(c.a)
+    %{c | a: a}
+  end
+
+  defp prepare_operation(:unarchive_contact, c) do
+    {:ok, a} = Contacts.archive_contact(c.a)
+    %{c | a: a}
+  end
+
+  defp prepare_operation(:clear_avatar, c) do
+    {:ok, a} = Contacts.set_avatar(c.a, c.photo)
+    %{c | a: a}
+  end
+
+  defp prepare_operation(_operation, c), do: c
 
   defp revisions(c), do: Map.new([c.a, c.b], &{&1.id, Repo.get!(ContactDav, &1.id).revision})
 
@@ -123,7 +144,7 @@ defmodule Kith.DAV.TouchCoverageTest do
     do: Contacts.update_address(c.address, %{city: "New city"})
 
   defp run_operation(:delete_address, c), do: Contacts.delete_address(c.address)
-  defp run_operation(:create_contact_field, c), do: contact_field_fixture(c.a, c.cft.id)
+  defp run_operation(:create_contact_field, c), do: contact_field_fixture(c.a, c.shared_type.id)
 
   defp run_operation(:update_contact_field, c),
     do: Contacts.update_contact_field(c.field, %{value: "new@example.com"})
@@ -136,7 +157,18 @@ defmodule Kith.DAV.TouchCoverageTest do
   end
 
   defp run_operation(:untag_contact, c), do: Contacts.untag_contact(c.a, c.tag)
-  defp run_operation(:create_relationship, c), do: relationship_fixture(c.a, c.b, c.rt.id)
+
+  defp run_operation(:create_relationship, c) do
+    spouse =
+      Repo.one!(
+        from(t in Kith.Contacts.RelationshipType,
+          where: is_nil(t.account_id) and t.system_key == "spouse"
+        )
+      )
+
+    relationship_fixture(c.a, c.b, spouse.id)
+  end
+
   defp run_operation(:delete_relationship, c), do: Contacts.delete_relationship(c.relationship)
   defp run_operation(:create_photo, c), do: photo_fixture(c.a)
   defp run_operation(:delete_photo, c), do: Contacts.delete_photo(c.photo)
@@ -181,7 +213,8 @@ defmodule Kith.DAV.TouchCoverageTest do
   for operation <- [:hard_delete_contact, :empty_trash, :purge] do
     test "#{operation} moves floor atomically with removal", c do
       old = DateTime.add(DateTime.utc_now(:second), -40 * 86_400, :second)
-      a = c.a |> Ecto.Changeset.change(deleted_at: old) |> Repo.update!()
+      {:ok, a} = Contacts.soft_delete_contact(c.a)
+      a = a |> Ecto.Changeset.change(deleted_at: old) |> Repo.update!()
       before = Store.sync_state(c.account)
       owner_before = Repo.get!(ContactDav, c.b.id).revision
       card_before = Kith.DAV.VCardAdapter.contact_to_vcard(c.b)
@@ -194,8 +227,8 @@ defmodule Kith.DAV.TouchCoverageTest do
 
       assert Repo.get(ContactDav, a.id) == nil
       assert Store.sync_state(c.account).floor > before.token
-      assert Repo.get!(ContactDav, c.b.id).revision > owner_before
-      assert Kith.DAV.VCardAdapter.contact_to_vcard(c.b) != card_before
+      assert Repo.get!(ContactDav, c.b.id).revision == owner_before
+      assert Kith.DAV.VCardAdapter.contact_to_vcard(c.b) == card_before
       assert Contacts.list_relationships(c.b.id) == []
     end
   end
@@ -219,12 +252,7 @@ defmodule Kith.DAV.TouchCoverageTest do
   end
 
   test "PhoneRenormalizeWorker touches contacts whose phone changed", c do
-    {:ok, phone_type} =
-      Contacts.create_contact_field_type(c.account, %{
-        name: "Phone",
-        protocol: "tel",
-        vcard_label: "TEL"
-      })
+    phone_type = FieldRegistry.canonical_type!(:phones)
 
     {:ok, _} =
       Contacts.create_contact_field(
@@ -258,7 +286,12 @@ defmodule Kith.DAV.TouchCoverageTest do
         KithWeb.Endpoint,
         :post,
         "/api/contacts/#{c.a.id}/contact_fields",
-        %{"contact_field" => %{"contact_field_type_id" => c.cft.id, "value" => "api@example.com"}}
+        %{
+          "contact_field" => %{
+            "contact_field_type_id" => c.shared_type.id,
+            "value" => "api@example.com"
+          }
+        }
       )
 
     assert conn.status == 201
@@ -296,10 +329,10 @@ defmodule Kith.DAV.TouchCoverageTest do
     assert revisions(c) == before
   end
 
-  test "unchanged name does not touch incoming relationship owners", c do
+  test "unchanged name leaves contact and relationship owners unchanged", c do
     before = revisions(c)
     assert {:ok, _} = Contacts.update_contact(c.a, %{first_name: c.a.first_name})
-    assert Repo.get!(ContactDav, c.a.id).revision > before[c.a.id]
+    assert Repo.get!(ContactDav, c.a.id).revision == before[c.a.id]
     assert Repo.get!(ContactDav, c.b.id).revision == before[c.b.id]
   end
 

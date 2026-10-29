@@ -196,9 +196,13 @@ test.describe("01 discovery, OPTIONS and PROPFIND", () => {
       expect(res.status, path).toBe(200);
       expect(res.headers["dav"], path).toContain("addressbook");
       const allow = (res.headers["allow"] ?? "").split(",").map((s) => s.trim());
-      for (const m of ["OPTIONS", "GET", "PUT", "DELETE", "PROPFIND", "PROPPATCH", "REPORT"]) {
+      for (const m of ["OPTIONS", "PROPFIND", "PROPPATCH", "REPORT", "ACL"]) {
         expect(allow, `${path} Allow`).toContain(m);
       }
+      for (const method of ["GET", "PUT", "DELETE"]) {
+        expect(allow.includes(method), `${path} ${method}`).toBe(path === contactHref);
+      }
+      expect((res.headers["dav"] ?? "").split(",").map((s) => s.trim())).not.toContain("2");
       const unauthed = await dav(request, "OPTIONS", path, { user: null });
       expect([200, 401], `${path} unauthed`).toContain(unauthed.status);
     }
@@ -209,7 +213,7 @@ test.describe("01 discovery, OPTIONS and PROPFIND", () => {
   test("P1: current-user-principal on /dav/", async ({ request }) => {
     const res = await propfind(request, "/dav/", "0", propfindBody("d", [...P1_PROPS]));
     expect207(res);
-    expect(okProps(res, "/dav/")["current-user-principal"]).toBe("href(/dav/principals/)");
+    expect(okProps(res, "/dav/")["current-user-principal"]).toMatch(/^href\(\/dav\/principals\/users\/\d+\/\)$/);
   });
 
   test("P2: principal addressbook-home-set and principal-URL", async ({ request }) => {
@@ -217,7 +221,7 @@ test.describe("01 discovery, OPTIONS and PROPFIND", () => {
     expect207(res);
     const p = okProps(res, "/dav/principals/");
     expect(p["addressbook-home-set"]).toBe("href(/dav/addressbooks/)");
-    expect(p["principal-URL"]).toBe("href(/dav/principals/)");
+    expect(p["principal-URL"]).toMatch(/^href\(\/dav\/principals\/users\/\d+\/\)$/);
   });
 
   test("P3: home set honours Depth 0 and Depth 1", async ({ request }) => {

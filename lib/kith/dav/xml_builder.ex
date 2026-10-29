@@ -39,6 +39,14 @@ defmodule Kith.DAV.XMLBuilder do
     """
   end
 
+  @doc "Builds a property status with an optional DAV precondition child."
+  def propstat(props, status, nil), do: propstat(props, status)
+
+  def propstat(props, status, condition) do
+    "<d:propstat><d:prop>#{Enum.join(props, "\n")}</d:prop>" <>
+      "<d:status>#{status}</d:status><d:error>#{condition}</d:error></d:propstat>"
+  end
+
   # ── Common DAV properties ──────────────────────────────────────────────
 
   def displayname(name), do: "<d:displayname>#{escape(name)}</d:displayname>"
@@ -148,14 +156,6 @@ defmodule Kith.DAV.XMLBuilder do
     do: "<d:principal-URL><d:href>#{escape(href)}</d:href></d:principal-URL>"
 
   def owner(href), do: "<d:owner><d:href>#{escape(href)}</d:href></d:owner>"
-
-  def current_user_privilege_set do
-    "<d:current-user-privilege-set>" <>
-      "<d:privilege><d:read/></d:privilege>" <>
-      "<d:privilege><d:write/></d:privilege>" <>
-      "<d:privilege><d:all/></d:privilege>" <>
-      "</d:current-user-privilege-set>"
-  end
 
   def supported_collation_set do
     "<card:supported-collation-set>" <>

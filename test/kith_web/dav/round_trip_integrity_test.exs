@@ -57,7 +57,7 @@ defmodule KithWeb.DAV.RoundTripIntegrityTest do
   end
 
   for operation <- [:hard_delete_contact, :empty_trash] do
-    test "#{operation} invalidates surviving owner conditional GET and rolls back atomically",
+    test "#{operation} advances floor and leaves already-hidden relationship representation stable",
          c do
       target = contact_fixture(c.account_id)
       owner = contact_fixture(c.account_id)
@@ -85,7 +85,7 @@ defmodule KithWeb.DAV.RoundTripIntegrityTest do
                Repo.transaction(fn ->
                  assert {:ok, _} = deletion.()
                  assert Repo.get(Kith.Contacts.Relationship, relationship.id) == nil
-                 assert authed_dav(c, "GET", path).resp_body != before.resp_body
+                 assert authed_dav(c, "GET", path).resp_body == before.resp_body
                  Repo.rollback(:cancelled)
                end)
 
@@ -99,8 +99,9 @@ defmodule KithWeb.DAV.RoundTripIntegrityTest do
       after_delete =
         authed_dav(%{c | conn: put_req_header(c.conn, "if-none-match", etag)}, "GET", path)
 
-      assert after_delete.status == 200
-      assert get_resp_header(after_delete, "etag") != [etag]
+      assert after_delete.status == 304
+      assert get_resp_header(after_delete, "etag") == [etag]
+      assert Store.sync_state(c.account_id).floor > floor_before.floor
       refute after_delete.resp_body =~ "RELATED"
       control_after = authed_dav(c, "GET", contact_path(control))
       assert get_resp_header(control_after, "etag") == get_resp_header(control_before, "etag")

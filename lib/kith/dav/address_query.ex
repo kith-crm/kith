@@ -7,6 +7,8 @@ defmodule Kith.DAV.AddressQuery do
   The filter comes from `Kith.DAV.XMLParser.parse_report/1`.
   """
 
+  alias Kith.VCard.Document
+
   @match_types ["equals", "contains", "starts-with", "ends-with"]
 
   # RFC 6352 §8.3: both casemap collations MUST be supported
@@ -103,45 +105,29 @@ defmodule Kith.DAV.AddressQuery do
   # Unfolded content lines as `%{name, params: %{NAME => [values]}, value}`,
   # without the group prefix, values unescaped (RFC 6350 §3.3, §3.4).
   defp properties(vcard) do
-    vcard
-    |> String.replace(~r/\r?\n[ \t]/, "")
-    |> String.split(~r/\r?\n/, trim: true)
-    |> Enum.flat_map(&property/1)
-  end
+    case Document.parse(vcard) do
+      {:ok, document} ->
+        Enum.map(document.properties, &query_property/1)
 
-  defp property(line) do
-    case Regex.run(
-           ~r/\A(?:[A-Za-z0-9-]+\.)?([A-Za-z0-9-]+)((?:;(?:[^:;"]|"[^"]*")*)*):(.*)\z/s,
-           line
-         ) do
-      [_, name, params, value] ->
-        [%{name: String.upcase(name), params: params(params), value: unescape(value)}]
-
-      _ ->
+      {:error, _} ->
         []
     end
   end
 
-  defp params(""), do: %{}
+  defp query_property(property) do
+    params =
+      Enum.reduce(property.parameters, %{}, fn parameter, acc ->
+        values = query_parameter_values(parameter)
+        Map.update(acc, parameter.normalized_name, values, &(&1 ++ values))
+      end)
 
-  defp params(params) do
-    ~r/;([A-Za-z0-9-]+)(?:=((?:[^;"]|"[^"]*")*))?/
-    |> Regex.scan(params)
-    |> Enum.reduce(%{}, fn match, acc ->
-      name = match |> Enum.at(1) |> String.upcase()
-      values = match |> Enum.at(2, "") |> param_values()
-      Map.update(acc, name, values, &(&1 ++ values))
-    end)
+    %{name: property.normalized_name, params: params, value: unescape(property.value)}
   end
 
-  defp param_values(raw) do
-    ~r/"([^"]*)"|([^,"]+)/
-    |> Regex.scan(raw)
-    |> Enum.map(fn
-      [_, quoted] -> quoted
-      [_, "", plain] -> plain
-    end)
-  end
+  defp query_parameter_values(%{normalized_name: "TYPE", values: values}),
+    do: Enum.flat_map(values, &String.split(&1, ","))
+
+  defp query_parameter_values(parameter), do: parameter.values
 
   defp unescape(value) do
     Regex.replace(~r/\\([\\,;nN])/, value, fn

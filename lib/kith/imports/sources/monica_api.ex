@@ -32,6 +32,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   alias Kith.Contacts
   alias Kith.Contacts.PhoneFormatter
+  alias Kith.Contacts.Write
   alias Kith.DAV.Store
   alias Kith.Imports
   alias Kith.Imports.DuplicateAutomerge
@@ -827,13 +828,19 @@ defmodule Kith.Imports.Sources.MonicaApi do
     tag_id = Map.get(ref_data.tags, tag["name"])
 
     if tag_id do
-      {count, _} =
-        Repo.insert_all("contact_tags", [%{contact_id: contact.id, tag_id: tag_id}],
-          on_conflict: :nothing
-        )
-
-      if count > 0, do: Store.touch(contact.account_id, [contact.id])
+      Write.run(contact.account_id, [contact.id], fn ->
+        insert_api_tag(contact, tag_id)
+      end)
     end
+  end
+
+  defp insert_api_tag(contact, tag_id) do
+    {count, _} =
+      Repo.insert_all("contact_tags", [%{contact_id: contact.id, tag_id: tag_id}],
+        on_conflict: :nothing
+      )
+
+    if count > 0, do: Store.touch(contact.account_id, [contact.id])
   end
 
   defp collect_deferred_data(api_contact, source_id, local_id, deferred, opts) do

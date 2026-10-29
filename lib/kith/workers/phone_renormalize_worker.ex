@@ -21,7 +21,7 @@ defmodule Kith.Workers.PhoneRenormalizeWorker do
 
   alias Kith.Accounts.Account
   alias Kith.Contacts.{ContactField, ContactFieldType, PhoneFormatter}
-  alias Kith.DAV.Store
+  alias Kith.Contacts.Write
   alias Kith.Repo
 
   require Logger
@@ -103,21 +103,25 @@ defmodule Kith.Workers.PhoneRenormalizeWorker do
   defp maybe_update(_id, nil, _region), do: :unchanged
   defp maybe_update(_id, "", _region), do: :unchanged
 
-  defp maybe_update(id, value, region) do
-    {:ok, normalized} = PhoneFormatter.normalize(value, region)
+  defp maybe_update(id, _value, region) do
+    field = Repo.get!(ContactField, id)
 
-    if normalized && normalized != value do
-      field = Repo.get!(ContactField, id)
+    Write.run(field.account_id, [field.contact_id], fn ->
+      current = Repo.get_by!(ContactField, id: id, account_id: field.account_id)
 
-      {count, _} =
-        from(cf in ContactField, where: cf.id == ^id)
+      if current.contact_id != field.contact_id,
+        do: Write.prepare(current.account_id, [current.contact_id])
+
+      {:ok, normalized} = PhoneFormatter.normalize(current.value, region)
+
+      if normalized && normalized != current.value do
+        from(cf in ContactField, where: cf.id == ^id and cf.account_id == ^field.account_id)
         |> Repo.update_all(set: [value: normalized])
 
-      if count > 0, do: Store.touch(field.account_id, [field.contact_id])
-
-      :updated
-    else
-      :unchanged
-    end
+        :updated
+      else
+        :unchanged
+      end
+    end)
   end
 end

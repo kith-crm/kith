@@ -213,6 +213,9 @@ dcurl "$BOOK$NEWUUID.vcf" >"$D/charlie-server.vcf"
 for line in '+15550654321' 'NOTE:CLI client edited note' 'X-CLI-EXTRA:retained'; do
   grep -q "$line" "$D/charlie-server.vcf" || fail "S3/S4 missing $line"
 done
+step "private Kith edits preserve DAV document bytes and revision"
+app_action assert-boundary "$NEWUUID"
+"$VDS" sync kith
 step "S5 application phone and tag rename"
 app_action edit "$NEWUUID"
 "$VDS" sync kith

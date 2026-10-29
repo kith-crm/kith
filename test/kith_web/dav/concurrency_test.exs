@@ -72,7 +72,11 @@ defmodule KithWeb.DAV.ConcurrencyTest do
     [etag] = request(user, "GET", href) |> get_resp_header("etag")
 
     tasks =
-      for _ <- 1..2, do: Task.async(fn -> request(user, "PUT", href, [{"if-match", etag}]) end)
+      for index <- 1..2,
+          do:
+            Task.async(fn ->
+              request(user, "PUT", href, [{"if-match", etag}], company: "Writer #{index}")
+            end)
 
     assert Enum.map(tasks, &Task.await(&1, 10_000).status) |> Enum.sort() == [204, 412]
   end
@@ -81,7 +85,7 @@ defmodule KithWeb.DAV.ConcurrencyTest do
     href = "/dav/addressbooks/default/delete.vcf"
     assert request(user, "PUT", href).status == 201
     [etag] = request(user, "GET", href) |> get_resp_header("etag")
-    assert request(user, "PUT", href).status == 204
+    assert request(user, "PUT", href, [], company: "Newer shared state").status == 204
     assert request(user, "DELETE", href, [{"if-match", etag}]).status == 412
     assert request(user, "GET", href).status == 200
   end
@@ -96,7 +100,15 @@ defmodule KithWeb.DAV.ConcurrencyTest do
         Sandbox.unboxed_run(Repo, fn ->
           Repo.transaction(fn ->
             Repo.query!("SET LOCAL deadlock_timeout = '5s'")
-            Store.get_by_resource_name(aid, "deadlock.vcf") |> Store.lock()
+            contact = Store.get_by_resource_name(aid, "deadlock.vcf")
+
+            Repo.one!(
+              from(c in Kith.Contacts.Contact,
+                where: c.id == ^contact.id,
+                lock: "FOR NO KEY UPDATE"
+              )
+            )
+
             send(parent, :locked)
 
             receive do
