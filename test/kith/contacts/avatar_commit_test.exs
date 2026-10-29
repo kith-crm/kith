@@ -186,6 +186,58 @@ defmodule Kith.Contacts.AvatarCommitTest do
     end)
   end
 
+  test "backfill publishes an unregistered processed avatar before any later private edit" do
+    user = Sandbox.unboxed_run(Repo, fn -> Kith.AccountsFixtures.user_fixture() end)
+    account = user.account_id
+    on_exit(fn -> cleanup(account) end)
+
+    Sandbox.unboxed_run(Repo, fn ->
+      contact = Kith.ContactsFixtures.contact_fixture(account)
+      bytes = image_binary(width: 512, height: 512, suffix: ".jpg")
+      assert :ok = Kith.Contacts.AvatarProcessor.validate_rendition(bytes)
+      key = Storage.generate_key(account, "avatars", "legacy-processed.jpg")
+      assert {:ok, _} = Storage.upload_binary(bytes, key)
+      contact = contact |> Ecto.Changeset.change(avatar: key) |> Repo.update!()
+      dav = Repo.get!(Kith.DAV.ContactDav, contact.id)
+      Repo.update!(Ecto.Changeset.change(dav, document: %{}, representation_fingerprint: nil))
+      assert :ok = Kith.DAV.Store.ensure_rows(account)
+      before = Repo.get!(Kith.DAV.ContactDav, contact.id)
+      assert Repo.get(Kith.Contacts.AvatarAsset, key) == nil
+      path = Kith.DAV.Store.href(%{contact | dav: before})
+      ctx = %{conn: Phoenix.ConnTest.build_conn(), user: user}
+      unavailable = KithWeb.DAV.TestHelpers.authed_dav(ctx, "GET", path)
+      assert unavailable.status == 503
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          Mix.Tasks.Kith.Avatars.Backfill.run(["--account-id", to_string(account)])
+        end)
+
+      assert output =~ "1 converted, 0 already normalized, 0 failed"
+      asset = Repo.get!(Kith.Contacts.AvatarAsset, key)
+      assert asset.content_hash == Avatar.hash(bytes)
+      repaired = Repo.get!(Kith.DAV.ContactDav, contact.id)
+      assert repaired.revision > before.revision
+      assert repaired.representation_fingerprint != before.representation_fingerprint
+      response = KithWeb.DAV.TestHelpers.authed_dav(ctx, "GET", path)
+      assert response.status == 200
+      assert response.resp_body =~ "PHOTO"
+
+      assert {:ok, _} = Contacts.update_contact(contact, %{favorite: true})
+      after_private = Repo.get!(Kith.DAV.ContactDav, contact.id)
+      assert after_private.revision == repaired.revision
+      assert after_private.representation_modified_at == repaired.representation_modified_at
+      assert after_private.representation_fingerprint == repaired.representation_fingerprint
+      assert after_private.document == repaired.document
+      unchanged = KithWeb.DAV.TestHelpers.authed_dav(ctx, "GET", path)
+      assert unchanged.status == 200
+      assert unchanged.resp_body == response.resp_body
+
+      assert Plug.Conn.get_resp_header(unchanged, "etag") ==
+               Plug.Conn.get_resp_header(response, "etag")
+    end)
+  end
+
   for choice <- ["survivor", "non_survivor"] do
     test "#{choice} merge preserves snapshots, counts shared assets once, and survives source deletion" do
       account =

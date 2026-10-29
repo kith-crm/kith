@@ -65,6 +65,37 @@ values below the floor and values above current state return 403
 - Unconditional PUT remains allowed: Thunderbird's observed writes without
   If-Match overwrite newer data. See the [client checklist](../carddav-client-checklist.md).
 
+## Data-boundary revision (2026-10-28)
+
+The original decision above describes the baseline implementation. The boundary
+revision replaces post-commit touches with `Contacts.Write`: all shared writes
+acquire the account lock, change native rows and document bindings, then publish
+one revision per affected representation inside the same transaction. Private
+and no-op edits publish nothing. `contact_dav` now stores the rich client document
+in JSONB alongside identity, DAV-specific time and fingerprint; legacy extras
+are quarantined. Native tables own shared values, with no background copy sync.
+
+An immutable audited system-key registry grants shared email/phone/website
+classification. Private Kith description/gender/custom fields never enter the
+projection; client NOTE/GENDER/IMPP remain document-only. Explicit Kith export
+and import policy is separate. Forward and reverse relationships share safe
+standard categories, retain native subtype bindings and suppress hidden targets.
+
+GET validators distinguish v3/v4 bytes (`revision-v30`/`revision-v40`); canonical
+getetag is v30 and conditional writes recognize current variants. DAV time no
+longer uses contact.updated_at. Read snapshots include collection state and all
+native/document data together. Existing resources are marked to require a
+current explicit validator for PUT/DELETE after migration; new-policy resources retain existing
+unconditional compatibility. This intentionally limits old unconditional clients
+whose cached cards may contain formerly exposed private data.
+
+The account lock, UUID identity restrictions, reserved hidden identities,
+hard-delete floor and compensating avatar cleanup are retained. Account reset
+also advances the floor. Existing warnings about hard-delete recovery and
+numeric histories after database restore still apply. Schema downgrade is not a
+privacy-safe deployment rollback. See [the implementation plan](../plan/carddav-data-boundary.md)
+and [CardDAV operations](../carddav.md) for cutover, audit and acceptance details.
+
 ## Alternatives Considered
 
 | Alternative | Reason Rejected |

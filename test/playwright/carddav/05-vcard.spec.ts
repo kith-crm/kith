@@ -12,7 +12,7 @@ const withoutRev = (s: string) => s.replace(/^REV:.*\r\n/gm, "");
 const created: string[] = [];
 let bearer = "";
 const fixtureUids: Record<string, string> = { "v30-full": testUid(`${prefix}-v30`), "v40-full": testUid(`${prefix}-v40`), "apple-ios": testUid(`${prefix}-apple`), "davx5-android": testUid(`${prefix}-davx5`), "thunderbird": testUid(`${prefix}-thunderbird`), "unicode-folding": testUid(`${prefix}-unicode`) };
-const fullCommon = ["NICKNAME:Enchantress", "ORG:Analytical Engines", "TITLE:Mathematician", "ada@home.example.test", "ada@work.example.test", "+15550001111", "+15550002222", "https://ada.example.test/home", "https://ada.example.test/work", "xmpp:ada@example.test", "CATEGORIES:Computing,Friends\\, close", "ADR;TYPE=HOME:;Suite 2;12 Engine St;London;Greater London;N1;UK", "ADR;TYPE=WORK:;Floor 3;20 Office St;Oxford;Oxon;OX1;UK", "X-CUSTOM:Keep me"];
+const fullCommon = ["NICKNAME:Enchantress", "ORG:Analytical Engines", "TITLE:Mathematician", "ada@home.example.test", "ada@work.example.test", "+15550001111", "+15550002222", "https://ada.example.test/home", "https://ada.example.test/work", "xmpp:ada@example.test", "CATEGORIES:Computing,Friends\\, close", "PO 42;Suite 2;12 Engine St;London;Greater London;N1;UK", ";Floor 3;20 Office St;Oxford;Oxon;OX1;UK", "X-CUSTOM:Keep me"];
 const fixtures: Record<string, string[]> = {
   "v30-full": [...fullCommon, "LABEL;TYPE=HOME:PO 42\\nLondon", "AGENT:BEGIN:VCARD\\nFN:Agent Smith\\nEND:VCARD", "KEY;ENCODING=b;TYPE=PGP:AAEC", "X-CHARSET;CHARSET=utf-8:Charset value"],
   "v40-full": [...fullCommon, "KEY:data:application/pgp-keys;base64,AAEC", "pid@example.test", "KIND:individual", "ANNIVERSARY:20100601"],
@@ -101,11 +101,11 @@ for (const [name, values] of Object.entries(fixtures)) {
       if (name === "v40-full") {
         expect(card).toContain("\r\nBDAY:--1210\r\n");
         expect(card).not.toMatch(/^BDAY[^\r\n]*:(?:1604|2000)/m);
-        expect(card).toContain(version === "4.0" ? "GENDER:F" : "X-GENDER:Female");
+        expect(card).toContain("GENDER:F");
         expect(card).toContain(version === "4.0" ? `RELATED;TYPE=friend:${wireUid(testUid(`${prefix}-friend`))}` : `.X-ABRELATEDNAMES:${prefix} Friend`);
       }
       if (name.endsWith("-full")) {
-        expect(card).toContain(`N:Lovelace;${prefix} Ada;Augusta;;`);
+        expect(card).toContain(`N:Lovelace;${prefix} Ada;Augusta;Countess;PhD`);
         expect(card).toContain(`FN:${prefix} Ada Augusta Lovelace`);
         expect(card).toContain("NOTE:Line one\\nLine two\\, comma\\; semicolon\\\\literal\\\\n");
         const photo = photoBytes(card);
@@ -119,11 +119,13 @@ for (const [name, values] of Object.entries(fixtures)) {
     }
   });
 }
-test("Apple social profile stays one field over three PUT-backs", async ({ request }) => {
+test("Apple social profile stays client-only without duplicate properties over three PUT-backs", async ({ request }) => {
   const href = `${BOOK}${prefix}-apple-ios.vcf`;
   const id = await contactId(request, prefix + " Alice");
   const first = await dav(request, "GET", href);
-  const count = (await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data.length;
+  const nativeFields = (await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data;
+  expect(nativeFields.some((field: {value: string}) => field.value.includes("twitter.com"))).toBe(false);
+  const count = nativeFields.length;
   for (let i = 0; i < 3; i++) {
     expect((await put(request, href, (await dav(request, "GET", href)).body)).status).toBe(204);
     const card = (await dav(request, "GET", href)).body;
@@ -143,7 +145,8 @@ test("natively deleted children stay deleted after PUT-back", async ({ request }
     await api(request, "DELETE", `/api/relationships/${rel.id}`, undefined, 204);
   for (const version of ["3.0", "4.0"]) {
     const g = await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } });
-    expect(g.body).not.toMatch(/IMPP|RELATED|item1\./);
+    expect(g.body).not.toMatch(/RELATED|item1\./);
+    expect(g.body).toContain("IMPP;TYPE=HOME:xmpp:dee@example.test");
     expect((await put(request, href, g.body)).status).toBe(204);
     expect((await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data.map((f: { value: string }) => f.value)).toEqual(["keep@example.test"]);
     expect((await api(request, "GET", `/api/contacts/${id}/relationships`)).data).toEqual([]);
@@ -181,7 +184,7 @@ test("an embedded AGENT vCard does not truncate the card", async ({ request }) =
   expect(card).toContain("EMAIL;TYPE=WORK:after@example.test\r\n");
   expect(card).toContain("AGENT:BEGIN:VCARD\\nFN:Agent\\nEND:VCARD\r\n");
 });
-test("native names serialize without unsupported prefix and suffix", async ({ request }) => {
+test("native name edits preserve client prefix and suffix metadata", async ({ request }) => {
   const href = `${BOOK}${prefix}-rename.vcf`; created.push(href);
   const body = `BEGIN:VCARD\r\nVERSION:3.0\r\nUID:${testUid(`${prefix}-rename`)}\r\nN:Lovelace;${prefix} Rena;Augusta;Countess;PhD\r\nFN:Countess ${prefix} Rena Augusta Lovelace PhD\r\nEND:VCARD\r\n`;
   expect((await put(request, href, body)).status).toBe(201);
@@ -189,7 +192,7 @@ test("native names serialize without unsupported prefix and suffix", async ({ re
   await api(request, "PATCH", `/api/contacts/${id}`, { contact: { first_name: `${prefix} Grace`, middle_name: "", last_name: "Hopper" } });
   for (const version of ["3.0", "4.0"]) {
     const card = unfold((await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } })).body);
-    expect(card).toContain(`N:Hopper;${prefix} Grace;;;\r\n`);
+    expect(card).toContain(`N:Hopper;${prefix} Grace;;Countess;PhD\r\n`);
     expect(card).toContain(`FN:${prefix} Grace Hopper\r\n`);
   }
 });
@@ -219,7 +222,7 @@ test("V3: unicode survives multiget and the web contact page", async ({ request,
   await expect(avatar).toBeVisible();
   expect(await avatar.evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth > 0)).toBe(true);
 });
-test("V4/V5: avatar survives photo-free sync and 4.0 GET PUT-back", async ({ request }) => {
+test("V4/V5: full PUT preserves avatar; PHOTO omission clears selection while private originals survive", async ({ request }) => {
   const href = `${BOOK}${prefix}-v40-full.vcf`;
   const id = await contactId(request, prefix + " Ada");
   const type = await api(request, "POST", "/api/contact_field_types", { contact_field_type: { name: `${prefix} Native secret` } }, 201);
@@ -234,11 +237,18 @@ test("V4/V5: avatar survives photo-free sync and 4.0 GET PUT-back", async ({ req
   const multi = unfold(await reportCard(request, href));
   const sync = unfold(await reportCard(request, href, true));
   expect(multi).toContain(photo); expect(sync).toContain(photo);
-  for (const body of [sync.replace(/^PHOTO.*\r\n/gm, ""), (await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0" } })).body]) {
+  const originalPhotos = (await api(request, "GET", `/api/contacts/${id}/photos`)).data.map((photo: {id: number}) => photo.id).sort();
+  const fullV4 = (await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0" } })).body;
+  for (const [body, retainsPhoto] of [[fullV4, true], [sync.replace(/^PHOTO.*\r\n/gm, ""), false]] as const) {
     expect((await put(request, href, body)).status).toBe(204);
     const after = unfold((await dav(request, "GET", href)).body);
-    expect(after).toContain(photo);
-    expect(withoutRev(after)).toBe(withoutRev(before));
+    if (retainsPhoto) {
+      expect(after).toContain(photo);
+      expect(withoutRev(after)).toBe(withoutRev(before));
+    } else {
+      expect(after).not.toMatch(/^PHOTO[;:]/m);
+      expect((await api(request, "GET", `/api/contacts/${id}/photos`)).data.map((photo: {id: number}) => photo.id).sort()).toEqual(originalPhotos);
+    }
     const fields = (await api(request, "GET", `/api/contacts/${id}/contact_fields`)).data;
     expect(fields).toContainEqual(custom.data);
     expect((await api(request, "GET", `/api/notes/${note.data.id}`)).data.body).toContain("native note");
@@ -260,28 +270,30 @@ test("escaped structured values survive", async ({ request }) => {
   const body = `BEGIN:VCARD\r\nVERSION:4.0\r\nUID:${testUid(`${prefix}-escaped`)}\r\nN:Family\\;Last;${prefix} Given\\;First;Middle\\,Name;Dr;Jr\r\nFN:${prefix} Given\\;First Middle\\,Name Family\\;Last\r\nADR;TYPE=HOME:;Suite\\;2;Street\\;3;City\\,Town;Region;Zip;Country\r\nNOTE:literal \\\\n\r\nEND:VCARD\r\n`;
   expect((await put(request, href, body)).status).toBe(201);
   const card = unfold((await dav(request, "GET", href)).body);
-  expect(card).toContain(`N:Family\\;Last;${prefix} Given\\;First;Middle\\,Name;;`);
+  expect(card).toContain(`N:Family\\;Last;${prefix} Given\\;First;Middle\\,Name;Dr;Jr`);
   expect(card).toContain("ADR;TYPE=HOME:;Suite\\;2;Street\\;3;City\\,Town;Region;Zip;Country");
 });
 
-test("one strong tag for both versions, listings and conditional requests", async ({ request }) => {
+test("version-specific strong tags and canonical listing validators", async ({ request }) => {
   const href = `${BOOK}${prefix}-variants.vcf`; created.push(href);
   expect((await put(request, href, vcard({ fn: `${prefix} Variants` }))).status).toBe(201);
   const g3 = await dav(request, "GET", href);
   const g4 = await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0" } });
   expect(g4.body).not.toBe(g3.body);
-  expect(g4.headers.etag).toBe(g3.headers.etag);
+  expect(g4.headers.etag).not.toBe(g3.headers.etag);
   expect(g4.headers.vary.toLowerCase()).toContain("accept");
   const propfind = await dav(request, "PROPFIND", href, { headers: { Depth: "0" }, body: `<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>` });
-  expect(propText(responseFor(propfind.body, href)!, "getetag")).toBe(g4.headers.etag);
+  expect(propText(responseFor(propfind.body, href)!, "getetag")).toBe(g3.headers.etag);
   for (const data of ["", `<c:address-data content-type="text/vcard" version="4.0"/>`]) {
     const report = await dav(request, "REPORT", BOOK, { body: `<c:addressbook-multiget xmlns:c="urn:ietf:params:xml:ns:carddav" xmlns:d="DAV:"><d:prop><d:getetag/>${data}</d:prop><d:href>${href}</d:href></c:addressbook-multiget>` });
     expect(report.status).toBe(207); assertWellFormedXml(report.body);
-    expect(propText(responseFor(report.body, href)!, "getetag")).toBe(g4.headers.etag);
+    expect(propText(responseFor(report.body, href)!, "getetag")).toBe(g3.headers.etag);
   }
-  for (const version of ["3.0", "4.0"])
-    expect((await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}`, "If-None-Match": g3.headers.etag } })).status).toBe(304);
-  const write = await dav(request, "PUT", href, { headers: { ...headers, "If-Match": g3.headers.etag }, body: g4.body });
+  for (const [version, etag] of [["3.0", g3.headers.etag], ["4.0", g4.headers.etag]])
+    expect((await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}`, "If-None-Match": etag } })).status).toBe(304);
+  expect((await dav(request, "GET", href, { headers: { Accept: "text/vcard; version=4.0", "If-None-Match": g3.headers.etag } })).status).toBe(200);
+  const changed = g4.body.replace("END:VCARD", "ORG:Changed shared company\r\nEND:VCARD");
+  const write = await dav(request, "PUT", href, { headers: { ...headers, "If-Match": g3.headers.etag }, body: changed });
   expect(write.status).toBe(204);
   expect((await dav(request, "PUT", href, { headers: { ...headers, "If-Match": g4.headers.etag }, body: g4.body })).status).toBe(412);
 });
@@ -293,7 +305,7 @@ test("non-UUID text UID is rejected without creating a contact", async ({ reques
   expect((await dav(request, "GET", href)).status).toBe(404);
 });
 
-test("unmapped extras retain syntax across versions while mapped parameters and groups are dropped", async ({ request }) => {
+test("client properties retain syntax mapped parameters and groups across versions", async ({ request }) => {
   const href = `${BOOK}${prefix}-extras.vcf`; created.push(href);
   const extra = "KEY;ENCODING=b;TYPE=PGP:AAEC";
   expect((await put(request, href, vcard({ fn: `${prefix} Extras`, extra: [extra, "EMAIL;PID=1.1;TYPE=work:extra@example.test", "item9.X-UNMAPPED:discard"] })) ).status).toBe(201);
@@ -301,8 +313,8 @@ test("unmapped extras retain syntax across versions while mapped parameters and 
     const card = unfold((await dav(request, "GET", href, { headers: { Accept: `text/vcard; version=${version}` } })).body);
     expect(card).toContain(extra + "\r\n");
     expect(card).toContain("extra@example.test");
-    expect(card).not.toContain("PID=");
-    expect(card).not.toContain("X-UNMAPPED");
+    expect(card).toContain("EMAIL;PID=1.1;TYPE=work:extra@example.test");
+    expect(card).toContain("item9.X-UNMAPPED:discard");
   }
 });
 

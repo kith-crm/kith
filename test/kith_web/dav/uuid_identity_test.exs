@@ -91,6 +91,7 @@ defmodule KithWeb.DAV.UUIDIdentityTest do
     assert authed_dav(c, "GET", href).resp_body =~ "BDAY:1990-07-20"
     cleared = String.replace(edited, "BDAY:1990-07-20\r\n", "")
     assert authed_dav(c, "PUT", href, cleared).status == 204
-    refute authed_dav(c, "GET", href).resp_body =~ "BDAY"
+    refute authed_dav(c, "GET", href).resp_body =~ ~r/^BDAY[;:]/m
+    assert Store.get_by_resource_name(c.account_id, Path.basename(href)).birthdate == nil
   end
 end

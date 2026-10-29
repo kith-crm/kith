@@ -4,7 +4,7 @@ defmodule Mix.Tasks.Kith.Avatars.Backfill do
   use Mix.Task
   import Ecto.Query
   alias Kith.{Contacts, Repo, Storage}
-  alias Kith.Contacts.{Avatar, AvatarAsset, AvatarProcessor, Contact, Photo}
+  alias Kith.Contacts.{Avatar, AvatarAsset, AvatarProcessor, Contact, Photo, Write}
 
   @impl Mix.Task
   def run(args) do
@@ -89,8 +89,10 @@ defmodule Mix.Tasks.Kith.Avatars.Backfill do
     with true <- String.starts_with?(contact.avatar, prefix),
          {:ok, bytes} <- Storage.read(contact.avatar),
          :ok <- AvatarProcessor.validate_rendition(bytes) do
-      Avatar.register_asset!(contact.account_id, contact.avatar, bytes)
-      {:ok, contact}
+      Write.run(contact.account_id, [contact.id], fn ->
+        Avatar.register_asset!(contact.account_id, contact.avatar, bytes)
+        {:ok, contact}
+      end)
     else
       false -> {:error, :source_photo_not_found}
       {:error, reason} -> {:error, reason}

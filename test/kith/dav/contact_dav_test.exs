@@ -84,8 +84,8 @@ defmodule Kith.DAV.ContactDavTest do
   defp insert_dav(account_id, uid, resource_name) do
     contact = contact_fixture(account_id)
 
-    %ContactDav{contact_id: contact.id, account_id: account_id}
+    Repo.get!(ContactDav, contact.id)
     |> ContactDav.identity_changeset(%{uid: uid, resource_name: resource_name})
-    |> Repo.insert()
+    |> Repo.update()
   end
 end

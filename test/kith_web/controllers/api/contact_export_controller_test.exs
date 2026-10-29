@@ -26,10 +26,11 @@ defmodule KithWeb.API.ContactExportControllerTest do
     refute Enum.any?(contacts, &(&1.first_name in ["Deleted", "Other account"]))
   end
 
-  test "single and bulk exports use stored identity, extras and relationship names", %{
-    conn: conn,
-    user: user
-  } do
+  test "explicit exports preserve identity, legacy extras and names while DAV applies its boundary",
+       %{
+         conn: conn,
+         user: user
+       } do
     contact = contact_fixture(user.account_id, %{first_name: "Alice"})
 
     target =
@@ -62,7 +63,45 @@ defmodule KithWeb.API.ContactExportControllerTest do
     target_dav = Kith.Repo.get!(Kith.DAV.ContactDav, target.id)
     card = Kith.DAV.VCardAdapter.contact_to_vcard(contact, version: :v40)
     assert card =~ "UID:urn:uuid:#{uid}\r\n"
-    assert card =~ "RELATED;TYPE=friend:urn:uuid:#{target_dav.uid}\r\n"
-    assert card =~ "X-CUSTOM:kept\r\nEND:VCARD"
+    assert card =~ "RELATED;TYPE=contact:urn:uuid:#{target_dav.uid}\r\n"
+    refute card =~ "X-CUSTOM:kept"
+  end
+
+  test "authorized API exports retain private native description, gender and custom fields", %{
+    conn: conn,
+    user: user
+  } do
+    {:ok, gender} = Kith.Contacts.create_gender(user.account_id, %{name: "Private export gender"})
+
+    contact =
+      contact_fixture(user.account_id, %{
+        description: "Private export description",
+        gender_id: gender.id
+      })
+
+    {:ok, field_type} =
+      Kith.Contacts.create_contact_field_type(user.account_id, %{
+        name: "Private export field",
+        vcard_label: "X-PRIVATE-EXPORT"
+      })
+
+    contact_field_fixture(contact, field_type.id, %{"value" => "Private export field value"})
+
+    single = get(conn, ~p"/api/contacts/#{contact.id}/export.vcf")
+    assert single.status == 200
+    assert single.resp_body =~ "NOTE:Private export description"
+    assert single.resp_body =~ "X-GENDER:Private export gender"
+    assert single.resp_body =~ "X-PRIVATE-EXPORT:Private export field value"
+
+    bulk = get(recycle(conn), ~p"/api/contacts/export.vcf")
+    assert bulk.status == 200
+    assert bulk.resp_body =~ "NOTE:Private export description"
+    assert bulk.resp_body =~ "X-GENDER:Private export gender"
+    assert bulk.resp_body =~ "X-PRIVATE-EXPORT:Private export field value"
+
+    dav = Kith.DAV.VCardAdapter.contact_to_vcard(contact)
+    refute dav =~ "Private export description"
+    refute dav =~ "Private export gender"
+    refute dav =~ "Private export field value"
   end
 end

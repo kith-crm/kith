@@ -3,6 +3,9 @@ defmodule Kith.Contacts.ContactFieldType do
   import Ecto.Changeset
 
   schema "contact_field_types" do
+    # Trusted classification assigned only by audited seeds/migrations.
+    # Deliberately excluded from ordinary changeset casts.
+    field :system_key, :string
     field :name, :string
     field :protocol, :string
     field :icon, :string

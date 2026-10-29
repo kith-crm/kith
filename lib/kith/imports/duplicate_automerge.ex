@@ -51,6 +51,7 @@ defmodule Kith.Imports.DuplicateAutomerge do
   alias Kith.Contacts
   alias Kith.Contacts.Contact
   alias Kith.Contacts.DuplicateCandidate
+  alias Kith.DAV.Store
   alias Kith.DuplicateDetection
   alias Kith.Repo
 
@@ -95,7 +96,7 @@ defmodule Kith.Imports.DuplicateAutomerge do
   def run(account_id, opts \\ []) when is_integer(account_id) do
     if Keyword.get(opts, :dry_run, false) do
       {:error, result} =
-        Repo.transaction(fn -> Repo.rollback(execute(account_id, opts)) end)
+        Store.transaction(account_id, fn -> Repo.rollback(execute(account_id, opts)) end)
 
       result
     else

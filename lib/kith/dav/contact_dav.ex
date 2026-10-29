@@ -10,6 +10,12 @@ defmodule Kith.DAV.ContactDav do
     field :uid, Ecto.UUID
     field :resource_name, :string
     field :revision, :integer, read_after_writes: true
+    field :document, Kith.DAV.DocumentType, default: %{}
+    # Latest pre-merge loser snapshot. Only authorized merge code writes it.
+    field :archived_document, Kith.DAV.DocumentType
+    field :representation_modified_at, :utc_datetime_usec
+    field :representation_fingerprint, :string
+    field :requires_precondition, :boolean, default: false
     field :extras, {:array, :string}, default: []
   end
 

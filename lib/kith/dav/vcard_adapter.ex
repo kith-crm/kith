@@ -10,11 +10,10 @@ defmodule Kith.DAV.VCardAdapter do
 
   alias Kith.Contacts
   alias Kith.Contacts.Contact
-  alias Kith.DAV.{Store, UID}
+  alias Kith.DAV.{Document, Store, UID}
   alias Kith.Repo
-  alias Kith.Storage
-  alias Kith.VCard.{Parser, Serializer}
-  require Logger
+  alias Kith.VCard.Document, as: VCardDocument
+  alias Kith.VCard.Parser
 
   @doc """
   Converts a Kith contact to a vCard string with a CardDAV UID.
@@ -27,7 +26,6 @@ defmodule Kith.DAV.VCardAdapter do
   """
   def contact_to_vcard(%Contact{} = contact, opts \\ []) do
     version = Keyword.get(opts, :version, :v30)
-    include_photo = Keyword.get(opts, :include_photo, true)
 
     contact =
       if Keyword.get(opts, :preloaded, false) do
@@ -37,9 +35,7 @@ defmodule Kith.DAV.VCardAdapter do
         Repo.preload(contact, Contacts.dav_preloads(), force: true)
       end
 
-    contact = if include_photo, do: maybe_load_avatar_data(contact), else: contact
-
-    Serializer.serialize(contact, version: version, include_uid: true)
+    Document.render(contact, Keyword.put(opts, :version, version))
   end
 
   @doc """
@@ -51,10 +47,51 @@ defmodule Kith.DAV.VCardAdapter do
   `nested_data` contains `:emails`, `:phones`, `:urls`, `:addresses`, `:uid`.
   """
   def vcard_to_attrs(vcard_string, opts \\ []) do
-    case Parser.parse(vcard_string, legacy_bday: false) do
-      {:ok, [parsed | _]} -> normalize_identity(parsed, opts)
+    with {:ok, document} <- VCardDocument.parse(vcard_string),
+         true <- length(VCardDocument.properties(document, "UID")) <= 1,
+         public_document <- shared_input(document),
+         parsed <- Parser.from_properties(public_document.properties, legacy_bday: false),
+         {attrs, nested} <- normalize_identity(parsed, opts) do
+      nested =
+        nested
+        |> Map.put(:dav_document, vcard_string)
+        |> Map.put(:dav_parsed_document, document)
+        |> Map.put(:related, relationship_entries(document))
+        |> Map.put(
+          :categories,
+          document.properties
+          |> Enum.filter(&(&1.normalized_name == "CATEGORIES"))
+          |> Enum.flat_map(&Document.category_values(&1.value))
+          |> Enum.uniq()
+        )
+
+      {attrs, nested}
+    else
       _ -> :error
     end
+  end
+
+  defp relationship_entries(document) do
+    document.properties
+    |> Enum.filter(&(&1.normalized_name in ["RELATED", "X-KITH-RELATED"]))
+    |> Enum.map(fn property ->
+      params = Map.new(property.parameters, &{&1.normalized_name, &1.values})
+
+      %{
+        value: unescape(property.value),
+        type: params |> Map.get("TYPE", ["contact"]) |> hd(),
+        value_type: params |> Map.get("VALUE", ["uri"]) |> hd() |> String.downcase()
+      }
+    end)
+  end
+
+  defp unescape(value), do: Parser.unescape(value)
+
+  defp shared_input(document) do
+    allowed =
+      ~w(VERSION UID FN N NICKNAME BDAY ORG TITLE EMAIL TEL URL ADR CATEGORIES RELATED X-KITH-RELATED PHOTO)
+
+    %{document | properties: Enum.filter(document.properties, &(&1.normalized_name in allowed))}
   end
 
   defp normalize_identity(%{uid: nil} = parsed, opts), do: build_attrs(parsed, opts)
@@ -67,11 +104,8 @@ defmodule Kith.DAV.VCardAdapter do
   end
 
   defp build_attrs(parsed, opts) do
-    account_id = Keyword.get(opts, :account_id)
-
     scalar_attrs =
       build_scalar_attrs(parsed)
-      |> maybe_resolve_gender(parsed, account_id)
       |> maybe_strip_nils(opts)
 
     nested_data = build_nested_data(parsed)
@@ -86,7 +120,6 @@ defmodule Kith.DAV.VCardAdapter do
       "nickname" => parsed.nickname,
       "company" => parsed.company,
       "occupation" => parsed.occupation,
-      "description" => parsed.description,
       "birthdate" => parsed.birthdate && Date.to_iso8601(parsed.birthdate),
       "birthdate_year_unknown" => parsed.birthdate_year_unknown
     }
@@ -101,7 +134,6 @@ defmodule Kith.DAV.VCardAdapter do
       uid: parsed.uid,
       categories: parsed.categories || [],
       related: parsed.related || [],
-      impp: parsed.impp || [],
       photo: parsed.photo
     }
   end
@@ -115,61 +147,4 @@ defmodule Kith.DAV.VCardAdapter do
       attrs
     end
   end
-
-  # ── Avatar loading ──────────────────────────────────────────────────
-
-  defp maybe_load_avatar_data(%Contact{avatar: nil} = contact), do: contact
-
-  defp maybe_load_avatar_data(%Contact{avatar: key} = contact) do
-    max_embed = Application.get_env(:kith, :max_vcard_photo_embed_bytes, 512 * 1024)
-
-    case Storage.read(key) do
-      {:ok, binary} when byte_size(binary) <= max_embed ->
-        ct = Storage.content_type(key)
-        %{contact | avatar_data: %{binary: binary, content_type: ct}}
-
-      {:ok, _oversized} ->
-        Logger.warning(
-          "CardDAV avatar for contact #{contact.id} exceeds the processed size limit"
-        )
-
-        contact
-
-      {:error, reason} ->
-        Logger.warning(
-          "CardDAV avatar for contact #{contact.id} could not be read: #{inspect(reason)}"
-        )
-
-        contact
-    end
-  end
-
-  # ── Gender resolution ───────────────────────────────────────────────
-
-  defp maybe_resolve_gender(attrs, _parsed, nil), do: attrs
-
-  defp maybe_resolve_gender(attrs, parsed, account_id) do
-    gender_name = resolve_gender_name(parsed.gender, parsed.gender_text)
-    gender_record = gender_name && find_gender_by_name(account_id, gender_name)
-
-    if gender_record,
-      do: Map.put(attrs, "gender_id", gender_record.id),
-      else: attrs
-  end
-
-  defp find_gender_by_name(account_id, name) do
-    downcased = String.downcase(name)
-
-    account_id
-    |> Kith.Contacts.list_genders()
-    |> Enum.find(fn g -> String.downcase(g.name) == downcased end)
-  end
-
-  defp resolve_gender_name("M", _), do: "Male"
-  defp resolve_gender_name("F", _), do: "Female"
-  defp resolve_gender_name("O", text) when is_binary(text) and text != "", do: text
-  defp resolve_gender_name("N", _), do: nil
-  defp resolve_gender_name("U", _), do: nil
-  defp resolve_gender_name(nil, text) when is_binary(text) and text != "", do: text
-  defp resolve_gender_name(_, _), do: nil
 end

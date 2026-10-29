@@ -27,6 +27,8 @@ defmodule Kith.Workers.AccountResetWorker do
     Tasks
   }
 
+  alias Kith.DAV.Store
+
   require Logger
 
   @cleaners [
@@ -48,10 +50,13 @@ defmodule Kith.Workers.AccountResetWorker do
     Logger.info("[AccountReset] starting reset for account #{account_id}")
     write_initiated_audit_log(account_id)
 
-    Enum.each(@cleaners, fn cleaner ->
-      Logger.info("[AccountReset] running #{inspect(cleaner)}")
-      :ok = cleaner.wipe_for_account(account_id)
-    end)
+    {:ok, :ok} =
+      Store.transaction(account_id, fn ->
+        Enum.each(@cleaners, fn cleaner ->
+          Logger.info("[AccountReset] running #{inspect(cleaner)}")
+          :ok = cleaner.wipe_for_account(account_id)
+        end)
+      end)
 
     Logger.info("[AccountReset] completed reset for account #{account_id}")
     :ok

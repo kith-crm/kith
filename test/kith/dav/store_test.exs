@@ -29,11 +29,15 @@ defmodule Kith.DAV.StoreTest do
     assert Repo.all(ContactDav) == before
   end
 
-  test "touch raises revision of only the given contacts", c do
+  test "touch publishes changed shared state only for the given contacts", c do
     Store.ensure_rows(c.account)
     [x, y, _] = c.contacts
     before = Repo.get!(ContactDav, x.id).revision
     other = Repo.get!(ContactDav, y.id)
+
+    from(contact in Kith.Contacts.Contact, where: contact.id == ^x.id)
+    |> Repo.update_all(set: [first_name: "Changed shared name"])
+
     assert :ok = Store.touch(c.account, [x.id])
     assert Repo.get!(ContactDav, x.id).revision > before
     assert Repo.get!(ContactDav, y.id) == other
@@ -45,6 +49,9 @@ defmodule Kith.DAV.StoreTest do
     [x | _] = c.contacts
     before = Store.sync_state(c.account).token
 
+    from(contact in Kith.Contacts.Contact, where: contact.id == ^x.id)
+    |> Repo.update_all(set: [first_name: "Changed shared name"])
+
     Store.touch(
       c.account,
       from(contact in Kith.Contacts.Contact, where: contact.id == ^x.id, select: contact.id)
@@ -54,7 +61,7 @@ defmodule Kith.DAV.StoreTest do
   end
 
   test "sync_state token is max of revisions and floor", c do
-    assert Store.sync_state(c.account) == %{token: 0, floor: 0}
+    assert Store.sync_state(c.account).token > 0
     Store.ensure_rows(c.account)
 
     assert Store.sync_state(c.account).token ==
@@ -97,8 +104,8 @@ defmodule Kith.DAV.StoreTest do
     other = user_fixture().account_id
     foreign = contact_fixture(other)
     Store.ensure_rows(c.account)
-    refute Repo.get(ContactDav, foreign.id)
-    assert Store.sync_state(other) == %{token: 0, floor: 0}
+    assert Repo.get!(ContactDav, foreign.id)
+    assert Store.sync_state(other).token > 0
     Store.record_hard_delete(c.account)
     floor = Store.sync_state(c.account).floor
     Store.record_hard_delete(c.account)
@@ -108,6 +115,10 @@ defmodule Kith.DAV.StoreTest do
     foreign_dav = Repo.get!(ContactDav, foreign.id)
     foreign_state = Store.sync_state(other)
     [x | _] = c.contacts
+
+    from(contact in Kith.Contacts.Contact, where: contact.id == ^x.id)
+    |> Repo.update_all(set: [first_name: "Changed after floor"])
+
     Store.touch(c.account, from(contact in Kith.Contacts.Contact, select: contact.id))
     assert Store.sync_state(c.account).token > floor
     assert Store.sync_state(c.account).floor == floor

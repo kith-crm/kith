@@ -44,6 +44,8 @@ erDiagram
 
     contacts ||--o| contact_dav : "has DAV identity"
     accounts ||--o{ contact_dav : "owns"
+    contact_dav ||--o{ dav_document_references : "indexes client UUID references"
+    accounts ||--o{ dav_document_references : "owns"
     accounts ||--o| dav_sync_floors : "sync floor"
     accounts ||--o{ avatar_assets : "owns avatar renditions"
 
@@ -60,7 +62,18 @@ erDiagram
         uuid uid
         text resource_name
         bigint revision
+        jsonb document
+        jsonb archived_document
+        timestamp representation_modified_at
+        text representation_fingerprint
+        boolean requires_precondition
         text_array extras
+    }
+
+    dav_document_references {
+        bigint account_id FK
+        bigint source_contact_id FK
+        uuid target_uid
     }
 
     dav_sync_floors {
@@ -196,6 +209,7 @@ erDiagram
 
     contact_field_types {
         bigserial id PK
+        text system_key
         bigint account_id FK
         string name
         string protocol
@@ -204,6 +218,7 @@ erDiagram
 
     relationship_types {
         bigserial id PK
+        text system_key
         bigint account_id FK
         string name
         string name_reverse_relationship
@@ -552,6 +567,7 @@ Reference data. Rows with `account_id = NULL` are global defaults; per-account r
 |---|---|---|---|---|
 | `id` | `bigserial` | NO | auto | `PRIMARY KEY` |
 | `account_id` | `bigint` | YES | `NULL` | `FK → accounts(id) ON DELETE CASCADE` |
+| `system_key` | `text` | YES | `NULL` | Trusted built-in identity; requires global row |
 | `name` | `varchar(255)` | NO | — | |
 | `protocol` | `varchar(255)` | YES | `NULL` | e.g. "mailto:", "tel:", "https://" |
 | `icon` | `varchar(255)` | YES | `NULL` | |
@@ -559,6 +575,8 @@ Reference data. Rows with `account_id = NULL` are global defaults; per-account r
 | `updated_at` | `timestamptz` | NO | `now()` | |
 
 **Indexes:**
+
+- `contact_field_types_system_key_index` — UNIQUE on non-null `system_key`
 
 - `contact_field_types_account_id_name_index` — UNIQUE on `(COALESCE(account_id, 0), name)`
 
@@ -575,12 +593,15 @@ Reference data. Rows with `account_id = NULL` are global defaults.
 |---|---|---|---|---|
 | `id` | `bigserial` | NO | auto | `PRIMARY KEY` |
 | `account_id` | `bigint` | YES | `NULL` | `FK → accounts(id) ON DELETE CASCADE` |
+| `system_key` | `text` | YES | `NULL` | Trusted built-in identity; requires global row |
 | `name` | `varchar(255)` | NO | — | |
 | `name_reverse_relationship` | `varchar(255)` | NO | — | |
 | `inserted_at` | `timestamptz` | NO | `now()` | |
 | `updated_at` | `timestamptz` | NO | `now()` | |
 
 **Indexes:**
+
+- `relationship_types_system_key_index` — UNIQUE on non-null `system_key`
 
 - `relationship_types_account_id_name_index` — UNIQUE on `(COALESCE(account_id, 0), name)`
 
@@ -949,7 +970,7 @@ Pure join table. **No `id`, `inserted_at`, or `updated_at` columns.**
 
 ### 28. `contact_dav`
 
-Protocol identity and revision state. No surrogate `id` or timestamps.
+Protocol identity, rich client document and publication state. No surrogate `id`; publication time is independent of native contact timestamps.
 
 | Column | Postgres Type | Nullable | Default | Constraints |
 |---|---|---|---|---|
@@ -958,7 +979,12 @@ Protocol identity and revision state. No surrogate `id` or timestamps.
 | `uid` | `uuid` | NO | — | Account-unique canonical UUID, including hidden contacts |
 | `resource_name` | `text` | NO | — | Account-unique |
 | `revision` | `bigint` | NO | `nextval('contact_dav_revision_seq')` | |
-| `extras` | `text[]` | NO | `'{}'` | Ungrouped unmapped vCard properties |
+| `document` | `jsonb` | NO | `'{}'` | Lossless compact document; rich map exposed by Ecto type |
+| `archived_document` | `jsonb` | YES | `NULL` | Private pre-merge document snapshot; never rendered |
+| `representation_modified_at` | `timestamp(6)` | NO | UTC migration time | DAV publication time |
+| `representation_fingerprint` | `text` | YES | `NULL` | Both version representations, excluding REV value |
+| `requires_precondition` | `boolean` | NO | `false` | Current explicit validator required on migrated rows |
+| `extras` | `text[]` | NO | `'{}'` | Quarantined legacy lines; never rendered |
 
 **Indexes:**
 
@@ -1001,6 +1027,26 @@ No surrogate `id` or timestamps.
 
 - `avatar_assets_pkey` — PRIMARY KEY on `(storage_key)`
 - `avatar_assets_account_id_index` — on `(account_id)`
+
+---
+
+### 31. `dav_document_references`
+
+Derived, account-scoped UUID dependency index. It lets visibility/identity changes
+invalidate documents that contain unresolved client relationship URIs. It does
+not create a native relationship or resolve text by name. Rebuilt atomically
+from the active document; no surrogate key or timestamps.
+
+| Column | Postgres Type | Nullable | Default | Constraints |
+|---|---|---|---|---|
+| `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
+| `source_contact_id` | `bigint` | NO | — | `FK → contact_dav(contact_id) ON DELETE CASCADE` |
+| `target_uid` | `uuid` | NO | — | May remain unresolved |
+
+**Indexes:**
+
+- `dav_document_references_identity_index` — UNIQUE on `(account_id, source_contact_id, target_uid)`
+- `dav_document_references_account_id_target_uid_index` — on `(account_id, target_uid)`
 
 ---
 

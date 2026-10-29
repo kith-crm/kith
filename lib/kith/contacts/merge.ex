@@ -34,7 +34,8 @@ defmodule Kith.Contacts.Merge do
   alias Ecto.Multi
   alias Kith.AuditLogs
   alias Kith.Contacts.{Address, Avatar, Contact, ContactField, MergeFields, Tag}
-  alias Kith.DAV.Store
+  alias Kith.Contacts.Write
+  alias Kith.DAV.{Bindings, Store}
   alias Kith.Repo
 
   # Policy, array, Immich and coupled-flag fields are computed rather than
@@ -128,6 +129,8 @@ defmodule Kith.Contacts.Merge do
   end
 
   defp run_locked(scope, survivor_id, loser_ids, resolution) do
+    Write.prepare(scope.account.id, [survivor_id | loser_ids])
+
     with {:ok, members} <- lock_and_load(scope, survivor_id, loser_ids),
          survivor = Enum.find(members, &(&1.id == survivor_id)),
          {:ok, resolution} <- validate_fields(members, resolution),
@@ -201,6 +204,17 @@ defmodule Kith.Contacts.Merge do
     account_id = scope.account.id
 
     Multi.new()
+    |> Multi.run(:archive_loser_documents, fn repo, _changes ->
+      # Copy the latest pre-merge representation before native ownership moves.
+      # Active documents still reconcile only against current native rows; the
+      # private snapshot is never used to render or restore DAV field values.
+      repo.query!(
+        "UPDATE contact_dav SET archived_document = document WHERE account_id = $1 AND contact_id = ANY($2)",
+        [account_id, loser_ids]
+      )
+
+      {:ok, :done}
+    end)
     |> Multi.run(:survivor, fn _repo, _changes -> apply_fields(survivor, resolution) end)
     |> Multi.run(:remap_photos, fn repo, %{survivor: resolved} ->
       # Preserve the selected rendition if its original row loses photo dedupe.
@@ -283,7 +297,9 @@ defmodule Kith.Contacts.Merge do
     |> Multi.run(:remap_me_contact, fn repo, _changes ->
       remap_me_contact_step(repo, loser_ids, survivor.id, account_id)
     end)
-    |> Multi.run(:dedupe_owned, fn repo, _changes -> dedupe_owned_step(repo, survivor.id) end)
+    |> Multi.run(:dedupe_owned, fn repo, _changes ->
+      dedupe_owned_step(repo, survivor.id, account_id)
+    end)
     |> Multi.run(:remap_relationships, fn repo, _changes ->
       remap_relationships(repo, survivor.id, loser_ids, account_id)
     end)
@@ -515,52 +531,61 @@ defmodule Kith.Contacts.Merge do
   # `Kith.Contacts.MergeSummary.normalize/1` mirrors this key so the screen
   # marks exactly the rows this step collapses. `btrim/1` strips spaces only —
   # keep the two in step if either side changes.
-  defp dedupe_owned_step(repo, survivor_id) do
-    repo.query!(
-      """
-      DELETE FROM contact_fields
-      WHERE id IN (
-        SELECT cf.id FROM contact_fields cf
-        WHERE cf.contact_id = $1
-          AND EXISTS (
-            SELECT 1 FROM contact_fields other
-            WHERE other.contact_id = $1
-              AND other.contact_field_type_id = cf.contact_field_type_id
-              AND lower(btrim(other.value)) = lower(btrim(cf.value))
-              AND other.id < cf.id
-          )
-      )
-      """,
-      [survivor_id]
-    )
+  defp dedupe_owned_step(repo, survivor_id, account_id) do
+    # These are the same native equivalence keys as the existing merge policy.
+    # Record every removed ID's final retained ID before deleting: a survivor
+    # property may carry client metadata even when an older loser's row wins.
+    field_ids =
+      repo.query!(
+        """
+        SELECT id, kept_id FROM (
+          SELECT id, min(id) OVER (
+            PARTITION BY contact_field_type_id, lower(btrim(value))
+          ) AS kept_id
+          FROM contact_fields
+          WHERE contact_id = $1 AND account_id = $2
+            AND contact_field_type_id IS NOT NULL AND value IS NOT NULL
+        ) ranked WHERE id <> kept_id
+        """,
+        [survivor_id, account_id]
+      ).rows
+      |> Map.new(fn [id, kept_id] -> {id, kept_id} end)
 
-    # A row with neither line1 nor postal_code is not a duplicate of
-    # another such row — addresses carry city/region/country/label too,
-    # so two blank-key rows can be different places. Only dedupe when
-    # at least one of the key columns actually has content.
-    repo.query!(
-      """
-      DELETE FROM addresses
-      WHERE id IN (
-        SELECT a.id FROM addresses a
-        WHERE a.contact_id = $1
-          AND (lower(btrim(coalesce(a.line1, ''))) <> ''
-               OR lower(btrim(coalesce(a.postal_code, ''))) <> '')
-          AND EXISTS (
-            SELECT 1 FROM addresses other
-            WHERE other.contact_id = $1
-              AND lower(btrim(coalesce(other.line1, ''))) =
-                  lower(btrim(coalesce(a.line1, '')))
-              AND lower(btrim(coalesce(other.postal_code, ''))) =
-                  lower(btrim(coalesce(a.postal_code, '')))
-              AND other.id < a.id
-          )
-      )
-      """,
-      [survivor_id]
-    )
+    # Blank line1/postal keys remain distinct, just as in the native merge
+    # policy; city/region/country alone do not establish address equivalence.
+    address_ids =
+      repo.query!(
+        """
+        SELECT id, kept_id FROM (
+          SELECT id, min(id) OVER (
+            PARTITION BY lower(btrim(coalesce(line1, ''))),
+                         lower(btrim(coalesce(postal_code, '')))
+          ) AS kept_id
+          FROM addresses
+          WHERE contact_id = $1 AND account_id = $2
+            AND (lower(btrim(coalesce(line1, ''))) <> ''
+                 OR lower(btrim(coalesce(postal_code, ''))) <> '')
+        ) ranked WHERE id <> kept_id
+        """,
+        [survivor_id, account_id]
+      ).rows
+      |> Map.new(fn [id, kept_id] -> {id, kept_id} end)
 
+    Bindings.rebind_owned!(repo, account_id, survivor_id, field_ids, address_ids)
+    delete_deduped_rows(repo, ContactField, survivor_id, account_id, Map.keys(field_ids))
+    delete_deduped_rows(repo, Address, survivor_id, account_id, Map.keys(address_ids))
     {:ok, :done}
+  end
+
+  defp delete_deduped_rows(_repo, _schema, _survivor_id, _account_id, []), do: :ok
+
+  defp delete_deduped_rows(repo, schema, survivor_id, account_id, ids) do
+    repo.delete_all(
+      from row in schema,
+        where: row.contact_id == ^survivor_id and row.account_id == ^account_id and row.id in ^ids
+    )
+
+    :ok
   end
 
   # Only rows currently owned by the survivor are deleted outright.

@@ -8,12 +8,13 @@ defmodule Kith.Storage.AccountCleanup do
   Storage objects are recoverable separately (S3 lifecycle, manual sweep)
   and don't affect data integrity.
 
-  Must run BEFORE `Kith.Contacts.Cleanup` — once contacts are hard-deleted,
+  Inside a contact write transaction, file deletion waits for commit. Enumerate
+  keys BEFORE `Kith.Contacts.Cleanup` — once contacts are hard-deleted,
   the `photos` and `documents` rows are CASCADE-deleted and we can no longer
   iterate their `storage_key` values.
   """
 
-  alias Kith.Contacts.{AvatarAsset, Contact, Document, Photo}
+  alias Kith.Contacts.{AvatarAsset, Contact, Document, Photo, Write}
   alias Kith.Imports.Import
   alias Kith.{Repo, Storage}
 
@@ -27,7 +28,7 @@ defmodule Kith.Storage.AccountCleanup do
     upload_count = delete_keys(import_upload_keys(account_id))
 
     Logger.info(
-      "[Storage.AccountCleanup] deleted #{photo_count} photo file(s) + " <>
+      "[Storage.AccountCleanup] scheduled cleanup of #{photo_count} photo file(s) + " <>
         "#{document_count} document file(s) + #{upload_count} import upload(s) " <>
         "for account #{account_id}"
     )
@@ -77,7 +78,7 @@ defmodule Kith.Storage.AccountCleanup do
   end
 
   defp delete_keys(keys) do
-    Enum.each(keys, &safe_delete/1)
+    Enum.each(keys, fn key -> Write.after_commit(fn -> safe_delete(key) end) end)
     length(keys)
   end
 

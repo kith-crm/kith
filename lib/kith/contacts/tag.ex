@@ -16,6 +16,7 @@ defmodule Kith.Contacts.Tag do
     tag
     |> cast(attrs, [:name, :color, :account_id])
     |> validate_required([:name])
+    |> validate_length(:name, max: 255, count: :codepoints)
     |> validate_format(:color, ~r/^#[0-9a-fA-F]{6}$/,
       message: "must be a hex color (e.g., #FF5733)"
     )

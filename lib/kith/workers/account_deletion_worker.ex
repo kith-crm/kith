@@ -13,6 +13,7 @@ defmodule Kith.Workers.AccountDeletionWorker do
     unique: [period: 300, fields: [:args], keys: [:account_id]]
 
   import Ecto.Query
+  alias Kith.DAV.Store
   alias Kith.Repo
   alias Kith.Storage.AccountCleanup
 
@@ -20,6 +21,13 @@ defmodule Kith.Workers.AccountDeletionWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"account_id" => account_id}}) do
+    case Store.transaction(account_id, fn -> delete_account(account_id) end) do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp delete_account(account_id) do
     # Verify account still exists (race condition guard)
     case Repo.get(Kith.Accounts.Account, account_id) do
       nil ->
@@ -37,7 +45,7 @@ defmodule Kith.Workers.AccountDeletionWorker do
           metadata: %{account_name: account.name}
         })
 
-        # 1. Delete stored files
+        # 1. Enumerate stored files; physical deletion is deferred until commit.
         delete_stored_files(account_id)
 
         # 2. Delete all user tokens (sessions already cleared, but ensure clean)

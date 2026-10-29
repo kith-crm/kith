@@ -366,7 +366,7 @@ test("U3d: children of a DAV-decorated card deleted in the UI stay deleted (via 
   expect(lines(card.body, "CATEGORIES"), card.body).toHaveLength(0);
   expect(card.body).not.toContain("_$!<Mobile>!$_");
   expect(lines(card.body, "EMAIL").join("\n")).toContain(`${name}@example.test`);
-  expect(card.body).not.toContain("_$!<Home>!$_");
+  expect(card.body).toContain("_$!<Home>!$_");
 
   // An identical PUT-back of what the client now sees resurrects nothing.
   await put(request, href, card.body, { "If-Match": card.etag! });
@@ -377,9 +377,20 @@ test("U3d: children of a DAV-decorated card deleted in the UI stay deleted (via 
   await expect(section(/^Contact$/).getByText("3333")).toHaveCount(0);
 });
 
-test("U4: a PUT over DAV shows in the UI after a reload", async ({ request }) => {
+test("U4: DAV shared edits appear in UI while client NOTE stays separate from private description", async ({ request }) => {
   const href = await defaultHref(request, uiId);
+  const beforePrivate = await getOk(request, href);
+  const privateState = await bookState(request);
+  await goToContact(page, uiId);
+  const about = section(/^About$/);
+  await about.getByRole("button", { name: "Edit", exact: true }).click();
+  await about.locator('textarea[name="contact[description]"]').fill(`${P}-u4 private description`);
+  await about.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(about.getByText(`${P}-u4 private description`, { exact: true })).toBeVisible();
   const before = await getOk(request, href);
+  expect(before.body).toBe(beforePrivate.body);
+  expect(before.etag).toBe(beforePrivate.etag);
+  expect(await syncFrom(request, privateState.token, href)).toBeUndefined();
   const body = before.body
     .replace(/^FN:.*$/m, `FN:${P}-u4 Edited`)
     .replace(/^N:.*$/m, `N:Edited;${P}-u4;;;`)
@@ -392,7 +403,9 @@ test("U4: a PUT over DAV shows in the UI after a reload", async ({ request }) =>
   await settle();
   await expect(page.getByRole("heading", { name: new RegExp(`${P}-u4 Edited`) }).first()).toBeVisible();
   await expect(section(/^Contact$/).getByText(/555.*010.*4444|5550104444/).first()).toBeVisible();
-  await expect(page.getByText(`${P}-u4 note from DAV`).first()).toBeVisible();
+  await expect(page.getByText(`${P}-u4 note from DAV`, { exact: true })).toHaveCount(0);
+  await expect(page.getByText(`${P}-u4 private description`, { exact: true })).toBeVisible();
+  expect((await getOk(request, href)).body).toContain(`NOTE:${P}-u4 note from DAV`);
 });
 
 test("U5: trash in the UI hides the contact from DAV; restore brings it back at the same href", async ({ request }) => {
@@ -469,7 +482,8 @@ test("U6: merging A into B in the UI removes A's href and gives B the merged fie
   expect(emails, afterB.body).toHaveLength(1);
   expect(emails[0]).toContain(`${P}-u6b@example.test`);
   expect(lines(afterB.body, "X-B-ONLY")).toHaveLength(1);
-  expect(afterB.body).not.toMatch(/^item\d+\./im);
+  expect(afterB.body).toContain(`item1.EMAIL;type=INTERNET:${P}-u6b@example.test`);
+  expect(afterB.body).toContain("item1.X-ABLabel:_$!<Work>!$_");
   const auth = await request.post("/api/auth/token", { data: USERS.admin });
   expect(auth.status()).toBe(201);
   const token = (await auth.json()).token;

@@ -892,7 +892,11 @@ defmodule Kith.Accounts do
     case Repo.update(changeset) do
       {:ok, updated_user} = result ->
         if format_changed? do
-          %{account_id: user.account_id, display_name_format: updated_user.display_name_format}
+          %{
+            account_id: user.account_id,
+            user_id: updated_user.id,
+            display_name_format: updated_user.display_name_format
+          }
           |> DisplayNameRecomputeWorker.new()
           |> Oban.insert()
         end

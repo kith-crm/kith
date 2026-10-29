@@ -84,9 +84,28 @@ defmodule Kith.VCard.Parser do
   end
 
   defp parse_vcard(block, opts) do
-    lines = String.split(block, "\n", trim: true)
+    block
+    |> String.split("\n", trim: true)
+    |> Enum.reduce(base_contact(), &parse_line/2)
+    |> in_document_order()
+    |> resolve_birthdate(opts)
+  end
 
-    base = %{
+  @doc "Maps already-decoded ordered properties through the existing contact codec."
+  def from_properties(properties, opts \\ []) do
+    properties
+    |> Enum.reduce(base_contact(), &apply_decoded_property/2)
+    |> in_document_order()
+    |> resolve_birthdate(opts)
+  end
+
+  defp apply_decoded_property(property, contact) do
+    params = Map.new(property.parameters, &{&1.normalized_name, Enum.join(&1.values, ",")})
+    apply_property(contact, property.normalized_name, params, property.value)
+  end
+
+  defp base_contact do
+    %{
       first_name: nil,
       last_name: nil,
       middle_name: nil,
@@ -112,11 +131,6 @@ defmodule Kith.VCard.Parser do
       rev: nil,
       photo: nil
     }
-
-    lines
-    |> Enum.reduce(base, &parse_line/2)
-    |> in_document_order()
-    |> resolve_birthdate(opts)
   end
 
   # Prepend while parsing and restore document order once to keep parsing linear.
@@ -486,10 +500,15 @@ defmodule Kith.VCard.Parser do
   def unescape(nil), do: nil
 
   def unescape(value) do
-    Regex.replace(~r/\\([\\nN;,])/, value, fn _, escaped ->
-      if escaped in ["n", "N"], do: "\n", else: escaped
-    end)
+    if String.contains?(value, "\\") do
+      Regex.replace(~r/\\([\\nN;,])/, value, &decode_text_escape/2)
+    else
+      value
+    end
   end
+
+  defp decode_text_escape(_match, escaped) when escaped in ["n", "N"], do: "\n"
+  defp decode_text_escape(_match, escaped), do: escaped
 
   defp unescape_or_nil(nil), do: nil
   defp unescape_or_nil(""), do: nil

@@ -30,7 +30,7 @@ defmodule KithWeb.DAV.PropfindTest do
       conn = authed_dav(context, "OPTIONS", "/dav/")
       [allow] = get_resp_header(conn, "allow")
 
-      for method <- ["OPTIONS", "GET", "PUT", "DELETE", "PROPFIND", "REPORT"] do
+      for method <- ["OPTIONS", "PROPFIND", "PROPPATCH", "REPORT", "ACL"] do
         assert allow =~ method
       end
     end
@@ -543,6 +543,50 @@ defmodule KithWeb.DAV.PropfindTest do
   end
 
   describe "RFC 3744 §5.4 — current-user-privilege-set" do
+    test "Depth 1 home discovery advertises the same child privileges as the direct book",
+         context do
+      body = """
+      <d:propfind xmlns:d="DAV:">
+        <d:prop><d:resourcetype/><d:current-user-privilege-set/></d:prop>
+      </d:propfind>
+      """
+
+      home =
+        context.conn
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("depth", "1")
+        |> dav_request("PROPFIND", "/dav/addressbooks/", body)
+
+      direct =
+        context.conn
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("depth", "0")
+        |> dav_request("PROPFIND", "/dav/addressbooks/default/", body)
+
+      assert home.status == 207
+      assert direct.status == 207
+
+      child =
+        Regex.scan(~r/<d:response>.*?<\/d:response>/s, home.resp_body)
+        |> Enum.map(&hd/1)
+        |> Enum.find(&String.contains?(&1, "<d:href>/dav/addressbooks/default/</d:href>"))
+
+      assert child
+      assert child =~ "HTTP/1.1 200 OK"
+      refute child =~ "HTTP/1.1 404"
+      refute child =~ "<d:current-user-privilege-set/>"
+
+      [privileges] =
+        Regex.run(
+          ~r/<d:current-user-privilege-set>.*?<\/d:current-user-privilege-set>/s,
+          child
+        )
+
+      assert privileges =~ "<d:read/>"
+      assert privileges =~ "<d:bind/>"
+      assert direct.resp_body =~ privileges
+    end
+
     test "addressbook collection advertises read and write privileges", context do
       conn =
         context.conn
@@ -552,7 +596,7 @@ defmodule KithWeb.DAV.PropfindTest do
 
       assert conn.resp_body =~ "current-user-privilege-set"
       assert conn.resp_body =~ "<d:read/>"
-      assert conn.resp_body =~ "<d:write/>"
+      assert conn.resp_body =~ "<d:bind/>"
     end
   end
 
@@ -759,6 +803,47 @@ defmodule KithWeb.DAV.PropfindTest do
       assert conn.status == 400
     end
 
+    test "invalid PROPFIND selectors return 400 at every supported resource", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+
+      for path <- [
+            "/dav/",
+            "/dav/principals/",
+            "/dav/addressbooks/",
+            "/dav/addressbooks/default/",
+            stored_path(contact)
+          ],
+          selectors <- [
+            "<d:allprop/><d:propname/>",
+            "<d:undefined/>",
+            "<d:prop/><d:allprop/>",
+            "<d:include/>",
+            "<d:prop/><d:prop/>"
+          ] do
+        body = ~s(<d:propfind xmlns:d="DAV:">#{selectors}</d:propfind>)
+        assert authed_dav(context, "PROPFIND", path, body).status == 400, path <> selectors
+      end
+    end
+
+    test "allprop include and unknown extensions preserve normal discovery", context do
+      body = """
+      <propfind xmlns="DAV:" xmlns:x="urn:x" x:flag="yes">
+        <x:extension><propname/></x:extension>
+        <include><current-user-principal/><x:extra/></include><allprop/>
+      </propfind>
+      """
+
+      conn = authed_dav(context, "PROPFIND", "/dav/", body)
+      assert conn.status == 207
+
+      assert conn.resp_body =~
+               "<d:current-user-principal><d:href>/dav/principals/users/#{context.user.id}/</d:href>"
+
+      assert conn.resp_body =~ "404 Not Found"
+      assert conn.resp_body =~ ~r{<(\w+):extra xmlns:\1="urn:x"/>}
+      assert length(Regex.scan(~r{<d:current-user-principal>}, conn.resp_body)) == 1
+    end
+
     test "Apple A: prefix and default xmlns give the same result as d:", context do
       d =
         authed_dav(
@@ -768,7 +853,8 @@ defmodule KithWeb.DAV.PropfindTest do
           ~s(<d:propfind xmlns:d="DAV:"><d:allprop/></d:propfind>)
         )
 
-      assert d.resp_body =~ "<d:current-user-principal><d:href>/dav/principals/</d:href>"
+      assert d.resp_body =~
+               "<d:current-user-principal><d:href>/dav/principals/users/#{context.user.id}/</d:href>"
 
       for body <- [
             ~s(<A:propfind xmlns:A="DAV:"><A:allprop/></A:propfind>),

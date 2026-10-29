@@ -8,8 +8,8 @@ defmodule KithWeb.DAV.AddressObjectTest do
   """
   use KithWeb.ConnCase, async: true
 
-  import Kith.Factory
   import KithWeb.DAV.TestHelpers
+  import SweetXml, only: [sigil_x: 2]
 
   alias Kith.Contacts
   alias Kith.ContactsFixtures
@@ -186,7 +186,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
     test "vCard MUST include EMAIL when contact has email fields",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Alice"})
-      email_type = insert(:contact_field_type, protocol: "mailto", vcard_label: "EMAIL")
+      email_type = shared_field_type!("email")
 
       ContactsFixtures.contact_field_fixture(contact, email_type.id, %{
         "value" => "alice@example.com"
@@ -201,7 +201,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
     test "vCard MUST include TEL when contact has phone fields",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Alice"})
-      tel_type = insert(:contact_field_type, protocol: "tel", vcard_label: "TEL")
+      tel_type = shared_field_type!("phone")
 
       ContactsFixtures.contact_field_fixture(contact, tel_type.id, %{
         "value" => "+1-555-0123"
@@ -560,10 +560,11 @@ defmodule KithWeb.DAV.AddressObjectTest do
     end
   end
 
-  # ── RFC 6352 §5.1 — PUT Content-Type validation ───────────────────────
+  # ── RFC 6352 §6.2.2 / §6.3.2.1 — PUT Content-Type validation ──────────
 
-  describe "RFC 6352 §5.1 — PUT Content-Type validation" do
-    test "PUT with wrong Content-Type returns 415 Unsupported Media Type", context do
+  describe "RFC 6352 §6.2.2 / §6.3.2.1 — PUT Content-Type validation" do
+    test "unsupported media type returns 415 with the CardDAV precondition without creating a card",
+         %{account_id: account_id} = context do
       conn =
         build_conn()
         |> basic_auth(context.user.email, dav_password())
@@ -576,6 +577,56 @@ defmodule KithWeb.DAV.AddressObjectTest do
         )
 
       assert conn.status == 415
+      assert get_resp_header(conn, "content-type") == ["application/xml; charset=utf-8"]
+
+      assert SweetXml.xpath(
+               conn.resp_body,
+               ~x"boolean(/*[local-name()='error' and namespace-uri()='DAV:']/*[local-name()='supported-address-data' and namespace-uri()='urn:ietf:params:xml:ns:carddav'])"b
+             )
+
+      assert is_nil(Kith.DAV.Store.get_by_resource_name(account_id, "kith-contact-new.vcf"))
+    end
+
+    test "unsupported media type cannot replace an existing card",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      resource = contact_uid(contact)
+      path = "/dav/addressbooks/default/#{resource}"
+      before = authed_dav(context, "GET", path)
+      stored = Kith.DAV.Store.get_by_resource_name(account_id, resource)
+
+      conn =
+        build_conn()
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("content-type", "text/plain")
+        |> dispatch(KithWeb.Endpoint, "PUT", path, build_vcard("Changed", "Name"))
+
+      assert conn.status == 415
+      assert conn.resp_body =~ "supported-address-data"
+      after_response = authed_dav(context, "GET", path)
+      assert after_response.resp_body == before.resp_body
+      assert get_resp_header(after_response, "etag") == get_resp_header(before, "etag")
+
+      assert Kith.DAV.Store.get_by_resource_name(account_id, resource) == stored
+    end
+
+    test "supported vCard versions and legacy media type remain accepted", context do
+      for {content_type, body} <- [
+            {"text/vcard; charset=utf-8", build_vcard("Version", "Three")},
+            {"Text/VCard; charset=utf-8; version=4.0", build_vcard_v40("Version", "Four")},
+            {"text/x-vcard", build_vcard("Legacy", "Media")}
+          ] do
+        path = "/dav/addressbooks/default/#{Ecto.UUID.generate()}.vcf"
+
+        conn =
+          build_conn()
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("content-type", content_type)
+          |> dispatch(KithWeb.Endpoint, "PUT", path, body)
+
+        assert conn.status == 201
+        assert authed_dav(context, "GET", path).status == 200
+      end
     end
 
     test "PUT with invalid vCard body returns 403 with precondition error", context do
@@ -600,12 +651,12 @@ defmodule KithWeb.DAV.AddressObjectTest do
   describe "RFC 2426 §2.6 — vCard line folding" do
     test "vCard lines longer than 75 octets are folded",
          %{account_id: account_id} = context do
-      long_desc = String.duplicate("A", 200)
+      long_company = String.duplicate("A", 200)
 
       contact =
         ContactsFixtures.contact_fixture(account_id, %{
           first_name: "Test",
-          description: long_desc
+          company: long_company
         })
 
       conn = authed_dav(context, "GET", contact_path(contact))
@@ -774,7 +825,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
   # ═══════════════════════════════════════════════════════════════════════════
 
   describe "GENDER round-trip" do
-    test "vCard 3.0 MUST include X-GENDER when contact has gender",
+    test "vCard does not expose native private gender",
          %{account_id: account_id} = context do
       genders = Contacts.list_genders(account_id)
       gender = Enum.find(genders, &(&1.name == "Male"))
@@ -783,10 +834,11 @@ defmodule KithWeb.DAV.AddressObjectTest do
         ContactsFixtures.contact_fixture(account_id, %{gender_id: gender.id})
 
       conn = authed_dav(context, "GET", contact_path(contact))
-      assert conn.resp_body =~ "X-GENDER:Male"
+      refute conn.resp_body =~ "GENDER"
+      assert Kith.Repo.get!(Kith.Contacts.Contact, contact.id).gender_id == gender.id
     end
 
-    test "PUT vCard with X-GENDER resolves to gender_id and round-trips",
+    test "PUT client X-GENDER round-trips without creating native private gender",
          context do
       vcard = build_vcard("Jane", "Doe", gender: "Female")
 
@@ -820,6 +872,8 @@ defmodule KithWeb.DAV.AddressObjectTest do
         |> dav_request("GET", href)
 
       assert conn_get.resp_body =~ "X-GENDER:Female"
+      native = Kith.DAV.Store.get_by_resource_name(context.account_id, Path.basename(href))
+      assert native.gender_id == nil
     end
   end
 
@@ -923,7 +977,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert conn_get.resp_body =~ "TITLE:Software Engineer"
     end
 
-    test "description round-trips via NOTE property", context do
+    test "client NOTE round-trips independently of private description", context do
       vcard = build_vcard("Alice", "Test", note: "Met at conference 2024")
       {href, _} = put_and_find(context, vcard)
 
@@ -933,6 +987,9 @@ defmodule KithWeb.DAV.AddressObjectTest do
         |> dav_request("GET", href)
 
       assert conn_get.resp_body =~ "NOTE:Met at conference 2024"
+
+      assert Kith.DAV.Store.get_by_resource_name(context.account_id, Path.basename(href)).description ==
+               nil
     end
 
     test "company round-trips via ORG property", context do
@@ -947,7 +1004,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert conn_get.resp_body =~ "ORG:Acme Corp"
     end
 
-    test "all scalar fields round-trip together", context do
+    test "shared scalar fields and client NOTE round-trip together", context do
       vcard =
         build_vcard("Alice", "Test",
           middle_name: "Marie",
@@ -1075,16 +1132,24 @@ defmodule KithWeb.DAV.AddressObjectTest do
       refute conn_get2.resp_body =~ "TITLE"
     end
 
-    test "PUTting vCard without NOTE clears existing description",
+    test "PUT omission clears client NOTE and preserves private description",
          %{account_id: account_id} = context do
       contact =
         ContactsFixtures.contact_fixture(account_id, %{
           first_name: "Alice",
-          description: "Old note"
+          description: "Private description"
         })
 
+      assert authed_dav(
+               context,
+               "PUT",
+               contact_path(contact),
+               build_vcard("Alice", "Original", note: "Client note")
+             ).status == 204
+
       conn_get1 = authed_dav(context, "GET", contact_path(contact))
-      assert conn_get1.resp_body =~ "NOTE:Old note"
+      assert conn_get1.resp_body =~ "NOTE:Client note"
+      refute conn_get1.resp_body =~ "Private description"
 
       vcard = build_vcard("Alice", "Updated")
       conn_put = authed_dav(context, "PUT", contact_path(contact), vcard)
@@ -1096,6 +1161,9 @@ defmodule KithWeb.DAV.AddressObjectTest do
         |> dav_request("GET", contact_path(contact))
 
       refute conn_get2.resp_body =~ "NOTE"
+
+      assert Kith.Repo.get!(Kith.Contacts.Contact, contact.id).description ==
+               "Private description"
     end
 
     test "PUTting vCard without middle name clears existing middle_name",
@@ -1137,7 +1205,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
         |> basic_auth(context.user.email, dav_password())
         |> dav_request("GET", href)
 
-      # IMPP should be stored as a contact field and re-serialized
+      # IMPP remains client document metadata and is re-serialized
       # The exact property name depends on the serializer's handling of the field type
       assert conn_get.resp_body =~ ~r/IMPP.*alice@chat\.example\.com/
     end
@@ -1148,7 +1216,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
   # ═══════════════════════════════════════════════════════════════════════════
 
   describe "vCard 4.0 PUT round-trip" do
-    test "PUT vCard 4.0 with GENDER:F resolves to gender and round-trips",
+    test "client v4 GENDER survives negotiated reads without native private mapping",
          context do
       vcard = build_vcard_v40("Jane", "Doe", gender: "F")
 
@@ -1176,13 +1244,15 @@ defmodule KithWeb.DAV.AddressObjectTest do
         )
         |> List.flatten()
 
-      # GET as v3.0 — should show X-GENDER:Female
+      # Default v3 response retains client metadata without synthesizing native gender
       conn_get =
         build_conn()
         |> basic_auth(context.user.email, dav_password())
         |> dav_request("GET", href)
 
-      assert conn_get.resp_body =~ "X-GENDER:Female"
+      assert conn_get.resp_body =~ "GENDER:F"
+      native = Kith.DAV.Store.get_by_resource_name(context.account_id, Path.basename(href))
+      assert native.gender_id == nil
 
       # GET as v4.0 — should show GENDER:F
       conn_get40 =
@@ -1357,7 +1427,7 @@ defmodule KithWeb.DAV.AddressObjectTest do
     stored = authed_dav(context, "GET", path).resp_body
     assert stored =~ "UID:urn:uuid:b2000000-0000-4000-8000-000000000002"
     assert stored =~ "X-CUSTOM:verbatim"
-    refute stored =~ "item1.X-CUSTOM"
+    assert stored =~ "item1.X-CUSTOM:drop"
 
     assert authed_dav(
              context,

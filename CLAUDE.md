@@ -117,10 +117,16 @@ imports, immich, purge. Four cron jobs run nightly/weekly.
 Tests use `Oban.Testing` — Oban is disabled in test env.
 
 ### CardDAV change tracking
-A write that changes anything a contact's vCard shows must call `Kith.DAV.Store.touch/2`.
-`test/kith/dav/touch_coverage_test.exs` enforces this rule. `Store.ensure_rows/1`
-runs before DAV reads. `Store.transaction(account_id, fun)` acquires the account
-advisory lock before contact locks for DAV writes, merges and hard deletes.
+Shared mutations must enter `Kith.Contacts.Write` before changing native rows.
+`Store.transaction/2` delegates to that coordinator and acquires the account lock
+before row locks. Nested `Store.touch/2` calls mark candidates; the outer commit
+updates bound rich documents and publishes only actual shared/client changes.
+Private and no-op edits never change DAV bytes, timestamps or revisions. Do not
+write first and touch afterward. Defer external effects through `Write.after_commit/1`.
+`Store.ensure_rows/1` initializes identities/sanitized documents before consistent
+read snapshots. Trusted system keys classify fields; client NOTE/GENDER belong
+to the DAV document and never to private native description/gender. Explicit Kith
+imports/exports have their own policy. See `docs/carddav.md` and the boundary plan.
 
 ### REST API conventions
 - Bearer token auth (POST /api/auth/token to create)
@@ -136,7 +142,7 @@ authenticated user and confirmed email. All LiveView routes are in the
 
 ## Database
 
-PostgreSQL 15+. 48 application tables (distinct migration-created tables; excludes Oban and Ecto metadata). Bigserial PKs except protocol identities and avatar asset keys. UTC timestamps everywhere.
+PostgreSQL 15+. 49 application tables (distinct migration-created tables; excludes Oban and Ecto metadata). Bigserial PKs except protocol identities and avatar asset keys. UTC timestamps everywhere.
 Cloak encryption vault for sensitive fields (API keys).
 
 ## Environment

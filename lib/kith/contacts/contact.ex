@@ -147,7 +147,7 @@ defmodule Kith.Contacts.Contact do
       :birthdate_year_unknown
     ])
     |> validate_name()
-    |> compute_display_name()
+    |> maybe_compute_display_name()
     |> validate_column_lengths()
     |> validate_first_met_through_account()
   end
@@ -216,6 +216,13 @@ defmodule Kith.Contacts.Contact do
     else
       validate_required(changeset, [:first_name])
     end
+  end
+
+  defp maybe_compute_display_name(changeset) do
+    if Enum.any?(
+         [:first_name, :middle_name, :last_name],
+         &Ecto.Changeset.changed?(changeset, &1)
+       ), do: compute_display_name(changeset), else: changeset
   end
 
   defp compute_display_name(changeset) do

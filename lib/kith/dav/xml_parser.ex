@@ -11,15 +11,45 @@ defmodule Kith.DAV.XMLParser do
   @carddav "urn:ietf:params:xml:ns:carddav"
   @cs "http://calendarserver.org/ns/"
 
+  @known_props %{
+    {@dav, "displayname"} => :displayname,
+    {@dav, "resourcetype"} => :resourcetype,
+    {@dav, "getcontenttype"} => :getcontenttype,
+    {@dav, "getetag"} => :getetag,
+    {@dav, "getlastmodified"} => :getlastmodified,
+    {@dav, "sync-token"} => :sync_token,
+    {@dav, "current-user-principal"} => :current_user_principal,
+    {@dav, "supported-report-set"} => :supported_report_set,
+    {@dav, "principal-URL"} => :principal_url,
+    {@dav, "owner"} => :owner,
+    {@dav, "group"} => :group,
+    {@dav, "alternate-URI-set"} => :alternate_uri_set,
+    {@dav, "group-member-set"} => :group_member_set,
+    {@dav, "group-membership"} => :group_membership,
+    {@dav, "supported-privilege-set"} => :supported_privilege_set,
+    {@dav, "acl"} => :acl,
+    {@dav, "acl-restrictions"} => :acl_restrictions,
+    {@dav, "inherited-acl-set"} => :inherited_acl_set,
+    {@dav, "principal-collection-set"} => :principal_collection_set,
+    {@dav, "current-user-privilege-set"} => :current_user_privilege_set,
+    {@carddav, "address-data"} => :address_data,
+    {@carddav, "addressbook-home-set"} => :addressbook_home_set,
+    {@carddav, "supported-address-data"} => :supported_address_data,
+    {@carddav, "max-resource-size"} => :max_resource_size,
+    {@carddav, "supported-collation-set"} => :supported_collation_set,
+    {@cs, "getctag"} => :getctag
+  }
+
   @doc """
   Parses a PROPFIND request body.
 
-  Returns `{:ok, :allprop}`, `{:ok, :propname}`, or `{:ok, {:prop, props}}`
+  Returns `{:ok, :allprop}`, `{:ok, {:allprop, included_props}}`,
+  `{:ok, :propname}`, or `{:ok, {:prop, props}}`
   where `props` lists the requested properties: an atom for each property the
   server knows, `{namespace, local_name}` for any other.
 
   An empty body is treated as an allprop request per RFC 4918 Section 9.1.
-  A body that is not well-formed UTF-8 XML returns `{:error, :invalid_xml}`.
+  Malformed XML or an invalid selector combination returns `{:error, :invalid_xml}`.
   """
   def parse_propfind(body) when body in [nil, ""] do
     {:ok, :allprop}
@@ -29,35 +59,111 @@ defmodule Kith.DAV.XMLParser do
     if String.trim(body) == "" do
       {:ok, :allprop}
     else
-      case parse_xml(body) do
-        {:ok, [{1, @dav, "propfind"} | elements]} -> {:ok, propfind_request(elements)}
+      case parse_tree(body) do
+        {:ok, %{ns: @dav, name: "propfind"} = root} -> propfind_request(root)
         _ -> {:error, :invalid_xml}
       end
     end
   end
 
-  defp propfind_request(elements) do
-    instructions = for {2, @dav, name} <- elements, do: name
+  defp propfind_request(root) do
+    # RFC 4918 §§14.20/17: ignore unknown extensions (including their
+    # descendants), then require exactly one selector. Include is valid only
+    # with allprop; element order is immaterial.
+    instructions =
+      for %{ns: @dav, name: name} <- root.children,
+          name in ["allprop", "propname", "prop", "include"],
+          do: name
 
-    cond do
-      "propname" in instructions -> :propname
-      "prop" in instructions -> {:prop, requested_props(elements, 2)}
-      true -> :allprop
-    end
+    selectors =
+      Enum.filter(root.children, &(&1.ns == @dav and &1.name in instructions))
+
+    valid_text? =
+      String.trim(root.text) == "" and
+        Enum.all?(selectors, fn selector ->
+          String.trim(selector.text) == "" and
+            (selector.name not in ["prop", "include"] or
+               Enum.all?(selector.children, &(String.trim(&1.text) == "")))
+        end)
+
+    select_propfind(if(valid_text?, do: Enum.sort(instructions), else: []), root)
   end
 
-  @doc """
-  Parses a PROPPATCH (`DAV:propertyupdate`) body.
-
-  Returns `{:ok, props}` listing the properties named by every `set` and
-  `remove` instruction, or `{:error, :invalid_xml}`.
-  """
-  def parse_proppatch(body) do
-    case parse_xml(body || "") do
-      {:ok, [{1, @dav, "propertyupdate"} | elements]} -> {:ok, requested_props(elements, 3)}
+  defp select_propfind(instructions, root) do
+    case instructions do
+      ["allprop"] -> {:ok, :allprop}
+      ["allprop", "include"] -> {:ok, {:allprop, property_names(child(root, @dav, "include"))}}
+      ["propname"] -> {:ok, :propname}
+      ["prop"] -> {:ok, {:prop, property_names(child(root, @dav, "prop"))}}
       _ -> {:error, :invalid_xml}
     end
   end
+
+  defp property_names(node) do
+    node.children
+    |> Enum.map(&Map.get(@known_props, {&1.ns, &1.name}, {&1.ns, &1.name}))
+    |> Enum.uniq()
+  end
+
+  @doc """
+  Parses a PROPPATCH (`DAV:propertyupdate`) body into ordered instructions.
+
+  Each instruction contains `:action` (`:set` or `:remove`), `:property`
+  (a known property atom or `{namespace, local_name}`), and `:value` (the
+  property XML tree). Repeated properties and XML values are retained.
+  Invalid instruction structure returns `{:error, :invalid_xml}`.
+  """
+  def parse_proppatch(body) do
+    with {:ok, %{ns: @dav, name: "propertyupdate"} = root} <- parse_tree(body || ""),
+         true <- String.trim(root.text) == "",
+         operations when operations != [] <-
+           Enum.filter(root.children, &(&1.ns == @dav and &1.name in ["set", "remove"])),
+         {:ok, instructions} <- proppatch_instructions(operations) do
+      {:ok, instructions}
+    else
+      _ -> {:error, :invalid_xml}
+    end
+  end
+
+  defp proppatch_instructions(operations) do
+    Enum.reduce_while(operations, {:ok, []}, fn operation, {:ok, acc} ->
+      case proppatch_operation(operation) do
+        {:ok, instructions} -> {:cont, {:ok, [instructions | acc]}}
+        error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, instructions} -> {:ok, instructions |> Enum.reverse() |> List.flatten()}
+      error -> error
+    end
+  end
+
+  defp proppatch_operation(operation) do
+    with [prop] <- dav_children(operation, ["prop"]),
+         true <- valid_update_properties?(operation, prop) do
+      action = update_action(operation.name)
+
+      instructions =
+        Enum.map(prop.children, &%{action: action, property: property_identity(&1), value: &1})
+
+      {:ok, instructions}
+    else
+      _ -> {:error, :invalid_xml}
+    end
+  end
+
+  defp valid_update_properties?(operation, prop) do
+    blank_text?(operation) and blank_text?(prop) and prop.children != [] and
+      valid_update_values?(operation.name, prop.children)
+  end
+
+  defp valid_update_values?("set", _properties), do: true
+
+  defp valid_update_values?("remove", properties),
+    do: Enum.all?(properties, &(&1.children == [] and &1.text == ""))
+
+  defp update_action("set"), do: :set
+  defp update_action("remove"), do: :remove
 
   @doc """
   Parses a REPORT body and identifies the report by its root element.
@@ -81,10 +187,232 @@ defmodule Kith.DAV.XMLParser do
   """
   def parse_report(body) do
     case parse_tree(body || "") do
-      {:ok, root} -> {:ok, report_request(root)}
-      :error -> {:error, :invalid_xml}
+      {:ok, %{ns: @dav, name: name} = root}
+      when name in [
+             "expand-property",
+             "acl-principal-prop-set",
+             "principal-match",
+             "principal-property-search",
+             "principal-search-property-set"
+           ] ->
+        principal_report_request(root)
+
+      {:ok, root} ->
+        {:ok, report_request(root)}
+
+      :error ->
+        {:error, :invalid_xml}
     end
   end
+
+  @doc "Validates the structure of an ACL request without changing account policy."
+  def parse_acl(body) do
+    case parse_acl_tree(body) do
+      {:ok, _root} -> :ok
+      error -> error
+    end
+  end
+
+  @doc false
+  def parse_acl_tree(body) do
+    with {:ok, %{ns: @dav, name: "acl"} = root} <- parse_tree(body || ""),
+         true <- blank_text?(root),
+         true <- Enum.all?(dav_children(root, ["ace"]), &valid_ace?/1) do
+      {:ok, root}
+    else
+      _ -> {:error, :invalid_xml}
+    end
+  end
+
+  defp valid_ace?(ace) do
+    with true <- blank_text?(ace),
+         [principal] <- dav_children(ace, ["principal"]),
+         true <- blank_text?(principal),
+         [identity] <- principal.children,
+         true <- valid_ace_principal?(identity),
+         [permission] <- dav_children(ace, ["grant", "deny"]),
+         true <- blank_text?(permission),
+         privileges when privileges != [] <- dav_children(permission, ["privilege"]) do
+      Enum.all?(privileges, fn privilege ->
+        blank_text?(privilege) and length(privilege.children) == 1 and
+          Enum.all?(privilege.children, &empty_property?/1)
+      end)
+    else
+      _ -> false
+    end
+  end
+
+  defp valid_ace_principal?(%{ns: @dav, name: "href", children: [], text: text}),
+    do: String.trim(text) != ""
+
+  defp valid_ace_principal?(%{ns: @dav, name: name} = node)
+       when name in ["all", "authenticated", "unauthenticated", "self"],
+       do: empty_property?(node)
+
+  defp valid_ace_principal?(%{ns: @dav, name: "property", children: [property]} = node),
+    do: blank_text?(node) and empty_property?(property)
+
+  defp valid_ace_principal?(_), do: false
+
+  @doc false
+  def parse_property_value(xml) do
+    wrapper =
+      ~s(<d:value xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav" xmlns:cs="http://calendarserver.org/ns/">#{xml}</d:value>)
+
+    case parse_tree(wrapper) do
+      {:ok, %{children: [property], text: text}} ->
+        if String.trim(text) == "", do: {:ok, property}, else: {:error, :invalid_xml}
+
+      _ ->
+        {:error, :invalid_xml}
+    end
+  end
+
+  defp principal_report_request(root) do
+    case principal_report_body(root) do
+      {:ok, request} -> {:ok, {:principal_report, request}}
+      _ -> {:error, :invalid_xml}
+    end
+  end
+
+  defp principal_report_body(%{name: "expand-property"} = root) do
+    with true <- blank_text?(root),
+         {:ok, properties} <- expansion_properties(root, 0) do
+      {:ok, %{type: :expand_property, properties: properties}}
+    end
+  end
+
+  defp principal_report_body(%{name: "acl-principal-prop-set"} = root) do
+    with true <- blank_text?(root),
+         {:ok, props} <- principal_report_props(root) do
+      {:ok, %{type: :acl_principal_prop_set, props: props}}
+    end
+  end
+
+  defp principal_report_body(%{name: "principal-search-property-set"} = root) do
+    if blank_text?(root) and root.children == [],
+      do: {:ok, %{type: :principal_search_property_set}},
+      else: :error
+  end
+
+  defp principal_report_body(%{name: "principal-match"} = root),
+    do: principal_match_request(root)
+
+  defp principal_report_body(%{name: "principal-property-search"} = root),
+    do: principal_search_request(root)
+
+  defp principal_match_request(root) do
+    selectors = dav_children(root, ["self", "principal-property"])
+
+    with true <- blank_text?(root),
+         [selector] <- selectors,
+         {:ok, props} <- principal_report_props(root),
+         {:ok, match} <- principal_match_selector(selector) do
+      {:ok, %{type: :principal_match, match: match, props: props}}
+    end
+  end
+
+  defp principal_match_selector(%{name: "self", children: [], text: ""}), do: {:ok, :self}
+
+  defp principal_match_selector(%{name: "principal-property", children: [property]} = node) do
+    if blank_text?(node) and empty_property?(property),
+      do: {:ok, {:property, property_identity(property)}},
+      else: :error
+  end
+
+  defp principal_match_selector(_), do: :error
+
+  defp principal_search_request(root) do
+    searches = dav_children(root, ["property-search"])
+    apply = dav_children(root, ["apply-to-principal-collection-set"])
+
+    with true <- blank_text?(root) and searches != [],
+         true <- length(apply) <= 1 and Enum.all?(apply, &empty_property?/1),
+         {:ok, props} <- principal_report_props(root),
+         {:ok, searches} <- parse_principal_searches(searches) do
+      {:ok,
+       %{
+         type: :principal_property_search,
+         searches: searches,
+         props: props,
+         apply_to_principal_collection_set: apply != []
+       }}
+    end
+  end
+
+  defp parse_principal_searches(searches) do
+    Enum.reduce_while(searches, {:ok, []}, fn search, {:ok, acc} ->
+      with true <- blank_text?(search),
+           [prop] <- dav_children(search, ["prop"]),
+           true <-
+             blank_text?(prop) and prop.children != [] and
+               Enum.all?(prop.children, &empty_property?/1),
+           [%{children: []} = match] <- dav_children(search, ["match"]) do
+        item = %{properties: Enum.map(prop.children, &property_identity/1), match: match.text}
+        {:cont, {:ok, [item | acc]}}
+      else
+        _ -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, searches} -> {:ok, Enum.reverse(searches)}
+      error -> error
+    end
+  end
+
+  defp principal_report_props(root) do
+    case dav_children(root, ["prop"]) do
+      [] ->
+        {:ok, nil}
+
+      [prop] ->
+        if blank_text?(prop) and Enum.all?(prop.children, &empty_property?/1),
+          do: {:ok, {:prop, Enum.map(prop.children, &property_identity/1)}},
+          else: :error
+
+      _ ->
+        :error
+    end
+  end
+
+  defp expansion_properties(_node, depth) when depth > 8, do: :error
+
+  defp expansion_properties(node, depth) do
+    Enum.reduce_while(dav_children(node, ["property"]), {:ok, []}, fn property, {:ok, acc} ->
+      name = unqualified_attribute(property, "name", "")
+      namespace = unqualified_attribute(property, "namespace", @dav)
+
+      with true <- blank_text?(property) and valid_property_name?(name),
+           {:ok, children} <- expansion_properties(property, depth + 1) do
+        identity = Map.get(@known_props, {namespace, name}, {namespace, name})
+        {:cont, {:ok, [%{property: identity, children: children} | acc]}}
+      else
+        _ -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, properties} -> {:ok, Enum.reverse(properties)}
+      error -> error
+    end
+  end
+
+  defp unqualified_attribute(node, name, default) do
+    case Enum.find(node.attributes, &(&1.ns == "" and &1.name == name)) do
+      nil -> default
+      attribute -> attribute.value
+    end
+  end
+
+  defp valid_property_name?(name), do: Regex.match?(~r/\A[\p{L}_][\p{L}\p{N}_.-]*\z/u, name)
+
+  defp dav_children(node, names),
+    do: Enum.filter(node.children, &(&1.ns == @dav and &1.name in names))
+
+  defp blank_text?(node), do: String.trim(node.text) == ""
+  defp empty_property?(node), do: node.children == [] and blank_text?(node)
+
+  defp property_identity(node),
+    do: Map.get(@known_props, {node.ns, node.name}, {node.ns, node.name})
 
   defp report_request(%{ns: @carddav, name: "addressbook-multiget"} = root) do
     hrefs = for %{ns: @dav, name: "href"} = el <- root.children, do: String.trim(text(el))
@@ -185,26 +513,6 @@ defmodule Kith.DAV.XMLParser do
 
   # ── Private ────────────────────────────────────────────────────────────
 
-  @known_props %{
-    {@dav, "displayname"} => :displayname,
-    {@dav, "resourcetype"} => :resourcetype,
-    {@dav, "getcontenttype"} => :getcontenttype,
-    {@dav, "getetag"} => :getetag,
-    {@dav, "getlastmodified"} => :getlastmodified,
-    {@dav, "sync-token"} => :sync_token,
-    {@dav, "current-user-principal"} => :current_user_principal,
-    {@dav, "supported-report-set"} => :supported_report_set,
-    {@dav, "principal-URL"} => :principal_url,
-    {@dav, "owner"} => :owner,
-    {@dav, "current-user-privilege-set"} => :current_user_privilege_set,
-    {@carddav, "address-data"} => :address_data,
-    {@carddav, "addressbook-home-set"} => :addressbook_home_set,
-    {@carddav, "supported-address-data"} => :supported_address_data,
-    {@carddav, "max-resource-size"} => :max_resource_size,
-    {@carddav, "supported-collation-set"} => :supported_collation_set,
-    {@cs, "getctag"} => :getctag
-  }
-
   # The properties asked for, as `parse_propfind/1` returns them.
   defp report_props(root) do
     cond do
@@ -222,58 +530,9 @@ defmodule Kith.DAV.XMLParser do
     end
   end
 
-  # The props named by the children of the `DAV:prop` elements found at
-  # `depth` (2 inside `propfind`, 3 inside `propertyupdate/set|remove`).
-  # Known props become atoms; unknown ones stay `{namespace, local_name}`.
-  defp requested_props(elements, depth) do
-    elements
-    |> children_of(depth, {@dav, "prop"})
-    |> Enum.map(&Map.get(@known_props, &1, &1))
-    |> Enum.uniq()
-  end
-
-  defp children_of(elements, depth, parent) do
-    {_inside, names} =
-      Enum.reduce(elements, {false, []}, fn {d, ns, name}, {inside, acc} ->
-        cond do
-          d == depth -> {{ns, name} == parent, acc}
-          d < depth -> {false, acc}
-          d == depth + 1 and inside -> {inside, [{ns, name} | acc]}
-          true -> {inside, acc}
-        end
-      end)
-
-    Enum.reverse(names)
-  end
-
-  # Namespace-aware, non-validating parse with OTP's xmerl SAX parser.
-  # Returns `{:ok, elements}`, the start tags in document order as
-  # `{depth, namespace_uri, local_name}` (strings, so no atoms are created),
-  # or `:error` for anything that is not well-formed UTF-8 XML. Entity
-  # declarations are refused (no entity-expansion attacks).
-  defp parse_xml(body) do
-    opts = [event_fun: &sax_event/3, event_state: {0, []}, external_entities: :none]
-
-    case :xmerl_sax_parser.stream(body, [:disallow_entities | opts]) do
-      {:ok, {0, elements}, rest} ->
-        if String.trim(to_string(rest)) == "", do: {:ok, Enum.reverse(elements)}, else: :error
-
-      _ ->
-        :error
-    end
-  catch
-    _, _ -> :error
-  end
-
-  defp sax_event({:startElement, uri, local, _qname, _attrs}, _loc, {depth, acc}),
-    do: {depth + 1, [{depth + 1, to_string(uri), to_string(local)} | acc]}
-
-  defp sax_event({:endElement, _uri, _local, _qname}, _loc, {depth, acc}), do: {depth - 1, acc}
-  defp sax_event(_event, _loc, state), do: state
-
   # Namespace-aware parse into a tree of
   # `%{ns: uri, name: local, attrs: %{local => value}, children: [...], text: text}`
-  # (strings only, so no atoms are created). Same safety rules as `parse_xml/1`.
+  # (strings only, so no atoms are created). Entity declarations are refused.
   defp parse_tree(body) do
     opts = [event_fun: &tree_event/3, event_state: [], external_entities: :none]
 
@@ -289,22 +548,45 @@ defmodule Kith.DAV.XMLParser do
   end
 
   defp tree_event({:startElement, uri, local, _qname, attrs}, _loc, stack) do
-    attrs =
-      Map.new(attrs, fn {_uri, _prefix, name, value} -> {to_string(name), to_string(value)} end)
+    attributes =
+      Enum.map(attrs, fn {uri, _prefix, name, value} ->
+        %{ns: to_string(uri), name: to_string(name), value: to_string(value)}
+      end)
 
-    node = %{ns: to_string(uri), name: to_string(local), attrs: attrs, children: [], text: ""}
+    node = %{
+      ns: to_string(uri),
+      name: to_string(local),
+      attrs: Map.new(attributes, &{&1.name, &1.value}),
+      attributes: attributes,
+      children: [],
+      content: [],
+      text: ""
+    }
+
     [node | stack]
   end
 
-  defp tree_event({:characters, chars}, _loc, [node | rest]),
-    do: [%{node | text: node.text <> to_string(chars)} | rest]
+  defp tree_event({:characters, chars}, _loc, [node | rest]) do
+    value = to_string(chars)
+    [%{node | text: node.text <> value, content: [{:text, value} | node.content]} | rest]
+  end
 
   defp tree_event({:endElement, _uri, _local, _qname}, _loc, [node | rest]) do
-    node = %{node | children: Enum.reverse(node.children)}
+    node = %{node | children: Enum.reverse(node.children), content: Enum.reverse(node.content)}
 
     case rest do
-      [parent | above] -> [%{parent | children: [node | parent.children]} | above]
-      [] -> [node]
+      [parent | above] ->
+        [
+          %{
+            parent
+            | children: [node | parent.children],
+              content: [{:element, node} | parent.content]
+          }
+          | above
+        ]
+
+      [] ->
+        [node]
     end
   end
 

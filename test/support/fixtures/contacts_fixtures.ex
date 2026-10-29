@@ -41,7 +41,9 @@ defmodule Kith.ContactsFixtures do
 
   def contact_field_fixture(contact, contact_field_type_id, attrs \\ %{}) do
     attrs =
-      Enum.into(attrs, %{
+      attrs
+      |> Map.new(fn {key, value} -> {to_string(key), value} end)
+      |> Enum.into(%{
         "value" => "test@example.com",
         "contact_field_type_id" => contact_field_type_id
       })
@@ -133,6 +135,7 @@ defmodule Kith.ContactsFixtures do
       [
         %{
           name: "Email",
+          system_key: "email",
           protocol: "mailto:",
           icon: "mail",
           vcard_label: "EMAIL",
@@ -143,6 +146,7 @@ defmodule Kith.ContactsFixtures do
         },
         %{
           name: "Phone",
+          system_key: "phone",
           protocol: "tel:",
           icon: "phone",
           vcard_label: "TEL",
@@ -161,6 +165,7 @@ defmodule Kith.ContactsFixtures do
       [
         %{
           name: "Friend",
+          system_key: "friend",
           reverse_name: "Friend",
           is_bidirectional: true,
           account_id: nil,
@@ -170,6 +175,7 @@ defmodule Kith.ContactsFixtures do
         },
         %{
           name: "Parent",
+          system_key: "parent",
           reverse_name: "Child",
           is_bidirectional: false,
           account_id: nil,

@@ -9,6 +9,7 @@ defmodule Kith.Storage do
   All backends implement the `Kith.Storage.Backend` behaviour.
   """
 
+  alias Kith.Contacts.Write
   alias Kith.Storage.S3
 
   require Logger
@@ -104,6 +105,10 @@ defmodule Kith.Storage do
   Call after successful upload or delete.
   """
   def bust_usage_cache(account_id) do
+    Write.after_commit(fn -> invalidate_usage_cache(account_id) end)
+  end
+
+  defp invalidate_usage_cache(account_id) do
     Cachex.del(:kith_cache, {:storage_usage, account_id})
   end
 
