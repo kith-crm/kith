@@ -43,6 +43,9 @@ defmodule Kith.Contacts.Note do
     Meta.allow_tag_with_uri_attributes("a", ["href"], ["http", "https", "mailto"])
     Meta.allow_tag_with_these_attributes("a", ["target", "rel"])
 
+    # Trix serializes paragraph blocks as divs. Keep their boundaries while
+    # rejecting all attributes, including style and event handlers.
+    Meta.allow_tag_with_these_attributes("div", [])
     Meta.allow_tag_with_these_attributes("p", [])
     Meta.allow_tag_with_these_attributes("br", [])
     Meta.allow_tag_with_these_attributes("strong", [])
@@ -58,6 +61,6 @@ defmodule Kith.Contacts.Note do
     Meta.allow_tag_with_these_attributes("h6", [])
     Meta.allow_tag_with_these_attributes("blockquote", [])
 
-    Meta.strip_everything_not_covered()
+    @before_compile HtmlSanitizeEx.ScrubberCompiler
   end
 end

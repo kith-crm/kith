@@ -1,4 +1,19 @@
-import "trix"
+import "trix/trix"
+
+// Older notes were entered in a textarea. Their stored text has literal
+// newlines and HTML-escaped entities, rather than editor block markup.
+// Insert that text through Trix's text API so breaks survive and escaped
+// markup stays text. Rich HTML still goes through Trix's sanitizer.
+function loadStoredContent(editor, content) {
+  if (/<[a-z!/]/i.test(content)) {
+    editor.loadHTML(content)
+  } else {
+    const text = document.createElement("textarea")
+    text.innerHTML = content
+    editor.loadHTML("")
+    editor.insertString(text.value)
+  }
+}
 
 const TrixEditor = {
   mounted() {
@@ -25,7 +40,7 @@ const TrixEditor = {
     const initialContent = this.hiddenInput?.value
     if (initialContent && initialContent.trim() !== "") {
       this.suppressChange = true
-      this.editor.editor.loadHTML(initialContent)
+      loadStoredContent(this.editor.editor, initialContent)
       this.suppressChange = false
     }
   },
@@ -39,7 +54,7 @@ const TrixEditor = {
 
     if (newContent !== currentContent && this.editor) {
       this.suppressChange = true
-      this.editor.editor.loadHTML(newContent)
+      loadStoredContent(this.editor.editor, newContent)
       this.suppressChange = false
     }
   },

@@ -14,6 +14,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   alias Kith.Contacts.{MergeFields, MergeResolution, MergeSummary}
   alias Kith.DuplicateDetection
   alias Kith.Policy
+  alias Kith.Storage
+  alias KithWeb.ContactLive.SectionNav
 
   # The value sections, keyed on the identifier the drop payload and the
   # summary both use. The display label is a rendering detail hanging off that
@@ -63,7 +65,63 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   @max_with_members 50
 
   @impl true
-  def mount(_params, _session, socket), do: {:ok, assign(socket, :error, nil)}
+  def mount(_params, _session, socket) do
+    {:ok, socket |> assign(:error, nil) |> assign(:referer_back, referer_back(socket))}
+  end
+
+  # Where "Back" and Cancel go (design B8): the page the user live-navigated
+  # from, read once from LiveView's `_live_referer` connect param. Only our own
+  # host and three known paths count; a contact path is looked up through the
+  # account scope, so a foreign or missing id can never leak a name. Anything
+  # else (reload, direct URL, other pages) -> nil -> the `synthetic?` fallback.
+  defp referer_back(socket) do
+    with true <- connected?(socket),
+         ref when is_binary(ref) <- get_connect_params(socket)["_live_referer"],
+         %URI{host: host, path: path, query: query} when is_binary(path) <- URI.parse(ref),
+         true <- host == URI.parse(KithWeb.Endpoint.url()).host do
+      back_for_path(path, query, socket.assigns.current_scope.account.id)
+    else
+      _ -> nil
+    end
+  end
+
+  defp back_for_path("/contacts/duplicates", _query, _account_id),
+    do: %{path: ~p"/contacts/duplicates", label: "Back to duplicates"}
+
+  defp back_for_path("/contacts", query, _account_id) do
+    path =
+      case normalize_query(query) do
+        "" -> ~p"/contacts"
+        normalized -> "/contacts?" <> normalized
+      end
+
+    %{path: path, label: "Back to contacts"}
+  end
+
+  defp back_for_path("/contacts/" <> raw, _query, account_id) do
+    with id when is_integer(id) <- parse_contact_id(raw),
+         %Kith.Contacts.Contact{} = contact <- Kith.Contacts.get_contact(account_id, id) do
+      %{path: ~p"/contacts/#{contact.id}", label: "Back to #{contact.display_name}"}
+    else
+      _ -> nil
+    end
+  end
+
+  defp back_for_path(_path, _query, _account_id), do: nil
+
+  # Round-trips the referer's query through decode/encode so whatever reaches
+  # the link is re-encoded `key=value` pairs. `URI.query_decoder/1` is lenient
+  # (a bad `%` sequence is kept literally and re-encoded), so it does not raise.
+  # Pair order is kept (a map would sort it).
+  defp normalize_query(query) when is_binary(query) do
+    query |> URI.query_decoder() |> Enum.to_list() |> URI.encode_query()
+  end
+
+  defp normalize_query(_query), do: ""
+
+  defp back_link(%{referer_back: %{} = back}), do: back
+  defp back_link(%{synthetic?: true}), do: %{path: ~p"/contacts", label: "Back to contacts"}
+  defp back_link(_assigns), do: %{path: ~p"/contacts/duplicates", label: "Back to duplicates"}
 
   # A contact id from the URL, or `nil` if it could never name a row: not an
   # integer, or outside what the column can hold.
@@ -783,7 +841,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
     case Map.get(assigns.resolution.attributions, field) do
       :all_agree -> "all #{total} agree"
-      {:only, id} -> "only #{member_name(assigns, id)} has this"
+      {:only, id} -> "only #{member_label(assigns, id)} has this"
       {:some, n} -> "#{n} of #{total}"
       _ -> nil
     end
@@ -793,11 +851,30 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   defp sections, do: @sections
 
-  defp member_name(assigns, id) do
+  @doc false
+  def member_name(assigns, id) do
     case Enum.find(assigns.members, &(&1.id == id)) do
-      nil -> "unknown"
+      nil -> nil
       contact -> contact.display_name
     end
+  end
+
+  # For running text, where a missing member still has to read as something.
+  @doc false
+  def member_label(assigns, id), do: member_name(assigns, id) || "unknown"
+
+  # "Photo 2 of 3, from Mona Vale, M. Vale" — distinct names for otherwise
+  # identical avatar buttons (design B10).
+  defp avatar_choice_label(assigns, candidate, index) do
+    holders =
+      candidate.member_ids
+      |> Enum.map(&member_name(assigns, &1))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> Enum.join(", ")
+
+    label = "Photo #{index + 1} of #{length(candidates(assigns, :avatar))}"
+    if holders == "", do: label, else: "#{label}, from #{holders}"
   end
 
   defp humanize(field) do
@@ -886,6 +963,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :back, back_link(assigns))
+
     ~H"""
     <Layouts.app
       flash={@flash}
@@ -893,6 +972,32 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       current_path={@current_path}
       pending_duplicates_count={@pending_duplicates_count}
     >
+      <%!--
+        Section header + sub-nav. The wizard is its own LiveView, so it renders
+        the shared Contacts tab bar itself, always with Duplicates active (the
+        page is "Merge duplicates"). The back link returns to the page the user
+        came from (`_live_referer`: a contact, the list with its query, or the
+        duplicates list); on a reload or direct URL it falls back to the
+        duplicates list for a detected cluster and the contact list otherwise.
+      --%>
+      <div class="max-w-4xl mx-auto space-y-4 mb-4">
+        <.link
+          navigate={@back.path}
+          class="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+        >
+          <.icon name="hero-arrow-left" class="size-4" />
+          {@back.label}
+        </.link>
+        <h1 class="text-2xl font-semibold text-[var(--color-text-primary)] tracking-tight">
+          Merge duplicates
+        </h1>
+        <SectionNav.section_nav
+          active={:duplicates}
+          pending_duplicates_count={@pending_duplicates_count}
+          link_mode={:navigate}
+        />
+      </div>
+
       <div class="max-w-4xl mx-auto space-y-4">
         <div
           :if={@error}
@@ -935,7 +1040,12 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                   phx-click="toggle-member"
                   phx-value-id={member.id}
                 />
-                <KithUI.avatar name={member.display_name} src={avatar_url(member)} size={:sm} />
+                <KithUI.avatar
+                  id={"merge-member-avatar-#{member.id}"}
+                  name={member.display_name}
+                  src={avatar_url(member)}
+                  size={:sm}
+                />
                 <span class="text-sm">
                   {member.display_name}
                   <span :if={member.id == @primary_id} class="text-xs text-[var(--color-accent)] ms-1">
@@ -1043,6 +1153,8 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                 phx-click="choose-field"
                 phx-value-field={field}
                 phx-value-index={index}
+                aria-pressed={to_string(effective(assigns, field) == candidate.value)}
+                aria-label={field == :avatar && avatar_choice_label(assigns, candidate, index)}
                 class={[
                   "rounded-[var(--radius-md)] border px-3 py-1.5 text-sm text-start",
                   if(effective(assigns, field) == candidate.value,
@@ -1052,7 +1164,20 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                   )
                 ]}
               >
-                {display(assigns, field, candidate.value)}
+                <%!--
+                  `avatar` holds a storage key, not a label, and `candidate.value`
+                  is always a present key (blanks are dropped upstream). Pass the
+                  owning contact's name so `KithUI.avatar` has alt text and can
+                  show initials if the image itself fails to load.
+                --%>
+                <KithUI.avatar
+                  :if={field == :avatar}
+                  id={"merge-avatar-choice-#{index}"}
+                  name={member_name(assigns, hd(candidate.member_ids))}
+                  src={Storage.url(candidate.value)}
+                  size={:md}
+                />
+                <span :if={field != :avatar}>{display(assigns, field, candidate.value)}</span>
                 <span class="block text-[10px] opacity-70">{candidate.count} record(s)</span>
               </button>
               <button
@@ -1061,6 +1186,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                 phx-click="choose-field"
                 phx-value-field={field}
                 phx-value-index="clear"
+                aria-pressed={to_string(effective(assigns, field) == :clear)}
                 class={[
                   "rounded-[var(--radius-md)] border px-3 py-1.5 text-sm text-start italic",
                   if(effective(assigns, field) == :clear,
@@ -1209,7 +1335,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
               <span class="text-xs text-[var(--color-text-tertiary)]">
                 {if entry.duplicate?,
                   do: "duplicate · dropped",
-                  else: member_name(assigns, entry.owner_id)}
+                  else: member_label(assigns, entry.owner_id)}
               </span>
             </label>
             <p
@@ -1262,7 +1388,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                     is nothing to dismiss — marking it would insert dismissed
                     candidate rows for pairs detection never suggested and
                     permanently suppress real future matches. --%>
-              <UI.button :if={@synthetic?} variant="secondary" navigate={~p"/contacts"}>
+              <UI.button :if={@synthetic?} variant="secondary" navigate={@back.path}>
                 Cancel
               </UI.button>
               <UI.button :if={not @synthetic?} variant="secondary" phx-click="not-duplicates">

@@ -13,6 +13,7 @@ defmodule Kith.Accounts do
   alias Kith.Accounts.{
     Account,
     AccountInvitation,
+    CoseKey,
     User,
     UserIdentity,
     UserNotifier,
@@ -63,6 +64,10 @@ defmodule Kith.Accounts do
       |> User.registration_changeset(attrs)
       |> Ecto.Changeset.put_change(:role, "admin")
       |> maybe_auto_confirm()
+    end)
+    |> Ecto.Multi.run(:reminder_rules, fn _repo, %{account: account} ->
+      {count, _} = Kith.Reminders.seed_default_rules(account.id)
+      {:ok, count}
     end)
     |> Repo.transaction()
     |> case do
@@ -515,8 +520,11 @@ defmodule Kith.Accounts do
       select: {wc.credential_id, wc.public_key}
     )
     |> Repo.all()
-    |> Enum.map(fn {cred_id, pk_binary} ->
-      {cred_id, :erlang.binary_to_term(pk_binary)}
+    |> Enum.flat_map(fn {cred_id, pk_binary} ->
+      case CoseKey.decode(pk_binary) do
+        {:ok, key} -> [{cred_id, key}]
+        {:error, :invalid_key} -> []
+      end
     end)
   end
 
@@ -714,6 +722,10 @@ defmodule Kith.Accounts do
         refresh_token: token_attrs[:refresh_token],
         expires_at: token_attrs[:expires_at]
       })
+    end)
+    |> Ecto.Multi.run(:reminder_rules, fn _repo, %{account: account} ->
+      {count, _} = Kith.Reminders.seed_default_rules(account.id)
+      {:ok, count}
     end)
     |> Repo.transaction()
     |> case do

@@ -33,7 +33,11 @@ defmodule Kith.Imports.Sources.MonicaApi do
   alias Kith.Contacts
   alias Kith.Contacts.PhoneFormatter
   alias Kith.Imports
+  alias Kith.Imports.DuplicateAutomerge
+  alias Kith.Imports.Monica.NoteTimestamps
+  alias Kith.Imports.Monica.ReminderMapper
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
+  alias Kith.Reminders
   alias Kith.Repo
   alias Kith.Workers.MonicaDocumentImportWorker
 
@@ -98,30 +102,34 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
     # Phase 1.5: Auto-merge definite duplicates (optional).
     # Runs AFTER Phase 1.4 so backfilled contacts participate in auto-merge.
+    # Scoped to `acc.created_contact_ids` — contacts created by this import job
+    # (main crawl + backfill, plus those an earlier attempt of the same job
+    # created) — never contacts from earlier imports, which are skipped, so
+    # pre-existing records are never merged.
     merge_result =
       if opts["auto_merge_duplicates"] do
-        auto_merge_duplicates(account_id, import_job)
+        auto_merge_duplicates(account_id, import_job, opts, acc.created_contact_ids)
       else
-        %{merged: 0, errors: []}
+        %{
+          merged: 0,
+          merged_by_name_group: 0,
+          merged_by_detection: 0,
+          skipped: 0,
+          left_behind: 0,
+          errors: []
+        }
       end
 
     # Phase 2: Resolve cross-references
     ref_errors = resolve_cross_references(account_id, deferred, import_job)
 
-    # Phase 3: Extra notes
-    notes_errors =
-      if opts["extra_notes"] != false do
-        fetch_all_extra_notes(credential, account_id, user_id, deferred.extra_notes, import_job)
-      else
-        []
-      end
-
-    # Phase 4: Per-contact "misc" data (pets, calls, activities, gifts, debts,
-    # tasks, reminders, conversations) is now planned during the main crawl
+    # Phase 3: Per-contact "misc" data (pets, calls, activities, gifts, debts,
+    # tasks, reminders, conversations, and notes beyond the ones embedded in
+    # the contact payload) is planned during the main crawl
     # and dispatched as a separate `MonicaMiscDataWorker` Oban job by
     # `MonicaApiCrawlWorker`. The plan is carried in `summary.misc_data_plan`.
 
-    # Phase 5: Enqueue document import jobs (async, runs after main import)
+    # Phase 4: Enqueue document import jobs (async, runs after main import)
     if opts["documents"] do
       enqueue_document_imports(credential, account_id, user_id, import_job)
     end
@@ -129,12 +137,10 @@ defmodule Kith.Imports.Sources.MonicaApi do
     all_errors =
       acc.errors ++
         ref_errors ++
-        notes_errors ++
         merge_result.errors
 
     error_count =
-      acc.error_count + length(ref_errors) + length(notes_errors) +
-        length(merge_result.errors)
+      acc.error_count + length(ref_errors) + length(merge_result.errors)
 
     {:ok,
      %{
@@ -143,6 +149,8 @@ defmodule Kith.Imports.Sources.MonicaApi do
        notes: acc.notes,
        skipped: acc.skipped,
        merged: merge_result.merged,
+       merged_by_detection: merge_result.merged_by_detection,
+       automerge_skipped: merge_result.skipped + merge_result.left_behind,
        error_count: error_count,
        errors: Enum.take(all_errors, 50),
        misc_data_plan: Enum.reverse(deferred.misc_data),
@@ -157,6 +165,8 @@ defmodule Kith.Imports.Sources.MonicaApi do
          notes: 0,
          skipped: 0,
          merged: 0,
+         merged_by_detection: 0,
+         automerge_skipped: 0,
          error_count: 1,
          errors: ["Import cancelled"],
          coverage_backfill: empty_backfill_stats()
@@ -169,11 +179,20 @@ defmodule Kith.Imports.Sources.MonicaApi do
     initial_state = %{
       page: 1,
       total: nil,
-      acc: %{contacts: 0, notes: 0, skipped: 0, error_count: 0, errors: []},
+      acc: %{
+        contacts: 0,
+        notes: 0,
+        skipped: 0,
+        error_count: 0,
+        errors: [],
+        created_contact_ids: [],
+        # Monica ids skipped as already imported / soft-deleted: they were
+        # handled this run, so the coverage backfill must count them as seen.
+        skipped_source_ids: []
+      },
       deferred: %{
         first_met_through: [],
         relationships: [],
-        extra_notes: [],
         misc_data: []
       },
       ref_data: nil,
@@ -309,7 +328,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
   end
 
   defp do_backfill(ctx, acc, ref_data, monica_total) do
-    seen_ids = seen_source_ids(ctx.import_job.id)
+    seen_ids = seen_source_ids(ctx.import_job.id, acc.skipped_source_ids)
 
     if Enum.empty?(seen_ids) do
       # Nothing imported by listing; refuse to scan an unbounded range.
@@ -338,7 +357,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
     end
   end
 
-  defp seen_source_ids(import_id) do
+  defp seen_source_ids(import_id, skipped_source_ids) do
     from(ir in Imports.ImportRecord,
       where:
         ir.import_id == ^import_id and
@@ -353,6 +372,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
       end
     end)
     |> MapSet.new()
+    |> MapSet.union(MapSet.new(skipped_source_ids))
   end
 
   defp scan_gap_range(ctx, acc, ref_data, seen_ids, min_id, max_id, monica_total, stats) do
@@ -412,6 +432,11 @@ defmodule Kith.Imports.Sources.MonicaApi do
                 imported_partial: stats.imported_partial + 1
             }, MapSet.put(seen, id)}}
 
+        {:skipped_existing, new_acc, new_ref_data} ->
+          {:cont,
+           {new_acc, new_ref_data, %{stats | range_scanned: stats.range_scanned + 1},
+            MapSet.put(seen, id)}}
+
         :skipped_deleted ->
           {:cont,
            {acc, ref_data,
@@ -458,13 +483,18 @@ defmodule Kith.Imports.Sources.MonicaApi do
           safe_import_api_contact(ctx, api_contact, new_ref_data, acc, %{
             first_met_through: [],
             relationships: [],
-            extra_notes: [],
             misc_data: []
           })
 
-        case verdict do
-          :import_full -> {:imported_full, new_acc, new_ref_data}
-          :import_partial -> {:imported_partial, new_acc, new_ref_data}
+        cond do
+          length(new_acc.skipped_source_ids) > length(acc.skipped_source_ids) ->
+            {:skipped_existing, new_acc, new_ref_data}
+
+          verdict == :import_full ->
+            {:imported_full, new_acc, new_ref_data}
+
+          true ->
+            {:imported_partial, new_acc, new_ref_data}
         end
     end
   end
@@ -482,34 +512,66 @@ defmodule Kith.Imports.Sources.MonicaApi do
     }
   end
 
+  # Re-importing previously imported contacts is not supported (decision
+  # 2026-10-19): a contact whose import record belongs to an earlier import is
+  # skipped. A record from the *current* import means an Oban retry of this
+  # same import, which must stay idempotent.
   defp import_api_contact(ctx, api_contact, ref_data, acc, deferred) do
     source_id = to_string(api_contact["id"])
 
-    # Check for existing import record (re-import)
-    existing = Imports.find_import_record(ctx.account_id, "monica_api", "contact", source_id)
-
-    case existing do
-      %{local_entity_id: local_id} ->
-        handle_existing_contact(ctx, api_contact, source_id, ref_data, acc, deferred, local_id)
+    case Imports.find_import_record(ctx.account_id, "monica_api", "contact", source_id) do
+      %{local_entity_id: local_id, import_id: import_id} ->
+        handle_existing_contact(
+          ctx,
+          {api_contact, source_id, ref_data},
+          {acc, deferred},
+          {local_id, import_id}
+        )
 
       nil ->
         do_create_api_contact(ctx, api_contact, source_id, ref_data, acc, deferred)
     end
   end
 
-  defp handle_existing_contact(ctx, api_contact, source_id, ref_data, acc, deferred, local_id) do
+  defp handle_existing_contact(
+         ctx,
+         {api_contact, source_id, ref_data},
+         {acc, deferred},
+         {local_id, import_id}
+       ) do
     case Repo.get(Contacts.Contact, local_id) do
+      # Purged since the earlier import: create it again as a new contact.
       nil ->
         do_create_api_contact(ctx, api_contact, source_id, ref_data, acc, deferred)
 
       %{deleted_at: deleted_at} when not is_nil(deleted_at) ->
         Logger.info("[MonicaApi] Skipping #{api_contact_display_name(api_contact)}: soft-deleted")
 
-        {%{acc | skipped: acc.skipped + 1}, deferred}
+        {add_skipped(acc, source_id), deferred}
 
-      contact ->
-        do_update_api_contact(ctx, contact, api_contact, source_id, ref_data, acc, deferred)
+      contact when import_id == ctx.import_job.id ->
+        # An Oban retry: this job created the contact in an earlier attempt, so
+        # it stays in scope for auto-merge (its record is only written on create).
+        acc = %{acc | created_contact_ids: [contact.id | acc.created_contact_ids]}
+        import_api_contact_children(ctx, contact, api_contact, source_id, ref_data, acc, deferred)
+
+      _contact ->
+        Logger.info(
+          "[MonicaApi] Skipping #{api_contact_display_name(api_contact)}: already imported by an earlier import"
+        )
+
+        {add_skipped(acc, source_id), deferred}
     end
+  end
+
+  defp add_skipped(acc, source_id) do
+    ids =
+      case Integer.parse(source_id) do
+        {n, ""} -> [n | acc.skipped_source_ids]
+        _ -> acc.skipped_source_ids
+      end
+
+    %{acc | skipped: acc.skipped + 1, skipped_source_ids: ids}
   end
 
   defp do_create_api_contact(ctx, api_contact, source_id, ref_data, acc, deferred) do
@@ -525,34 +587,15 @@ defmodule Kith.Imports.Sources.MonicaApi do
           contact.id
         )
 
+        # Track genuinely-new contacts so the auto-merge second pass can scope
+        # itself to this run's own creations.
+        acc = %{acc | created_contact_ids: [contact.id | acc.created_contact_ids]}
+
         import_api_contact_children(ctx, contact, api_contact, source_id, ref_data, acc, deferred)
 
       {:error, changeset} ->
         name = api_contact_display_name(api_contact)
         msg = "Contact #{name}: #{inspect_errors(changeset)}"
-        Logger.warning("[MonicaApi] #{msg}")
-        {add_error(acc, msg), deferred}
-    end
-  end
-
-  defp do_update_api_contact(ctx, contact, api_contact, source_id, ref_data, acc, deferred) do
-    attrs = build_contact_attrs_from_api(api_contact, ref_data)
-
-    case Contacts.update_contact(contact, attrs) do
-      {:ok, contact} ->
-        Imports.record_imported_entity(
-          ctx.import_job,
-          "contact",
-          source_id,
-          "contact",
-          contact.id
-        )
-
-        import_api_contact_children(ctx, contact, api_contact, source_id, ref_data, acc, deferred)
-
-      {:error, changeset} ->
-        name = api_contact_display_name(api_contact)
-        msg = "Contact #{name} (update): #{inspect_errors(changeset)}"
         Logger.warning("[MonicaApi] #{msg}")
         {add_error(acc, msg), deferred}
     end
@@ -612,11 +655,57 @@ defmodule Kith.Imports.Sources.MonicaApi do
     # Tags (embedded directly)
     import_api_tags(contact, api_contact, ref_data)
 
+    # Stay-in-touch (design spec 2026-10-14 §4), gated like the reminders endpoint.
+    if ctx.opts["reminders"] != false,
+      do: import_api_stay_in_touch(ctx, contact, api_contact, source_id)
+
     # Collect deferred data
     deferred = collect_deferred_data(api_contact, source_id, contact.id, deferred, ctx.opts)
 
     acc = %{acc | contacts: acc.contacts + 1, notes: acc.notes + n}
     {acc, deferred}
+  end
+
+  defp import_api_stay_in_touch(ctx, contact, api_contact, source_id) do
+    key = "stay_in_touch:#{source_id}"
+
+    case ReminderMapper.stay_in_touch(api_contact, Reminders.account_today(ctx.account_id)) do
+      :none ->
+        :ok
+
+      {:create, attrs, _notes} ->
+        existing =
+          case Imports.find_import_record(ctx.account_id, "monica_api", "reminder", key) do
+            %{local_entity_id: id} when is_integer(id) ->
+              Reminders.get_reminder(ctx.account_id, id)
+
+            _ ->
+              nil
+          end
+
+        result =
+          case existing do
+            %Reminders.Reminder{type: "stay_in_touch"} = r ->
+              Reminders.update_reminder(r, Map.delete(attrs, "type"))
+
+            _ ->
+              Reminders.create_reminder(
+                ctx.account_id,
+                ctx.user_id,
+                Map.put(attrs, "contact_id", contact.id)
+              )
+          end
+
+        case result do
+          {:ok, r} ->
+            Imports.record_imported_entity(ctx.import_job, "reminder", key, "reminder", r.id)
+
+          {:error, reason} ->
+            Logger.warning(
+              "[MonicaApi] stay-in-touch for #{source_id}: #{inspect_errors(reason)}"
+            )
+        end
+    end
   end
 
   defp import_api_contact_fields(contact, api_contact, ref_data, ctx) do
@@ -718,7 +807,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
   defp create_imported_note(contact, user_id, note, import_job) do
     attrs = %{"body" => note["body"]}
 
-    case Contacts.create_note(contact, user_id, attrs) do
+    case Contacts.create_note(contact, user_id, attrs, NoteTimestamps.from_note(note)) do
       {:ok, n} ->
         maybe_record_entity(import_job, "note", note["uuid"], "note", n.id)
 
@@ -748,7 +837,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
     deferred
     |> collect_first_met_through(api_contact, source_id)
     |> collect_relationships(api_contact, source_id)
-    |> collect_extra_notes(api_contact, source_id)
     |> collect_misc_data(api_contact, source_id, local_id, opts)
   end
 
@@ -783,17 +871,29 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
     endpoints = if opts["pets"] != false, do: [:pets | endpoints], else: endpoints
 
+    embedded_notes = length(api_contact["notes"] || [])
+    endpoints = maybe_add_notes_endpoint(endpoints, stats, embedded_notes, opts)
+
     if endpoints == [] do
       deferred
     else
       entry = %{
         source_id: to_string(source_id),
         local_id: local_id,
+        embedded_notes: embedded_notes,
         endpoints: Enum.map(endpoints, &Atom.to_string/1)
       }
 
       %{deferred | misc_data: [entry | deferred.misc_data]}
     end
+  end
+
+  # Notes past the ones embedded in the contact payload. `embedded_notes` goes
+  # in the plan entry so the worker skips those leading notes on page 1.
+  defp maybe_add_notes_endpoint(endpoints, stats, embedded_notes, opts) do
+    if opts["extra_notes"] != false and (stats["number_of_notes"] || 0) > embedded_notes,
+      do: endpoints ++ [:notes],
+      else: endpoints
   end
 
   defp collect_first_met_through(deferred, api_contact, source_id) do
@@ -832,44 +932,20 @@ defmodule Kith.Imports.Sources.MonicaApi do
     %{deferred | relationships: deferred.relationships ++ rel_entries}
   end
 
-  defp collect_extra_notes(deferred, api_contact, source_id) do
-    stats = api_contact["statistics"] || %{}
-    note_count = stats["number_of_notes"] || 0
-    embedded_notes = length(api_contact["notes"] || [])
-
-    if note_count > embedded_notes do
-      entry = %{
-        source_id: source_id,
-        monica_id: api_contact["id"],
-        embedded_count: embedded_notes
-      }
-
-      %{deferred | extra_notes: [entry | deferred.extra_notes]}
-    else
-      deferred
-    end
-  end
-
   # ── Phase 1.5: Auto-merge definite duplicates ───────────────────────
 
-  defp auto_merge_duplicates(account_id, import_job) do
-    # Get all contact IDs imported in this batch
-    import_records =
-      Repo.all(
-        from(ir in Imports.ImportRecord,
-          where:
-            ir.import_id == ^import_job.id and
-              ir.source_entity_type == "contact",
-          select: ir.local_entity_id
-        )
-      )
+  defp auto_merge_duplicates(account_id, import_job, opts, created_ids) do
+    # `created_ids` are the contacts this import job created (main crawl +
+    # backfill), including ones an earlier attempt of the same job created
+    # (an Oban retry). Contacts from earlier import jobs are skipped entirely
+    # and never appear here, so pre-existing contacts stay out of the auto-merge.
 
     # Load contacts with contact fields and addresses (addresses participate
     # in the broadened definite-duplicate predicate).
     contacts =
       Repo.all(
         from(c in Contacts.Contact,
-          where: c.id in ^import_records and is_nil(c.deleted_at),
+          where: c.id in ^created_ids and is_nil(c.deleted_at),
           preload: [:addresses, contact_fields: :contact_field_type]
         )
       )
@@ -885,9 +961,56 @@ defmodule Kith.Imports.Sources.MonicaApi do
     merged_ids = MapSet.new()
     {merged_count, errors, _} = merge_name_groups(name_groups, account_id, import_job, merged_ids)
 
-    Logger.info("[MonicaApi] Auto-merge: #{merged_count} contacts merged")
-    %{merged: merged_count, errors: errors}
+    # Second pass: reconcile with the duplicate detector (issue #2). The
+    # name-group pass above only catches pairs that share an exact normalized
+    # {first_name, last_name} AND a concrete email/phone/address. The detector
+    # also flags transitive chains where each link rests on a different concrete
+    # signal; those are merged here, restricted to `created_ids` so pre-existing
+    # records are never touched. Name-only matches (identical display_name,
+    # nothing else shared) are deliberately NOT merged at any score — they stay
+    # as pending candidates for manual review. `opts["auto_merge_score"]`, when
+    # present, overrides the default strong-edge score floor of 1.0.
+    detection_opts =
+      case parse_auto_merge_score(opts["auto_merge_score"]) do
+        nil -> [restrict_ids: created_ids]
+        score -> [restrict_ids: created_ids, min_score: score]
+      end
+
+    detection = DuplicateAutomerge.run(account_id, detection_opts)
+
+    total = merged_count + detection.merged
+
+    Logger.info(
+      "[MonicaApi] Auto-merge: #{merged_count} by name group + #{detection.merged} by detection " <>
+        "= #{total} contacts merged (#{detection.skipped} cluster(s) skipped, " <>
+        "#{detection.left_behind} contact(s) left behind by a sub-floor edge)"
+    )
+
+    %{
+      merged: total,
+      merged_by_name_group: merged_count,
+      merged_by_detection: detection.merged,
+      skipped: detection.skipped,
+      left_behind: detection.left_behind,
+      errors: errors ++ detection.errors
+    }
   end
+
+  # `auto_merge_score` reaches us straight from form/JSON opts, so it may be a
+  # string. `DuplicateAutomerge`'s `pair.score >= min_score` compares numbers,
+  # and `1.0 >= "0.85"` is always false under Elixir term ordering, so an
+  # un-coerced string would silently merge nothing. Drop anything unparseable.
+  defp parse_auto_merge_score(nil), do: nil
+  defp parse_auto_merge_score(n) when is_number(n), do: n / 1
+
+  defp parse_auto_merge_score(s) when is_binary(s) do
+    case Float.parse(s) do
+      {score, _rest} -> score
+      :error -> nil
+    end
+  end
+
+  defp parse_auto_merge_score(_), do: nil
 
   defp merge_name_groups(groups, account_id, import_job, merged_ids) do
     Enum.reduce(groups, {0, [], merged_ids}, fn {_name_key, group}, {count, errors, seen} ->
@@ -917,12 +1040,18 @@ defmodule Kith.Imports.Sources.MonicaApi do
     end
   end
 
-  defp try_merge_candidate(survivor, candidate, _account_id, _import_job, {c, e, s}) do
+  defp try_merge_candidate(survivor, candidate, account_id, _import_job, {c, e, s}) do
     cond do
       MapSet.member?(s, candidate.id) ->
         {c, e, s}
 
       not definite_duplicate?(survivor, candidate) ->
+        {c, e, s}
+
+      Kith.DuplicateDetection.dismissed_pair?(account_id, survivor.id, candidate.id) ->
+        # A prior merge repoints dismissed pairs from a loser to the survivor,
+        # so re-reading here also protects against transitive matches within
+        # this name group. A same-job retry must preserve the user's decision.
         {c, e, s}
 
       true ->
@@ -1126,80 +1255,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
       errors
   end
 
-  # ── Phase 3: Extra notes ─────────────────────────────────────────────
-
-  defp fetch_all_extra_notes(credential, account_id, user_id, entries, import_job) do
-    Enum.reduce(entries, [], fn entry, errors ->
-      fetch_extra_notes_for_contact(credential, account_id, user_id, entry, import_job, errors)
-    end)
-  end
-
-  defp fetch_extra_notes_for_contact(credential, account_id, user_id, entry, import_job, errors) do
-    contact_rec =
-      Imports.find_import_record(account_id, "monica_api", "contact", entry.source_id)
-
-    if contact_rec do
-      contact = Repo.get(Contacts.Contact, contact_rec.local_entity_id)
-
-      if contact do
-        fetch_notes_pages(credential, contact, user_id, entry, import_job, errors)
-      else
-        errors
-      end
-    else
-      errors
-    end
-  end
-
-  defp fetch_notes_pages(credential, contact, user_id, entry, import_job, errors) do
-    fetch_notes_loop(
-      credential,
-      contact,
-      user_id,
-      entry,
-      import_job,
-      errors,
-      _page = 1,
-      _skip = entry.embedded_count
-    )
-  end
-
-  defp fetch_notes_loop(credential, contact, user_id, entry, import_job, errors, page, skip) do
-    url = "#{credential.url}/api/contacts/#{entry.monica_id}/notes"
-
-    case api_get_json(credential, url, limit: @page_limit, page: page) do
-      {:ok, %{"data" => notes, "meta" => meta}} when is_list(notes) ->
-        last_page = meta["last_page"] || 1
-
-        # Skip already-imported notes (first N were embedded in contact response)
-        notes_to_import = if skip > 0, do: Enum.drop(notes, skip), else: notes
-        import_extra_notes_batch(contact, user_id, notes_to_import, import_job)
-
-        if page < last_page do
-          fetch_notes_loop(credential, contact, user_id, entry, import_job, errors, page + 1, 0)
-        else
-          errors
-        end
-
-      {:error, :rate_limited} ->
-        errors ++ ["Rate limited fetching notes for contact #{entry.source_id}"]
-
-      {:error, reason} ->
-        errors ++ ["Failed to fetch notes for contact #{entry.source_id}: #{inspect(reason)}"]
-
-      _ ->
-        errors
-    end
-  end
-
-  defp import_extra_notes_batch(contact, user_id, notes, import_job) do
-    Enum.each(notes, fn note ->
-      unless note_duplicate?(contact.id, note["body"]) do
-        create_imported_note(contact, user_id, note, import_job)
-      end
-    end)
-  end
-
   # ── Reference data building ──────────────────────────────────────────
 
   defp build_or_update_ref_data(account_id, contacts, nil) do
@@ -1371,10 +1426,10 @@ defmodule Kith.Imports.Sources.MonicaApi do
         headers: headers,
         params: params,
         max_retries: 5,
-        retry_log_level: :warn
+        retry_log_level: :warning
       ] ++ req_options
 
-    Req.get(url, options)
+    Kith.BoundedHTTP.get(url, options)
   end
 
   defp api_get_json(credential, url, params) do
@@ -1468,7 +1523,9 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   defp add_error(acc, msg) do
     errors = if length(acc.errors) < 50, do: acc.errors ++ [msg], else: acc.errors
-    %{acc | skipped: acc.skipped + 1, error_count: acc.error_count + 1, errors: errors}
+    # Errors are not "skipped": `skipped` counts only contacts from earlier
+    # imports (or soft-deleted ones) that this run deliberately left alone.
+    %{acc | error_count: acc.error_count + 1, errors: errors}
   end
 
   defp api_contact_display_name(api_contact) do

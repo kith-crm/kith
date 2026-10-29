@@ -76,6 +76,7 @@ defmodule Kith.Workers.MonicaDocumentImportWorkerTest do
     assert Imports.count_import_records_by_type(import_job.id, "document") == 1
   end
 
+  @tag :capture_log
   test "cancels without downloading when the key has been wiped",
        %{user: user, import_job: import_job, contact: contact} do
     {:ok, _} = Imports.wipe_api_key(import_job)

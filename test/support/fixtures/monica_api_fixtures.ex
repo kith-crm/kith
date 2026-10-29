@@ -28,6 +28,8 @@ defmodule Kith.MonicaApiFixtures do
       "is_partial" => false,
       "is_active" => Map.get(overrides, :is_active, true),
       "is_dead" => overrides[:is_dead] || false,
+      "stay_in_touch_frequency" => overrides[:stay_in_touch_frequency],
+      "stay_in_touch_trigger_date" => overrides[:stay_in_touch_trigger_date],
       "is_me" => false,
       "information" => %{
         "relationships" => overrides[:relationships] || default_relationships(),
@@ -154,8 +156,8 @@ defmodule Kith.MonicaApiFixtures do
       "is_favorited" => false,
       "favorited_at" => nil,
       "account" => %{"id" => 1},
-      "created_at" => "2024-02-20T12:00:00Z",
-      "updated_at" => "2024-02-20T12:00:00Z"
+      "created_at" => Map.get(overrides, :created_at, "2024-02-20T12:00:00Z"),
+      "updated_at" => Map.get(overrides, :updated_at, "2024-02-20T12:00:00Z")
     }
   end
 

@@ -103,27 +103,4 @@ defmodule Kith.Contacts.MergeInvariantsTest do
            repoint them: #{inspect(rows -- known)}
            """
   end
-
-  # import_records.local_entity_id is the one known pointer neither test
-  # above can see — see the moduledoc's "What these tests do NOT cover". A
-  # behavioural test already covers this ("import records follow the
-  # survivor" in test/kith/contacts_merge_test.exs), so this doesn't run a
-  # second merge to prove the same thing; it pins the wiring structurally
-  # instead, so removing `remap_import_records_step/4` or disconnecting it
-  # from `build_multi/7`'s Multi chain fails here too.
-  test "the untyped import_records pointer has a dedicated, wired step" do
-    source =
-      __ENV__.file
-      |> Path.dirname()
-      |> Path.join("../../../lib/kith/contacts/merge.ex")
-      |> Path.expand()
-      |> File.read!()
-
-    assert source =~
-             ~r/defp remap_import_records_step\(repo, loser_ids, survivor_id, account_id\)/,
-           "remap_import_records_step/4 is missing from lib/kith/contacts/merge.ex"
-
-    assert source =~ ~r/Multi\.run\(:remap_import_records,.*?remap_import_records_step\(/s,
-           "remap_import_records_step/4 exists but is no longer wired into build_multi/7's Multi chain"
-  end
 end

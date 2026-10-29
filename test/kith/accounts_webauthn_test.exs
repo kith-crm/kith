@@ -27,6 +27,18 @@ defmodule Kith.AccountsWebauthnTest do
     |> Kith.Repo.insert!()
   end
 
+  test "allow credentials skips corrupted stored keys and preserves valid credential ownership" do
+    user = user_fixture()
+    valid = create_credential(user)
+    invalid = create_credential(user)
+    invalid |> Ecto.Changeset.change(public_key: <<131, 255>>) |> Kith.Repo.update!()
+    create_credential(user_fixture())
+
+    assert Accounts.get_webauthn_allow_credentials(user) == [
+             {valid.credential_id, @fake_cose_key}
+           ]
+  end
+
   describe "list_webauthn_credentials/1" do
     test "returns credentials for the user" do
       user = user_fixture()

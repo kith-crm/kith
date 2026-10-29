@@ -127,7 +127,54 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
     end
   end
 
+  describe "perform/1 — earlier-import contacts" do
+    test "does not attach photos to a contact imported by an earlier job, but does for the current job",
+         %{user: user, account_id: account_id} do
+      earlier_job = api_import_fixture(account_id, user.id)
+      old_contact = contact_fixture(account_id, %{first_name: "Old"})
+      register_imported_contact!(earlier_job, old_contact, 501)
+      {:ok, _} = Imports.update_import_status(earlier_job, "completed")
+
+      current_job = api_import_fixture(account_id, user.id)
+      new_contact = contact_fixture(account_id, %{first_name: "New"})
+      register_imported_contact!(current_job, new_contact, 502)
+
+      photos = [
+        photo_json(
+          id: 1,
+          data_url: @pixel_data_url,
+          contact: contact_short_json(501, Ecto.UUID.generate(), "Old", "Test")
+        ),
+        photo_json(
+          id: 2,
+          data_url: @other_pixel_data_url,
+          contact: contact_short_json(502, Ecto.UUID.generate(), "New", "Test")
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, photos_page_json(photos))
+      end)
+
+      assert :ok = perform_job(MonicaPhotoSyncWorker, job_args(current_job))
+
+      assert Contacts.list_photos(old_contact.id) == []
+      assert Repo.get!(Contacts.Contact, old_contact.id).avatar == nil
+      assert [_] = Contacts.list_photos(new_contact.id)
+
+      updated = Imports.get_import!(current_job.id)
+      assert updated.sync_summary["synced"] == 1
+      assert updated.sync_summary["not_found"] == 1
+
+      assert Enum.any?(
+               updated.sync_summary["photos"],
+               &(is_binary(&1["reason"]) and &1["reason"] =~ "earlier import")
+             )
+    end
+  end
+
   describe "perform/1 — failed" do
+    @tag :capture_log
     test "marks photo as failed when dataUrl is missing", %{user: user, account_id: account_id} do
       import_job = api_import_fixture(account_id, user.id)
       contact = contact_fixture(account_id, %{first_name: "NoData"})
@@ -259,6 +306,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       assert_received {:auth, ["Bearer test-key"]}
     end
 
+    @tag :capture_log
     test "cancels without calling Monica when the key has been wiped",
          %{user: user, account_id: account_id} do
       import_job = api_import_fixture(account_id, user.id)

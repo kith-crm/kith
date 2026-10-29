@@ -19,7 +19,8 @@ defmodule Kith.Workers.MonicaApiKeyReleaseWorker do
   race and also covers jobs that crash, time out, or are cancelled from Oban
   Web without running any code of ours.
 
-  Snoozing doesn't consume attempts (Oban bumps `max_attempts` on snooze).
+  Snoozing doesn't consume attempts (Oban 2.24 rolls back `attempt` on snooze,
+  leaving `max_attempts` unchanged).
   If this job is itself lost, `ImportApiKeySweepWorker` wipes the key later.
   """
 

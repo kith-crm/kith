@@ -7,7 +7,7 @@ defmodule Kith.Contacts.Debt do
 
   schema "debts" do
     field :title, :string
-    field :amount, :decimal
+    field :amount, Kith.Types.BoundedDecimal
     field :direction, :string
     field :status, :string, default: "active"
     field :due_date, :date

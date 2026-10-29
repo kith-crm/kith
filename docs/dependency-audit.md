@@ -62,7 +62,8 @@
 | mox | ~> 1.2 | Behaviour-based mock library for concurrent tests | Test |
 | phoenix_live_reload | ~> 1.5 | Dev-mode live code reloading via file watchers | Dev |
 | tailwind | ~> 0.2 | TailwindCSS CLI integration for asset compilation | Dev |
-| wallaby | ~> 0.30 | Browser-based end-to-end testing (ChromeDriver) | Test |
+
+Browser tests use Playwright. On 2026-10-29, the unused Wallaby dependency and case template were removed after confirming no test used them. All existing browser specs were retained; this also removes the test-only Hackney/Tesla closure.
 
 ---
 
@@ -144,3 +145,8 @@ All versions listed use `~>` (pessimistic) constraints:
 - `~> X.Y.Z` allows only patch increments — used for libraries with a history of breaking minor changes.
 
 **At implementation time, pin each dependency to the latest stable patch release** (e.g., `~> 1.7.18` rather than `~> 1.7`). Record the resolved lockfile (`mix.lock`) in version control. Run `mix hex.audit` in CI to detect known vulnerabilities in resolved versions.
+
+
+## Upgrade review policy
+
+Before changing a package, inspect its code usages and the complete dependency graph, including unchanged parents, transitive children, optional adapters and build tools. Read the upstream changelogs and breaking-change notes across every intervening release; record runtime floors, schema/protocol changes, and any unavailable release documentation. Resolve compatible parent closures without forced overrides, then validate the affected behavior and cold production release. The PR44 reviews are recorded in `docs/plan/pr44-dependency-compatibility.json`, `docs/plan/pr44-npm-compatibility.json`, and `docs/plan/pr44-ci-action-compatibility.json`.

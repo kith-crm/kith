@@ -9,6 +9,7 @@ import topbar from "../vendor/topbar"
 // Custom hooks
 import TrixEditor from "./hooks/trix_editor"
 import CommandPalette from "./hooks/command_palette"
+import ImgFallback from "./hooks/img_fallback"
 
 // Alpine.js (CSP build -- no runtime code generation, compatible with strict Content-Security-Policy)
 import Alpine from "@alpinejs/csp"
@@ -27,6 +28,7 @@ const Hooks = {
   ...colocatedHooks,
   TrixEditor,
   CommandPalette,
+  ImgFallback,
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
