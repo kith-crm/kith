@@ -641,6 +641,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert_received {:auth, ["Bearer test-key"]}
     end
 
+    @tag :capture_log
     test "cancels without calling Monica when the key has been wiped",
          %{user: user, account_id: account_id} do
       contact = contact_fixture(account_id)
@@ -1383,6 +1384,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     end
 
     for response <- [:rate_limited, :server_error, :transport_error, :malformed] do
+      @tag :capture_log
       test "#{response} fails the job without announcing successful completion", ctx do
         import_job = api_import(ctx.account_id, ctx.user.id)
         contact = contact_fixture(ctx.account_id)
@@ -1399,6 +1401,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       end
     end
 
+    @tag :capture_log
     test "a later endpoint failure retries already persisted calls without losing or duplicating them",
          ctx do
       import_job = api_import(ctx.account_id, ctx.user.id)
@@ -1454,6 +1457,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert %{"calls" => 1, "tasks" => 1} = misc_summary(import_job)
     end
 
+    @tag :capture_log
     test "a page import and its checkpoint roll back together if processing crashes", ctx do
       import_job = api_import(ctx.account_id, ctx.user.id)
       contact = contact_fixture(ctx.account_id)
@@ -1503,6 +1507,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert misc_summary(import_job)["notes"] == 2
     end
 
+    @tag :capture_log
     test "a failed continuation insert does not publish partial summary and retries completed work safely",
          ctx do
       import_job = api_import(ctx.account_id, ctx.user.id)
@@ -1549,6 +1554,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert_received {:import_misc_complete, %{"pets" => 2}}
     end
 
+    @tag :capture_log
     test "a failed later notes page does not report completion and a retry preserves all notes",
          ctx do
       import_job = api_import(ctx.account_id, ctx.user.id)
@@ -1596,6 +1602,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
   end
 
   describe "merged survivor deduplication boundaries" do
+    @tag :capture_log
     test "equivalent debt, task, activity and pet data collapses while meaningful differences survive",
          ctx do
       import_job = api_import(ctx.account_id, ctx.user.id)
@@ -1718,6 +1725,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       assert snapshot.() == before_retry
     end
 
+    @tag :capture_log
     test "an invalid debt does not prevent a later valid record from importing", ctx do
       import_job = api_import(ctx.account_id, ctx.user.id)
       contact = contact_fixture(ctx.account_id)

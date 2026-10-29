@@ -107,7 +107,17 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
       html = click_edit(view, "note", note.id)
 
       assert html =~ "Edit Note"
-      assert has_element?(view, ~s|textarea[name="entry[body]"]|, "Met at the conference")
+
+      assert has_element?(
+               view,
+               ~s|input[type="hidden"][name="entry[body]"][value="Met at the conference"]|
+             )
+
+      assert has_element?(
+               view,
+               ~s|[phx-hook="TrixEditor"][data-input="entry[body]"] trix-editor[aria-labelledby="entry-note-content-label"]|
+             )
+
       assert has_element?(view, ~s|input[name="entry[is_private]"][checked]|)
     end
 
@@ -214,7 +224,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
         |> render_click()
 
       assert html =~ "New Note"
-      refute has_element?(view, ~s|textarea[name="entry[body]"]|, "Met at the conference")
+      assert has_element?(view, ~s|input[type="hidden"][name="entry[body]"][value=""]|)
     end
 
     test "life event prefills and saves", %{conn: conn, contact: contact, account_id: account_id} do

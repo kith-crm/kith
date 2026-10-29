@@ -76,6 +76,6 @@ defmodule Kith.Immich.Client do
 
   defp get(url, options) do
     configured = Application.get_env(:kith, __MODULE__, []) |> Keyword.get(:req_options, [])
-    Req.get(url, Keyword.merge(options, configured))
+    Kith.BoundedHTTP.get(url, Keyword.merge(options, configured))
   end
 end

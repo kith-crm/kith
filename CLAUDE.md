@@ -39,10 +39,6 @@ npx playwright test --project=e2e test/playwright/auth.spec.ts  # Single spec
 npx playwright test --project=e2e --headed  # Visible browser
 npx playwright test --project=smoke         # Smoke tests (e2e/ dir)
 
-# Tests — Wallaby browser
-WALLABY=1 mix test --only wallaby
-WALLABY_HEADLESS=false WALLABY=1 mix test --only wallaby  # Headed
-
 # Assets
 mix assets.build             # Compile tailwind + esbuild
 mix assets.deploy            # Minified build + phx.digest
@@ -53,7 +49,6 @@ mix assets.deploy            # Minified build + phx.digest
 ```elixir
 @tag :integration   # DB-touching tests (most tests, Ecto sandbox)
 @tag :external      # Hits real APIs (Immich, LocationIQ). Skipped unless EXTERNAL_TESTS=true
-@tag :wallaby       # Browser E2E. Run with: WALLABY=1 mix test --only wallaby
 @tag :slow          # Large dataset perf tests. Run with: mix test --only slow
 ```
 
@@ -144,7 +139,7 @@ See `.env.example` for all env vars. Key ones:
 
 - MIME types: `.vcf` registered as `text/vcard` in config.exs (needed for LiveView uploads)
 - `mix format` uses `Phoenix.LiveView.HTMLFormatter` plugin for `.heex` files
-- Wallaby tests need `WALLABY=1` env var — they're excluded by default
+- Browser tests use Playwright; `npm run test:pr44` starts the isolated regression fixtures
 - Playwright tests run outside Elixir test harness — they hit the running server over HTTP
 - Soft-deleted contacts: always check `deleted_at IS NULL` in custom queries
 - The Scope struct must have `account` preloaded — `Scope.for_user/1` extracts it from user

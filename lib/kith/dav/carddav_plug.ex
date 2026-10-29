@@ -434,6 +434,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
         conn
         |> put_resp_content_type(content_type, "utf-8")
+        |> put_resp_header("x-content-type-options", "nosniff")
         |> put_resp_header("etag", "\"#{etag}\"")
         |> send_resp(200, vcard)
     end

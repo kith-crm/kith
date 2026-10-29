@@ -13,6 +13,7 @@ defmodule Kith.Accounts do
   alias Kith.Accounts.{
     Account,
     AccountInvitation,
+    CoseKey,
     User,
     UserIdentity,
     UserNotifier,
@@ -519,8 +520,11 @@ defmodule Kith.Accounts do
       select: {wc.credential_id, wc.public_key}
     )
     |> Repo.all()
-    |> Enum.map(fn {cred_id, pk_binary} ->
-      {cred_id, :erlang.binary_to_term(pk_binary)}
+    |> Enum.flat_map(fn {cred_id, pk_binary} ->
+      case CoseKey.decode(pk_binary) do
+        {:ok, key} -> [{cred_id, key}]
+        {:error, :invalid_key} -> []
+      end
     end)
   end
 

@@ -142,34 +142,33 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   def handle_event("upload-photo", _params, socket) do
     contact_id = socket.assigns.contact_id
 
-    uploaded_photos =
+    contact = Contacts.get_contact!(socket.assigns.account_id, contact_id)
+
+    results =
       consume_uploaded_entries(socket, :photo, fn %{path: path}, entry ->
-        key = "contacts/#{contact_id}/photos/#{entry.uuid}-#{entry.client_name}"
-        {:ok, _} = Storage.upload(path, key)
-
-        {:ok, photo} =
-          Contacts.create_photo(
-            Contacts.get_contact!(socket.assigns.account_id, contact_id),
-            %{
-              file_name: entry.client_name,
-              storage_key: key,
-              file_size: entry.client_size,
-              content_type: entry.client_type
-            }
-          )
-
-        {:ok, photo}
+        {:ok, KithWeb.ContactUploads.save(contact, path, entry, :photo)}
       end)
 
-    if uploaded_photos != [] do
-      {:noreply,
-       socket
-       |> assign(:modal_type, nil)
-       |> load_entries()
-       |> put_flash(:info, "#{length(uploaded_photos)} photo(s) uploaded.")}
-    else
-      {:noreply, socket}
-    end
+    uploaded = Enum.count(results, &match?({:ok, _}, &1))
+    failed = Enum.any?(results, &match?({:error, _}, &1))
+
+    socket =
+      socket
+      |> clear_flash(:error)
+      |> assign(:modal_type, nil)
+      |> load_entries()
+
+    socket =
+      if uploaded > 0,
+        do: put_flash(socket, :info, "#{uploaded} photo(s) uploaded."),
+        else: socket
+
+    socket =
+      if failed,
+        do: put_flash(socket, :error, "Some photos could not be uploaded. Please try again."),
+        else: socket
+
+    {:noreply, socket}
   end
 
   def handle_event("cancel-photo-upload", %{"ref" => ref}, socket) do
@@ -353,6 +352,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   def render(assigns) do
     ~H"""
     <div>
+      <p :if={@flash["error"]} role="alert">{@flash["error"]}</p>
       <%!-- Stream Header --%>
       <div class="bg-[var(--color-surface-elevated)] rounded-xl p-3.5 shadow-[var(--shadow-card)] border border-[var(--color-border-subtle)] mb-3.5">
         <div class="flex justify-between items-center">
@@ -583,15 +583,25 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
       <.form for={%{}} phx-submit="save-entry" phx-target={@myself}>
         <div class="space-y-3">
           <div>
-            <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
+            <label
+              id="entry-note-content-label"
+              class="block text-sm font-medium text-[var(--color-text-primary)] mb-1"
+            >
               Content
             </label>
-            <textarea
-              name="entry[body]"
-              rows="5"
-              class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20"
-              placeholder="Write a note..."
-            >{@record && @record.body}</textarea>
+            <div
+              id={"entry-note-editor-#{@entry_id || "new"}"}
+              phx-hook="TrixEditor"
+              phx-update="ignore"
+              data-input="entry[body]"
+            >
+              <input type="hidden" name="entry[body]" value={(@record && @record.body) || ""} />
+              <trix-editor
+                aria-labelledby="entry-note-content-label"
+                class="trix-content min-h-[100px] prose prose-sm max-w-none border rounded-[var(--radius-lg)] p-2 bg-[var(--color-surface-elevated)]"
+              >
+              </trix-editor>
+            </div>
           </div>
           <label class="flex items-center gap-2 cursor-pointer">
             <input type="hidden" name="entry[is_private]" value="false" />

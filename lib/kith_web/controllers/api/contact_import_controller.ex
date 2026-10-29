@@ -107,6 +107,8 @@ defmodule KithWeb.API.ContactImportController do
     end
   end
 
+  defp validate_file_size(_), do: {:error, "Expected a multipart file upload."}
+
   defp read_upload(%Plug.Upload{path: path}) do
     case File.read(path) do
       {:ok, data} -> {:ok, data}

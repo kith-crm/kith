@@ -18,14 +18,18 @@ jobs:
 
     services:
       postgres:
+        # CI-only local socket trust; host connections require the password.
+        # Retain the audited en_US.utf8 locale; Alpine locale diagnostics
+        # are service initialization evidence, retained in the artifact.
         image: postgres:15-alpine
         ports: ["5432:5432"]
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.utf8 --auth-local=trust --auth-host=scram-sha-256"
           POSTGRES_DB: kith_test
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -34,6 +38,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
+        id: beam
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
@@ -42,15 +47,15 @@ jobs:
         uses: actions/cache@v6
         with:
           path: deps
-          key: deps-${{ runner.os }}-${{ hashFiles('mix.lock') }}
-          restore-keys: deps-${{ runner.os }}-
+          key: deps-${{ github.job }}-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ github.job }}-${{ runner.os }}-
 
       - name: Cache _build
         uses: actions/cache@v6
         with:
           path: _build
-          key: build-${{ runner.os }}-${{ env.MIX_ENV }}-${{ hashFiles('mix.lock') }}
-          restore-keys: build-${{ runner.os }}-${{ env.MIX_ENV }}-
+          key: build-${{ runner.os }}-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ env.MIX_ENV }}-${{ hashFiles('mix.lock') }}
+          restore-keys: build-${{ runner.os }}-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ env.MIX_ENV }}-
 
       - name: Install dependencies
         run: mix deps.get
@@ -65,7 +70,7 @@ jobs:
         run: mix credo --strict
 
       - name: Sobelow security scan
-        run: mix sobelow --config
+        run: mix run --no-start scripts/security/sobelow_check.exs
 
       - name: Setup database
         run: mix ecto.create && mix ecto.migrate
@@ -73,26 +78,43 @@ jobs:
       - name: Run tests
         run: mix test --cover --export-coverage ci
 
-      # Keep test failures blocking. Coverage is diagnostic while its existing
-      # 90% application-wide threshold is above the baseline; do not lower it.
-      - name: Build coverage report
-        continue-on-error: true
-        run: mix test.coverage
+      # The 90% threshold is unchanged. Only its documented shortfall exit is
+      # informational; report failures and the preceding test failures block CI.
+      - name: Build informational coverage report (90% target)
+        run: bash scripts/ci/coverage-report.sh
 
-      - uses: actions/upload-artifact@v4
+      - name: Save PostgreSQL diagnostics
+        if: always()
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          mkdir -p tmp/ci-diagnostics
+          docker logs "$POSTGRES_CONTAINER" > tmp/ci-diagnostics/postgres.log 2>&1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0; Node24 action runtime
+        with:
+          node-version: "22"
+          # The browser job owns the npm cache; avoid concurrent saves.
+          package-manager-cache: false
+
+      - name: Install JavaScript dependencies
+        run: npm ci && npm ci --prefix assets
+
+      - name: Enforce dependency security policy
+        run: mix run --no-start scripts/security/dependency_audit.exs
+
+      - name: Test JavaScript hooks
+        run: npm run test:js
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2; Node24 action runtime
         if: always()
         with:
           name: exunit-coverage
-          path: cover/
+          path: |
+            cover/
+            tmp/ci-diagnostics/
+            tmp/security/
           retention-days: 7
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Test JavaScript hooks
-        run: npm ci && npm run test:js
 
   browser-regressions:
     runs-on: ubuntu-latest
@@ -102,13 +124,17 @@ jobs:
       ERL_FLAGS: "+S 4:4"
     services:
       postgres:
+        # CI-only local socket trust; host connections require the password.
+        # Retain the audited en_US.utf8 locale; Alpine locale diagnostics
+        # are service initialization evidence, retained in the artifact.
         image: postgres:15-alpine
         ports: ["5432:5432"]
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.utf8 --auth-local=trust --auth-host=scram-sha-256"
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -118,26 +144,30 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
+        id: beam
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0; Node24 action runtime
         with:
           node-version: "22"
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            assets/package-lock.json
       - uses: actions/cache@v6
         with:
           path: |
             deps
             _build
-          key: browser-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}
+          key: browser-${{ runner.os }}-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-${{ hashFiles('mix.lock') }}
       - run: mix deps.get
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: mix assets.setup && mix assets.vendor && mix assets.build
       - name: Run deterministic browser regressions
         run: npm run test:pr44
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2; Node24 action runtime
         if: always()
         with:
           name: browser-regression-results
@@ -165,15 +195,15 @@ jobs:
         uses: actions/cache@v6
         with:
           path: deps
-          key: deps-${{ runner.os }}-${{ hashFiles('mix.lock') }}
-          restore-keys: deps-${{ runner.os }}-
+          key: deps-${{ github.job }}-${{ runner.os }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ github.job }}-${{ runner.os }}-
 
       - name: Cache _build
         uses: actions/cache@v6
         with:
           path: _build
-          key: build-${{ runner.os }}-dev-${{ hashFiles('mix.lock') }}
-          restore-keys: build-${{ runner.os }}-dev-
+          key: build-${{ runner.os }}-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-dev-${{ hashFiles('mix.lock') }}
+          restore-keys: build-${{ runner.os }}-${{ steps.beam.outputs.elixir-version }}-${{ steps.beam.outputs.otp-version }}-dev-
 
       - name: Cache PLTs
         uses: actions/cache@v6

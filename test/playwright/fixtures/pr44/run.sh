@@ -74,4 +74,5 @@ node -e 'const s=JSON.parse(process.env.IMG_SEED_JSON); if (!s.photo_contact || 
 
 # Whole-queue drains require a single worker. Do not parallelize before isolating queues.
 npx playwright test --project=e2e --workers=1 \
-  test/playwright/pr44-regressions.spec.ts test/playwright/image-fallback.spec.ts
+  test/playwright/pr44-regressions.spec.ts test/playwright/image-fallback.spec.ts \
+  test/playwright/editor-security.spec.ts

@@ -174,6 +174,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
   end
 
   describe "perform/1 — failed" do
+    @tag :capture_log
     test "marks photo as failed when dataUrl is missing", %{user: user, account_id: account_id} do
       import_job = api_import_fixture(account_id, user.id)
       contact = contact_fixture(account_id, %{first_name: "NoData"})
@@ -305,6 +306,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       assert_received {:auth, ["Bearer test-key"]}
     end
 
+    @tag :capture_log
     test "cancels without calling Monica when the key has been wiped",
          %{user: user, account_id: account_id} do
       import_job = api_import_fixture(account_id, user.id)

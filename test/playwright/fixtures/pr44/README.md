@@ -1,6 +1,6 @@
 # PR44 regression E2E harness
 
-Runs six Playwright tests covering all five agreed fixes against real Phoenix UI,
+Runs eight PR44 Playwright tests covering the agreed fixes and editor security against real Phoenix UI,
 Postgres, importer/worker contexts, and SMTP delivery to Mailpit. The Monica source
 is a deterministic HTTP server, not a mocked importer: it returns ten notes and
 an exchange with identical sent/received messages at the same timestamp.
@@ -30,8 +30,8 @@ npm run test:pr44
 ```
 
 This starts Phoenix, the deterministic Monica fixture, and a fresh fake S3; seeds
-an isolated database with a unique `kith_testpr44_browser_*` name; and runs both the six PR44 regressions
-and eight image-fallback scenarios. PostgreSQL and Mailpit must already be running.
+an isolated database with a unique `kith_testpr44_browser_*` name; and runs eight PR44 regressions,
+eight image-fallback scenarios, and three focused editor security scenarios. PostgreSQL and Mailpit must already be running.
 It requires the fixtures rather than silently skipping their tests. Servers started
 by the script are stopped on exit; diagnostic logs are under `tmp/pr44-browser`.
 Browser traces are retained on failure. The existing 90% ExUnit coverage threshold
@@ -104,6 +104,11 @@ used. The normal Playwright configuration targets Phoenix on port 4000.
    pre-snooze job is discarded and the new job delivers exactly one SMTP email.
 6. Import the two opposite-direction “OK” messages, retry the misc worker, and
    verify both records remain stable and appear through the actual messages API.
+7. Exercise paste/drop injection payloads in the shipped note editor, preserve
+   inline formatting and paragraph boundaries, then save, query and reload the
+   server-sanitized note.
+8. Edit and reload a legacy multiline plain-text note without losing line breaks
+   or turning escaped markup into executable HTML.
 
 `control.exs` is a test-only CLI, invoked with `execFileSync` and separate argv
 values (no shell interpolation). It uses real contexts and workers. CLI and web
@@ -142,3 +147,7 @@ so incidental foreign-key locks cannot make the test pass.
 These tests establish database and application-state contracts, not exactly-once
 SMTP delivery. Completed import response checkpoints preserve the original
 snapshot on retry and do not restore rows the user subsequently deleted.
+
+## Warning remediation verification (2026-10-29)
+
+The final harness passes all 19 scenarios: eight PR44 behavior/editor cases, eight image-fallback cases and three focused editor security cases. The actual shipped editor tests preserve paragraph boundaries and legacy multiline notes through save/reload. Final ExUnit: 1,843 tests, zero failures; JavaScript: 14 passed. Fresh PLT/application Dialyzer, `mix quality`, dependency audits and cold production release passed; hosted action/cache/artifact behavior remains a separate CI check.

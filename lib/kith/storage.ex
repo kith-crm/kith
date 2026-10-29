@@ -45,7 +45,9 @@ defmodule Kith.Storage do
   Returns `{:ok, binary}` or `{:error, reason}`.
   """
   def read(storage_key) do
-    backend().read(storage_key)
+    with :ok <- validate_storage_key(storage_key) do
+      backend().read(storage_key)
+    end
   end
 
   @doc """
@@ -65,7 +67,9 @@ defmodule Kith.Storage do
   For S3 backend: returns a presigned URL with 1-hour expiry.
   """
   def url(storage_key) do
-    backend().url(storage_key)
+    with :ok <- validate_storage_key(storage_key) do
+      backend().url(storage_key)
+    end
   end
 
   @doc """
@@ -139,8 +143,11 @@ defmodule Kith.Storage do
 
   @doc "Generates a UUID-based storage key for an upload."
   def generate_key(account_id, type, original_filename)
-      when type in ~w(photos documents avatars) do
-    ext = Path.extname(original_filename)
+      when type in ~w(photos documents avatars imports) do
+    # A filename is display metadata, never part of a storage path. Retain only
+    # a bounded conventional extension; arbitrary document names remain valid.
+    candidate = Path.extname(original_filename)
+    ext = if Regex.match?(~r/\A\.[A-Za-z0-9]{1,16}\z/, candidate), do: candidate, else: ""
     uuid = Ecto.UUID.generate()
     "#{account_id}/#{type}/#{uuid}#{ext}"
   end
@@ -175,13 +182,21 @@ defmodule Kith.Storage do
     end
   end
 
-  defp validate_storage_key(key) do
-    if String.contains?(key, "..") do
-      {:error, :invalid_path}
-    else
+  @doc "Validates the shared relative object-key policy for every storage operation."
+  def validate_storage_key(key) when is_binary(key) and byte_size(key) in 1..4096 do
+    parts = String.split(key, "/")
+
+    if String.valid?(key) and Path.type(key) == :relative and
+         not String.contains?(key, ["\\", <<0>>]) and
+         not Regex.match?(~r/%[0-9A-Fa-f]{2}/, key) and
+         Enum.all?(parts, &(&1 not in ["", ".", ".."] and not String.contains?(&1, ".."))) do
       :ok
+    else
+      {:error, :invalid_path}
     end
   end
+
+  def validate_storage_key(_), do: {:error, :invalid_path}
 
   defp compute_usage(account_id) do
     import Ecto.Query

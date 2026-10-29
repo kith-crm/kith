@@ -40,6 +40,7 @@ defmodule Kith.Workers.ReminderEmailWorkerFailureTest do
   end
 
   for newer_state <- [:snoozed, :woken, :resolved] do
+    @tag :capture_log
     test "a final delivery failure cannot overwrite #{newer_state} while SMTP is in flight",
          ctx do
       original = Application.fetch_env!(:kith, Kith.Mailer)
@@ -84,6 +85,7 @@ defmodule Kith.Workers.ReminderEmailWorkerFailureTest do
     end
   end
 
+  @tag :capture_log
   test "a final failure rearms stay-in-touch using an interval edited during SMTP", ctx do
     today = Date.utc_today()
 
@@ -136,6 +138,7 @@ defmodule Kith.Workers.ReminderEmailWorkerFailureTest do
     :ok
   end
 
+  @tag :capture_log
   test "a failed queued delivery retries successfully without changing the notice", ctx do
     [job] = all_enqueued(worker: ReminderEmailWorker)
     original_mailer = Application.fetch_env!(:kith, Kith.Mailer)
@@ -182,6 +185,7 @@ defmodule Kith.Workers.ReminderEmailWorkerFailureTest do
     refute_email_sent()
   end
 
+  @tag :capture_log
   test "a retryable original job cannot send after a later snooze wakes", ctx do
     [original] = all_enqueued(worker: ReminderEmailWorker)
     original_mailer = Application.get_env(:kith, Kith.Mailer)
@@ -204,6 +208,7 @@ defmodule Kith.Workers.ReminderEmailWorkerFailureTest do
     setup :fail_mail
 
     for blocked <- [:inactive, :deleted, :archived, :resolved, :dismissed, :snoozed, :failed] do
+      @tag :capture_log
       test "does not retry delivery after #{blocked}", ctx do
         assert {:error, :boom} =
                  perform_job(ReminderEmailWorker, %{instance_id: ctx.instance.id}, attempt: 1)
@@ -222,6 +227,7 @@ defmodule Kith.Workers.ReminderEmailWorkerFailureTest do
   describe "when delivery fails on the final attempt" do
     setup :fail_mail
 
+    @tag :capture_log
     test "the instance is marked failed", %{instance: instance} do
       assert {:error, :boom} =
                perform_job(ReminderEmailWorker, %{instance_id: instance.id}, attempt: 3)
@@ -229,6 +235,7 @@ defmodule Kith.Workers.ReminderEmailWorkerFailureTest do
       assert Repo.get!(ReminderInstance, instance.id).status == "failed"
     end
 
+    @tag :capture_log
     test "an earlier attempt leaves the instance pending", %{instance: instance} do
       assert {:error, :boom} =
                perform_job(ReminderEmailWorker, %{instance_id: instance.id}, attempt: 1)
@@ -236,6 +243,7 @@ defmodule Kith.Workers.ReminderEmailWorkerFailureTest do
       assert Repo.get!(ReminderInstance, instance.id).status == "pending"
     end
 
+    @tag :capture_log
     test "a stay-in-touch reminder is re-armed one interval from today", ctx do
       today = Reminders.account_today(ctx.user.account_id)
 

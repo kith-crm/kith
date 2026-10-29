@@ -42,6 +42,10 @@ defmodule PR44Control do
 
         Map.merge(base, %{contact_id: contact.id, reminder_id: reminder.id, title: title})
 
+      "editor" ->
+        contact = contact!(user, "Editor Security")
+        Map.put(base, :contact_id, contact.id)
+
       "import" ->
         base
     end

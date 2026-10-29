@@ -206,3 +206,126 @@ test("import preserves identical opposite-direction messages and remains stable 
   await connected(page);
   await expect(page.getByText("Fixture exchange", { exact: true }).first()).toBeVisible();
 });
+
+test("shipped contact editor rejects paste/drop injection and persists sanitized formatting", async ({ page, request }) => {
+  const account = control("prepare", { scenario: "editor" });
+  await login(page, account);
+  await page.goto(`/contacts/${account.contact_id}`);
+  await connected(page);
+
+  // Use the application-loaded Trix, its real LiveView hook, and the real modal.
+  // The fallback controller is the prerequisite for the drop advisory.
+  await page.evaluate(() => { (window as any).Trix.config.input.level2Enabled = false; });
+  await page.locator('button[phx-click="open-entry-modal"][phx-value-type="note"]').click();
+  const form = page.locator('form[phx-submit="save-entry"]');
+  const editor = form.locator("trix-editor");
+  const hidden = form.locator('input[name="entry[body]"]');
+  await expect(editor).toBeVisible();
+  await expect.poll(() => editor.evaluate((element: any) =>
+    element.editorController?.inputController instanceof (window as any).Trix.controllers.Level0InputController
+  )).toBe(true);
+  await editor.focus();
+
+  // GHSA-53g2-mvcc-q9x3: attachment attributes must not bypass URL filtering.
+  await editor.evaluate((element) => {
+    const clipboardData = new DataTransfer();
+    clipboardData.setData("text/html", `<span data-trix-attachment='{}' data-trix-attributes='{"href":"javascript:window.editorXSS=1"}'>Pasted payload text</span><strong>Kept bold</strong><a href="https://example.com/">Safe link</a><div>First paragraph</div><div>Second paragraph</div><div>Drop target</div>`);
+    element.dispatchEvent(new ClipboardEvent("paste", { clipboardData, bubbles: true, cancelable: true }));
+  });
+  await expect(editor).toContainText("Pasted payload text");
+  await expect(editor.locator("strong")).toHaveText("Kept bold");
+  await expect(editor.locator('a[href="https://example.com/"]')).toHaveText("Safe link");
+  await expect(hidden).not.toHaveValue(/javascript:|editorXSS/);
+
+  // GHSA-53p3-c7vp-4mcc: application/x-trix-document drop attributes are untrusted.
+  await editor.evaluate((element: any) => {
+    element.editor.setSelectedRange([element.editor.getDocument().getLength() - 1, element.editor.getDocument().getLength() - 1]);
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData("application/x-trix-document", JSON.stringify([{ text: [{ type: "string", string: "Dropped safe italic", attributes: { href: "javascript:window.editorXSS=1", italic: true } }], attributes: [] }]));
+    const bounds = element.getBoundingClientRect();
+    element.dispatchEvent(new DragEvent("drop", { dataTransfer, bubbles: true, cancelable: true, clientX: bounds.left + 20, clientY: bounds.bottom - 10 }));
+  });
+  await expect(editor).toContainText("Dropped safe italic");
+  await expect(editor.locator("em")).toHaveText("Dropped safe italic");
+  await expect(hidden).not.toHaveValue(/javascript:|editorXSS/);
+  expect(await page.evaluate(() => (window as any).editorXSS)).toBeUndefined();
+
+  // Bypass client filtering in the actual submitted field to prove server-side
+  // sanitation independently; these bytes never enter an executable DOM sink.
+  await hidden.evaluate((input: HTMLInputElement) => {
+    input.value += '<img src="x" onerror="window.editorXSS=1"><a href="javascript:window.editorXSS=1">Server-filtered link</a><iframe srcdoc="bad"></iframe><p><strong>Server-safe bold</strong></p>';
+  });
+  await form.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+
+  const saved = await api(request, account, `/api/contacts/${account.contact_id}/notes`);
+  expect(saved.data).toHaveLength(1);
+  const body = saved.data[0].body;
+  expect(body).toContain("Pasted payload text");
+  expect(body).toContain("<strong>Kept bold</strong>");
+  expect(body).toContain("<em>Dropped safe italic</em>");
+  expect(body).toContain('href="https://example.com/"');
+  expect(body).toContain("Server-filtered link");
+  expect(body).toContain("<strong>Server-safe bold</strong>");
+  expect(body).toContain("<div>First paragraph</div><div>Second paragraph</div>");
+  expect(body).not.toMatch(/javascript:|editorXSS|<img|<iframe|onerror|srcdoc/i);
+
+  await page.reload();
+  await connected(page);
+  // Reopen the stored note through the normal UI and assert formatting survives
+  // the server sanitizer and the hook's initial-content loading after reload.
+  const editButton = page.locator(`button[phx-click="edit-entry"][phx-value-type="note"][phx-value-id="${saved.data[0].id}"]`);
+  await editButton.locator("..").locator("..").locator(":scope > button").click();
+  await editButton.click();
+  await expect(editor.locator("strong")).toHaveText(["Kept bold", "Server-safe bold"]);
+  await expect(editor.locator("div").filter({ hasText: /^First paragraph$/ })).toBeVisible();
+  await expect(editor.locator("div").filter({ hasText: /^Second paragraph/ })).toBeVisible();
+  await expect(editor.locator("em")).toHaveText("Dropped safe italic");
+  await expect(editor.locator('a[href="https://example.com/"]')).toHaveText("Safe link");
+  await expect(hidden).not.toHaveValue(/javascript:|editorXSS|<img|<iframe|onerror|srcdoc/i);
+  expect(await page.evaluate(() => (window as any).editorXSS)).toBeUndefined();
+});
+
+test("editing a legacy multiline note preserves breaks and escaped markup as text", async ({ page, request }) => {
+  const account = control("prepare", { scenario: "editor" });
+  const original = 'First line\nSecond line\n\nThird paragraph &amp; &lt;img src=x onerror=window.editorXSS=1&gt;';
+  const created = await api(request, account, `/api/contacts/${account.contact_id}/notes`, "POST", { note: { body: original } });
+  expect(created.data.body).toBe(original);
+  await login(page, account);
+  await page.goto(`/contacts/${account.contact_id}`);
+  await connected(page);
+
+  const editButton = page.locator(`button[phx-click="edit-entry"][phx-value-type="note"][phx-value-id="${created.data.id}"]`);
+  async function openNote() {
+    await editButton.locator("..").locator("..").locator(":scope > button").click();
+    await editButton.click();
+  }
+  await openNote();
+  const form = page.locator('form[phx-submit="save-entry"]');
+  const editor = form.locator("trix-editor");
+  const expectedText = 'First line\nSecond line\n\nThird paragraph & <img src=x onerror=window.editorXSS=1>';
+  await expect.poll(() => editor.evaluate((element: any) => element.editor.getDocument().toString())).toBe(`${expectedText}\n`);
+  await expect(editor.locator("img")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).editorXSS)).toBeUndefined();
+
+  // Editing forces the hook to serialize editor HTML, rather than resubmitting
+  // the original textarea-era value unchanged.
+  await editor.evaluate((element: any) => {
+    const end = element.editor.getDocument().getLength() - 1;
+    element.editor.setSelectedRange([end, end]);
+    element.editor.insertString(" edited");
+  });
+  await form.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(editor).toHaveCount(0);
+  const saved = await api(request, account, `/api/notes/${created.data.id}`);
+  expect(saved.data.body).toContain("edited");
+  expect(saved.data.body).not.toContain("<img");
+  expect(saved.data.body).toContain("&lt;img");
+
+  await page.reload();
+  await connected(page);
+  await openNote();
+  await expect.poll(() => editor.evaluate((element: any) => element.editor.getDocument().toString())).toBe(`${expectedText} edited\n`);
+  await expect(editor.locator("img")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as any).editorXSS)).toBeUndefined();
+});

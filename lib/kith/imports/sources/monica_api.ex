@@ -1429,7 +1429,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
         retry_log_level: :warning
       ] ++ req_options
 
-    Req.get(url, options)
+    Kith.BoundedHTTP.get(url, options)
   end
 
   defp api_get_json(credential, url, params) do

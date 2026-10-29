@@ -51,6 +51,7 @@ erl_crash.dump
 /docs/playwright-report/
 /docs/screenshots/
 /tmp/pr44-browser/
+/tmp/security/
 
 # Git worktrees
 .worktrees/

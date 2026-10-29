@@ -28,7 +28,9 @@ defmodule KithWeb.Router do
   pipeline :browser_json do
     plug :accepts, ["json"]
     plug :fetch_session
+    plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug KithWeb.Plugs.CSP
     plug :fetch_current_scope_for_user
   end
 

@@ -108,6 +108,7 @@ defmodule Kith.TimeHelperTest do
                {~D[2026-01-14], 22}
     end
 
+    @tag :capture_log
     test "falls back to UTC for an invalid or missing timezone" do
       assert TimeHelper.local_date_hour(~U[2026-09-26 20:30:00Z], "Mars/Olympus") ==
                {~D[2026-09-26], 20}

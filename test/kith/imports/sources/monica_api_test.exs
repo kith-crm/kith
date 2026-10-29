@@ -452,6 +452,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert eve.first_met_additional_info == "Through mutual friends at a party"
     end
 
+    @tag :capture_log
     test "skips first_met_through when referenced contact not found", %{
       user: user,
       account_id: account_id
@@ -550,6 +551,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert Enum.any?(rels, fn r -> r.related_contact_id == bob_rec.local_entity_id end)
     end
 
+    @tag :capture_log
     test "skips relationship when related contact not imported", %{
       user: user,
       account_id: account_id
@@ -978,6 +980,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   # ── crawl/5 — error handling ─────────────────────────────────────────
 
   describe "crawl/5 — error handling" do
+    @tag :capture_log
     test "a contact that fails to create counts as an error, not as skipped", %{
       user: user,
       account_id: account_id
@@ -2242,6 +2245,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       refute_received {:single_fetch, _}
     end
 
+    @tag :capture_log
     test "a skipped contact first found by the gap scan is not counted as imported", %{
       user: user,
       account_id: account_id
@@ -2348,6 +2352,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       refute is_nil(record)
     end
 
+    @tag :capture_log
     test "closes a 1-of-2 gap when one direct fetch 404s",
          %{user: user, account_id: account_id} do
       import_job = api_import_fixture(account_id, user.id)
@@ -2405,6 +2410,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert summary.coverage_backfill.unresolved_gap == 1
     end
 
+    @tag :capture_log
     test "skips inactive contact in gap", %{user: user, account_id: account_id} do
       import_job = api_import_fixture(account_id, user.id)
 

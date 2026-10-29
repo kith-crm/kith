@@ -14,6 +14,7 @@ defmodule KithWeb.WebauthnController do
   use KithWeb, :controller
 
   alias Kith.Accounts
+  alias Kith.Accounts.CoseKey
   alias KithWeb.UserAuth
 
   # ── Registration ──────────────────────────────────────────────────
@@ -220,25 +221,30 @@ defmodule KithWeb.WebauthnController do
          client_data_json,
          challenge
        ) do
-    cose_key = :erlang.binary_to_term(db_credential.public_key)
-    allow_creds = [{credential_id, cose_key}]
+    with {:ok, cose_key} <- CoseKey.decode(db_credential.public_key),
+         {:ok, auth_data} <-
+           authenticate_assertion(
+             credential_id,
+             auth_data_bin,
+             signature,
+             client_data_json,
+             challenge,
+             [{credential_id, cose_key}]
+           ) do
+      Accounts.touch_webauthn_credential(db_credential, auth_data.sign_count)
+      user = Accounts.get_user!(db_credential.user_id)
 
-    case Wax.authenticate(
-           credential_id,
-           auth_data_bin,
-           signature,
-           client_data_json,
-           challenge,
-           allow_creds
-         ) do
-      {:ok, auth_data} ->
-        Accounts.touch_webauthn_credential(db_credential, auth_data.sign_count)
-        user = Accounts.get_user!(db_credential.user_id)
-
+      conn
+      |> delete_session(:webauthn_auth_challenge)
+      |> delete_session(:webauthn_auth_user_id)
+      |> UserAuth.log_in_user(user, %{"remember_me" => "false"})
+    else
+      {:error, :invalid_key} ->
         conn
         |> delete_session(:webauthn_auth_challenge)
         |> delete_session(:webauthn_auth_user_id)
-        |> UserAuth.log_in_user(user, %{"remember_me" => "false"})
+        |> put_status(401)
+        |> json(%{error: "Invalid stored credential"})
 
       {:error, error} ->
         conn
@@ -246,6 +252,22 @@ defmodule KithWeb.WebauthnController do
         |> put_status(401)
         |> json(%{error: "Authentication failed: #{Exception.message(error)}"})
     end
+  end
+
+  # A structurally valid stored EC point can still be invalid for the curve.
+  # OTP raises badarg for those keys; treat that as a rejected credential.
+  defp authenticate_assertion(id, auth_data, signature, client_data, challenge, credentials) do
+    Wax.authenticate(id, auth_data, signature, client_data, challenge, credentials)
+  rescue
+    ArgumentError ->
+      {:error, :invalid_key}
+
+    error in ErlangError ->
+      case error.original do
+        {:badarg, _, _} -> {:error, :invalid_key}
+        :badarg -> {:error, :invalid_key}
+        _ -> reraise error, __STACKTRACE__
+      end
   end
 
   # ── Credential Management ─────────────────────────────────────────

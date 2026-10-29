@@ -34,32 +34,30 @@ defmodule KithWeb.ContactLive.DocumentsListComponent do
   def handle_event("upload", _params, socket) do
     contact = Contacts.get_contact!(socket.assigns.account_id, socket.assigns.contact_id)
 
-    uploaded_docs =
+    results =
       consume_uploaded_entries(socket, :document, fn %{path: path}, entry ->
-        key = "contacts/#{contact.id}/documents/#{entry.uuid}-#{entry.client_name}"
-        {:ok, _} = Storage.upload(path, key)
-
-        {:ok, doc} =
-          Contacts.create_document(contact, %{
-            file_name: entry.client_name,
-            storage_key: key,
-            file_size: entry.client_size,
-            content_type: entry.client_type
-          })
-
-        {:ok, doc}
+        {:ok, KithWeb.ContactUploads.save(contact, path, entry, :document)}
       end)
 
-    if uploaded_docs != [] do
-      documents = Contacts.list_documents(socket.assigns.contact_id)
+    uploaded = Enum.count(results, &match?({:ok, _}, &1))
+    failed = Enum.any?(results, &match?({:error, _}, &1))
 
-      {:noreply,
-       socket
-       |> assign(:documents, documents)
-       |> put_flash(:info, "#{length(uploaded_docs)} document(s) uploaded.")}
-    else
-      {:noreply, socket}
-    end
+    socket =
+      socket
+      |> clear_flash(:error)
+      |> assign(:documents, Contacts.list_documents(socket.assigns.contact_id))
+
+    socket =
+      if uploaded > 0,
+        do: put_flash(socket, :info, "#{uploaded} document(s) uploaded."),
+        else: socket
+
+    socket =
+      if failed,
+        do: put_flash(socket, :error, "Some documents could not be uploaded. Please try again."),
+        else: socket
+
+    {:noreply, socket}
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
@@ -100,6 +98,7 @@ defmodule KithWeb.ContactLive.DocumentsListComponent do
   def render(assigns) do
     ~H"""
     <div>
+      <p :if={@flash["error"]} role="alert">{@flash["error"]}</p>
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Documents</h2>
       </div>

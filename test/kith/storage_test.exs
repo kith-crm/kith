@@ -15,6 +15,19 @@ defmodule Kith.StorageTest do
       assert String.starts_with?(key, "42/documents/")
     end
 
+    test "does not include client path or unsafe filename extensions" do
+      for filename <- [
+            "../../100% complete.pdf",
+            "document.%2e",
+            "a.\\evil",
+            "a." <> String.duplicate("x", 100)
+          ] do
+        key = Storage.generate_key(42, "documents", filename)
+        assert key =~ ~r/\A42\/documents\/[a-f0-9-]{36}(?:\.pdf)?\z/
+        assert Storage.validate_storage_key(key) == :ok
+      end
+    end
+
     test "generates unique keys" do
       key1 = Storage.generate_key(1, "photos", "a.jpg")
       key2 = Storage.generate_key(1, "photos", "a.jpg")
@@ -50,6 +63,12 @@ defmodule Kith.StorageTest do
   describe "validate path traversal" do
     test "upload rejects paths with .." do
       assert {:error, :invalid_path} = Storage.upload("/tmp/file", "../etc/passwd")
+    end
+
+    test "read rejects invalid keys before backend access" do
+      for key <- ["../etc/passwd", "/etc/passwd", "a/%2e%2e/secret", nil] do
+        assert {:error, :invalid_path} = Storage.read(key)
+      end
     end
 
     test "delete rejects paths with .." do

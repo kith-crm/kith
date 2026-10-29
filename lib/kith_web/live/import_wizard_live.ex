@@ -264,7 +264,7 @@ defmodule KithWeb.ImportWizardLive do
         data = File.read!(path)
 
         storage_key =
-          "imports/#{account_id}/#{Ecto.UUID.generate()}#{Path.extname(entry.client_name)}"
+          Storage.generate_key(account_id, "imports", entry.client_name)
 
         case Storage.upload_binary(data, storage_key) do
           {:ok, _} -> {:ok, {storage_key, entry.client_name, byte_size(data)}}

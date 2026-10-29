@@ -153,7 +153,7 @@ defmodule Kith.Contacts.PhoneFormatter do
   defp region_label(code, locale) do
     name =
       case Kith.Cldr.Territory.from_territory_code(
-             String.to_atom(code),
+             code,
              locale: locale,
              style: :standard
            ) do

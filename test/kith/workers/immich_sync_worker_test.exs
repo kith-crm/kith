@@ -43,6 +43,7 @@ defmodule Kith.Workers.ImmichSyncWorkerTest do
   end
 
   describe "circuit breaker" do
+    @tag :capture_log
     test "increments failure counter on sync failure", %{account: account} do
       Req.Test.expect(Kith.Immich.Client, &Req.Test.transport_error(&1, :econnrefused))
 
@@ -63,6 +64,7 @@ defmodule Kith.Workers.ImmichSyncWorkerTest do
       assert reloaded.immich_status != "error"
     end
 
+    @tag :capture_log
     test "opens after three failures and makes no further request", %{account: account} do
       account
       |> Account.immich_changeset(%{

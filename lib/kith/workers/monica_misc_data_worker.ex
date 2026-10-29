@@ -68,6 +68,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   alias Kith.Reminders
   alias Kith.Repo
   alias Kith.Tasks.Task
+  alias Kith.Types.BoundedDecimal
 
   defmodule FetchError do
     defexception [:message]
@@ -1391,8 +1392,8 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     title = norm(debt_data["reason"] || "Imported debt")
     direction = debt_direction(debt_data)
 
-    case Decimal.parse(to_string(debt_data["amount"] || "0")) do
-      {amount, ""} ->
+    case BoundedDecimal.cast(debt_data["amount"] || "0") do
+      {:ok, amount} ->
         Repo.exists?(
           from(d in Debt,
             where:
