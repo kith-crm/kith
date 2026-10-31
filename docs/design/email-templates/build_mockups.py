@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parent
 LOGO = "data:image/png;base64," + base64.b64encode((ROOT / "logo.png").read_bytes()).decode()
 
 # sRGB equivalents of the light theme tokens in assets/css/app.css.
-# The logo retains its original #FD4F00; CTAs use --color-accent.
+# The logo comes from landing/android-chrome-192x192.png; CTAs use --color-accent.
 BRAND = dict(accent="#d25900", accent_subtle="#fef8e5", surface="#fbfaf7",
              sunken="#f6f4f0", card="#ffffff", text="#1c1917",
              secondary="#57534d", tertiary="#79716b", border="#d6d3d0",
@@ -149,7 +149,7 @@ def render_email(e):
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:{b['surface']};"><tr><td align="center" style="padding:28px 12px;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;width:100%;background:{b['card']};border:1px solid {b['border']};border-radius:8px;">
 <tr><td style="padding:24px 24px 22px;border-bottom:1px solid {b['subtle_border']};">
-<table role="presentation" cellspacing="0" cellpadding="0"><tr><td width="53"><img src="{LOGO}" alt="Kith logo" width="47" height="32" style="display:block;border:0;"></td><td style="font-size:27px;letter-spacing:-1.2px;font-weight:700;color:{b['text']};">Kith</td></tr></table>
+<table role="presentation" cellspacing="0" cellpadding="0"><tr><td width="42"><img src="{LOGO}" alt="Kith logo" width="32" height="32" style="display:block;border:0;"></td><td style="font-size:27px;letter-spacing:-1.2px;font-weight:700;color:{b['text']};">Kith</td></tr></table>
 </td></tr><tr><td style="padding:28px 24px 26px;">
 {content}
 <table role="presentation" cellspacing="0" cellpadding="0" style="margin:26px 0 0;"><tr><td bgcolor="{b['accent']}" style="border-radius:6px;text-align:center;"><a data-cta="primary" href="{esc(e['url'])}" style="display:inline-block;padding:14px 20px;border:1px solid {b['accent']};border-radius:6px;font-size:13px;line-height:18px;font-weight:600;color:#ffffff;text-decoration:none;">{esc(e['action'])}</a></td></tr></table>

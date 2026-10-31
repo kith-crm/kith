@@ -141,8 +141,8 @@ defmodule Kith.Emails.Template do
           style="max-width:560px;width:100%;background:#{@colors.card};border:1px solid #{@colors.border};
           border-radius:8px;table-layout:fixed;">
           <tr><td style="padding:24px 24px 22px;border-bottom:1px solid #{@colors.subtle_border};">
-            <table role="presentation" cellspacing="0" cellpadding="0"><tr><td width="53">
-              <img src="cid:kith-logo.png" alt="Kith logo" width="47" height="32"
+            <table role="presentation" cellspacing="0" cellpadding="0"><tr><td width="42">
+              <img src="cid:kith-logo.png" alt="Kith logo" width="32" height="32"
                 style="display:block;border:0;"></td>
               <td style="font-size:27px;letter-spacing:-1.2px;font-weight:700;
                 color:#{@colors.text};">Kith</td></tr></table>
