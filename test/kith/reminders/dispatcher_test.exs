@@ -173,6 +173,61 @@ defmodule Kith.Reminders.DispatcherTest do
     assert Repo.get!(Reminder, r.id).next_reminder_date == Date.shift(ctx.today, month: 1)
   end
 
+  for {action, status} <- [resolve_instance: "resolved", dismiss_instance: "dismissed"] do
+    test "stay-in-touch waits through snooze expiry until #{status}", ctx do
+      r =
+        create!(ctx, %{
+          type: "stay_in_touch",
+          interval_unit: "day",
+          interval_count: 1,
+          anchor_date: ctx.today
+        })
+
+      assert :ok = Dispatcher.run(ctx.after_send)
+      assert [instance] = instances(r)
+      assert {:ok, snoozed} = Reminders.snooze_instance(instance, "three_days")
+
+      # Anchor expiry to the dispatcher's explicit clock rather than wall time.
+      expires_at = DateTime.add(ctx.after_send, 3 * 86_400)
+
+      snoozed =
+        snoozed
+        |> Ecto.Changeset.change(snoozed_until: expires_at)
+        |> Repo.update!()
+
+      Repo.delete_all(Oban.Job)
+
+      for seconds <- [3600, 86_400, 2 * 86_400, 3 * 86_400 - 1] do
+        assert :ok = Dispatcher.run(DateTime.add(ctx.after_send, seconds))
+        assert instances(r) == [snoozed]
+        assert Repo.get!(Reminder, r.id).next_reminder_date == ctx.today
+        refute_enqueued(worker: ReminderEmailWorker)
+      end
+
+      assert :ok = Dispatcher.run(expires_at)
+      assert [pending] = instances(r)
+      assert pending.id == instance.id
+      assert pending.status == "pending"
+      assert pending.snoozed_until == nil
+      assert pending.snooze_count == 1
+
+      assert :ok = Dispatcher.run(DateTime.add(expires_at, 3600))
+      assert instances(r) == [pending]
+      assert Repo.get!(Reminder, r.id).next_reminder_date == ctx.today
+
+      assert [%{args: %{"instance_id" => id, "snooze_count" => 1}}] =
+               all_enqueued(worker: ReminderEmailWorker)
+
+      assert id == instance.id
+
+      # Resolution uses the account's real local date, independently of run/1.
+      next_date = Date.add(Reminders.account_today(ctx.account_id), 1)
+      assert {:ok, finished} = apply(Reminders, unquote(action), [pending])
+      assert finished.status == unquote(status)
+      assert Repo.get!(Reminder, r.id).next_reminder_date == next_date
+    end
+  end
+
   test "a deceased contact's birthday is sent and advanced", ctx do
     {:ok, contact} = Kith.Contacts.update_contact(ctx.contact, %{deceased: true})
 

@@ -5,7 +5,7 @@ defmodule Kith.Reminders.Dispatcher do
 
   For each account whose local hour has reached `send_hour`:
   - the on-day notice when `next_reminder_date <= local today` (catch-up
-    included); stay-in-touch waits while it has a pending instance;
+    included); stay-in-touch waits while it has a pending or snoozed instance;
   - at most one advance notice per birthday/one-time reminder: window
     boundaries come from all configured advance rules (active or not), via
     `advance_days_before/3`, but a notice only sends when the rule whose
@@ -144,7 +144,7 @@ defmodule Kith.Reminders.Dispatcher do
   end
 
   defp send_on_day(%Reminder{type: "stay_in_touch"} = reminder, today, now) do
-    if Kith.Reminders.has_pending_instance?(reminder.id),
+    if Kith.Reminders.has_outstanding_instance?(reminder.id),
       do: :waiting,
       else: send_notice(reminder, "on_day", 0, today, now)
   end
@@ -222,7 +222,7 @@ defmodule Kith.Reminders.Dispatcher do
 
   defp advance(_reminder, _today), do: :ok
 
-  # Stay-in-touch only reaches here with no pending instance, so nothing else
+  # Stay-in-touch only reaches here with no pending or snoozed instance, so nothing else
   # will re-arm it.
   defp move_past_sent(%Reminder{type: "stay_in_touch"} = reminder, today),
     do: reminder |> Reminder.rearm_changeset(today) |> Repo.update!()

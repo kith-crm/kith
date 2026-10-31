@@ -461,6 +461,14 @@ defmodule Kith.Reminders do
     |> Repo.exists?()
   end
 
+  @doc false
+  def has_outstanding_instance?(reminder_id) do
+    from(i in ReminderInstance,
+      where: i.reminder_id == ^reminder_id and i.status in ["pending", "snoozed"]
+    )
+    |> Repo.exists?()
+  end
+
   @doc "Today's date in the account's timezone."
   @spec account_today(integer()) :: Date.t()
   def account_today(account_id) do
