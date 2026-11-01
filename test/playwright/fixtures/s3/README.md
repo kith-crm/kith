@@ -12,8 +12,11 @@ Drives `test/playwright/image-fallback.spec.ts` against a local fake S3.
    The data directory must start empty, or objects from an earlier run leak into this one.
    `mktemp -d` gives a fresh empty directory each run, so nothing has to be deleted first.
 
-   The seed script uploads the valid images (`ok-1.png`, `avatar-a.png`) itself; keys never
-   uploaded return 404.
+   The seed script uploads the valid timeline image (`ok-1.png`) and avatar source
+   photos, then selects processed JPEG avatars through `Contacts.set_avatar/2`.
+   It deletes one selected rendition from fake S3 to exercise avatar fallback
+   while retaining the original photo and valid database references. Missing keys
+   return 404; the fake server supports PUT, GET, HEAD and idempotent DELETE.
 
 2. Add this block to `config/dev.exs`. It is **uncommitted**; never commit it:
 

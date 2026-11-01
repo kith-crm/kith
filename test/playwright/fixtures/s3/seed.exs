@@ -2,8 +2,9 @@
 # contact whose photo is still syncing, two duplicates with different avatars
 # (one missing), for test/playwright/image-fallback.spec.ts. Requires the
 # fake S3 (fake_s3.py) and REVIEW_S3=1 dev config (see README).
-# Also uploads two valid PNGs (ok-1.png, avatar-a.png) to the fake S3.
-alias Kith.{Accounts, Contacts, Repo}
+# Uploads source PNGs and selects processed avatars, then removes one rendition
+# from storage to exercise a missing avatar without bypassing contact validation.
+alias Kith.{Accounts, Contacts, Repo, Storage}
 
 # Keep Ecto debug SQL off stdout so the final JSON line is the only output.
 Logger.configure(level: :warning)
@@ -13,13 +14,9 @@ email = "img-#{System.unique_integer([:positive])}@test.local"
 user = user |> Ecto.Changeset.change(confirmed_at: DateTime.utc_now(:second)) |> Repo.update!()
 acc = user.account_id
 
-png =
-  Base.decode64!(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
-  )
+png = Image.new!(32, 24, color: [180, 40, 30]) |> Image.write!(:memory, suffix: ".png")
 
-{:ok, _} = Kith.Storage.upload_binary(png, "#{acc}/photos/ok-1.png")
-{:ok, _} = Kith.Storage.upload_binary(png, "#{acc}/avatars/avatar-a.png")
+{:ok, _} = Storage.upload_binary(png, "#{acc}/photos/ok-1.png")
 
 {:ok, photo_contact} = Contacts.create_contact(acc, %{first_name: "Photo", last_name: "Missing"})
 
@@ -61,19 +58,26 @@ stale_photo = photo.(stale_contact, "#{acc}/photos/missing-s.png", "stale.png")
 changed_contact = new_contact.("Changed")
 changed_photo = photo.(changed_contact, "#{acc}/photos/missing-c.png", "changed.png")
 
-{:ok, a} =
-  Contacts.create_contact(acc, %{
-    first_name: "Mona",
-    last_name: "Vale",
-    avatar: "#{acc}/avatars/avatar-a.png"
-  })
+with_avatar = fn name ->
+  {:ok, contact} = Contacts.create_contact(acc, %{first_name: "Mona", last_name: "Vale"})
+  key = Storage.generate_key(acc, "photos", name)
+  {:ok, _} = Storage.upload_binary(png, key)
 
-{:ok, b} =
-  Contacts.create_contact(acc, %{
-    first_name: "Mona",
-    last_name: "Vale",
-    avatar: "#{acc}/avatars/missing-b.png"
-  })
+  {:ok, source} =
+    Contacts.create_photo(contact, %{
+      file_name: name,
+      storage_key: key,
+      file_size: byte_size(png),
+      content_type: "image/png"
+    })
+
+  {:ok, selected} = Contacts.set_avatar(contact, source)
+  selected
+end
+
+a = with_avatar.("avatar-a.png")
+b = with_avatar.("avatar-b.png")
+:ok = Storage.delete(b.avatar)
 
 Repo.insert!(%Contacts.DuplicateCandidate{
   account_id: acc,
