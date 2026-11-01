@@ -23,6 +23,7 @@ mix compile --warnings-as-errors
 mix credo --strict           # Static analysis (style/consistency)
 mix dialyzer                 # Type-based static analysis (first run builds PLT ~5-12 min)
 mix quality                  # All static analysis: compile + format + credo + sobelow + dialyzer
+mix ci.audit                 # Hex + both npm audits + reviewed Sobelow checks
 mix precommit                # compile + unlock unused + format + credo + test
 
 # Tests — ExUnit

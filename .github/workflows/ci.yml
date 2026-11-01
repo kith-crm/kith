@@ -69,9 +69,6 @@ jobs:
       - name: Credo static analysis
         run: mix credo --strict
 
-      - name: Sobelow security scan
-        run: mix run --no-start scripts/security/sobelow_check.exs
-
       - name: Setup database
         run: mix ecto.create && mix ecto.migrate
 
@@ -100,8 +97,8 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci && npm ci --prefix assets
 
-      - name: Enforce dependency security policy
-        run: mix run --no-start scripts/security/dependency_audit.exs
+      - name: Audit dependencies and application security
+        run: mix ci.audit
 
       - name: Test JavaScript hooks
         run: npm run test:js

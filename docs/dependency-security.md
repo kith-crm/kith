@@ -25,14 +25,14 @@ Unpublished Calendars, PromEx, Wax and Credo experiments remain optional histori
 Install the locked Mix dependencies and both npm dependency graphs before running these checks from the repository root:
 
 ```bash
-mix run --no-start scripts/security/dependency_audit.exs
+mix ci.audit
 MIX_ENV=test mix run --no-start scripts/security/dependency_graph.exs
 mix quality
 ```
 
-Every Hex advisory or retirement and either npm audit failure blocks acceptance. The audit gate clears both inherited Hex ignore variables, runs all three audits even after failure and records their outcomes. No CVE/retirement exceptions, inherited suppression, incompatible overrides or weakened failure handling are permitted. The dependency graph check verifies installed constraints and runtime floors.
+`mix ci.audit` runs Hex, root npm, assets npm and the reviewed Sobelow check. It clears inherited Hex ignore variables, runs every check even after a failure and exits unsuccessfully if any check fails. Output goes directly to the terminal and CI logs. No CVE/retirement exceptions, inherited suppression, incompatible overrides or weakened failure handling are permitted. The optional dependency graph check verifies installed constraints and runtime floors.
 
-`mix quality` includes compilation, formatting, strict Credo, the source-bound Sobelow gate and Dialyzer. Keep `scripts/security/sobelow-exceptions.json`: each reviewed exception is tied to exact source and an expiry; changed, expired, stale or unreviewed findings fail closed. Generated reports belong under ignored `tmp/` paths.
+`mix quality` includes compilation, formatting, strict Credo, the source-bound Sobelow gate and Dialyzer for local pre-commit checks. CI runs Sobelow once through `mix ci.audit`. Keep `scripts/security/sobelow-exceptions.json`: each reviewed exception is tied to exact source and an expiry; changed, expired, stale or unreviewed findings fail closed. Sobelow diagnostics remain under ignored `tmp/` paths.
 
 The production smoke checks require Docker with a running daemon, Python 3, the installed root Node dependencies and Playwright Chromium (`npx playwright install chromium`), and a prebuilt production image tagged `kith:review`. They consume the image without building it. Run them from the repository root:
 
