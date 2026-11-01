@@ -316,14 +316,14 @@
     "file": "lib/kith/rich_text.ex",
     "variable": "sanitize",
     "source_sha256": "9c1bfd1d8443b8db2b758bc71a64b1e034c63d6d96d2dc00f524742810a33fca",
-    "reason": "All output passes HtmlSanitizeEx.Scrubber with the narrow Note.Scrubber tag/URL allowlist immediately before HTML.raw. No unsanitized fallback exists; legacy rows are sanitized again on rendering.",
-    "evidence": "test/kith/rich_text_test.exs; test/kith_web/live/rich_text_security_test.exs",
+    "reason": "All output passes HtmlSanitizeEx.Scrubber with the narrow Note.Scrubber tag/URL allowlist immediately before HTML.raw. No unsanitized fallback exists; legacy rows are sanitized again on rendering. Note.render_body only escapes literal angle brackets before calling the same scrubber; its tag and URL allowlist is unchanged. Escaped imports stay text and are never decoded into executable markup.",
+    "evidence": "test/kith/rich_text_test.exs; test/kith/contacts/note_test.exs; test/kith_web/live/rich_text_security_test.exs; test/playwright/regressions.spec.ts (shipped editor and legacy multiline); test/playwright/contact-notes.spec.ts",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29",
     "reviewed_sources": [
       {
         "file": "lib/kith/contacts/note.ex",
-        "source_sha256": "cd686cca2f0b9811db6c850deca8faa75acaf6f7992d1bf95f00973c4a15a6d6"
+        "source_sha256": "a58a455a626a263992022e7899075c68b6243f17ba461a4a803b486d813aa6c8"
       },
       {
         "file": "mix.lock",

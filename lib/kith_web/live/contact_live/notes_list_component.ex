@@ -1,6 +1,8 @@
 defmodule KithWeb.ContactLive.NotesListComponent do
   use KithWeb, :live_component
 
+  import KithWeb.NoteComponents
+
   alias Kith.Contacts
 
   @impl true
@@ -150,17 +152,19 @@ defmodule KithWeb.ContactLive.NotesListComponent do
         <div class="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] shadow-sm mb-4">
           <div class="p-4">
             <.form for={%{}} phx-submit="save-note" phx-target={@myself}>
-              <div id={"trix-new-note-#{@contact_id}"} phx-hook="TrixEditor" data-input="note[body]">
-                <input type="hidden" name="note[body]" value="" />
-                <trix-editor class="trix-content min-h-[100px] prose prose-sm max-w-none border rounded-[var(--radius-lg)] p-2 bg-[var(--color-surface-elevated)]">
-                </trix-editor>
-              </div>
+              <.note_editor
+                id={"trix-new-note-#{@contact_id}"}
+                name="note[body]"
+                value={Ecto.Changeset.get_field(@changeset, :body) || ""}
+              />
               <div class="mt-2">
                 <label class="flex cursor-pointer justify-start gap-2">
+                  <input type="hidden" name="note[is_private]" value="false" />
                   <input
                     type="checkbox"
                     name="note[is_private]"
                     value="true"
+                    checked={Ecto.Changeset.get_field(@changeset, :is_private)}
                     class="size-4 rounded-[var(--radius-sm)] border border-[var(--color-border)] accent-[var(--color-accent)] cursor-pointer"
                   />
                   <span class="text-sm font-medium text-[var(--color-text-primary)] flex items-center gap-1">
@@ -216,11 +220,21 @@ defmodule KithWeb.ContactLive.NotesListComponent do
               <%= if @editing_note_id == note.id do %>
                 <%!-- Inline edit form --%>
                 <.form for={%{}} phx-submit="update-note" phx-target={@myself}>
-                  <div id={"trix-edit-note-#{note.id}"} phx-hook="TrixEditor" data-input="note[body]">
-                    <input type="hidden" name="note[body]" value={note.body} />
-                    <trix-editor class="trix-content min-h-[100px] prose prose-sm max-w-none border rounded-[var(--radius-lg)] p-2 bg-[var(--color-surface-elevated)]">
-                    </trix-editor>
-                  </div>
+                  <.note_editor
+                    id={"trix-edit-note-#{note.id}"}
+                    name="note[body]"
+                    value={Ecto.Changeset.get_field(@changeset, :body) || ""}
+                  />
+                  <label class="flex items-center gap-2 mt-2">
+                    <input type="hidden" name="note[is_private]" value="false" />
+                    <input
+                      type="checkbox"
+                      name="note[is_private]"
+                      value="true"
+                      checked={Ecto.Changeset.get_field(@changeset, :is_private)}
+                    />
+                    <span>Private (only visible to you)</span>
+                  </label>
                   <div class="flex gap-2 mt-3">
                     <button
                       type="submit"
@@ -242,7 +256,7 @@ defmodule KithWeb.ContactLive.NotesListComponent do
                 <%!-- Note display --%>
                 <div class="flex items-start justify-between">
                   <div class="prose prose-sm max-w-none flex-1">
-                    {Kith.RichText.render(note.body)}
+                    <.note_body body={note.body} />
                   </div>
                   <div class="flex items-center gap-1 ms-2 shrink-0">
                     <%= if note.is_private do %>

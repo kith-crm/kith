@@ -6,6 +6,8 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   """
   use KithWeb, :live_component
 
+  import KithWeb.NoteComponents
+
   alias Kith.Activities
   alias Kith.Contacts
   alias Kith.Contacts.ActivityStream
@@ -110,6 +112,18 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
          |> load_entries()}
 
       {:error, message} ->
+        socket =
+          if type == :note do
+            note_params = params["entry"] || %{}
+
+            assign(socket, :modal_record, %{
+              body: note_params["body"] || "",
+              is_private: note_params["is_private"] in [true, "true"]
+            })
+          else
+            socket
+          end
+
         {:noreply, assign(socket, :modal_error, message)}
     end
   end
@@ -550,11 +564,13 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
           </div>
 
           <div
-            :if={entry.body}
+            :if={entry.body && entry.type != :note}
             class="text-xs text-[var(--color-text-secondary)] leading-relaxed line-clamp-3"
           >
-            {if entry.type == :note, do: strip_html(entry.body), else: entry.body}
+            {entry.body}
           </div>
+
+          <.note_body :if={entry.type == :note && entry.body} body={entry.body} />
 
           <.live_component
             :if={entry.type == :photo}
@@ -587,19 +603,12 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             >
               Content
             </label>
-            <div
+            <.note_editor
               id={"entry-note-editor-#{@entry_id || "new"}"}
-              phx-hook="TrixEditor"
-              phx-update="ignore"
-              data-input="entry[body]"
-            >
-              <input type="hidden" name="entry[body]" value={(@record && @record.body) || ""} />
-              <trix-editor
-                aria-labelledby="entry-note-content-label"
-                class="trix-content min-h-[100px] prose prose-sm max-w-none border rounded-[var(--radius-lg)] p-2 bg-[var(--color-surface-elevated)]"
-              >
-              </trix-editor>
-            </div>
+              name="entry[body]"
+              labelledby="entry-note-content-label"
+              value={(@record && @record.body) || ""}
+            />
           </div>
           <label class="flex items-center gap-2 cursor-pointer">
             <input type="hidden" name="entry[is_private]" value="false" />
@@ -1116,15 +1125,6 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
 
   defp duration_text(mins) when mins < 60, do: "#{mins} min"
   defp duration_text(mins), do: "#{div(mins, 60)}h #{rem(mins, 60)}m"
-
-  defp strip_html(nil), do: ""
-
-  defp strip_html(html) do
-    html
-    |> String.replace(~r/<[^>]+>/, " ")
-    |> String.replace(~r/\s+/, " ")
-    |> String.trim()
-  end
 
   defp photo_error_to_string(:too_large), do: "File too large (max 10 MB)"
   defp photo_error_to_string(:too_many_files), do: "Too many files (max 5)"

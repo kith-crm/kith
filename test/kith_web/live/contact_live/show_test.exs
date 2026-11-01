@@ -59,6 +59,80 @@ defmodule KithWeb.ContactLive.ShowTest do
       assert html =~ "Note"
     end
 
+    test "note editing selects saved content and privacy and only updates that note", %{
+      conn: conn,
+      contact: contact,
+      user: user
+    } do
+      first =
+        note_fixture(contact, user.id, %{
+          "body" => "<strong>First saved</strong>",
+          "is_private" => true
+        })
+
+      second = note_fixture(contact, user.id, %{"body" => "<em>Second saved</em>"})
+      {:ok, view, html} = live(conn, ~p"/contacts/#{contact.id}")
+      assert html =~ "<strong>First saved</strong>"
+      assert html =~ "<em>Second saved</em>"
+
+      view
+      |> element("button[phx-click=edit-entry][phx-value-id='#{first.id}'][phx-value-type=note]")
+      |> render_click()
+
+      assert has_element?(view, "input[name='entry[is_private]'][checked]")
+      assert has_element?(view, "input[name='entry[body]'][value='<strong>First saved</strong>']")
+
+      view
+      |> form("form[phx-submit=save-entry]")
+      |> render_submit(entry: %{body: "<del>Updated first</del>", is_private: "true"})
+
+      assert Kith.Contacts.get_note!(contact.account_id, first.id, user.id).body ==
+               "<del>Updated first</del>"
+
+      assert Kith.Contacts.get_note!(contact.account_id, second.id, user.id).body ==
+               "<em>Second saved</em>"
+
+      view
+      |> element("button[phx-click=edit-entry][phx-value-id='#{second.id}'][phx-value-type=note]")
+      |> render_click()
+
+      refute has_element?(view, "input[name='entry[is_private]'][checked]")
+      assert has_element?(view, "input[name='entry[body]'][value='<em>Second saved</em>']")
+    end
+
+    test "invalid note submissions retain submitted privacy and editor value", %{
+      conn: conn,
+      contact: contact
+    } do
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      view |> element("button[phx-click=open-entry-modal][phx-value-type=note]") |> render_click()
+
+      view
+      |> form("form[phx-submit=save-entry]")
+      |> render_submit(entry: %{body: "   ", is_private: "true"})
+
+      assert has_element?(view, "input[name='entry[body]'][value='   ']")
+      assert has_element?(view, "input[name='entry[is_private]'][checked]")
+      assert render(view) =~ "can&#39;t be blank"
+    end
+
+    test "private notes remain hidden from another account member", %{
+      conn: conn,
+      contact: contact,
+      user: user
+    } do
+      other =
+        Kith.AccountsFixtures.user_fixture()
+        |> Ecto.Changeset.change(account_id: user.account_id)
+        |> Kith.Repo.update!()
+
+      note_fixture(contact, other.id, %{"body" => "Private secret", "is_private" => true})
+      note_fixture(contact, other.id, %{"body" => "Shared note"})
+      {:ok, _view, html} = live(conn, ~p"/contacts/#{contact.id}")
+      refute html =~ "Private secret"
+      assert html =~ "Shared note"
+    end
+
     test "quick-add buttons are visible", %{conn: conn, contact: contact} do
       {:ok, _view, html} = live(conn, ~p"/contacts/#{contact.id}")
       assert html =~ "+ Note"

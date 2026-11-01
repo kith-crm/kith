@@ -2,6 +2,7 @@
    https://tailwindcss.com/docs/configuration */
 
 @import "tailwindcss" source(none);
+@import "../node_modules/trix/dist/trix.css";
 @import "../node_modules/cropperjs/dist/cropper.css";
 @source "../css";
 @source "../js";
@@ -182,3 +183,22 @@
 }
 
 /* This file is for your main application CSS */
+
+/* Note/editor content must retain its formatting after Tailwind's reset. */
+.trix-content { overflow-wrap: anywhere; color: var(--color-text-primary); }
+.note-body { white-space: pre-wrap; font-size: 0.875rem; }
+.trix-content ul { list-style-type: disc; padding-left: 1.5em; }
+.trix-content ol { list-style-type: decimal; padding-left: 1.5em; }
+.trix-content ul ul { list-style-type: circle; }
+.trix-content p, .trix-content div { margin-bottom: 0.5em; }
+.trix-content a { color: var(--color-accent); text-decoration: underline; }
+.trix-content h1 { font-size: 1.4em; font-weight: 700; margin: 0.6em 0; }
+.trix-content blockquote { border-left: 3px solid var(--color-border); padding-left: 1em; margin: 0.5em 0; }
+.trix-content pre { white-space: pre-wrap; font-family: monospace; padding: 0.75em; background: var(--color-surface); border-radius: 0.3em; }
+trix-editor { border-color: var(--color-border); }
+trix-toolbar .trix-button-group { border-color: var(--color-border); background: var(--color-surface-elevated); }
+trix-toolbar .trix-button { border-color: var(--color-border); }
+trix-toolbar .trix-button--icon::before { opacity: 0.8; }
+[data-theme="dark"] trix-toolbar .trix-button--icon::before { filter: invert(1); }
+trix-toolbar .trix-button--icon-attach, trix-toolbar .trix-button-group--file-tools { display: none; }
+@media (max-width: 480px) { trix-toolbar .trix-button-group { margin-right: 0.3em; } }
