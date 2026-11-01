@@ -47,6 +47,7 @@ defmodule Kith.Application do
       Kith.Repo,
       {Finch, name: Swoosh.Finch, pools: %{:default => [size: 10]}},
       Kith.RateLimiter,
+      Kith.Cache.Locks,
       Kith.Cache.Store,
       {Oban, Application.fetch_env!(:kith, Oban)},
       {Task.Supervisor, name: Kith.TaskSupervisor},

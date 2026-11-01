@@ -149,6 +149,56 @@ defmodule Kith.CacheDataIntegrationTest do
     end)
   end
 
+  test "a scan invalidates earlier committed inserts when a later insert raises", ctx do
+    function = "cache_scan_failure_#{ctx.first.id}"
+
+    on_exit(fn ->
+      unboxed(fn -> Repo.query!("DROP FUNCTION IF EXISTS #{function}() CASCADE") end)
+    end)
+
+    unboxed(fn ->
+      for _ <- 1..3 do
+        assert {:ok, _} =
+                 Contacts.create_contact(ctx.first.id, %{
+                   first_name: "Partial Scan",
+                   last_name: "Match"
+                 })
+      end
+
+      assert DuplicateDetection.cluster_count(ctx.first.id) == 0
+
+      Repo.query!("""
+      CREATE FUNCTION #{function}() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        IF NEW.account_id = #{ctx.first.id} AND EXISTS (
+          SELECT 1 FROM duplicate_candidates WHERE account_id = NEW.account_id
+        ) THEN
+          RAISE EXCEPTION 'synthetic scan failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$
+      """)
+
+      Repo.query!("""
+      CREATE TRIGGER #{function} BEFORE INSERT ON duplicate_candidates
+      FOR EACH ROW EXECUTE FUNCTION #{function}()
+      """)
+
+      assert_raise Postgrex.Error, ~r/synthetic scan failure/, fn ->
+        DuplicateDetection.scan_account(ctx.first.id)
+      end
+
+      assert Repo.aggregate(
+               from(d in Kith.Contacts.DuplicateCandidate, where: d.account_id == ^ctx.first.id),
+               :count
+             ) == 1
+
+      assert :miss = Cache.get({:duplicate_cluster_count, ctx.first.id})
+      assert DuplicateDetection.cluster_count(ctx.first.id) == 1
+    end)
+  end
+
   test "contact trash/restore and permanent cascade invalidate affected counts and storage",
        ctx do
     unboxed(fn ->

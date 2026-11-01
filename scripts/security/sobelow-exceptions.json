@@ -231,11 +231,11 @@
     "review_by": "2026-11-29"
   },
   {
-    "line": 752,
+    "line": 757,
     "type": "SQL.Query: SQL injection",
     "file": "lib/kith/duplicate_detection.ex",
     "variable": "query",
-    "source_sha256": "bd666e3d050770b3f1392157f5e6c1c3c80d322b4a752585f4fd98b4c18e1ea5",
+    "source_sha256": "2996e9656fcae3b09010a9055243c1f48544687c94414cf33257094991d2a0e7",
     "reason": "The query is a static SQL literal; account_id is bound as $1 via Repo.query(query,[account_id]). No user text interpolation.",
     "evidence": "test/kith/duplicate_detection_test.exs; test/kith/duplicate_merge_scenarios_test.exs",
     "owner": "kith-crm maintainers",

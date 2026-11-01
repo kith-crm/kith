@@ -103,6 +103,47 @@ defmodule Kith.CacheTest do
     assert {:ok, :new_database_value} = Cache.fetch(key, fn -> {:ok, :new_database_value} end)
   end
 
+  test "a crashed fill releases its key without blocking other keys", %{key: key} do
+    parent = self()
+
+    {owner, monitor} =
+      spawn_monitor(fn ->
+        Cache.fetch(key, fn ->
+          send(parent, :fill_started)
+          receive do: (:continue -> {:ok, :old})
+        end)
+      end)
+
+    assert_receive :fill_started
+    waiter = Task.async(fn -> Cache.fetch(key, fn -> {:ok, :fresh} end) end)
+    assert {:ok, :independent} = Cache.fetch({key, :other}, fn -> {:ok, :independent} end)
+    Process.exit(owner, :kill)
+    assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}
+    assert {:ok, :fresh} = Task.await(waiter)
+    assert {:ok, :fresh} = Cache.get(key)
+    Cache.delete({key, :other})
+  end
+
+  @tag timeout: 10_000
+  test "waiters survive a fill taking longer than five seconds", %{key: key} do
+    parent = self()
+
+    fill =
+      Task.async(fn ->
+        Cache.fetch(key, fn ->
+          send(parent, :fill_started)
+          receive do: (:continue -> {:ok, :filled})
+        end)
+      end)
+
+    assert_receive :fill_started
+    waiter = Task.async(fn -> Cache.get(key) end)
+    assert Task.yield(waiter, 5_100) == nil
+    send(fill.pid, :continue)
+    assert {:ok, :filled} = Task.await(fill)
+    assert {:ok, :filled} = Task.await(waiter)
+  end
+
   test "promoting old-generation reads cannot resurrect an invalidated entry", %{key: key} do
     assert :ok = Cache.put(key, :value)
     assert :ok = Store.new_generation()

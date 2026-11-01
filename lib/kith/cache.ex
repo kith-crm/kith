@@ -5,14 +5,14 @@ defmodule Kith.Cache do
   and only successful values are cached. Cache outages still run the callback.
 
   TTLs are milliseconds and default to 24 hours. Reads never renew expiration.
-  All access uses a node-local per-key lock, including reads that can promote an
-  entry between Nebulex generations. Invalidation therefore cannot be undone by
+  All access uses a queued node-local per-key lock, including reads that can
+  promote an entry between Nebulex generations. Invalidation therefore cannot be undone by
   an earlier fill or promotion. Values carry the backend's identity so a fill
   spanning a backend restart cannot expose a stale value through the
   replacement cache.
   """
 
-  alias Kith.Cache.Store
+  alias Kith.Cache.{Locks, Store}
 
   require Logger
 
@@ -101,10 +101,7 @@ defmodule Kith.Cache do
   end
 
   defp locked(key, operation) do
-    case :global.trans({{__MODULE__, key}, self()}, operation, [node()]) do
-      :aborted -> {:error, :lock_unavailable}
-      result -> result
-    end
+    Locks.with_lock(key, operation)
   end
 
   defp invalidate_peers(key) do

@@ -715,22 +715,27 @@ defmodule Kith.DuplicateDetection do
 
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    Enum.each(all_pairs, fn {{id1, id2}, score, reasons} ->
-      {contact_id, dup_id} = if id1 < id2, do: {id1, id2}, else: {id2, id1}
+    try do
+      Enum.each(all_pairs, fn {{id1, id2}, score, reasons} ->
+        {contact_id, dup_id} = if id1 < id2, do: {id1, id2}, else: {id2, id1}
 
-      unless MapSet.member?(existing, {contact_id, dup_id}) do
-        %DuplicateCandidate{account_id: account_id}
-        |> DuplicateCandidate.changeset(%{
-          contact_id: contact_id,
-          duplicate_contact_id: dup_id,
-          score: score,
-          reasons: reasons,
-          detected_at: now
-        })
-        |> Repo.insert(on_conflict: :nothing)
-        |> Invalidation.after_commit(cluster_count_key(account_id))
-      end
-    end)
+        unless MapSet.member?(existing, {contact_id, dup_id}) do
+          %DuplicateCandidate{account_id: account_id}
+          |> DuplicateCandidate.changeset(%{
+            contact_id: contact_id,
+            duplicate_contact_id: dup_id,
+            score: score,
+            reasons: reasons,
+            detected_at: now
+          })
+          |> Repo.insert(on_conflict: :nothing)
+        end
+      end)
+    after
+      # Inserts commit independently. Invalidate once even if a later insert
+      # raises, so earlier successful writes cannot leave a stale badge.
+      Invalidation.after_commit(:ok, cluster_count_key(account_id))
+    end
   end
 
   defp find_name_matches(account_id) do
