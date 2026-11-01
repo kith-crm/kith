@@ -88,11 +88,19 @@ defmodule KithWeb.ContactLive.ContactFieldsComponent do
 
   defp field_link(field) do
     case field.contact_field_type.protocol do
-      "mailto:" -> "mailto:#{field.value}"
-      "tel:" -> "tel:#{field.value}"
+      proto when proto in ["mailto", "mailto:"] -> "mailto:#{field.value}"
+      proto when proto in ["tel", "tel:"] -> "tel:#{field.value}"
+      proto when proto in ["https", "https://"] -> web_link("https", field.value)
+      proto when proto in ["http", "http://"] -> web_link("http", field.value)
       proto when is_binary(proto) and proto != "" -> "#{proto}#{field.value}"
       _ -> nil
     end
+  end
+
+  defp web_link(protocol, value) do
+    if String.starts_with?(value, ["http://", "https://"]),
+      do: value,
+      else: "#{protocol}://#{value}"
   end
 
   defp display_value(field, phone_format) do

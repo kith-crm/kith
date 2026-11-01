@@ -45,6 +45,325 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
     import_fixture(account_id, user_id, attrs)
   end
 
+  describe "field metadata and recovery" do
+    test "imports_custom_phone_type_with_tel_protocol", %{user: user, account_id: account_id} do
+      other = user_fixture()
+
+      {:ok, foreign} =
+        Contacts.create_contact_field_type(other.account_id, %{
+          name: "Custom mobile",
+          protocol: "https"
+        })
+
+      {:ok, legacy} = Contacts.create_contact_field_type(account_id, %{name: "Custom mobile"})
+
+      fields = [
+        contact_field_json(
+          content: "+1 (202) 555-0100",
+          type_name: "Custom mobile",
+          protocol: "tel:"
+        )
+      ]
+
+      stub_fields(fields)
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      assert summary.error_count == 0
+      contact = mapped_contact(account_id)
+      assert [%{value: "+12025550100", contact_field_type: type}] = contact.contact_fields
+      refute type.id == legacy.id
+      assert Repo.get!(Contacts.ContactFieldType, legacy.id).protocol == nil
+      assert type.protocol == "tel"
+      assert Repo.get!(Contacts.ContactFieldType, foreign.id).protocol == "https"
+      assert Kith.VCard.Serializer.serialize(contact) =~ "TEL:+12025550100"
+    end
+
+    test "preserves_phone_labels", %{user: user, account_id: account_id} do
+      stub_fields([
+        contact_field_json(
+          content: "+12025550100",
+          type_name: "Custom mobile",
+          protocol: "tel",
+          label: "Work"
+        )
+      ])
+
+      assert {:ok, _} =
+               MonicaApi.crawl(
+                 account_id,
+                 user.id,
+                 credential(),
+                 api_import_fixture(account_id, user.id)
+               )
+
+      assert [%{label: "Work"}] = mapped_contact(account_id).contact_fields
+
+      assert Kith.VCard.Serializer.serialize(mapped_contact(account_id)) =~
+               "TEL;TYPE=WORK:+12025550100"
+    end
+
+    test "rerun_recovers_missing_field_once", %{user: user, account_id: account_id} do
+      stub_fields([])
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      original = mapped_contact(account_id)
+
+      {:ok, email_type} =
+        Contacts.create_contact_field_type(account_id, %{name: "Local email", protocol: "mailto"})
+
+      {:ok, _} =
+        Contacts.create_contact_field(original, %{
+          value: "local@example.test",
+          contact_field_type_id: email_type.id
+        })
+
+      stub_fields([
+        contact_field_json(content: "+12025550100", type_name: "Custom mobile", protocol: "tel:")
+      ])
+
+      {:ok, _} = Imports.update_import_status(job, "completed")
+
+      recovery =
+        api_import_fixture(account_id, user.id, %{
+          api_options: %{"recover_contact_fields" => true}
+        })
+
+      for _ <- 1..2 do
+        assert {:ok, summary} =
+                 MonicaApi.crawl(
+                   account_id,
+                   user.id,
+                   credential(),
+                   recovery,
+                   Kith.Workers.MonicaApiCrawlWorker.build_opts(recovery)
+                 )
+
+        assert summary.error_count == 0
+        assert mapped_contact(account_id).id == original.id
+
+        assert Enum.sort(Enum.map(mapped_contact(account_id).contact_fields, & &1.value)) == [
+                 "+12025550100",
+                 "local@example.test"
+               ]
+
+        assert Imports.find_import_record(account_id, "monica_api", "contact", "1").import_id ==
+                 job.id
+      end
+    end
+
+    test "missing embedded fields are diagnosed separately from explicit empty fields", %{
+      user: user,
+      account_id: account_id
+    } do
+      for {payload, errors} <- [
+            {Map.delete(contact_json(id: 1), "contactFields"), 1},
+            {contact_json(id: 1), 0}
+          ] do
+        Req.Test.stub(@stub_name, fn conn ->
+          assert conn.request_path == "/api/contacts"
+          Req.Test.json(conn, contacts_page_json([payload]))
+        end)
+
+        job = api_import_fixture(account_id, user.id)
+
+        assert {:ok, summary} =
+                 MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                   "recover_contact_fields" => true
+                 })
+
+        assert summary.error_count == errors
+        {:ok, _} = Imports.update_import_status(job, "completed")
+      end
+    end
+
+    test "blank phone fields skip and rejected nonblank fields report without values", %{
+      user: user,
+      account_id: account_id
+    } do
+      secret = String.duplicate("sensitive", 40)
+
+      stub_fields(
+        Enum.map(
+          [nil, "", "  ", " malformed phone ", secret],
+          &contact_field_json(content: &1, type_name: "Custom mobile", protocol: "tel:")
+        )
+      )
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(
+                 account_id,
+                 user.id,
+                 credential(),
+                 api_import_fixture(account_id, user.id)
+               )
+
+      assert summary.error_count == 1
+      refute inspect(summary.errors) =~ secret
+      assert [%{value: "malformed phone"}] = mapped_contact(account_id).contact_fields
+    end
+
+    test "repairs a Monica-only legacy generic type from explicit protocol metadata", %{
+      user: user,
+      account_id: account_id
+    } do
+      field = contact_field_json(content: "+12025550100", type_name: "Legacy mobile")
+      stub_fields([field])
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      [%{contact_field_type: type}] = mapped_contact(account_id).contact_fields
+      assert type.protocol == nil
+      stub_fields([put_in(field, ["contact_field_type", "protocol"], "tel:")])
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      assert summary.error_count == 0
+
+      assert [%{contact_field_type: %{id: id, protocol: "tel"}}] =
+               mapped_contact(account_id).contact_fields
+
+      assert id == type.id
+    end
+
+    test "recovery respects merge survivor and deleted contacts", %{
+      user: user,
+      account_id: account_id
+    } do
+      email = contact_field_json(content: "same@example.test", type_name: "Email")
+
+      contacts =
+        for id <- 1..2,
+            do:
+              contact_json(
+                id: id,
+                first_name: "Same",
+                last_name: "Person",
+                contact_fields: [email]
+              )
+
+      Req.Test.stub(@stub_name, fn conn -> Req.Test.json(conn, contacts_page_json(contacts)) end)
+      job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, %{merged: 1}} =
+               MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      original = mapped_contact(account_id)
+
+      assert Imports.find_import_record(account_id, "monica_api", "contact", "2").local_entity_id ==
+               original.id
+
+      {:ok, _} = Imports.update_import_status(job, "completed")
+      recovery = api_import_fixture(account_id, user.id)
+
+      phone =
+        contact_field_json(
+          content: "+12025550100",
+          type_name: "Recovered mobile",
+          protocol: "tel:"
+        )
+
+      stub_fields([phone])
+
+      assert {:ok, %{error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), recovery, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert mapped_contact(account_id).id == original.id
+      assert length(mapped_contact(account_id).contact_fields) == 2
+      {:ok, _} = Contacts.soft_delete_contact(original)
+      stub_fields([%{phone | "content" => "+12025550101"}])
+
+      assert {:ok, %{skipped: 1}} =
+               MonicaApi.crawl(account_id, user.id, credential(), recovery, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert length(mapped_contact(account_id).contact_fields) == 2
+    end
+
+    test "later pages resolve distinct protocols for the same source name", %{
+      user: user,
+      account_id: account_id
+    } do
+      Req.Test.stub(@stub_name, fn conn ->
+        params = URI.decode_query(conn.query_string)
+
+        if params["limit"] == "1" do
+          Req.Test.json(conn, contacts_page_json([], 1, 2, 2))
+        else
+          page = String.to_integer(params["page"])
+          protocol = if page == 1, do: "mailto:", else: "tel:"
+          value = if page == 1, do: "one@example.test", else: "+12025550100"
+
+          fields = [
+            contact_field_json(type_name: "Same name", protocol: protocol, content: value)
+          ]
+
+          Req.Test.json(
+            conn,
+            contacts_page_json([contact_json(id: page, contact_fields: fields)], page, 2, 2)
+          )
+        end
+      end)
+
+      job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, %{contacts: 2, error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), job)
+
+      record = Imports.find_import_record(account_id, "monica_api", "contact", "2")
+
+      contact =
+        Repo.get!(Contacts.Contact, record.local_entity_id)
+        |> Repo.preload(contact_fields: :contact_field_type)
+
+      assert [%{value: "+12025550100", contact_field_type: %{protocol: "tel"}}] =
+               contact.contact_fields
+
+      assert [%{contact_field_type: %{protocol: "mailto"}}] =
+               mapped_contact(account_id).contact_fields
+    end
+
+    test "unknown source protocols stay generic despite seeded name collisions", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_fields([
+        contact_field_json(type_name: "Phone", protocol: "gopher:", content: "opaque value")
+      ])
+
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, %{error_count: 0}} = MonicaApi.crawl(account_id, user.id, credential(), job)
+
+      assert [
+               %{
+                 value: "opaque value",
+                 contact_field_type: %{account_id: ^account_id, protocol: nil}
+               }
+             ] = mapped_contact(account_id).contact_fields
+    end
+
+    defp stub_fields(fields) do
+      Req.Test.stub(@stub_name, fn conn ->
+        assert conn.request_path == "/api/contacts"
+        Req.Test.json(conn, contacts_page_json([contact_json(id: 1, contact_fields: fields)]))
+      end)
+    end
+
+    defp mapped_contact(account_id) do
+      record = Imports.find_import_record(account_id, "monica_api", "contact", "1")
+
+      Repo.get!(Contacts.Contact, record.local_entity_id)
+      |> Repo.preload([
+        :addresses,
+        :gender,
+        :tags,
+        :relationships,
+        contact_fields: :contact_field_type
+      ])
+    end
+  end
+
   # ── test_connection/1 ──────────────────────────────────────────────────
 
   describe "test_connection/1" do

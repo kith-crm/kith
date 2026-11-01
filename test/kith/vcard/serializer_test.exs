@@ -3,6 +3,32 @@ defmodule Kith.VCard.SerializerTest do
 
   alias Kith.VCard.Serializer
 
+  test "exports_seeded_tel_colon_protocol" do
+    for {protocol, prefix} <- [
+          {"tel:", "TEL"},
+          {"mailto:", "EMAIL"},
+          {"https://", "URL"},
+          {" TEL: ", "TEL"}
+        ] do
+      contact = %Kith.Contacts.Contact{
+        display_name: "Fixture",
+        addresses: [],
+        tags: [],
+        relationships: [],
+        gender: nil,
+        contact_fields: [
+          %{
+            value: "+12025550100",
+            label: nil,
+            contact_field_type: %{protocol: protocol, vcard_label: nil}
+          }
+        ]
+      }
+
+      assert Serializer.serialize(contact) =~ "#{prefix}:+12025550100"
+    end
+  end
+
   test "yearless birthday exports a reduced date without a synthetic year" do
     contact = %Kith.Contacts.Contact{
       display_name: "Yearless Birthday",

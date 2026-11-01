@@ -112,6 +112,35 @@ defmodule KithWeb.ContactLive.ShowTest do
     end
   end
 
+  test "canonical contact field protocols render usable links", %{
+    conn: conn,
+    contact: contact,
+    account_id: account_id
+  } do
+    for {protocol, value, target} <- [
+          {"tel", "+12025550100", "tel:+12025550100"},
+          {"mailto", "fixture@example.test", "mailto:fixture@example.test"},
+          {"https", "example.test/profile", "https://example.test/profile"},
+          {"http", "http://example.test/profile", "http://example.test/profile"}
+        ] do
+      {:ok, type} =
+        Kith.Contacts.create_contact_field_type(account_id, %{
+          name: "Canonical #{protocol}",
+          protocol: protocol
+        })
+
+      {:ok, _} =
+        Kith.Contacts.create_contact_field(contact, %{
+          value: value,
+          label: "Work",
+          contact_field_type_id: type.id
+        })
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      assert has_element?(view, "a[href='#{target}']")
+    end
+  end
+
   describe "birthday badge" do
     test "a 29 February birthday renders the expected next-birthday text in any year", %{
       conn: conn,

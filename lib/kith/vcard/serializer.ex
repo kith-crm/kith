@@ -348,7 +348,12 @@ defmodule Kith.VCard.Serializer do
   defp normalize_protocol(nil), do: ""
 
   defp normalize_protocol(protocol),
-    do: protocol |> String.trim_trailing("://") |> String.trim_trailing(":")
+    do:
+      protocol
+      |> String.trim()
+      |> String.downcase()
+      |> String.trim_trailing("://")
+      |> String.trim_trailing(":")
 
   defp type_param_from_label(nil), do: ""
   defp type_param_from_label(""), do: ""
