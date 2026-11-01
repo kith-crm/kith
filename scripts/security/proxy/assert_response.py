@@ -14,8 +14,8 @@ for line in lines:
         headers[name.lower()] = value.strip()
 
 assert status == int(expected_status), (path, status, expected_status)
-assert headers["x-pr44-verified-client"] == expected_client, (path, headers)
-assert headers["x-pr44-socket-peer"] == expected_peer, (path, headers)
+assert headers["x-kith-verified-client"] == expected_client, (path, headers)
+assert headers["x-kith-socket-peer"] == expected_peer, (path, headers)
 Path(path).with_suffix(".json").write_text(
     json.dumps({"probe": Path(path).stem, "client": expected_client, "peer": expected_peer, "status": status}) + "\n"
 )

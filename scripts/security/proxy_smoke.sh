@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 # Uses an already-built production image and the repository's actual Caddyfile.
 # All services are disposable local verification containers; nothing is published.
-# Usage: scripts/security/pr44_proxy_smoke.sh kith:review [report-directory]
+# Usage: scripts/security/proxy_smoke.sh kith:review [report-directory]
 set -euo pipefail
 
 image="${1:?Pass the prebuilt production Docker image}"
 repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
-report_dir="${2:-$repo_root/tmp/security/pr44-proxy}"
+report_dir="${2:-$repo_root/tmp/security/proxy}"
 mkdir -p "$report_dir"
 report_dir="$(cd "$report_dir" && pwd)"
 rm -f "$report_dir/proxy-smoke.json" "$report_dir/browser-signup.json"
-probe_dir="$repo_root/scripts/security/pr44_proxy"
+probe_dir="$repo_root/scripts/security/proxy"
 scratch="$(mktemp -d)"
-run_id="pr44-proxy-$(date +%s)-$$"
+run_id="proxy-smoke-$(date +%s)-$$"
 ingress="$run_id-ingress"
 backend="$run_id-backend"
 external="$run_id-external"
@@ -24,7 +24,7 @@ containers=()
 networks=()
 
 cleanup() {
-  docker cp "$app:/tmp/pr44-signup-observations.jsonl" "$report_dir/signup-observations.jsonl" > /dev/null 2>&1 || true
+  docker cp "$app:/tmp/kith-signup-observations.jsonl" "$report_dir/signup-observations.jsonl" > /dev/null 2>&1 || true
   for ((index=${#containers[@]}-1; index>=0; index--)); do
     container="${containers[$index]}"
     docker logs "$container" > "$report_dir/$container.log" 2>&1 || true
@@ -79,8 +79,8 @@ docker run --rm --network "$backend" --env-file "$scratch/app.env" "$image" eval
   'Kith.Release.migrate()' > "$report_dir/migrate.log" 2>&1
 containers+=("$app")
 docker run -d --name "$app" --network "$backend" --ip 172.30.45.3 \
-  --env-file "$scratch/app.env" -v "$probe_dir:/tmp/pr44-proxy:ro" "$image" eval \
-  'Code.eval_file("/tmp/pr44-proxy/server.ex")' > /dev/null
+  --env-file "$scratch/app.env" -v "$probe_dir:/tmp/kith-proxy-smoke:ro" "$image" eval \
+  'Code.eval_file("/tmp/kith-proxy-smoke/server.ex")' > /dev/null
 docker network connect --ip 172.30.44.3 --alias app "$ingress" "$app"
 
 containers+=("$caddy")
@@ -114,7 +114,7 @@ request() {
   local id="$1" address="$2" path="$3"
   shift 3
   docker exec "$client" curl --noproxy '*' --silent --show-error --max-time 10 --include \
-    -H 'Host: localhost' -H "X-Pr44-Probe-ID: $id" "$@" "$address$path" > "$report_dir/$id.http"
+    -H 'Host: localhost' -H "X-Kith-Probe-ID: $id" "$@" "$address$path" > "$report_dir/$id.http"
 }
 assert_response() {
   python3 "$probe_dir/assert_response.py" "$report_dir/$1.http" "$2" "$3" "$4"
@@ -130,15 +130,15 @@ request direct-untrusted http://172.30.45.3:4000 /health/live \
   -H 'X-Forwarded-For: 198.51.100.77' -H 'X-Kith-Client-IP: 192.0.2.77'
 assert_response direct-untrusted 172.30.45.4 172.30.45.4 200
 request log-redaction http://172.30.46.2:8080 \
-  '/health/live?token=pr44-proxy-query-secret&_csrf_token=pr44-proxy-csrf-secret&anything=pr44-proxy-extra-query-secret' \
-  -H 'X-Kith-Client-IP: pr44-proxy-forwarded-secret' \
-  -H 'Forwarded: for=pr44-proxy-forwarded-chain-secret' \
-  -H 'Referer: https://example.test/?token=pr44-proxy-referrer-secret'
+  '/health/live?token=proxy-smoke-query-secret&_csrf_token=proxy-smoke-csrf-secret&anything=proxy-smoke-extra-query-secret' \
+  -H 'X-Kith-Client-IP: proxy-smoke-forwarded-secret' \
+  -H 'Forwarded: for=proxy-smoke-forwarded-chain-secret' \
+  -H 'Referer: https://example.test/?token=proxy-smoke-referrer-secret'
 assert_response log-redaction 172.30.46.3 172.30.44.2 200
 
 # A malformed value emitted by the trusted peer must also fail closed.
 docker exec "$caddy" wget -S -O /dev/null --header='Host: localhost' \
-  --header='X-Pr44-Probe-ID: trusted-malformed' \
+  --header='X-Kith-Probe-ID: trusted-malformed' \
   --header='X-Kith-Client-IP: 203.0.113.8,198.51.100.8' \
   http://app:4000/health/live > "$report_dir/trusted-malformed.http" 2>&1
 assert_response trusted-malformed 172.30.44.2 172.30.44.2 200
@@ -163,10 +163,10 @@ done
 # host matches the production endpoint's configured localhost host; checks stay on.
 browser_port="$(docker port "$caddy" 8080/tcp | sed -n 's/^127\.0\.0\.1://p')"
 [[ -n "$browser_port" ]] || { echo "Caddy has no loopback-only browser port" >&2; exit 1; }
-PR44_PROXY_BROWSER_URL="http://localhost:$browser_port" \
-PR44_PROXY_REPORT_DIRECTORY="$report_dir" \
+KITH_PROXY_BROWSER_URL="http://localhost:$browser_port" \
+KITH_PROXY_REPORT_DIRECTORY="$report_dir" \
   node "$probe_dir/browser.mjs" > "$report_dir/browser.log" 2>&1
-docker cp "$app:/tmp/pr44-signup-observations.jsonl" "$report_dir/signup-observations.jsonl" > /dev/null
+docker cp "$app:/tmp/kith-signup-observations.jsonl" "$report_dir/signup-observations.jsonl" > /dev/null
 docker exec "$postgres" psql -U postgres -d kith_proxy_smoke -Atc 'SELECT count(*) FROM users' \
   > "$report_dir/user-count.log"
 
@@ -174,9 +174,9 @@ docker exec "$postgres" psql -U postgres -d kith_proxy_smoke -Atc 'SELECT count(
 # Both must redact the synthetic query/header secrets when the upstream is down.
 docker stop --time 2 "$app" > /dev/null
 request log-redaction-outage http://172.30.46.2:8080 \
-  '/health/live?token=pr44-proxy-outage-query-secret' \
-  -H 'X-Kith-Client-IP: pr44-proxy-outage-forwarded-secret' \
-  -H 'Referer: https://example.test/?token=pr44-proxy-outage-referrer-secret'
+  '/health/live?token=proxy-smoke-outage-query-secret' \
+  -H 'X-Kith-Client-IP: proxy-smoke-outage-forwarded-secret' \
+  -H 'Referer: https://example.test/?token=proxy-smoke-outage-referrer-secret'
 python3 - "$report_dir/log-redaction-outage.http" <<'PY'
 import pathlib, sys
 lines = pathlib.Path(sys.argv[1]).read_text().splitlines()
@@ -195,7 +195,7 @@ for line in (root / 'app.log').read_text().splitlines():
     except (ValueError, TypeError):
         continue
     message = event.get('message', '')
-    if isinstance(message, str) and message.startswith('pr44_proxy_identity:'):
+    if isinstance(message, str) and message.startswith('proxy_identity:'):
         observations[message.split(':', 1)[1]] = event.get('metadata', {}).get('client_ip')
 probes = []
 probe_ids = ['caddy-ipv4', 'caddy-ipv6', 'direct-untrusted', 'trusted-malformed', 'log-redaction']
@@ -249,9 +249,9 @@ assert any(event['request']['uri'] == '/live/websocket' and event['status'] == 1
 assert any(event['request']['uri'] == '/users/log-in' and event['status'] == 429 for event in caddy_access)
 assert any(event['request']['uri'] == '/health/live' and event.get('status') == 502 for event in caddy_access)
 assert any(str(event.get('logger', '')).startswith('http.log.error') and event.get('status') == 502 for event in caddy_requests)
-for marker in ['pr44-proxy-query-secret', 'pr44-proxy-csrf-secret', 'pr44-proxy-extra-query-secret',
-               'pr44-proxy-forwarded-secret', 'pr44-proxy-forwarded-chain-secret', 'pr44-proxy-referrer-secret',
-               'pr44-proxy-outage-query-secret', 'pr44-proxy-outage-forwarded-secret', 'pr44-proxy-outage-referrer-secret']:
+for marker in ['proxy-smoke-query-secret', 'proxy-smoke-csrf-secret', 'proxy-smoke-extra-query-secret',
+               'proxy-smoke-forwarded-secret', 'proxy-smoke-forwarded-chain-secret', 'proxy-smoke-referrer-secret',
+               'proxy-smoke-outage-query-secret', 'proxy-smoke-outage-forwarded-secret', 'proxy-smoke-outage-referrer-secret']:
     assert marker not in caddy_output, marker
 (root / 'proxy-smoke.json').write_text(json.dumps({
     'status': 'passed',

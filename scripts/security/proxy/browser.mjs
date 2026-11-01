@@ -5,11 +5,11 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium, expect } from "@playwright/test";
 
-const baseURL = process.env.PR44_PROXY_BROWSER_URL;
-const reportDirectory = process.env.PR44_PROXY_REPORT_DIRECTORY;
+const baseURL = process.env.KITH_PROXY_BROWSER_URL;
+const reportDirectory = process.env.KITH_PROXY_REPORT_DIRECTORY;
 assert(baseURL && reportDirectory, "Pass the loopback Caddy URL and report directory");
 const forgedClient = "192.0.2.222";
-const email = `pr44-proxy-signup-${Date.now()}@example.test`;
+const email = `proxy-smoke-signup-${Date.now()}@example.test`;
 const errors = [];
 const browser = await chromium.launch({ args: ["--host-resolver-rules=MAP localhost 127.0.0.1"] });
 
@@ -28,7 +28,7 @@ try {
     extraHTTPHeaders: {
       "X-Kith-Client-IP": forgedClient,
       "X-Forwarded-For": "198.51.100.222",
-      "X-Pr44-Probe-ID": "browser-signup",
+      "X-Kith-Probe-ID": "browser-signup",
     },
   });
   const page = await context.newPage();
@@ -64,10 +64,10 @@ try {
   await avoidWindowBoundary();
   const response = await page.goto("/users/register");
   assert.equal(response.status(), 200);
-  const verifiedClient = response.headers()["x-pr44-verified-client"];
+  const verifiedClient = response.headers()["x-kith-verified-client"];
   assert(verifiedClient, "The actual HTTP endpoint must expose the fixture observation");
   assert.notEqual(verifiedClient, forgedClient);
-  assert.equal(response.headers()["x-pr44-socket-peer"], "172.30.44.2");
+  assert.equal(response.headers()["x-kith-socket-peer"], "172.30.44.2");
   await expect(page.locator("[data-phx-main].phx-connected")).toBeVisible();
   assert(await page.evaluate(() => window.liveSocket.socket.conn instanceof WebSocket));
   await expect.poll(() => handshakeStatuses.includes(101)).toBe(true);
@@ -104,7 +104,7 @@ try {
     await context.setExtraHTTPHeaders({
       "X-Kith-Client-IP": `192.0.2.${attempt}`,
       "X-Forwarded-For": `198.51.100.${attempt}`,
-      "X-Pr44-Probe-ID": `browser-login-${attempt}`,
+      "X-Kith-Probe-ID": `browser-login-${attempt}`,
     });
     const login = await page.evaluate(async ({ csrf, email, attempt }) => {
       const response = await fetch("/users/log-in", {
@@ -115,7 +115,7 @@ try {
           "X-CSRF-Token": csrf,
           "X-Kith-Client-IP": `192.0.2.${attempt}`,
           "X-Forwarded-For": `198.51.100.${attempt}`,
-          "X-Pr44-Probe-ID": `browser-login-${attempt}`,
+          "X-Kith-Probe-ID": `browser-login-${attempt}`,
         },
         body: new URLSearchParams({
           _csrf_token: csrf,
@@ -126,8 +126,8 @@ try {
       return {
         status: response.status,
         redirected: response.redirected,
-        client: response.headers.get("x-pr44-verified-client"),
-        peer: response.headers.get("x-pr44-socket-peer"),
+        client: response.headers.get("x-kith-verified-client"),
+        peer: response.headers.get("x-kith-socket-peer"),
         retry_after: response.headers.get("retry-after"),
       };
     }, { csrf, email, attempt });
@@ -154,7 +154,7 @@ try {
     email,
     websocket_handshake_status: 101,
     forged_websocket_header_observed: true,
-    websocket_save_roundtrips: saves.length,
+    websocket_save_count: saves.length,
     sixth_signup_attempt_blocked: true,
     browser_login_fetches: loginFetches,
     origin_checks_disabled: false,

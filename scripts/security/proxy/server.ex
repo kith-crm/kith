@@ -6,14 +6,14 @@ if KithWeb.Endpoint.config(:check_origin) == false do
   raise "The proxy browser fixture requires the production origin check to remain enabled"
 end
 
-defmodule Kith.Pr44SignupIdentityObserver do
-  @path "/tmp/pr44-signup-observations.jsonl"
+defmodule Kith.SignupIdentityObserver do
+  @path "/tmp/kith-signup-observations.jsonl"
 
   def attach do
     File.write!(@path, "")
 
     :telemetry.attach_many(
-      "pr44-signup-identity-observer",
+      "proxy-smoke-signup-identity-observer",
       [[:phoenix, :live_view, :mount, :stop], [:phoenix, :live_view, :handle_event, :stop]],
       &__MODULE__.handle_event/4,
       nil
@@ -73,9 +73,9 @@ defmodule Kith.Pr44SignupIdentityObserver do
   defp address(ip), do: ip |> Kith.TrustedProxies.normalize() |> :inet.ntoa() |> to_string()
 end
 
-:ok = Kith.Pr44SignupIdentityObserver.attach()
+:ok = Kith.SignupIdentityObserver.attach()
 
-defmodule Kith.Pr44ProxyIdentityProbe do
+defmodule Kith.ProxyIdentityProbe do
   import Plug.Conn
   require Logger
 
@@ -84,14 +84,14 @@ defmodule Kith.Pr44ProxyIdentityProbe do
   def call(conn, _options) do
     conn
     |> register_before_send(fn final ->
-      probe_id = get_req_header(final, "x-pr44-probe-id") |> List.first()
-      Logger.info("pr44_proxy_identity:#{probe_id}")
+      probe_id = get_req_header(final, "x-kith-probe-id") |> List.first()
+      Logger.info("proxy_identity:#{probe_id}")
       peer = final |> get_peer_data() |> Map.fetch!(:address) |> Kith.TrustedProxies.normalize()
 
       if final.method == "POST" and final.request_path == "/users/log-in" do
         client = address(final.remote_ip)
 
-        Kith.Pr44SignupIdentityObserver.record(%{
+        Kith.SignupIdentityObserver.record(%{
           kind: "http_login_post",
           socket_peer: address(peer),
           client: client,
@@ -101,8 +101,8 @@ defmodule Kith.Pr44ProxyIdentityProbe do
       end
 
       final
-      |> put_resp_header("x-pr44-verified-client", address(final.remote_ip))
-      |> put_resp_header("x-pr44-socket-peer", address(peer))
+      |> put_resp_header("x-kith-verified-client", address(final.remote_ip))
+      |> put_resp_header("x-kith-socket-peer", address(peer))
     end)
     |> KithWeb.Endpoint.call(KithWeb.Endpoint.init([]))
   end
@@ -110,5 +110,5 @@ defmodule Kith.Pr44ProxyIdentityProbe do
   defp address(ip), do: ip |> :inet.ntoa() |> to_string()
 end
 
-{:ok, _} = Bandit.start_link(plug: Kith.Pr44ProxyIdentityProbe, port: 4000, ip: {0, 0, 0, 0})
+{:ok, _} = Bandit.start_link(plug: Kith.ProxyIdentityProbe, port: 4000, ip: {0, 0, 0, 0})
 Process.sleep(:infinity)

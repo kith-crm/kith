@@ -34,6 +34,15 @@ Every Hex advisory or retirement and either npm audit failure blocks acceptance.
 
 `mix quality` includes compilation, formatting, strict Credo, the source-bound Sobelow gate and Dialyzer. Keep `scripts/security/sobelow-exceptions.json`: each reviewed exception is tied to exact source and an expiry; changed, expired, stale or unreviewed findings fail closed. Generated reports belong under ignored `tmp/` paths.
 
+The production smoke checks require Docker with a running daemon, Python 3, the installed root Node dependencies and Playwright Chromium (`npx playwright install chromium`), and a prebuilt production image tagged `kith:review`. They consume the image without building it. Run them from the repository root:
+
+```bash
+bash scripts/security/release_smoke.sh kith:review
+bash scripts/security/proxy_smoke.sh kith:review
+```
+
+Both runners accept an optional second argument for the report directory. Their defaults are `tmp/security/release` and `tmp/security/proxy`. They create disposable local services and remove them on exit; generated reports and logs belong under ignored `tmp/security/`. The release check verifies ordinary production migrations, runtime modes, encrypted credential interoperability, cache behavior, metrics and security budgets. The proxy check uses the actual Caddy configuration and Chromium to verify transported client identity, signup/login/API budgets and log redaction.
+
 ## Historical evidence
 
 The removed investigations and upstream experiments are recoverable from the immutable [reviewed tree](https://github.com/kith-crm/kith/tree/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan). The [final POT/ASN validation report](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-implementation-evidence/pot-reviewed-validation.json) records the tested source snapshot; the [policy review](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-implementation-evidence/policy-review.json) records the revised acceptance policy.
