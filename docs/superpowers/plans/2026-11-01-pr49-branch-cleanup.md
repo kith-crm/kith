@@ -53,11 +53,11 @@ Acceptance requirements:
 ### Task 1: Remove investigation artifacts and consolidate current documentation
 
 **Files:**
-- Delete: `docs/plan/pr44-implementation-evidence/` (51 tracked files in reviewed snapshot).
-- Delete: `docs/plan/pr44-upstream/` (98 tracked files in reviewed snapshot).
-- Delete: `docs/plan/pr44-remediation-research.json`.
-- Delete: `docs/plan/pr44-security-upgrade-evidence.json`.
-- Delete after consolidation: `docs/plan/pr44-dependency-remediation-plan.md`, `docs/plan/pr44-security-upgrade-review.md`.
+- Delete: [docs/plan/pr44-implementation-evidence/](https://github.com/kith-crm/kith/tree/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-implementation-evidence) (51 tracked files in reviewed snapshot).
+- Delete: [docs/plan/pr44-upstream/](https://github.com/kith-crm/kith/tree/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-upstream) (98 tracked files in reviewed snapshot).
+- Delete: [docs/plan/pr44-remediation-research.json](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-remediation-research.json).
+- Delete: [docs/plan/pr44-security-upgrade-evidence.json](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-security-upgrade-evidence.json).
+- Delete after consolidation: [docs/plan/pr44-dependency-remediation-plan.md](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-dependency-remediation-plan.md), [docs/plan/pr44-security-upgrade-review.md](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-security-upgrade-review.md).
 - Create: `docs/dependency-security.md`.
 - Modify: remaining current documents that link to these removed paths, as discovered by the reference scan below. Historical plans retain their narrative; repair necessary links to immutable historical URLs rather than rewriting their content.
 
@@ -66,8 +66,8 @@ Acceptance requirements:
 - [ ] **Step 1: Inventory and verify historical recovery.**
 
 ```bash
-git cat-file -e be8259183cfe0b61e639b9fd2eb4b4604e7df969:docs/plan/pr44-implementation-evidence/pot-reviewed-validation.json
-git ls-tree -r --name-only be8259183cfe0b61e639b9fd2eb4b4604e7df969 docs/plan/pr44-upstream
+git cat-file -e be8259183cfe0b61e639b9fd2eb4b4604e7df969:docs/plan/pr44-implementation-evidence/pot-reviewed-validation.json # https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-implementation-evidence/pot-reviewed-validation.json
+git ls-tree -r --name-only be8259183cfe0b61e639b9fd2eb4b4604e7df969 docs/plan/pr44-upstream # https://github.com/kith-crm/kith/tree/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-upstream
 rg -n 'pr44-(implementation-evidence|upstream|remediation-research|security-upgrade-evidence|dependency-remediation-plan|security-upgrade-review)' docs README.md
 ```
 

@@ -1,0 +1,41 @@
+# Dependency security
+
+## Current dependency decisions
+
+Use the latest mutually compatible stable releases. A release older than two years triggers a maintenance review, not automatic replacement. Review support, repository status, package scope, parent integration and tested compatibility; release age and parent usage alone prove neither maintenance nor abandonment. Existing replacement and adoption criteria still apply to proposed replacements.
+
+Calendars 2.4.4 with DigitalToken 1.0.0 and PromEx 1.12.0 with Peep 4.4.0 are accepted compatible selections. Do not force newer children through incompatible constraints, downgrade their parents or adopt unpublished forks merely to satisfy an absolute-latest target.
+
+Retain ASN1 Compiler 0.1.1: no demonstrated Kith advisory, build or compatibility failure justifies owning the prepared alternative's compiler lifecycle, cache, failure recovery and packaging. Retain POT 1.0.2 with the application guards and regression coverage described below. Retain the existing Bunt and Fuse versions. No age-only replacement, authentication rewrite or new infrastructure is required by this policy.
+
+POT integration rejects malformed OTP/recovery values and invalid secrets while preserving compatible Base32 secrets and encrypted credentials. Browser second-factor verification has a separate 10 attempts/minute budget per verified IP; browser and API verification share 10 attempts/minute per user after first-factor proof. Existing password-login and API-IP limits remain separate. Denials return 429 with a rounded-up Retry-After; backend failure cannot authorize a session or token. Only the active OTP/recovery form input is enabled, and recovery codes are consumed once.
+
+The accepted TOTP window remains the current and next two 30-second intervals. Stateless TOTP and signed-challenge reuse remain possible; no accepted-counter persistence or replay protection was added. POT comparisons are not claimed constant-time. OTP auto-submit uses JavaScript digit checks and native `form.submit()`, bypassing native HTML constraint validation; recovery uses native validation. Successful CSRF-protected submission was verified historically, without a new invalid-CSRF negative test. Algorithm vectors and integration tests do not establish complete MFA security certification.
+
+## Maintenance follow-ups
+
+Upstream maintenance remains unconfirmed for **ASN1 Compiler, Bunt, Fuse and POT**. Retention does not label them confirmed maintained, abandoned, vulnerable or incompatible. Full maintenance-policy closure remains open until support evidence is established or a justified replacement is implemented and verified.
+
+The reviewed evidence supports retaining the other older dependencies under the revised policy. Keep Prometheus Core on a release/support responsiveness watchlist: accepted project work supports retention, but the installed release does not thereby contain unreleased fixes. See the historical [maintenance review](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-implementation-evidence/maintenance-review.json) for the bounded evidence and its limitations.
+
+Unpublished Calendars, PromEx, Wax and Credo experiments remain optional historical contribution material; they are neither adopted nor required. A clean audit or passing local build does not establish upstream maintenance or authorize upstream communication or deployment.
+
+## Running checks
+
+Install the locked Mix dependencies and both npm dependency graphs before running these checks from the repository root:
+
+```bash
+mix run --no-start scripts/security/dependency_audit.exs
+MIX_ENV=test mix run --no-start scripts/security/dependency_graph.exs
+mix quality
+```
+
+Every Hex advisory or retirement and either npm audit failure blocks acceptance. The audit gate clears both inherited Hex ignore variables, runs all three audits even after failure and records their outcomes. No CVE/retirement exceptions, inherited suppression, incompatible overrides or weakened failure handling are permitted. The dependency graph check verifies installed constraints and runtime floors.
+
+`mix quality` includes compilation, formatting, strict Credo, the source-bound Sobelow gate and Dialyzer. Keep `scripts/security/sobelow-exceptions.json`: each reviewed exception is tied to exact source and an expiry; changed, expired, stale or unreviewed findings fail closed. Generated reports belong under ignored `tmp/` paths.
+
+## Historical evidence
+
+The removed investigations and upstream experiments are recoverable from the immutable [reviewed tree](https://github.com/kith-crm/kith/tree/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan). The [final POT/ASN validation report](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-implementation-evidence/pot-reviewed-validation.json) records the tested source snapshot; the [policy review](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-implementation-evidence/policy-review.json) records the revised acceptance policy.
+
+Those reports are historical, not fresh validation of the cleaned tree. Production verification covered Linux/arm64 musl, synthetic credentials and local provider fixtures; it did not establish Linux/amd64, every runtime/device matrix, live provider accounts or embedded standalone-tool Rust/Go dependency inventories. Remote CI was not rerun for that validation. Historical audit results are point-in-time evidence, and maintenance reviews do not predict future maintainer responsiveness.
