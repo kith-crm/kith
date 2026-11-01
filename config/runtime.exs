@@ -74,15 +74,19 @@ if config_env() == :prod do
     http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}],
     secret_key_base: secret_key_base
 
-  # Cloak encryption vault — production key from env
+  # Credential vault — preserve env/secret-file loading and validate in every
+  # production mode, including release migrations which do not start the app.
   cloak_key =
     Kith.ConfigHelpers.read_secret("CLOAK_KEY") ||
       raise "CLOAK_KEY is required in production (base64-encoded 32-byte key)"
 
-  config :kith, Kith.Vault,
-    ciphers: [
-      default: {Cloak.Ciphers.AES.GCM, tag: "AES.GCM.V1", key: Base.decode64!(cloak_key)}
-    ]
+  decoded_cloak_key =
+    case Base.decode64(cloak_key) do
+      {:ok, key} when byte_size(key) == 32 -> key
+      _ -> raise "CLOAK_KEY must be base64-encoded and decode to exactly 32 bytes"
+    end
+
+  config :kith, Kith.Vault, key: decoded_cloak_key
 
   # WebAuthn — rp_id must match KITH_HOSTNAME exactly
   config :wax_,
@@ -308,7 +312,11 @@ if config_env() == :prod do
   end
 
   # Sentry error tracking (optional — only when SENTRY_DSN is set)
-  if sentry_dsn = System.get_env("SENTRY_DSN") do
+  sentry_dsn = System.get_env("SENTRY_DSN", "") |> String.trim()
+
+  if sentry_dsn != "" do
+    System.put_env("SENTRY_DSN", sentry_dsn)
+
     config :sentry,
       dsn: sentry_dsn,
       environment_name: System.get_env("SENTRY_ENVIRONMENT", "production"),
@@ -320,6 +328,11 @@ if config_env() == :prod do
       filter: Kith.SentryFilter,
       before_send: {Kith.SentryEventHandler, :before_send},
       enable_source_code_context: true
+  else
+    # Sentry re-reads this variable when validating partial runtime updates;
+    # an empty variable would override the disabled configuration on that path.
+    System.delete_env("SENTRY_DSN")
+    config :sentry, client: Kith.SentryReqClient, dsn: nil
   end
 
   # Geolix — local MaxMind GeoLite2 database (optional)

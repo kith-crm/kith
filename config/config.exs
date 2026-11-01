@@ -144,13 +144,8 @@ config :logger, :default_formatter,
     :import_id
   ]
 
-# Cloak encryption vault — key set per-environment
-config :kith, Kith.Vault,
-  ciphers: [
-    default:
-      {Cloak.Ciphers.AES.GCM,
-       tag: "AES.GCM.V1", key: Base.decode64!("oQaI0liBwsBX4ClJyWexY+lHhC3R3RPn1t9N8VPFdho=")}
-  ]
+# Credential vault — production overrides this development/test key via CLOAK_KEY.
+config :kith, Kith.Vault, key: Base.decode64!("oQaI0liBwsBX4ClJyWexY+lHhC3R3RPn1t9N8VPFdho=")
 
 # Flop — server-side sorting, filtering, pagination
 config :flop, repo: Kith.Repo, default_limit: 25

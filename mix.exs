@@ -13,6 +13,7 @@ defmodule Kith.MixProject do
       dialyzer: dialyzer(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       test_ignore_filters: [
+        ~r"^test/fixtures/tls_pr44/transport_probe\.ex$",
         ~r"^test/playwright/seed\.exs$",
         ~r"^test/playwright/fixtures/pr44/(?:boot|control|server)\.exs$",
         ~r"^test/playwright/fixtures/s3/seed\.exs$"
@@ -27,7 +28,7 @@ defmodule Kith.MixProject do
   def application do
     [
       mod: {Kith.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: [:logger, :runtime_tools, :crypto]
     ]
   end
 
@@ -76,9 +77,9 @@ defmodule Kith.MixProject do
       # Core Phoenix
       {:phoenix, "~> 1.8.5"},
       {:phoenix_ecto, "~> 4.5"},
-      {:ecto_sql, "~> 3.13"},
+      {:ecto_sql, "~> 3.14"},
       {:postgrex, ">= 0.0.0"},
-      {:phoenix_html, "~> 4.1"},
+      {:phoenix_html, "~> 4.4"},
       {:phoenix_live_view, "~> 1.1.0"},
       {:phoenix_live_dashboard, "~> 0.8.3"},
       {:telemetry_metrics, "~> 1.0"},
@@ -116,7 +117,7 @@ defmodule Kith.MixProject do
       {:pot, "~> 1.0"},
       {:eqrcode, "~> 0.1"},
       {:wax_, "~> 0.6"},
-      {:assent, "~> 0.2"},
+      {:assent, "~> 0.3.2"},
       {:pbkdf2_elixir, "~> 2.2"},
 
       # Rate Limiting
@@ -128,9 +129,12 @@ defmodule Kith.MixProject do
 
       # i18n / CLDR / Timezone
       {:tz, "~> 0.28"},
-      {:ex_cldr, "~> 2.40"},
+      {:ex_cldr, "~> 2.47.5"},
       {:ex_cldr_dates_times, "~> 2.20"},
-      {:ex_cldr_numbers, "~> 2.33"},
+      # Keep the latest Calendars parent; its 2.4.x manifest currently requires
+      # DigitalToken 1.x. Do not let resolution downgrade it to select token 2.x.
+      {:ex_cldr_calendars, "~> 2.4.4"},
+      {:ex_cldr_numbers, "~> 2.38.3"},
       {:ex_cldr_territories, "~> 2.9"},
 
       # Logging & Observability
@@ -140,9 +144,6 @@ defmodule Kith.MixProject do
 
       # Circuit Breaker
       {:fuse, "~> 2.5"},
-
-      # Encryption
-      {:cloak_ecto, "~> 1.3"},
 
       # IP Geolocation
       {:geolix, "~> 2.0"},

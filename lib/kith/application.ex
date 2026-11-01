@@ -8,6 +8,7 @@ defmodule Kith.Application do
 
   @impl true
   def start(_type, _args) do
+    Kith.Vault.validate_key!()
     log_oban_pruner_retention()
     children = base_children() ++ mode_children()
     opts = [strategy: :one_for_one, name: Kith.Supervisor]
@@ -44,7 +45,6 @@ defmodule Kith.Application do
     :logger.add_handler(:sentry_handler, Sentry.LoggerHandler, %{})
 
     [
-      Kith.Vault,
       Kith.Repo,
       {Finch, name: Swoosh.Finch, pools: %{:default => [size: 10]}},
       {Oban, Application.fetch_env!(:kith, Oban)},
