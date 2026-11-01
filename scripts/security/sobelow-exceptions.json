@@ -48,7 +48,7 @@
     "type": "XSS.ContentType: XSS in `put_resp_content_type`",
     "file": "lib/kith_web/plugs/rate_limiter.ex",
     "variable": "content_type",
-    "source_sha256": "52d09a791aa19010d84e3dd886954e53fe6bdf069dec095e3c3a4c50b52e191a",
+    "source_sha256": "22b5ea0d872540fd70ff0584a1d5973499be54da5fd8d6737b17ada4482f7229",
     "reason": "MIME is one of two literals; HTML is static and JSON encoded from constants plus integer retry duration. Request text never reaches the body.",
     "evidence": "test/kith_web/plugs/rate_limiter_test.exs",
     "owner": "kith-crm maintainers",
@@ -59,7 +59,7 @@
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith_web/plugs/rate_limiter.ex",
     "variable": "error_body",
-    "source_sha256": "52d09a791aa19010d84e3dd886954e53fe6bdf069dec095e3c3a4c50b52e191a",
+    "source_sha256": "22b5ea0d872540fd70ff0584a1d5973499be54da5fd8d6737b17ada4482f7229",
     "reason": "MIME is one of two literals; HTML is static and JSON encoded from constants plus integer retry duration. Request text never reaches the body.",
     "evidence": "test/kith_web/plugs/rate_limiter_test.exs",
     "owner": "kith-crm maintainers",
@@ -242,22 +242,22 @@
     "review_by": "2026-11-29"
   },
   {
-    "line": 436,
+    "line": 434,
     "type": "XSS.ContentType: XSS in `put_resp_content_type`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "content_type",
-    "source_sha256": "b006930694712829cc02e44f1a14d6bc0ef60a614201a8a7b1b1811d223b46d1",
+    "source_sha256": "806a7c18953428df86562e559e49397a4b4d070d4fd515497c54f91612e2b09b",
     "reason": "Serialized vCard with one of two fixed text/vcard MIME literals and nosniff, never HTML or an arbitrary requested content type.",
     "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29"
   },
   {
-    "line": 439,
+    "line": 437,
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "vcard",
-    "source_sha256": "b006930694712829cc02e44f1a14d6bc0ef60a614201a8a7b1b1811d223b46d1",
+    "source_sha256": "806a7c18953428df86562e559e49397a4b4d070d4fd515497c54f91612e2b09b",
     "reason": "Serialized vCard with one of two fixed text/vcard MIME literals and nosniff, never HTML or an arbitrary requested content type.",
     "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs",
     "owner": "kith-crm maintainers",
@@ -284,5 +284,51 @@
     "evidence": "test/kith_web/controllers/uploads_controller_test.exs",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29"
+  },
+  {
+    "line": 718,
+    "type": "XSS.SendResp: XSS in `send_resp`",
+    "file": "lib/kith/dav/carddav_plug.ex",
+    "variable": "xml",
+    "source_sha256": "806a7c18953428df86562e559e49397a4b4d070d4fd515497c54f91612e2b09b",
+    "reason": "Owned XMLBuilder output only: text, hrefs, descriptions, validators and tokens are XML-escaped; vCards use CDATA with terminators split. Structure and properties are restricted by XMLParser known-property atoms. Fixed application/xml MIME; parsed malicious-content tests create no script elements.",
+    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs",
+    "owner": "kith-crm maintainers",
+    "review_by": "2026-11-29",
+    "reviewed_sources": [
+      {
+        "file": "lib/kith/dav/xml_builder.ex",
+        "source_sha256": "09269d932e7e80bb2f7bf9f83f2584cc0d8d6d9df29ba3b1077356706a0982fe"
+      },
+      {
+        "file": "lib/kith/dav/xml_parser.ex",
+        "source_sha256": "1ed2d8afaab575e3485e81a7482aae55d3407504895c50e3883802f4c8df05e5"
+      },
+      {
+        "file": "mix.lock",
+        "source_sha256": "c95c20a68d3b6200850bf9962197d64066062494013c1dbc49c3105268cb8e2c"
+      }
+    ]
+  },
+  {
+    "line": 20,
+    "type": "XSS.Raw: XSS",
+    "file": "lib/kith/rich_text.ex",
+    "variable": "sanitize",
+    "source_sha256": "9c1bfd1d8443b8db2b758bc71a64b1e034c63d6d96d2dc00f524742810a33fca",
+    "reason": "All output passes HtmlSanitizeEx.Scrubber with the narrow Note.Scrubber tag/URL allowlist immediately before HTML.raw. No unsanitized fallback exists; legacy rows are sanitized again on rendering.",
+    "evidence": "test/kith/rich_text_test.exs; test/kith_web/live/rich_text_security_test.exs",
+    "owner": "kith-crm maintainers",
+    "review_by": "2026-11-29",
+    "reviewed_sources": [
+      {
+        "file": "lib/kith/contacts/note.ex",
+        "source_sha256": "cd686cca2f0b9811db6c850deca8faa75acaf6f7992d1bf95f00973c4a15a6d6"
+      },
+      {
+        "file": "mix.lock",
+        "source_sha256": "c95c20a68d3b6200850bf9962197d64066062494013c1dbc49c3105268cb8e2c"
+      }
+    ]
   }
 ]

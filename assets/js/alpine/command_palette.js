@@ -67,7 +67,10 @@ Alpine.data("commandPalette", () => ({
     this.contacts.forEach(c => items.push({ ...c, type: "contact", section: "contacts" }))
     this.filteredPages.forEach(p => items.push({ ...p, section: "pages" }))
     this.filteredActions.forEach(a => items.push({ ...a, section: "actions" }))
-    return items
+    return items.map((item, index) => ({
+      ...item,
+      sectionStart: index === 0 || items[index - 1].section !== item.section,
+    }))
   },
 
   onInput() {

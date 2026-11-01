@@ -1386,11 +1386,12 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   defp phone_cft_id_map(account_id, cft_ids) when is_list(cft_ids) do
     Repo.all(
-      from t in Contacts.ContactFieldType,
+      from(t in Contacts.ContactFieldType,
         where: t.id in ^cft_ids,
         where: is_nil(t.account_id) or t.account_id == ^account_id,
         where: fragment("? LIKE 'tel%'", t.protocol),
         select: t.id
+      )
     )
     |> Map.new(&{&1, true})
   end
@@ -1421,8 +1422,11 @@ defmodule Kith.Imports.Sources.MonicaApi do
     headers = [{"Authorization", "Bearer #{credential.api_key}"}, {"Accept", "application/json"}]
     req_options = Map.get(credential, :req_options, [])
 
+    # Req 0.7 turns URL userinfo into Basic auth. Explicit auth keeps the
+    # stored API key authoritative, even for legacy URLs containing userinfo.
     options =
       [
+        auth: {:bearer, credential.api_key},
         headers: headers,
         params: params,
         max_retries: 5,

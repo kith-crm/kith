@@ -5,7 +5,7 @@ defmodule Kith.MixProject do
     [
       app: :kith,
       version: "0.1.0",
-      elixir: "~> 1.15",
+      elixir: ">= 1.15.1 and < 2.0.0",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -14,6 +14,7 @@ defmodule Kith.MixProject do
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       test_ignore_filters: [
         ~r"^test/fixtures/tls_pr44/transport_probe\.ex$",
+        ~r"^test/fixtures/rate_limiter_redis/probe\.ex$",
         ~r"^test/playwright/seed\.exs$",
         ~r"^test/playwright/fixtures/pr44/(?:boot|control|server)\.exs$",
         ~r"^test/playwright/fixtures/s3/seed\.exs$"
@@ -80,8 +81,8 @@ defmodule Kith.MixProject do
       {:ecto_sql, "~> 3.14"},
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 4.4"},
-      {:phoenix_live_view, "~> 1.1.0"},
-      {:phoenix_live_dashboard, "~> 0.8.3"},
+      {:phoenix_live_view, "~> 1.2.13"},
+      {:phoenix_live_dashboard, "~> 0.9.1"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 1.0"},
@@ -105,12 +106,12 @@ defmodule Kith.MixProject do
       {:gen_smtp, "~> 1.2"},
 
       # Storage
-      {:ex_aws, "~> 2.5"},
+      {:ex_aws, "~> 2.7"},
       {:ex_aws_s3, "~> 2.5"},
       {:sweet_xml, "~> 0.7"},
 
       # HTTP Client
-      {:req, "~> 0.6.3"},
+      {:req, "~> 0.7.5"},
       {:finch, "~> 0.21"},
 
       # Auth
@@ -121,14 +122,15 @@ defmodule Kith.MixProject do
       {:pbkdf2_elixir, "~> 2.2"},
 
       # Rate Limiting
-      {:hammer, "~> 6.2"},
-      {:redix, "~> 1.5", optional: true},
+      {:hammer, "~> 7.5"},
+      {:hammer_backend_redis, "~> 7.2", optional: true},
+      {:redix, "~> 1.10", optional: true},
 
       # Cache
       {:cachex, "~> 4.0"},
 
       # i18n / CLDR / Timezone
-      {:tz, "~> 0.28"},
+      {:tz, "~> 0.28.4"},
       {:ex_cldr, "~> 2.47.5"},
       {:ex_cldr_dates_times, "~> 2.20"},
       # Keep the latest Calendars parent; its 2.4.x manifest currently requires
@@ -138,16 +140,16 @@ defmodule Kith.MixProject do
       {:ex_cldr_territories, "~> 2.9"},
 
       # Logging & Observability
-      {:logger_json, "~> 6.0"},
-      {:sentry, "~> 10.8"},
-      {:prom_ex, "~> 1.9"},
+      {:logger_json, "~> 7.0"},
+      {:sentry, "~> 14.0"},
+      {:prom_ex, "~> 1.12"},
 
       # Circuit Breaker
       {:fuse, "~> 2.5"},
 
       # IP Geolocation
-      {:geolix, "~> 2.0"},
-      {:geolix_adapter_mmdb2, "~> 0.6"},
+      {:geolix, "~> 2.1"},
+      {:geolix_adapter_mmdb2, "~> 0.7"},
 
       # Security
       {:remote_ip, "~> 1.2"},
@@ -159,18 +161,18 @@ defmodule Kith.MixProject do
       {:ex_phone_number, "~> 0.4"},
 
       # Server-side sorting, filtering, and pagination
-      {:flop, "~> 0.26"},
-      {:flop_phoenix, "~> 0.23"},
+      {:flop, "~> 0.29.1"},
+      {:flop_phoenix, "~> 0.27.0"},
 
       # Dev/Test
-      {:phoenix_live_reload, "~> 1.2", only: :dev},
-      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
-      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
+      {:phoenix_live_reload, "~> 1.7", only: :dev},
+      {:esbuild, "~> 0.10.1", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.5.2", runtime: Mix.env() == :dev},
       {:lazy_html, ">= 0.1.0", only: :test},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
-      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
-      {:ex_machina, "~> 2.8", only: :test},
+      {:credo, "~> 1.7.19", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4.8", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.18.1", only: [:dev, :test], runtime: false},
+      {:ex_machina, "~> 2.8.2", only: :test},
       {:mox, "~> 1.2", only: :test}
     ]
   end

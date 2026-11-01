@@ -23,6 +23,75 @@ defmodule Kith.Storage.S3Test do
     end
   end
 
+  test "reads through the actual Req adapter and signs every ExAws retry" do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    on_exit(fn -> if Process.alive?(counter), do: Agent.stop(counter) end)
+
+    Kith.TestEnv.put_env_restoring(:ex_aws, :http_client, ExAws.Request.Req)
+
+    Kith.TestEnv.put_env_restoring(:ex_aws, :retries,
+      max_attempts: 2,
+      base_backoff_in_ms: 1,
+      max_backoff_in_ms: 1
+    )
+
+    fixture = fn conn ->
+      assert conn.method == "GET"
+      assert conn.request_path == "/kith-test/assets/a.png"
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      verify_signature!(conn, body)
+      attempt = Agent.get_and_update(counter, &{&1 + 1, &1 + 1})
+      Plug.Conn.send_resp(conn, if(attempt == 1, do: 503, else: 200), "image-data")
+    end
+
+    Kith.TestEnv.put_env_restoring(:ex_aws, :req_opts, plug: fixture)
+    assert {:ok, "image-data"} = S3.read("assets/a.png")
+    assert Agent.get(counter, & &1) == 2
+  end
+
+  # Independently recompute SigV4 from the request the Req adapter actually
+  # delivers, rather than accepting the presence of an Authorization header.
+  defp verify_signature!(conn, body) do
+    [authorization] = Plug.Conn.get_req_header(conn, "authorization")
+
+    [_, scope, signed_headers, signature] =
+      Regex.run(
+        ~r/^AWS4-HMAC-SHA256 Credential=test\/(.*),SignedHeaders=(.*),Signature=(.*)$/,
+        authorization
+      )
+
+    [date, "us-east-1", "s3", "aws4_request"] = String.split(scope, "/")
+    [timestamp] = Plug.Conn.get_req_header(conn, "x-amz-date")
+
+    headers =
+      signed_headers
+      |> String.split(";")
+      |> Enum.map_join("", fn name ->
+        value = conn |> Plug.Conn.get_req_header(name) |> Enum.join(",")
+        name <> ":" <> (value |> String.trim() |> String.replace(~r/\s+/, " ")) <> "\n"
+      end)
+
+    canonical =
+      Enum.join(
+        [
+          conn.method,
+          conn.request_path,
+          conn.query_string,
+          headers,
+          signed_headers,
+          sha256(body)
+        ],
+        "\n"
+      )
+
+    string_to_sign = Enum.join(["AWS4-HMAC-SHA256", timestamp, scope, sha256(canonical)], "\n")
+    key = "AWS4test" |> hmac(date) |> hmac("us-east-1") |> hmac("s3") |> hmac("aws4_request")
+    assert Base.encode16(hmac(key, string_to_sign), case: :lower) == signature
+  end
+
+  defp sha256(value), do: :crypto.hash(:sha256, value) |> Base.encode16(case: :lower)
+  defp hmac(key, value), do: :crypto.mac(:hmac, :sha256, key, value)
+
   describe "csp_img_src/0" do
     test "scheme and host, default port omitted" do
       assert S3.csp_img_src() == "https://s3.example.com"

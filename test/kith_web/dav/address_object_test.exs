@@ -50,6 +50,30 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert Regex.match?(~r/^(W\/)?"[^"]*"$/, etag)
     end
 
+    test "opaque SHA-256 validator accepts current conditional writes and rejects stale validators",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id)
+      conn = authed_dav(context, "GET", contact_path(contact))
+      [etag] = get_resp_header(conn, "etag")
+      assert Regex.match?(~r/^"[a-f0-9]{64}"$/, etag)
+
+      stale =
+        build_conn()
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("if-match", "\"stale-validator\"")
+        |> dav_request("PUT", contact_path(contact), build_vcard("Updated", "Person"))
+
+      assert stale.status == 412
+
+      current =
+        build_conn()
+        |> basic_auth(context.user.email, dav_password())
+        |> put_req_header("if-match", etag)
+        |> dav_request("PUT", contact_path(contact), build_vcard("Updated", "Person"))
+
+      assert current.status == 204
+    end
+
     test "MUST return 404 for non-existent address object", context do
       conn =
         authed_dav(context, "GET", "/dav/addressbooks/default/kith-contact-999999.vcf")

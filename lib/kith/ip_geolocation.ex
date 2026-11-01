@@ -24,7 +24,7 @@ defmodule Kith.IpGeolocation do
 
         case result do
           {:ok, data} ->
-            Cachex.put(:kith_cache, cache_key, data, ttl: @cache_ttl)
+            Cachex.put(:kith_cache, cache_key, data, expire: @cache_ttl)
             {:ok, data}
 
           error ->
@@ -52,7 +52,10 @@ defmodule Kith.IpGeolocation do
 
   @doc "Returns true if Geolix database is configured."
   def configured? do
-    System.get_env("GEOIP_DB_PATH") != nil
+    case System.get_env("GEOIP_DB_PATH") do
+      path when is_binary(path) -> String.trim(path) != ""
+      _ -> false
+    end
   end
 
   # -- Private --
@@ -87,8 +90,8 @@ defmodule Kith.IpGeolocation do
 
   defp build_full_location(city_data, country_data, subdivisions) do
     %{
-      city: get_in(city_data || %{}, [:name]) || get_geolix_name(city_data),
-      country: get_in(country_data || %{}, [:iso_code]) || get_geolix_name(country_data),
+      city: Map.get(city_data || %{}, :name) || get_geolix_name(city_data),
+      country: Map.get(country_data || %{}, :iso_code) || get_geolix_name(country_data),
       region: get_geolix_name(List.first(subdivisions || []))
     }
   end
@@ -96,7 +99,7 @@ defmodule Kith.IpGeolocation do
   defp build_country_only_location(country_data) do
     %{
       city: nil,
-      country: get_in(country_data || %{}, [:iso_code]) || get_geolix_name(country_data),
+      country: Map.get(country_data || %{}, :iso_code) || get_geolix_name(country_data),
       region: nil
     }
   end

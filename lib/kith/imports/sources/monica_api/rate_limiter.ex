@@ -1,6 +1,6 @@
 defmodule Kith.Imports.Sources.MonicaApi.RateLimiter do
   @moduledoc """
-  Per-host token bucket for outbound Monica API calls.
+  Per-host fixed-window request budget for outbound Monica API calls.
 
   Configured at one token below Monica's documented default of 60 requests
   per minute, leaving a one-call safety margin so a small clock-skew or
@@ -13,7 +13,7 @@ defmodule Kith.Imports.Sources.MonicaApi.RateLimiter do
   which `config/runtime.exs` sets from `MONICA_RATE_LIMIT_PER_MINUTE`.
   Per-test overrides go through `Application.put_env/3`.
 
-  Hammer (already a dep) supplies the underlying token bucket; we use a
+  The shared supervised Hammer backend supplies the fixed-window counter; we use a
   bucket key per Monica host so independent Monica instances do not share
   a quota. Calls block the caller process via `Process.sleep/1` until a
   token is available, then return `:ok`.
@@ -36,7 +36,7 @@ defmodule Kith.Imports.Sources.MonicaApi.RateLimiter do
     retry_sleep_ms =
       Application.get_env(:kith, :monica_rate_limit_retry_sleep_ms) || @default_retry_sleep_ms
 
-    case Hammer.check_rate(bucket, scale_ms, limit) do
+    case Kith.RateLimiter.hit(bucket, scale_ms, limit) do
       {:allow, _count} ->
         :ok
 

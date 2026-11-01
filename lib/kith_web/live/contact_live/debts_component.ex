@@ -169,7 +169,7 @@ defmodule KithWeb.ContactLive.DebtsComponent do
         <div class="flex items-center gap-2">
           <h3 class="text-sm font-semibold text-[var(--color-text-primary)]">Debts</h3>
           <%= if @can_edit do %>
-            <form phx-change="set-contact-currency" phx-target={@myself}>
+            <form id={"#{@id}-currency-form"} phx-change="set-contact-currency" phx-target={@myself}>
               <select
                 name="currency_id"
                 class="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-1.5 py-0.5 text-xs text-[var(--color-text-secondary)] focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20 transition-colors"

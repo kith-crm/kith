@@ -754,7 +754,7 @@ defmodule KithWeb.KithUI do
             >
               <div>
                 <%!-- Section headers --%>
-                <template x-if="index === 0 || allItems[index - 1].section !== item.section">
+                <template x-if="item.sectionStart">
                   <div class="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-text-disabled)]">
                     <span x-text="item.section === 'recent' ? 'Recent' : item.section === 'contacts' ? 'Contacts' : item.section === 'pages' ? 'Pages' : 'Actions'" />
                   </div>

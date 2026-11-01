@@ -30,12 +30,12 @@ defmodule KithWeb.Plugs.RateLimiter do
     key = build_key(conn, opts)
     scale_ms = opts[:lockout] || period
 
-    case Hammer.check_rate(key, scale_ms, limit) do
+    case Kith.RateLimiter.hit(key, scale_ms, limit) do
       {:allow, _count} ->
         conn
 
-      {:deny, _limit} ->
-        retry_after = div(scale_ms, 1000)
+      {:deny, retry_after_ms} ->
+        retry_after = Kith.RateLimiter.retry_after_seconds(retry_after_ms)
 
         conn
         |> put_resp_content_type(content_type(conn))

@@ -78,8 +78,7 @@ defmodule KithWeb.UserLive.TotpChallenge do
             class="font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors cursor-pointer"
             x-on:click="toggleMode"
             x-text="modeLabel"
-          >
-          </button>
+          ></button>
         </p>
 
         <p class="text-center text-sm text-[var(--color-text-tertiary)]">

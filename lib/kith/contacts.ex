@@ -193,7 +193,12 @@ defmodule Kith.Contacts do
       |> paginated_filter_deceased(show_deceased)
       |> paginated_filter_favorites(favorites_only)
       |> paginated_filter_tags(tag_ids)
-      |> preload(^preloads)
+
+    # Search/tag joins may produce multiple rows. Keep their DISTINCT ON order
+    # inside a subquery so PostgreSQL cannot prepend contact IDs to Flop's
+    # requested sort order. The outer schema also preserves tag preloads.
+    query = from(c in Contact, where: c.id in subquery(select(query, [c], c.id)))
+    query = preload(query, ^preloads)
 
     case Flop.validate_and_run(query, flop_params, for: Contact) do
       {:ok, {entries, meta}} -> {:ok, entries, meta}
@@ -223,6 +228,7 @@ defmodule Kith.Contacts do
           ^pattern
         )
     )
+    |> exclude(:distinct)
     |> distinct([c], c.id)
   end
 
@@ -260,6 +266,7 @@ defmodule Kith.Contacts do
     query
     |> join(:inner, [c], t in assoc(c, :tags))
     |> where([c, ..., t], t.id in ^int_ids)
+    |> exclude(:distinct)
     |> distinct([c], c.id)
   end
 

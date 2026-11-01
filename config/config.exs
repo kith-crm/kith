@@ -77,8 +77,7 @@ config :kith, Oban,
   ]
 
 # Rate limiting (ETS default, Redis optional via RATE_LIMIT_BACKEND env)
-config :hammer,
-  backend: {Hammer.Backend.ETS, [expiry_ms: 60_000 * 60, cleanup_interval_ms: 60_000 * 10]}
+config :kith, Kith.RateLimiter, backend: :ets
 
 # Timezone database
 config :elixir, :time_zone_database, Tz.TimeZoneDatabase
@@ -96,7 +95,7 @@ config :kith, KithWeb.Endpoint,
 
 # Configure esbuild (the version is required)
 config :esbuild,
-  version: "0.25.4",
+  version: "0.28.2",
   kith: [
     args:
       ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=. --alias:trix=./vendor/trix/src/trix --alias:trix_editor_element=./vendor/trix/src/trix/elements/trix_editor_element.js --alias:trix_toolbar_element=./vendor/trix/src/trix/elements/trix_toolbar_element.js),
@@ -106,7 +105,7 @@ config :esbuild,
 
 # Configure tailwind (the version is required)
 config :tailwind,
-  version: "4.1.12",
+  version: "4.3.3",
   kith: [
     args: ~w(
       --input=assets/css/app.css
@@ -120,6 +119,19 @@ config :kith, :weather_api_key, nil
 
 # OAuth providers — configured per-environment via env vars
 config :kith, :oauth_providers, %{}
+
+# Preserve error-only reporting across SDK upgrades. Processing categories do
+# not disable metric capture; the explicit callback drops those events.
+config :sentry,
+  telemetry_processor_categories: [:error],
+  before_send_metric: {Kith.SentryEventHandler, :before_send_metric},
+  logs: nil,
+  traces_sample_rate: nil,
+  traces_sampler: nil,
+  integrations: [
+    oban: [capture_errors: false, cron: [enabled: false]],
+    quantum: [cron: [enabled: false]]
+  ]
 
 # WebAuthn (wax_) — origin/rp_id set per-environment
 config :wax_,

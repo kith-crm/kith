@@ -95,7 +95,9 @@ defmodule Kith.Workers.MonicaDocumentImportWorker do
   defp download_document(credential, url) do
     headers = [{"Authorization", "Bearer #{credential.api_key}"}]
 
-    case Req.get(url, [headers: headers] ++ credential.req_options) do
+    options = [auth: {:bearer, credential.api_key}, headers: headers] ++ credential.req_options
+
+    case Kith.BoundedHTTP.get(url, options) do
       {:ok, %Req.Response{status: 200, body: body} = resp} ->
         # Req returns header values as lists.
         content_type =

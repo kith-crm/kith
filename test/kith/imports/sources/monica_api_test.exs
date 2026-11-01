@@ -56,6 +56,17 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert :ok = MonicaApi.test_connection(credential())
     end
 
+    test "stored Bearer identity is preserved for a legacy URL containing userinfo" do
+      Req.Test.stub(@stub_name, fn conn ->
+        assert conn.request_path == "/api/me"
+        assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer test-key"]
+        Req.Test.json(conn, %{"data" => %{"id" => 1}})
+      end)
+
+      assert :ok =
+               MonicaApi.test_connection(credential(url: "https://legacy:password@monica.test"))
+    end
+
     test "returns error for invalid API key" do
       Req.Test.stub(@stub_name, fn conn ->
         Plug.Conn.send_resp(conn, 401, "")

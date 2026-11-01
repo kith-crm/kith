@@ -120,6 +120,7 @@ defmodule KithWeb.SettingsLive.Emotions do
               {if @editing_emotion, do: "Edit Emotion", else: "New Emotion"}
             </h2>
             <.form
+              id="emotion-settings-form"
               for={@changeset}
               phx-change="validate"
               phx-submit="save"

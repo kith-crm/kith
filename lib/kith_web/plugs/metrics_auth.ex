@@ -16,6 +16,7 @@ defmodule KithWeb.Plugs.MetricsAuth do
     cond do
       is_nil(expected_token) or expected_token == "" ->
         conn
+        |> put_resp_content_type("application/json")
         |> send_resp(401, Jason.encode!(%{error: "Metrics endpoint not configured"}))
         |> halt()
 

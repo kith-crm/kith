@@ -48,7 +48,7 @@ config :kith, Kith.Mailer, adapter: Swoosh.Adapters.Test
 config :swoosh, :api_client, false
 
 # Disable Sentry in tests
-config :sentry, client: Sentry.NoopClient, dsn: nil
+config :sentry, client: Kith.SentryReqClient, dsn: nil
 
 # Test metrics token
 config :kith, metrics_token: "test-metrics-token"

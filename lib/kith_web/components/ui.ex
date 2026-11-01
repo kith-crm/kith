@@ -164,7 +164,8 @@ defmodule KithWeb.UI do
   attr :error_class, :any, default: nil
 
   attr :rest, :global,
-    include: ~w(accept autocomplete capture cols disabled form list max maxlength min minlength
+    include:
+      ~w(accept autocomplete autofocus capture cols disabled form list max maxlength min minlength
          multiple pattern placeholder readonly required rows size step)
 
   slot :inner_block

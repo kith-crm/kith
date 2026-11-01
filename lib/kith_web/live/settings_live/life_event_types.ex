@@ -120,6 +120,7 @@ defmodule KithWeb.SettingsLive.LifeEventTypes do
               {if @editing_life_event_type, do: "Edit Life Event Type", else: "New Life Event Type"}
             </h2>
             <.form
+              id="life-event-type-settings-form"
               for={@changeset}
               phx-change="validate"
               phx-submit="save"

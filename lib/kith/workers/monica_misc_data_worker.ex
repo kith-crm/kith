@@ -456,6 +456,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
     # can't hold the job for more than about two and a half minutes.
     options =
       [
+        auth: {:bearer, credential.api_key},
         headers: headers,
         params: params,
         receive_timeout: @request_timeout_ms,
@@ -469,7 +470,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       "[MonicaMiscData] -> GET #{URI.parse(url).path} (request ##{Process.get(:misc_requests, 0) + 1})"
     )
 
-    {request_ms, result} = timed(fn -> Req.get(url, options) end)
+    {request_ms, result} = timed(fn -> Kith.BoundedHTTP.get(url, options) end)
     track_request(url, wait_ms, request_ms, result)
     ensure_import_active!(credential.import_id)
 
@@ -1461,11 +1462,12 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   defp pet_duplicate?(contact_id, name, species) do
     Repo.exists?(
-      from p in Kith.Contacts.Pet,
+      from(p in Kith.Contacts.Pet,
         where:
           p.contact_id == ^contact_id and
             fragment("lower(trim(coalesce(?, '')))", p.name) == ^norm(name) and
             p.species == ^species
+      )
     )
   end
 

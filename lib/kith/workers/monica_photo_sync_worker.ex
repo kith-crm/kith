@@ -357,7 +357,10 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
       {"Accept", "application/json"}
     ]
 
-    options = [headers: headers, params: params] ++ Map.get(credential, :req_options, [])
-    Req.get(url, options)
+    options =
+      [auth: {:bearer, credential.api_key}, headers: headers, params: params] ++
+        Map.get(credential, :req_options, [])
+
+    Kith.BoundedHTTP.get(url, options)
   end
 end

@@ -1,11 +1,19 @@
 # Fail closed on every unreviewed finding, changed reviewed source, expired
 # exception, scanner error, or malformed output. Never ignore an entire category.
-{output, status} = System.cmd("mix", ["sobelow", "--format", "json", "--private", "--no-config"])
-if status != 0, do: raise("Sobelow failed (#{status}): #{output}")
+{output, status} =
+  try do
+    System.cmd("mix", ["sobelow", "--format", "json", "--private", "--no-config"],
+      stderr_to_stdout: true
+    )
+  rescue
+    error in ErlangError -> {Exception.message(error), 127}
+  end
 
-report = Jason.decode!(output)
 File.mkdir_p!("tmp/security")
+File.write!("tmp/security/sobelow.log", output)
 File.write!("tmp/security/sobelow.json", output)
+if status != 0, do: raise("Sobelow failed (#{status}); see tmp/security/sobelow.log")
+report = Jason.decode!(output)
 findings = report |> Map.fetch!("findings") |> Map.values() |> List.flatten()
 exceptions = "scripts/security/sobelow-exceptions.json" |> File.read!() |> Jason.decode!()
 
@@ -24,6 +32,13 @@ Enum.each(exceptions, fn exception ->
 
   if digest != exception["source_sha256"],
     do: raise("Reviewed source changed; re-review Sobelow exception: #{exception["file"]}")
+
+  Enum.each(Map.get(exception, "reviewed_sources", []), fn source ->
+    digest = :crypto.hash(:sha256, File.read!(source["file"])) |> Base.encode16(case: :lower)
+
+    if digest != source["source_sha256"],
+      do: raise("Reviewed guard changed; re-review Sobelow exception: #{source["file"]}")
+  end)
 end)
 
 remaining = Enum.map(findings, key) -- Enum.map(exceptions, key)

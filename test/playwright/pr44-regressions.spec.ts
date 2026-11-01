@@ -32,6 +32,8 @@ async function login(page: Page, account: Account) {
   await connected(page);
   await page.getByRole("textbox", { name: /email/i }).fill(account.email);
   await page.locator('input[type="password"]').fill("ValidP@ssword123!");
+  await expect(page.getByRole("textbox", { name: /email/i })).toHaveValue(account.email);
+  await expect(page.locator('input[type="password"]')).toHaveValue("ValidP@ssword123!");
   await page.getByRole("button", { name: /log in/i }).click();
   await expect(page).toHaveURL(/\/(dashboard|contacts)$/);
 }
@@ -79,6 +81,29 @@ async function api(request: APIRequestContext, account: Account, route: string, 
 
 test.beforeEach(async ({ page }) => {
   page.on("dialog", async (dialog) => { await dialog.accept(); });
+});
+
+test("contact search recovers its form state after a LiveView reconnect", async ({ page }) => {
+  const account = control("prepare", { scenario: "duplicates" });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await login(page, account);
+  await page.goto("/contacts");
+  await connected(page);
+  await expect(page.locator("tbody tr")).toHaveCount(3);
+  const search = page.locator("#contacts-search-form input[name='search']");
+  await expect(search).toHaveCount(1);
+
+  await page.evaluate(() => new Promise<void>((resolve) => (window as any).liveSocket.disconnect(resolve)));
+  await expect.poll(() => page.evaluate(() => (window as any).liveSocket.isConnected())).toBe(false);
+  await search.fill("Cousin");
+  await page.evaluate(() => (window as any).liveSocket.connect());
+  await connected(page);
+
+  await expect(search).toHaveValue("Cousin");
+  await expect(page.locator("tbody tr")).toHaveCount(1);
+  await expect(page.locator("tbody")).toContainText("Alex Cousin");
+  expect(errors).toEqual([]);
 });
 
 test("a saved Not duplicates decision survives transitive auto-merge and reruns", async ({ page }) => {

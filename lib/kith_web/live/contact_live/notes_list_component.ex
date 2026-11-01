@@ -242,7 +242,7 @@ defmodule KithWeb.ContactLive.NotesListComponent do
                 <%!-- Note display --%>
                 <div class="flex items-start justify-between">
                   <div class="prose prose-sm max-w-none flex-1">
-                    {raw(note.body)}
+                    {Kith.RichText.render(note.body)}
                   </div>
                   <div class="flex items-center gap-1 ms-2 shrink-0">
                     <%= if note.is_private do %>

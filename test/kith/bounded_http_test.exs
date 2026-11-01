@@ -31,6 +31,87 @@ defmodule Kith.BoundedHTTPTest do
              Kith.BoundedHTTP.get("http://example.test", plug: plug, retry: false)
   end
 
+  test "accepts the exact body limit and leaves archive content undecoded" do
+    body = String.duplicate("Z", 20 * 1024 * 1024)
+
+    plug = fn conn ->
+      conn
+      |> Plug.Conn.put_resp_header("content-type", "application/zip")
+      |> Plug.Conn.send_resp(200, body)
+    end
+
+    assert {:ok, %{body: ^body}} =
+             Kith.BoundedHTTP.get("http://example.test/archive.zip", plug: plug, decoders: [:zip])
+  end
+
+  test "explicit parameters replace URL values while retaining explicit duplicates" do
+    plug = fn conn ->
+      assert Enum.to_list(URI.query_decoder(conn.query_string)) ==
+               [{"page", "2"}, {"page", "3"}, {"token", "opaque"}]
+
+      Req.Test.json(conn, %{"ok" => true})
+    end
+
+    assert {:ok, %{body: %{"ok" => true}}} =
+             Kith.BoundedHTTP.get("http://example.test?page=1&token=opaque",
+               params: [page: 2, page: 3],
+               plug: plug
+             )
+  end
+
+  test "explicit Bearer auth wins over URL userinfo" do
+    plug = fn conn ->
+      assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer stored-key"]
+      Req.Test.json(conn, %{})
+    end
+
+    assert {:ok, _} =
+             Kith.BoundedHTTP.get("http://legacy:password@example.test",
+               auth: {:bearer, "stored-key"},
+               plug: plug
+             )
+  end
+
+  test "a 303 redirect uses GET and cross-host redirects discard credentials" do
+    plug = fn conn ->
+      case conn.host do
+        "original.test" ->
+          assert conn.method == "POST"
+          assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer stored-key"]
+
+          conn
+          |> Plug.Conn.put_resp_header("location", "http://target.test/final")
+          |> Plug.Conn.send_resp(303, "")
+
+        "target.test" ->
+          assert conn.method == "GET"
+          assert Plug.Conn.get_req_header(conn, "authorization") == []
+          assert Plug.Conn.get_req_header(conn, "content-type") == []
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          assert body == ""
+          Req.Test.json(conn, %{"redirected" => true})
+      end
+    end
+
+    assert {:ok, %{body: %{"redirected" => true}}} =
+             Req.post("http://original.test",
+               auth: {:bearer, "stored-key"},
+               body: "payload",
+               headers: [{"content-type", "text/plain"}],
+               plug: plug
+             )
+  end
+
+  test "GET with a request body stays GET on the final Req version" do
+    plug = fn conn ->
+      assert conn.method == "GET"
+      {:ok, "payload", conn} = Plug.Conn.read_body(conn)
+      Req.Test.json(conn, %{})
+    end
+
+    assert {:ok, _} = Kith.BoundedHTTP.get("http://example.test", body: "payload", plug: plug)
+  end
+
   test "real Finch chunked transport halts after cumulative response limit" do
     observer = self()
 

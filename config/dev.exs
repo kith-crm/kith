@@ -81,7 +81,7 @@ config :kith, Kith.Mailer,
 config :swoosh, :api_client, false
 
 # Disable Sentry in dev
-config :sentry, client: Sentry.NoopClient, dsn: nil
+config :sentry, client: Kith.SentryReqClient, dsn: nil
 
 # Dev metrics token (for testing /metrics endpoint locally)
 config :kith, metrics_token: "dev-metrics-token"

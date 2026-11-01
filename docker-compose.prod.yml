@@ -194,6 +194,8 @@ services:
       METRICS_TOKEN: ${METRICS_TOKEN}
       # Monica API import throttle (requests/min); imports run in this container
       MONICA_RATE_LIMIT_PER_MINUTE: ${MONICA_RATE_LIMIT_PER_MINUTE:-55}
+      RATE_LIMIT_BACKEND: ${RATE_LIMIT_BACKEND:-ets}
+      REDIS_URL: ${REDIS_URL:-}
     volumes:
       - uploads:/app/uploads
     deploy:

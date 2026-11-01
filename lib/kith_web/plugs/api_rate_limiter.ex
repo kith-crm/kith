@@ -23,18 +23,19 @@ defmodule KithWeb.Plugs.ApiRateLimiter do
       %{user: %{account_id: account_id}} when not is_nil(account_id) ->
         key = "api_rate:account:#{account_id}"
 
-        case Hammer.check_rate(key, period, limit) do
+        case Kith.RateLimiter.hit(key, period, limit) do
           {:allow, count} ->
             remaining = max(limit - count, 0)
-            reset_at = System.system_time(:second) + div(period, 1000)
+            now = System.system_time(:millisecond)
+            reset_at = div(now + period - rem(now, period) + 999, 1000)
 
             conn
             |> put_resp_header("x-ratelimit-limit", to_string(limit))
             |> put_resp_header("x-ratelimit-remaining", to_string(remaining))
             |> put_resp_header("x-ratelimit-reset", to_string(reset_at))
 
-          {:deny, _limit} ->
-            retry_after = div(period, 1000)
+          {:deny, retry_after_ms} ->
+            retry_after = Kith.RateLimiter.retry_after_seconds(retry_after_ms)
 
             conn
             |> put_resp_content_type("application/problem+json")
@@ -43,7 +44,7 @@ defmodule KithWeb.Plugs.ApiRateLimiter do
             |> put_resp_header("x-ratelimit-remaining", "0")
             |> put_resp_header(
               "x-ratelimit-reset",
-              to_string(System.system_time(:second) + retry_after)
+              to_string(div(System.system_time(:millisecond) + retry_after_ms + 999, 1000))
             )
             |> send_resp(
               429,

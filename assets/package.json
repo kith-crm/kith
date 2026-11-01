@@ -2,9 +2,9 @@
   "name": "kith-assets",
   "private": true,
   "dependencies": {
-    "trix": "2.1.19",
-    "@alpinejs/csp": "^3.14.0",
+    "@alpinejs/csp": "3.17.5",
+    "dompurify": "3.4.17",
     "tailwindcss-animate": "^1.0.7",
-    "dompurify": "3.4.17"
+    "trix": "2.1.19"
   }
 }

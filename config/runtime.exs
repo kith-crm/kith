@@ -218,8 +218,7 @@ if config_env() == :prod do
       System.get_env("REDIS_URL") ||
         raise "REDIS_URL is required when RATE_LIMIT_BACKEND=redis"
 
-    config :hammer,
-      backend: {Hammer.Backend.Redis, [expiry_ms: 60_000 * 60, redis_url: redis_url]}
+    config :kith, Kith.RateLimiter, backend: :redis, redis_url: redis_url
   end
 
   # Oban — only the worker container processes jobs in production.
@@ -373,6 +372,8 @@ if config_env() == :prod do
   # the Monica import workers, so a log line says which import it belongs to.
   config :logger, :default_handler,
     formatter:
-      {LoggerJSON.Formatters.Basic,
-       metadata: [:request_id, :user_id, :account_id, :reason, :import_id, :worker]}
+      LoggerJSON.Formatters.Basic.new(
+        metadata: [:request_id, :user_id, :account_id, :reason, :import_id, :worker],
+        redactors: [Kith.LogRedactor.new()]
+      )
 end
