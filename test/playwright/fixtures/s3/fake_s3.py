@@ -4,7 +4,7 @@
 Usage: python3 fake_s3.py <log-file> [data-dir] [port]
 
 Serves path-style GET/HEAD /<bucket>/<key> from <data-dir> (default: ./s3-data),
-404 for missing keys, PUT stores objects. SigV4 query params are ignored (no
+404 for missing keys, PUT stores objects, DELETE removes them. SigV4 query params are ignored (no
 signature validation). Every request line is appended to <log-file>.
 Default port: 9000. Dependency-free (stdlib only).
 """
@@ -61,7 +61,8 @@ class Handler(BaseHTTPRequestHandler):
             data = f.read()
         self.send_response(200)
         self._cors()
-        self.send_header("Content-Type", "image/png" if p.endswith(".png") else "application/octet-stream")
+        content_type = {".png": "image/png", ".jpg": "image/jpeg"}.get(os.path.splitext(p)[1], "application/octet-stream")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         if not head:
@@ -85,7 +86,7 @@ class Handler(BaseHTTPRequestHandler):
         self._log()
         self.send_response(204)
         self._cors()
-        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, PUT, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, HEAD, PUT, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "*")
         self.end_headers()
 
@@ -115,6 +116,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("ETag", '"fake"')
         self.send_header("Content-Length", "0")
         self.end_headers()
+
+    def do_DELETE(self):
+        self._log()
+        p = self._path()
+        if not p:
+            self._empty(400)
+            return
+        try:
+            os.unlink(p)
+        except FileNotFoundError:
+            pass  # S3 object deletion is idempotent.
+        self._empty(204)
 
     def log_message(self, *args):
         pass

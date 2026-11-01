@@ -11,7 +11,6 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   alias Kith.Contacts.ActivityStream
   alias Kith.Conversations
   alias Kith.Gifts
-  alias Kith.Storage
   alias Kith.Tasks
   alias KithWeb.ContactLive.PhotoThumbComponent
 
@@ -299,11 +298,9 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
     Activities.delete_activity(activity) |> normalize_result()
   end
 
-  # Same cleanup as PhotosGalleryComponent: drop the stored file, then the row
-  # (delete_photo also clears the contact's avatar if it pointed here).
+  # Domain deletion clears selected avatars and retires files after commit.
   defp delete_entry(:photo, id, assigns) do
     photo = Contacts.get_photo!(assigns.account_id, id)
-    Storage.delete(photo.storage_key)
     Contacts.delete_photo(photo) |> normalize_result()
   end
 
@@ -391,6 +388,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             <div x-data="{ open: false }" class="relative">
               <button
                 @click="open = !open"
+                aria-label="Add timeline entry"
                 class="inline-flex items-center justify-center size-8 rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer"
               >
                 <.icon name="hero-plus-mini" class="size-4" />

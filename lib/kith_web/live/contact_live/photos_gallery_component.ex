@@ -67,22 +67,13 @@ defmodule KithWeb.ContactLive.PhotosGalleryComponent do
   def handle_event("set-avatar", %{"id" => id}, socket) do
     contact = socket.assigns.contact
     photo = Contacts.get_photo!(contact.account_id, String.to_integer(id))
-    {:ok, updated_contact} = Contacts.set_avatar(contact, photo)
-    photos = Contacts.list_photos(contact.id)
-
-    send(self(), {:avatar_updated, updated_contact})
-
-    {:noreply,
-     socket
-     |> assign(:contact, updated_contact)
-     |> assign(:photos, photos)
-     |> put_flash(:info, "Avatar set.")}
+    send(self(), {:crop_avatar, photo.id})
+    {:noreply, socket}
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
     contact = socket.assigns.contact
     photo = Contacts.get_photo!(contact.account_id, String.to_integer(id))
-    Storage.delete(photo.storage_key)
     {:ok, _} = Contacts.delete_photo(photo)
     photos = Contacts.list_photos(contact.id)
 
@@ -102,7 +93,7 @@ defmodule KithWeb.ContactLive.PhotosGalleryComponent do
   end
 
   defp avatar?(photo, contact) do
-    contact.avatar == photo.storage_key
+    Contacts.avatar_photo?(contact, photo)
   end
 
   @impl true

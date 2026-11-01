@@ -71,7 +71,11 @@ export async function loginUser(
 ): Promise<void> {
   await page.goto("/users/log-in");
   await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(300);
+  // Fill the connected LiveView, since its initial mount can replace static
+  // inputs after network-idle on a busy local database.
+  await expect(page.locator("[data-phx-main]")).toHaveClass(/phx-connected/, {
+    timeout: 15_000,
+  });
 
   await page.getByRole("textbox", { name: /email/i }).fill(email);
   await page.locator('input[type="password"]').fill(password);

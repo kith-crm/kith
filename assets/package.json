@@ -3,6 +3,7 @@
   "private": true,
   "dependencies": {
     "@alpinejs/csp": "3.17.5",
+    "cropperjs": "^1.7.0",
     "dompurify": "3.4.17",
     "tailwindcss": "4.3.3",
     "trix": "2.1.19"

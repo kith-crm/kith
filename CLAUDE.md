@@ -40,6 +40,13 @@ npx playwright test --project=e2e test/playwright/auth.spec.ts  # Single spec
 npx playwright test --project=e2e --headed  # Visible browser
 npx playwright test --project=smoke         # Smoke tests (e2e/ dir)
 
+# Tests — isolated CardDAV live harness (fresh dedicated database)
+scripts/carddav-e2e/up.sh
+source .carddav-task10/env
+npx playwright test --project=e2e test/playwright/carddav
+scripts/carddav-e2e/vdirsyncer-smoke.sh
+scripts/carddav-e2e/down.sh
+
 # Assets
 mix assets.build             # Compile tailwind + esbuild
 mix assets.deploy            # Minified build + phx.digest
@@ -63,7 +70,7 @@ lib/kith/              # Domain layer (contexts + schemas)
   contacts/            # Core: contacts, addresses, tags, notes, fields, relationships,
                        #   debts, gifts, photos, documents, pets, emotions, duplicates
   conversations/       # Conversations + messages
-  dav/                 # CardDAV/CalDAV integration
+  dav/                 # Plug-based CardDAV server (CalDAV is not implemented)
   immich/              # Immich photo server read-only integration
   imports/             # Import records + source tracking (vCard, Monica CRM)
   journal/             # Journal entries
@@ -86,7 +93,7 @@ test/                  # ExUnit tests
 test/playwright/       # Playwright E2E specs
 e2e/                   # Playwright smoke tests
 specs/                 # Product specification
-docs/adr/              # Architecture Decision Records (7 ADRs)
+docs/adr/              # Architecture Decision Records (8 ADRs)
 docs/plan/             # Implementation phase plans
 ```
 
@@ -105,6 +112,18 @@ Workers live in `lib/kith/workers/`. Queues: default, mailers, reminders, export
 imports, immich, purge. Four cron jobs run nightly/weekly.
 Tests use `Oban.Testing` — Oban is disabled in test env.
 
+### CardDAV change tracking
+Shared mutations must enter `Kith.Contacts.Write` before changing native rows.
+`Store.transaction/2` delegates to that coordinator and acquires the account lock
+before row locks. Nested `Store.touch/2` calls mark candidates; the outer commit
+updates bound rich documents and publishes only actual shared/client changes.
+Private and no-op edits never change DAV bytes, timestamps or revisions. Do not
+write first and touch afterward. Defer external effects through `Write.after_commit/1`.
+`Store.ensure_rows/1` initializes identities/sanitized documents before consistent
+read snapshots. Trusted system keys classify fields; client NOTE/GENDER belong
+to the DAV document and never to private native description/gender. Explicit Kith
+imports/exports have their own policy. See `docs/carddav.md` and the boundary plan.
+
 ### REST API conventions
 - Bearer token auth (POST /api/auth/token to create)
 - Cursor pagination (not offset) — see ADR-005
@@ -119,7 +138,7 @@ authenticated user and confirmed email. All LiveView routes are in the
 
 ## Database
 
-PostgreSQL 15+. 27 tables. Bigserial PKs. UTC timestamps everywhere.
+PostgreSQL 15+. 49 application tables (distinct migration-created tables; excludes Oban and Ecto metadata). Bigserial PKs except protocol identities and avatar asset keys. UTC timestamps everywhere.
 Cloak encryption vault for sensitive fields (API keys).
 
 ## Environment
@@ -138,6 +157,7 @@ See `.env.example` for all env vars. Key ones:
 
 ## Gotchas
 
+- No DB triggers: raw-SQL writes to contacts or their children are invisible to CardDAV until the next touch. See `docs/carddav.md` and `docs/carddav-client-checklist.md` for client limits.
 - MIME types: `.vcf` registered as `text/vcard` in config.exs (needed for LiveView uploads)
 - `mix format` uses `Phoenix.LiveView.HTMLFormatter` plugin for `.heex` files
 - Browser tests use Playwright; `npm run test:regressions` starts the isolated regression fixtures
@@ -159,3 +179,4 @@ See `.env.example` for all env vars. Key ones:
 | 005 | Cursor pagination over offset |
 | 006 | Soft-delete with scope |
 | 007 | Immich read-only integration |
+| 008 | CardDAV state and change tracking in app code |

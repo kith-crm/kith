@@ -9,6 +9,7 @@ defmodule Kith.Storage do
   All backends implement the `Kith.Storage.Backend` behaviour.
   """
 
+  alias Kith.Contacts.Write
   alias Kith.Storage.S3
 
   require Logger
@@ -104,6 +105,10 @@ defmodule Kith.Storage do
   Call after successful upload or delete.
   """
   def bust_usage_cache(account_id) do
+    Write.after_commit(fn -> invalidate_usage_cache(account_id) end)
+  end
+
+  defp invalidate_usage_cache(account_id) do
     Kith.Cache.delete({:storage_usage, account_id})
   end
 
@@ -121,13 +126,19 @@ defmodule Kith.Storage do
   Checks whether an upload of `size_bytes` would exceed the account's storage limit.
   Returns `:ok` or `{:error, :storage_limit_exceeded}`.
   """
-  def check_storage_limit(account_id, size_bytes) do
+  def check_storage_limit(account_id, size_bytes, opts \\ []) do
     max = max_storage_size_bytes()
 
     if max == 0 do
       :ok
     else
-      {:ok, current} = usage(account_id)
+      current =
+        if Keyword.get(opts, :fresh, false) do
+          compute_usage(account_id)
+        else
+          {:ok, cached} = usage(account_id)
+          cached
+        end
 
       if current + size_bytes > max do
         {:error, :storage_limit_exceeded}
@@ -211,6 +222,13 @@ defmodule Kith.Storage do
       )
       |> Kith.Repo.one()
 
-    photos_sum + documents_sum
+    avatars_sum =
+      from(a in "avatar_assets",
+        where: a.account_id == ^account_id,
+        select: coalesce(sum(a.byte_size), 0)
+      )
+      |> Kith.Repo.one()
+
+    photos_sum + documents_sum + avatars_sum
   end
 end

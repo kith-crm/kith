@@ -87,11 +87,11 @@ defmodule KithWeb.ContactLive.UploadFilenameTest do
 
     upload(
       view,
-      ~s|form[phx-submit="upload-avatar"]|,
+      "#avatar-upload-form",
       :avatar,
       "../100% portrait.png",
       "image/png",
-      "avatar photo"
+      Kith.AvatarFixtures.image_binary()
     )
 
     photos = Contacts.list_photos(ctx.contact.id)
@@ -101,14 +101,16 @@ defmodule KithWeb.ContactLive.UploadFilenameTest do
 
     for photo <- photos do
       contents =
-        if photo.file_name == "100% memories.png", do: "timeline photo", else: "avatar photo"
+        if photo.file_name == "100% memories.png",
+          do: "timeline photo",
+          else: Kith.AvatarFixtures.image_binary()
 
       assert_safe_file(photo, ctx, "photos", ".png", contents)
     end
 
     updated = Contacts.get_contact!(ctx.contact.account_id, ctx.contact.id)
 
-    assert Enum.find(photos, &(&1.storage_key == updated.avatar)).file_name ==
+    assert Enum.find(photos, &(&1.avatar_storage_key == updated.avatar)).file_name ==
              "../100% portrait.png"
 
     stop_view(view)
@@ -165,14 +167,14 @@ defmodule KithWeb.ContactLive.UploadFilenameTest do
 
     upload(
       view,
-      ~s|form[phx-submit="upload-avatar"]|,
+      "#avatar-upload-form",
       :avatar,
       "100% avatar.png",
       "image/png",
       "avatar"
     )
 
-    assert render(view) =~ "Avatar could not be uploaded"
+    assert render(view) =~ "Could not save this avatar"
     assert Contacts.list_photos(ctx.contact.id) == []
     assert Contacts.get_contact!(ctx.contact.account_id, ctx.contact.id).avatar == nil
     stop_view(view)
@@ -181,7 +183,16 @@ defmodule KithWeb.ContactLive.UploadFilenameTest do
   defp upload(view, selector, name, filename, type, contents) do
     input = file_input(view, selector, name, [%{name: filename, content: contents, type: type}])
     render_upload(input, filename)
-    view |> form(selector) |> render_submit()
+
+    if name == :avatar do
+      view |> form(selector) |> render_submit()
+
+      render_submit(view, "upload-avatar", %{
+        "crop" => %{"x" => "0", "y" => "0", "width" => "1", "height" => "1"}
+      })
+    else
+      view |> form(selector) |> render_submit()
+    end
   end
 
   defp assert_safe_file(record, ctx, type, ext, contents) do

@@ -7,11 +7,16 @@ defmodule Kith.Contacts do
   import Ecto.Query, warn: false
   import Kith.Scope
   alias Kith.Cache.Invalidation
+  alias Kith.Contacts.Write
+  alias Kith.DAV.Document, as: DAVDocument
+  alias Kith.DAV.{FieldReconciler, Relationships, Store}
   alias Kith.Repo
 
   alias Kith.Contacts.{
     ActivityTypeCategory,
     Address,
+    Avatar,
+    AvatarProcessor,
     CallDirection,
     Contact,
     ContactField,
@@ -292,17 +297,37 @@ defmodule Kith.Contacts do
   end
 
   def create_contact(account_id, attrs) do
-    %Contact{account_id: account_id}
-    |> Contact.create_changeset(attrs)
-    |> Repo.insert()
-    |> sync_derived_reminders(%Contact{})
+    Write.run(account_id, [], fn ->
+      %Contact{account_id: account_id}
+      |> Contact.create_changeset(attrs)
+      |> reject_raw_avatar()
+      |> Repo.insert()
+      |> sync_derived_reminders(%Contact{})
+    end)
   end
 
   def update_contact(%Contact{} = contact, attrs) do
-    contact
-    |> Contact.update_changeset(attrs)
-    |> Repo.update()
-    |> sync_derived_reminders(contact)
+    Write.run(contact.account_id, [contact.id], fn ->
+      contact = Repo.get_by!(Contact, id: contact.id, account_id: contact.account_id)
+
+      contact
+      |> Contact.update_changeset(attrs)
+      |> reject_raw_avatar()
+      |> Repo.update()
+      |> sync_derived_reminders(contact)
+    end)
+  end
+
+  # Avatar assignment requires source validation and bounded processing. Merge
+  # resolution uses its trusted changeset path to retain an existing rendition.
+  defp reject_raw_avatar(changeset) do
+    case Ecto.Changeset.fetch_change(changeset, :avatar) do
+      {:ok, key} when not is_nil(key) ->
+        Ecto.Changeset.add_error(changeset, :avatar, "must be selected from a processed photo")
+
+      _ ->
+        changeset
+    end
   end
 
   # Every path that sets or clears a birthdate or first-met date (UI, REST API,
@@ -310,16 +335,21 @@ defmodule Kith.Contacts do
   # update_contact/2. `old` is the contact before the write (`%Contact{}` on
   # create, whose dates are nil and whose opt-in is false).
   defp sync_derived_reminders({:ok, %Contact{} = new} = result, %Contact{} = old) do
+    unless Write.origin() == :dav, do: sync_native_reminders(new, old)
+    result
+  end
+
+  defp sync_derived_reminders(result, _old), do: result
+
+  defp sync_native_reminders(new, old) do
     if new.birthdate != old.birthdate,
       do: log_sync_failure(:birthday, new, Kith.Reminders.sync_birthday(new))
 
     if {new.first_met_at, new.first_met_reminder} != {old.first_met_at, old.first_met_reminder},
       do: log_sync_failure(:first_met, new, Kith.Reminders.sync_first_met(new))
 
-    result
+    :ok
   end
-
-  defp sync_derived_reminders(result, _old), do: result
 
   defp log_sync_failure(_kind, _contact, {:ok, _}), do: :ok
 
@@ -330,49 +360,73 @@ defmodule Kith.Contacts do
   end
 
   def soft_delete_contact(%Contact{} = contact) do
-    contact
-    |> Contact.soft_delete_changeset()
-    |> Repo.update()
+    Write.run(contact.account_id, [contact.id], fn ->
+      contact = Repo.get_by!(Contact, id: contact.id, account_id: contact.account_id)
+
+      contact
+      |> Contact.soft_delete_changeset()
+      |> Repo.update()
+    end)
     |> Invalidation.after_commit({:duplicate_cluster_count, contact.account_id})
   end
 
   def restore_contact(%Contact{} = contact) do
-    contact
-    |> Contact.restore_changeset()
-    |> Repo.update()
+    Write.run(contact.account_id, [contact.id], fn ->
+      contact = Repo.get_by!(Contact, id: contact.id, account_id: contact.account_id)
+
+      contact
+      |> Contact.restore_changeset()
+      |> Repo.update()
+    end)
     |> Invalidation.after_commit({:duplicate_cluster_count, contact.account_id})
   end
 
   def archive_contact(%Contact{} = contact) do
-    contact
-    |> Contact.archive_changeset(true)
-    |> Repo.update()
+    Write.run(contact.account_id, [contact.id], fn ->
+      contact = Repo.get_by!(Contact, id: contact.id, account_id: contact.account_id)
+
+      contact
+      |> Contact.archive_changeset(true)
+      |> Repo.update()
+    end)
   end
 
   def unarchive_contact(%Contact{} = contact) do
-    contact
-    |> Contact.archive_changeset(false)
-    |> Repo.update()
+    Write.run(contact.account_id, [contact.id], fn ->
+      contact = Repo.get_by!(Contact, id: contact.id, account_id: contact.account_id)
+
+      contact
+      |> Contact.archive_changeset(false)
+      |> Repo.update()
+    end)
   end
 
   def hard_delete_contact(%Contact{} = contact) do
-    Repo.transaction(fn ->
-      # Lock the parent before inspecting children: a concurrent FK insert
-      # must not land between mapping cleanup and the cascade.
-      from(c in Contact,
-        where: c.id == ^contact.id and c.account_id == ^contact.account_id,
-        lock: "FOR UPDATE"
-      )
-      |> Repo.one!()
-
-      ContactCleanup.delete_for_contacts(contact.account_id, [contact.id])
-
-      case Repo.delete(contact) do
-        {:ok, deleted} -> deleted
-        {:error, reason} -> Repo.rollback(reason)
-      end
+    Write.run(contact.account_id, [contact.id], fn ->
+      {:ok, hard_delete_locked(contact)}
     end)
     |> Invalidation.after_contact_removal(contact.account_id)
+  end
+
+  defp hard_delete_locked(contact) do
+    Store.record_hard_delete(contact.account_id)
+
+    from(c in Contact,
+      where: c.id == ^contact.id and c.account_id == ^contact.account_id,
+      lock: "FOR UPDATE"
+    )
+    |> Repo.one!()
+
+    ContactCleanup.delete_for_contacts(contact.account_id, [contact.id])
+    stage_contact_files(contact.account_id, [contact.id])
+
+    case Repo.delete(contact) do
+      {:ok, deleted} ->
+        deleted
+
+      {:error, reason} ->
+        Repo.rollback(reason)
+    end
   end
 
   @doc """
@@ -382,25 +436,52 @@ defmodule Kith.Contacts do
   cannot interleave.
   """
   def empty_trash(account_id) do
-    Repo.transaction(fn ->
-      contact_ids =
-        from(c in Contact,
-          where: c.account_id == ^account_id and not is_nil(c.deleted_at),
-          order_by: c.id,
-          select: c.id,
-          lock: "FOR UPDATE"
-        )
-        |> Repo.all()
+    Avatar.with_cleanup(fn ->
+      Store.transaction(account_id, fn ->
+        Store.record_hard_delete(account_id)
 
-      ContactCleanup.delete_for_contacts(account_id, contact_ids)
+        query =
+          from(c in Contact, where: c.account_id == ^account_id and not is_nil(c.deleted_at))
 
-      {count, _} =
-        from(c in Contact, where: c.account_id == ^account_id and c.id in ^contact_ids)
-        |> Repo.delete_all()
-
-      count
+        ids = Repo.all(from(c in query, order_by: c.id, select: c.id, lock: "FOR UPDATE"))
+        ContactCleanup.delete_for_contacts(account_id, ids)
+        owners = incoming_relationship_owner_ids(account_id, ids)
+        stage_contact_files(account_id, ids)
+        {count, _} = Repo.delete_all(from(c in query, where: c.id in ^ids))
+        Store.touch(account_id, owners)
+        count
+      end)
     end)
     |> Invalidation.after_contact_removal(account_id)
+  end
+
+  defp stage_contact_files(account_id, ids) do
+    photo_keys =
+      Repo.all(
+        from p in Photo,
+          where: p.account_id == ^account_id and p.contact_id in ^ids,
+          select: [p.storage_key, p.avatar_storage_key]
+      )
+      |> List.flatten()
+
+    avatar_keys =
+      Repo.all(
+        from c in Contact, where: c.account_id == ^account_id and c.id in ^ids, select: c.avatar
+      )
+
+    Enum.each(Enum.uniq(photo_keys ++ avatar_keys), &Avatar.stage_retired/1)
+    Storage.bust_usage_cache(account_id)
+  end
+
+  # Snapshot before FK cascades remove the incoming edges; the account lock is held.
+  defp incoming_relationship_owner_ids(account_id, ids) do
+    Repo.all(
+      from(r in Relationship,
+        where: r.account_id == ^account_id and r.related_contact_id in ^ids,
+        distinct: true,
+        select: r.contact_id
+      )
+    )
   end
 
   ## Addresses
@@ -415,39 +496,49 @@ defmodule Kith.Contacts do
   end
 
   def create_address(%Contact{} = contact, attrs) do
-    result =
-      %Address{contact_id: contact.id, account_id: contact.account_id}
-      |> Address.changeset(attrs)
-      |> Repo.insert()
+    Write.run(contact.account_id, [contact.id], fn ->
+      result =
+        %Address{contact_id: contact.id, account_id: contact.account_id}
+        |> Address.changeset(attrs)
+        |> Repo.insert()
 
-    case result do
-      {:ok, address} ->
-        maybe_geocode_address(address)
-        {:ok, address}
+      case result do
+        {:ok, address} ->
+          maybe_geocode_address(address)
+          {:ok, address}
 
-      error ->
-        error
-    end
+        error ->
+          error
+      end
+    end)
   end
 
   def update_address(%Address{} = address, attrs) do
-    result =
-      address
-      |> Address.changeset(attrs)
-      |> Repo.update()
+    Write.run(address.account_id, [address.contact_id], fn ->
+      address = Write.reload_child!(address)
 
-    case result do
-      {:ok, updated} ->
-        maybe_geocode_address(updated)
-        {:ok, updated}
+      result =
+        address
+        |> Address.changeset(attrs)
+        |> Repo.update()
 
-      error ->
-        error
-    end
+      case result do
+        {:ok, updated} ->
+          maybe_geocode_address(updated)
+          {:ok, updated}
+
+        error ->
+          error
+      end
+    end)
   end
 
   def delete_address(%Address{} = address) do
-    Repo.delete(address)
+    Write.run(address.account_id, [address.contact_id], fn ->
+      address = Write.reload_child!(address)
+
+      Repo.delete(address)
+    end)
   end
 
   ## Contact Fields
@@ -477,28 +568,37 @@ defmodule Kith.Contacts do
   end
 
   def create_contact_field(%Contact{} = contact, attrs, opts \\ []) do
-    attrs =
-      if Keyword.get(opts, :normalize, true) do
-        maybe_normalize_phone(attrs)
-      else
-        attrs
-      end
+    Write.run(contact.account_id, [contact.id], fn ->
+      attrs =
+        if Keyword.get(opts, :normalize, true) do
+          maybe_normalize_phone(attrs)
+        else
+          attrs
+        end
 
-    %ContactField{contact_id: contact.id, account_id: contact.account_id}
-    |> ContactField.changeset(attrs)
-    |> Repo.insert()
+      %ContactField{contact_id: contact.id, account_id: contact.account_id}
+      |> ContactField.changeset(attrs)
+      |> Repo.insert()
+    end)
   end
 
   def update_contact_field(%ContactField{} = field, attrs) do
-    attrs = maybe_normalize_phone(attrs)
+    Write.run(field.account_id, [field.contact_id], fn ->
+      field = Write.reload_child!(field)
+      attrs = maybe_normalize_phone(attrs)
 
-    field
-    |> ContactField.changeset(attrs)
-    |> Repo.update()
+      field
+      |> ContactField.changeset(attrs)
+      |> Repo.update()
+    end)
   end
 
   def delete_contact_field(%ContactField{} = field) do
-    Repo.delete(field)
+    Write.run(field.account_id, [field.contact_id], fn ->
+      field = Write.reload_child!(field)
+
+      Repo.delete(field)
+    end)
   end
 
   defp maybe_normalize_phone(attrs) do
@@ -537,9 +637,13 @@ defmodule Kith.Contacts do
   end
 
   def update_tag(%Tag{} = tag, attrs) do
-    tag
-    |> Tag.changeset(attrs)
-    |> Repo.update()
+    Write.run(tag.account_id, [], fn ->
+      Write.prepare(tag.account_id, Repo.all(tag_contact_ids(tag.id)))
+
+      tag
+      |> Tag.changeset(attrs)
+      |> Repo.update()
+    end)
   end
 
   def get_tag!(account_id, id) do
@@ -549,22 +653,33 @@ defmodule Kith.Contacts do
   end
 
   def delete_tag(%Tag{} = tag) do
-    Repo.delete(tag)
+    Write.run(tag.account_id, [], fn ->
+      Write.prepare(tag.account_id, Repo.all(tag_contact_ids(tag.id)))
+
+      Repo.delete(tag)
+    end)
   end
 
+  def tag_contact(%Contact{account_id: account_id}, %Tag{account_id: tag_account_id})
+      when account_id != tag_account_id, do: {:error, :cross_account_write}
+
   def tag_contact(%Contact{} = contact, %Tag{} = tag) do
-    Repo.insert_all(
-      "contact_tags",
-      [%{contact_id: contact.id, tag_id: tag.id}],
-      on_conflict: :nothing
-    )
+    Write.run(contact.account_id, [contact.id], fn ->
+      Repo.insert_all(
+        "contact_tags",
+        [%{contact_id: contact.id, tag_id: tag.id}],
+        on_conflict: :nothing
+      )
+    end)
   end
 
   def untag_contact(%Contact{} = contact, %Tag{} = tag) do
-    from(ct in "contact_tags",
-      where: ct.contact_id == ^contact.id and ct.tag_id == ^tag.id
-    )
-    |> Repo.delete_all()
+    Write.run(contact.account_id, [contact.id], fn ->
+      from(ct in "contact_tags",
+        where: ct.contact_id == ^contact.id and ct.tag_id == ^tag.id
+      )
+      |> Repo.delete_all()
+    end)
   end
 
   ## Relationships
@@ -621,13 +736,21 @@ defmodule Kith.Contacts do
   end
 
   def create_relationship(%Contact{} = contact, attrs) do
-    %Relationship{contact_id: contact.id, account_id: contact.account_id}
-    |> Relationship.changeset(attrs)
-    |> Repo.insert()
+    Write.run(contact.account_id, [contact.id], fn ->
+      %Relationship{contact_id: contact.id, account_id: contact.account_id}
+      |> Relationship.changeset(attrs)
+      |> Repo.insert()
+    end)
   end
 
   def delete_relationship(%Relationship{} = relationship) do
-    Repo.delete(relationship)
+    Write.run(
+      relationship.account_id,
+      [relationship.contact_id, relationship.related_contact_id],
+      fn ->
+        relationship |> Write.reload_child!() |> Repo.delete()
+      end
+    )
   end
 
   ## Notes
@@ -732,11 +855,20 @@ defmodule Kith.Contacts do
   end
 
   def create_photo(%Contact{} = contact, attrs) do
-    %Photo{contact_id: contact.id, account_id: contact.account_id}
-    |> Photo.changeset(attrs)
-    |> Repo.insert()
-    |> Invalidation.after_commit({:storage_usage, contact.account_id})
+    Write.run(contact.account_id, [contact.id], fn ->
+      %Photo{contact_id: contact.id, account_id: contact.account_id}
+      |> Photo.changeset(attrs)
+      |> Repo.insert()
+      |> invalidate_photo_usage(contact.account_id)
+    end)
   end
+
+  defp invalidate_photo_usage({:ok, _} = result, account_id) do
+    Storage.bust_usage_cache(account_id)
+    result
+  end
+
+  defp invalidate_photo_usage(result, _account_id), do: result
 
   def photo_exists_by_hash?(contact_id, content_hash) when is_binary(content_hash) do
     Photo
@@ -747,37 +879,37 @@ defmodule Kith.Contacts do
   def photo_exists_by_hash?(_contact_id, _content_hash), do: false
 
   def delete_photo(%Photo{} = photo) do
-    Repo.transaction(fn ->
-      contact = Repo.get!(Contact, photo.contact_id)
-
-      case Repo.delete(photo) do
-        {:ok, _} ->
-          clear_deleted_photo_avatar(contact, photo)
-          photo
-
-        {:error, reason} ->
-          Repo.rollback(reason)
-      end
+    Write.run(photo.account_id, [photo.contact_id], fn ->
+      {:ok, delete_photo_locked(photo)}
     end)
-    |> Invalidation.after_commit({:storage_usage, photo.account_id})
   end
 
-  defp clear_deleted_photo_avatar(contact, photo) do
-    if contact.avatar == photo.storage_key do
+  defp delete_photo_locked(photo) do
+    photo = Write.reload_child!(photo)
+    contact = Repo.get_by!(Contact, id: photo.contact_id, account_id: photo.account_id)
+
+    if avatar_photo?(contact, photo) do
       contact |> Ecto.Changeset.change(avatar: nil) |> Repo.update!()
     end
+
+    deleted = Repo.delete!(photo)
+    Avatar.stage_retired(photo.storage_key)
+    Avatar.stage_retired(photo.avatar_storage_key)
+    Storage.bust_usage_cache(photo.account_id)
+    deleted
   end
 
-  def set_avatar(%Contact{} = contact, %Photo{} = photo) do
-    contact
-    |> Ecto.Changeset.change(avatar: photo.storage_key)
-    |> Repo.update()
-  end
+  def avatar_photo?(%Contact{} = contact, %Photo{} = photo),
+    do: Avatar.selected?(contact, photo)
+
+  def set_avatar(%Contact{} = contact, %Photo{} = photo, opts \\ []),
+    do: Avatar.set(contact, photo, opts)
 
   def clear_avatar(%Contact{} = contact) do
-    contact
-    |> Ecto.Changeset.change(avatar: nil)
-    |> Repo.update()
+    Write.run(contact.account_id, [contact.id], fn ->
+      contact = Store.lock(contact) || Repo.rollback(:not_found)
+      {:ok, contact |> Ecto.Changeset.change(avatar: nil) |> Repo.update!()}
+    end)
   end
 
   ## Reference Data
@@ -1065,9 +1197,12 @@ defmodule Kith.Contacts do
   def update_gender(%Gender{account_id: nil}, _attrs), do: {:error, :global_read_only}
 
   def update_gender(%Gender{} = gender, attrs) do
+    ids = Repo.all(from(c in Contact, where: c.gender_id == ^gender.id, select: c.id))
+
     gender
     |> Gender.changeset(attrs)
     |> Repo.update()
+    |> touched(gender.account_id, ids)
   end
 
   @doc """
@@ -1128,9 +1263,15 @@ defmodule Kith.Contacts do
     do: {:error, :global_read_only}
 
   def update_relationship_type(%RelationshipType{} = rt, attrs) do
+    ids =
+      Repo.all(
+        from(r in Relationship, where: r.relationship_type_id == ^rt.id, select: r.contact_id)
+      )
+
     rt
     |> RelationshipType.changeset(attrs)
     |> Repo.update()
+    |> touched(rt.account_id, ids)
   end
 
   @doc "Deletes a custom relationship type. Cannot delete global types or types in use."
@@ -1175,9 +1316,15 @@ defmodule Kith.Contacts do
     do: {:error, :global_read_only}
 
   def update_contact_field_type(%ContactFieldType{} = cft, attrs) do
+    ids =
+      Repo.all(
+        from(f in ContactField, where: f.contact_field_type_id == ^cft.id, select: f.contact_id)
+      )
+
     cft
     |> ContactFieldType.changeset(attrs)
     |> Repo.update()
+    |> touched(cft.account_id, ids)
   end
 
   @doc "Deletes a custom contact field type. Cannot delete global types or types in use."
@@ -1239,17 +1386,13 @@ defmodule Kith.Contacts do
 
   @doc "Renames a tag. Validates new name is unique per account (case-insensitive)."
   def rename_tag(%Tag{} = tag, new_name) do
-    tag
-    |> Tag.changeset(%{name: new_name})
-    |> Repo.update()
+    update_tag(tag, %{name: new_name})
   end
 
   @doc """
   Deletes a tag and removes it from all contacts (CASCADE handles join table).
   """
-  def delete_tag_with_removal(%Tag{} = tag) do
-    Repo.delete(tag)
-  end
+  def delete_tag_with_removal(%Tag{} = tag), do: delete_tag(tag)
 
   @doc """
   Merges source tag into target tag: moves all contact associations from
@@ -1257,6 +1400,13 @@ defmodule Kith.Contacts do
   Uses Ecto.Multi for atomicity.
   """
   def merge_tags(_account_id, %Tag{} = source, %Tag{} = target) do
+    Write.run(source.account_id, [], fn ->
+      Write.prepare(source.account_id, Repo.all(tag_contact_ids(source.id)))
+      do_merge_tags(source, target)
+    end)
+  end
+
+  defp do_merge_tags(source, target) do
     Ecto.Multi.new()
     |> Ecto.Multi.run(:move_associations, fn repo, _changes ->
       # Get all contact_ids associated with source tag
@@ -1268,7 +1418,8 @@ defmodule Kith.Contacts do
         |> repo.all()
 
       # Insert associations to target, ignoring duplicates
-      entries = Enum.map(source_contact_ids, fn cid -> %{contact_id: cid, tag_id: target.id} end)
+      entries =
+        Enum.map(source_contact_ids, fn cid -> %{contact_id: cid, tag_id: target.id} end)
 
       if entries != [] do
         repo.insert_all("contact_tags", entries, on_conflict: :nothing)
@@ -1299,10 +1450,14 @@ defmodule Kith.Contacts do
     address_string = format_address_for_geocoding(address)
 
     if Kith.Geocoding.enabled?() and address_string != "" do
-      Task.Supervisor.start_child(Kith.TaskSupervisor, fn ->
-        perform_geocode(address, address_string)
-      end)
+      Write.after_commit(fn -> start_geocoding(address, address_string) end)
     end
+  end
+
+  defp start_geocoding(address, address_string) do
+    Task.Supervisor.start_child(Kith.TaskSupervisor, fn ->
+      perform_geocode(address, address_string)
+    end)
   end
 
   defp perform_geocode(address, address_string) do
@@ -1348,8 +1503,7 @@ defmodule Kith.Contacts do
     Contact
     |> scope_active(account_id)
     |> order_by([c], asc: c.last_name, asc: c.first_name)
-    |> preload(^preloads)
-    |> Repo.stream(max_rows: 100)
+    |> stream_with_preloads(preloads)
   end
 
   @doc """
@@ -1363,8 +1517,14 @@ defmodule Kith.Contacts do
     |> scope_active(account_id)
     |> where([c], c.id in ^ids)
     |> order_by([c], asc: c.last_name, asc: c.first_name)
-    |> preload(^preloads)
+    |> stream_with_preloads(preloads)
+  end
+
+  defp stream_with_preloads(query, preloads) do
+    query
     |> Repo.stream(max_rows: 100)
+    |> Stream.chunk_every(100)
+    |> Stream.flat_map(&Repo.preload(&1, preloads))
   end
 
   @doc """
@@ -1419,6 +1579,8 @@ defmodule Kith.Contacts do
   Checks if a contact with the given email or name already exists in the account.
   Returns true if a duplicate is found.
   """
+  def contact_exists?(_account_id, {:error, _reason}), do: false
+
   def contact_exists?(account_id, %{} = attrs) do
     emails = Map.get(attrs, :emails, [])
     first_name = Map.get(attrs, :first_name)
@@ -1463,43 +1625,55 @@ defmodule Kith.Contacts do
   Creates a contact from parsed vCard data. Used by the import flow.
   Does not create birthday reminders (intentional for bulk import).
   """
+  def import_contact(_account_id, {:error, reason}), do: {:error, reason}
+
   def import_contact(account_id, %{} = parsed) do
-    Repo.transaction(fn ->
-      contact_attrs = %{
-        first_name: parsed.first_name,
-        last_name: parsed.last_name,
-        nickname: parsed.nickname,
-        birthdate: parsed.birthdate,
-        company: parsed.company,
-        occupation: parsed.occupation,
-        description: parsed.description,
-        account_id: account_id
-      }
-
-      contact =
-        %Contact{}
-        |> Contact.create_changeset(contact_attrs)
-        |> Ecto.Changeset.put_change(:account_id, account_id)
-        |> Repo.insert!()
-
-      # Create email contact fields
-      create_imported_contact_fields(contact, account_id, parsed.emails, "mailto")
-
-      # Create phone contact fields
-      create_imported_contact_fields(contact, account_id, parsed.phones, "tel")
-
-      # Create URL contact fields
-      create_imported_contact_fields(contact, account_id, parsed.urls, "https")
-
-      # Create addresses
-      Enum.each(parsed.addresses, fn addr ->
-        %Address{}
-        |> Address.changeset(Map.merge(addr, %{contact_id: contact.id, account_id: account_id}))
-        |> Repo.insert!()
-      end)
-
-      contact
+    Avatar.with_cleanup(fn ->
+      Store.transaction(account_id, fn -> import_contact_locked(account_id, parsed) end)
     end)
+  end
+
+  defp import_contact_locked(account_id, parsed) do
+    contact_attrs = %{
+      first_name: parsed.first_name,
+      last_name: parsed.last_name,
+      nickname: parsed.nickname,
+      birthdate: parsed.birthdate,
+      birthdate_year_unknown: Map.get(parsed, :birthdate_year_unknown, false),
+      company: parsed.company,
+      occupation: parsed.occupation,
+      description: parsed.description,
+      account_id: account_id
+    }
+
+    contact =
+      %Contact{}
+      |> Contact.create_changeset(contact_attrs)
+      |> Ecto.Changeset.put_change(:account_id, account_id)
+      |> insert_or_rollback()
+
+    # Create email contact fields
+    create_imported_contact_fields(contact, account_id, parsed.emails, "mailto")
+
+    # Create phone contact fields
+    create_imported_contact_fields(contact, account_id, parsed.phones, "tel")
+
+    # Create URL contact fields
+    create_imported_contact_fields(contact, account_id, parsed.urls, "https")
+
+    # Create addresses
+    Enum.each(parsed.addresses, fn addr ->
+      %Address{}
+      |> Address.changeset(Map.merge(addr, %{contact_id: contact.id, account_id: account_id}))
+      |> insert_or_rollback()
+    end)
+
+    if photo = Map.get(parsed, :photo) do
+      maybe_import_vcard_photo(contact, account_id, photo)
+    end
+
+    Store.touch(account_id, [contact.id])
+    Repo.reload!(contact)
   end
 
   defp create_imported_contact_fields(contact, account_id, fields, protocol) do
@@ -1517,17 +1691,42 @@ defmodule Kith.Contacts do
       |> Repo.one()
 
     if field_type do
-      Enum.each(fields, fn %{value: value, label: label} ->
-        %ContactField{}
-        |> ContactField.changeset(%{
-          value: value,
-          label: label,
-          contact_id: contact.id,
-          account_id: account_id,
-          contact_field_type_id: field_type.id
-        })
-        |> Repo.insert!()
-      end)
+      # A blank value (`EMAIL:`) is skipped; an unstorable one rolls back the
+      # caller's transaction instead of raising.
+      now = DateTime.utc_now(:second)
+
+      fields
+      |> Enum.reject(fn %{value: value} -> is_nil(value) or String.trim(value) == "" end)
+      |> Enum.map(&contact_field_row(&1, contact.id, account_id, field_type.id, now))
+      |> Enum.chunk_every(2000)
+      |> Enum.each(&Repo.insert_all(ContactField, &1))
+    end
+  end
+
+  defp contact_field_row(%{value: value, label: label}, contact_id, account_id, type_id, now) do
+    changeset =
+      ContactField.changeset(%ContactField{}, %{
+        value: value,
+        label: label,
+        contact_id: contact_id,
+        account_id: account_id,
+        contact_field_type_id: type_id
+      })
+
+    if changeset.valid? do
+      changeset
+      |> Ecto.Changeset.apply_changes()
+      |> Map.take([:value, :label, :contact_id, :account_id, :contact_field_type_id])
+      |> Map.merge(%{inserted_at: now, updated_at: now})
+    else
+      Repo.rollback(changeset)
+    end
+  end
+
+  defp insert_or_rollback(changeset) do
+    case Repo.insert(changeset) do
+      {:ok, record} -> record
+      {:error, changeset} -> Repo.rollback(changeset)
     end
   end
 
@@ -1540,17 +1739,21 @@ defmodule Kith.Contacts do
   each with `%{value: ..., label: ...}` entries (addresses have full address maps).
   """
   def replace_contact_children(contact, account_id, nested_data) do
+    Write.run(account_id, [contact.id], fn ->
+      do_replace_contact_children(contact, account_id, nested_data)
+    end)
+  end
+
+  defp do_replace_contact_children(contact, account_id, nested_data) do
     Repo.transaction(fn ->
-      from(cf in ContactField, where: cf.contact_id == ^contact.id) |> Repo.delete_all()
-      from(a in Address, where: a.contact_id == ^contact.id) |> Repo.delete_all()
+      if contact.account_id != account_id, do: Repo.rollback(:cross_account_write)
 
-      create_imported_contact_fields(contact, account_id, nested_data.emails, "mailto")
-      create_imported_contact_fields(contact, account_id, nested_data.phones, "tel")
-      create_imported_contact_fields(contact, account_id, nested_data.urls, "https")
+      contact =
+        Repo.get_by!(Contact, id: contact.id, account_id: account_id) |> Repo.preload(:dav)
 
-      Enum.each(nested_data.addresses, fn addr ->
-        insert_address!(addr, contact.id, account_id)
-      end)
+      # Keep native-only fields and unchanged rows (including native type ids
+      # and address geocoding) that a DAV client cannot reconstruct.
+      FieldReconciler.replace(contact, nested_data)
 
       # Tags (CATEGORIES)
       if Map.has_key?(nested_data, :categories) do
@@ -1562,19 +1765,18 @@ defmodule Kith.Contacts do
         replace_contact_relationships(contact, account_id, Map.get(nested_data, :related, []))
       end
 
-      # IMPP
-      if Map.has_key?(nested_data, :impp) do
-        create_imported_contact_fields(
-          contact,
-          account_id,
-          Map.get(nested_data, :impp, []),
-          "impp"
-        )
-      end
+      # PHOTO replaces selection, never the private source photo collection.
+      replace_dav_avatar(contact, account_id, Map.get(nested_data, :photo))
 
-      # Photo
-      if photo = Map.get(nested_data, :photo) do
-        maybe_import_vcard_photo(contact, account_id, photo)
+      if raw = Map.get(nested_data, :dav_document) do
+        current = Repo.reload!(contact)
+
+        current =
+          %{current | dav: contact.dav}
+          |> Repo.preload(List.delete(dav_preloads(), :dav), force: true)
+
+        document = DAVDocument.accept(current, Map.get(nested_data, :dav_parsed_document, raw))
+        Write.stage_document(account_id, current, document)
       end
 
       :ok
@@ -1584,25 +1786,35 @@ defmodule Kith.Contacts do
     |> Invalidation.after_commit({:storage_usage, account_id})
   end
 
-  defp insert_address!(addr, contact_id, account_id) do
-    %Address{}
-    |> Address.changeset(Map.merge(addr, %{contact_id: contact_id, account_id: account_id}))
-    |> Repo.insert()
-    |> case do
-      {:ok, address} -> address
-      {:error, changeset} -> Repo.rollback(changeset)
+  defp replace_dav_avatar(contact, account_id, photo) do
+    case photo do
+      %{url: _} -> clear_avatar(contact)
+      nil -> if contact.avatar, do: clear_avatar(contact), else: :ok
+      photo -> maybe_import_vcard_photo(contact, account_id, photo)
     end
   end
 
   # ── Tag sync (CATEGORIES) ──────────────────────────────────────────
 
-  defp replace_contact_tags(_contact, _account_id, []), do: :ok
-
   defp replace_contact_tags(contact, account_id, category_names) do
-    from(ct in "contact_tags", where: ct.contact_id == ^contact.id) |> Repo.delete_all()
+    incoming = Enum.reject(category_names, &(&1 == ""))
 
-    Enum.each(category_names, fn name ->
-      tag = find_or_create_tag!(account_id, String.trim(name))
+    existing =
+      Repo.all(
+        from t in Tag,
+          join: ct in "contact_tags",
+          on: ct.tag_id == t.id,
+          where: ct.contact_id == ^contact.id and t.account_id == ^account_id,
+          select: {t.id, t.name}
+      )
+
+    removed = for {id, name} <- existing, name not in incoming, do: id
+
+    from(ct in "contact_tags", where: ct.contact_id == ^contact.id and ct.tag_id in ^removed)
+    |> Repo.delete_all()
+
+    Enum.each(incoming, fn name ->
+      tag = find_or_create_tag!(account_id, name)
 
       Repo.insert_all(
         "contact_tags",
@@ -1621,9 +1833,11 @@ defmodule Kith.Contacts do
           {:ok, tag} ->
             tag
 
-          {:error, _} ->
-            # Race: another transaction created it first — re-fetch
-            Repo.one!(from(t in Tag, where: t.account_id == ^account_id and t.name == ^name))
+          {:error, changeset} ->
+            # A uniqueness race can reuse the row; validation failures must
+            # reject the entire PUT instead of raising after partial writes.
+            Repo.one(from(t in Tag, where: t.account_id == ^account_id and t.name == ^name)) ||
+              Repo.rollback(changeset)
         end
 
       tag ->
@@ -1633,84 +1847,10 @@ defmodule Kith.Contacts do
 
   # ── Relationship sync (RELATED) ────────────────────────────────────
 
-  defp replace_contact_relationships(_contact, _account_id, []), do: :ok
-
-  defp replace_contact_relationships(contact, account_id, related_entries) do
-    from(r in Relationship, where: r.contact_id == ^contact.id and r.account_id == ^account_id)
-    |> Repo.delete_all()
-
-    Enum.each(related_entries, fn entry ->
-      with {:ok, related_id} <- extract_contact_id_from_uid(entry.value),
-           %Contact{} <- get_contact(account_id, related_id) do
-        type_name = vcard_type_to_relationship_name(entry.type)
-        rel_type = find_or_create_relationship_type!(account_id, type_name)
-
-        %Relationship{}
-        |> Relationship.changeset(%{
-          account_id: account_id,
-          contact_id: contact.id,
-          related_contact_id: related_id,
-          relationship_type_id: rel_type.id
-        })
-        |> Repo.insert(on_conflict: :nothing)
-      else
-        _ -> :ok
-      end
-    end)
-  end
-
-  defp extract_contact_id_from_uid(uid) do
-    # Match both "kith-contact-123" and "urn:uuid:kith-contact-123"
-    case Regex.run(~r/kith-contact-(\d+)/, uid) do
-      [_, id_str] -> {:ok, String.to_integer(id_str)}
-      _ -> :error
-    end
-  end
-
-  defp vcard_type_to_relationship_name(type) do
-    case String.downcase(type || "contact") do
-      "spouse" -> "Spouse"
-      "parent" -> "Parent"
-      "child" -> "Child"
-      "sibling" -> "Sibling"
-      "friend" -> "Friend"
-      "colleague" -> "Colleague"
-      _ -> "Contact"
-    end
-  end
-
-  defp find_or_create_relationship_type!(account_id, name) do
-    # First check global (account_id is nil) then account-specific
-    case Repo.one(
-           from(rt in RelationshipType,
-             where: (is_nil(rt.account_id) or rt.account_id == ^account_id) and rt.name == ^name,
-             order_by: [asc_nulls_first: rt.account_id],
-             limit: 1
-           )
-         ) do
-      nil ->
-        # Create account-specific relationship type
-        %RelationshipType{}
-        |> RelationshipType.changeset(%{name: name, reverse_name: name, account_id: account_id})
-        |> Repo.insert()
-        |> case do
-          {:ok, rt} ->
-            rt
-
-          {:error, _} ->
-            # Race: another transaction created it first — re-fetch
-            Repo.one!(
-              from(rt in RelationshipType,
-                where:
-                  (is_nil(rt.account_id) or rt.account_id == ^account_id) and rt.name == ^name,
-                order_by: [asc_nulls_first: rt.account_id],
-                limit: 1
-              )
-            )
-        end
-
-      rt ->
-        rt
+  defp replace_contact_relationships(contact, _account_id, related_entries) do
+    case Relationships.reconcile(contact, related_entries) do
+      {:ok, %{affected_contact_ids: ids}} -> Store.touch(contact.account_id, ids)
+      {:error, reason} -> Repo.rollback(reason)
     end
   end
 
@@ -1726,26 +1866,52 @@ defmodule Kith.Contacts do
     max_bytes = Application.get_env(:kith, :max_vcard_photo_bytes, 2 * 1024 * 1024)
 
     with {:ok, binary} <- Base.decode64(String.replace(b64_data, ~r/\s/, "")),
-         true <- byte_size(binary) <= max_bytes,
-         hash <- :crypto.hash(:sha256, binary) |> Base.encode16(case: :lower),
-         false <- photo_exists_by_hash?(contact.id, hash) do
-      upload_and_set_avatar(contact, account_id, binary, ct, hash)
+         true <- byte_size(binary) <= max_bytes do
+      if Avatar.current_bytes?(contact, binary),
+        do: :ok,
+        else: import_avatar_bytes(contact, account_id, binary, ct)
     else
-      _ -> :ok
+      _ -> Repo.rollback(:invalid_photo)
     end
   end
 
-  defp maybe_import_vcard_photo(%{id: id}, _account_id, _photo) do
-    require Logger
-    Logger.debug("Skipping unsupported vCard PHOTO format for contact #{id}")
-    :ok
+  defp maybe_import_vcard_photo(_contact, _account_id, _photo),
+    do: Repo.rollback(:unsupported_photo)
+
+  defp import_avatar_bytes(contact, account_id, binary, ct) do
+    hash = Avatar.hash(binary)
+
+    photo =
+      Repo.one(
+        from p in Photo,
+          where:
+            p.contact_id == ^contact.id and p.account_id == ^account_id and
+              p.content_hash == ^hash
+      )
+
+    if photo do
+      case set_avatar(contact, photo) do
+        {:ok, _} -> :ok
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    else
+      upload_and_set_avatar(contact, account_id, binary, ct, hash)
+    end
   end
 
   defp upload_and_set_avatar(contact, account_id, binary, ct, hash) do
+    # Validate before creating either an original photo row or a stored object.
+    case AvatarProcessor.prepare(binary) do
+      {:ok, _} -> :ok
+      {:error, reason} -> Repo.rollback(reason)
+    end
+
     ext = photo_extension(ct)
     key = Storage.generate_key(account_id, "photos", "carddav-import#{ext}")
 
-    with {:ok, _} <- Storage.upload_binary(binary, key),
+    with :ok <- Storage.check_storage_limit(account_id, byte_size(binary), fresh: true),
+         {:ok, _} <- Storage.upload_binary(binary, key),
+         :ok <- Avatar.stage_created(key),
          {:ok, photo} <-
            create_photo(contact, %{
              "file_name" => "carddav-photo#{ext}",
@@ -1754,10 +1920,11 @@ defmodule Kith.Contacts do
              "content_type" => ct,
              "content_hash" => hash,
              "account_id" => account_id
-           }) do
-      set_avatar(contact, photo)
+           }),
+         {:ok, _} <- set_avatar(contact, photo) do
+      :ok
     else
-      _ -> :ok
+      {:error, reason} -> Repo.rollback(reason)
     end
   end
 
@@ -1767,45 +1934,17 @@ defmodule Kith.Contacts do
   defp photo_extension("image/webp"), do: ".webp"
   defp photo_extension(_), do: ".jpg"
 
-  @doc "Bumps `updated_at` on a contact. Used after replacing child data."
-  def touch_contact!(%Contact{} = contact) do
-    contact
-    |> Ecto.Changeset.change(updated_at: DateTime.utc_now(:second))
-    |> Repo.update!()
-  end
-
   @doc false
+  def export_preloads, do: [:gender | dav_preloads()]
+
   def dav_preloads do
     [
+      :dav,
       :addresses,
-      :gender,
       :tags,
       contact_fields: :contact_field_type,
-      relationships: [:relationship_type, :related_contact]
+      relationships: [:relationship_type, related_contact: :dav]
     ]
-  end
-
-  @doc """
-  Lists contacts modified since the given timestamp.
-  Used by CardDAV sync-collection REPORT for incremental sync.
-  """
-  def list_contacts_modified_since(account_id, %DateTime{} = since) do
-    Contact
-    |> scope_active(account_id)
-    |> where([c], c.updated_at > ^since)
-    |> preload(^dav_preloads())
-    |> Repo.all()
-  end
-
-  @doc """
-  Lists contacts soft-deleted since the given timestamp.
-  Used by CardDAV sync-collection REPORT to report deletions.
-  """
-  def list_contacts_deleted_since(account_id, %DateTime{} = since) do
-    Contact
-    |> scope_to_account(account_id)
-    |> where([c], not is_nil(c.deleted_at) and c.deleted_at > ^since)
-    |> Repo.all()
   end
 
   # ── Contact Merge ──────────────────────────────────────────────────────
@@ -2269,5 +2408,16 @@ defmodule Kith.Contacts do
     |> limit(^limit)
     |> select([c], %{id: c.id, display_name: c.display_name, company: c.company})
     |> Repo.all()
+  end
+
+  defp touched({:ok, _} = result, account_id, ids) do
+    Store.touch(account_id, ids)
+    result
+  end
+
+  defp touched(result, _account_id, _ids), do: result
+
+  defp tag_contact_ids(tag_id) do
+    from(ct in "contact_tags", where: ct.tag_id == ^tag_id, select: ct.contact_id)
   end
 end

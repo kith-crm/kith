@@ -3,6 +3,9 @@ defmodule Kith.Contacts.RelationshipType do
   import Ecto.Changeset
 
   schema "relationship_types" do
+    # Trusted classification assigned only by audited seeds/migrations.
+    # Deliberately excluded from ordinary changeset casts.
+    field :system_key, :string
     field :name, :string
     field :reverse_name, :string
     field :is_bidirectional, :boolean, default: false

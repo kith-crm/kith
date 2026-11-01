@@ -1,11 +1,14 @@
 # Kith v1 — Entity Relationship Diagram
 
-> **27 tables** | PostgreSQL 16+ | Elixir/Phoenix migrations
+> **48 application tables** (distinct migration-created tables; excludes Oban and Ecto metadata) | PostgreSQL 16+ | Elixir/Phoenix migrations
 >
 > Every table includes `id bigserial PRIMARY KEY`, `inserted_at timestamptz NOT NULL DEFAULT now()`,
 > `updated_at timestamptz NOT NULL DEFAULT now()` unless explicitly noted otherwise.
 
 ---
+
+The detailed legacy inventory below covers the original core tables plus the two
+CardDAV tables; the header counts all application tables in current migrations.
 
 ## Mermaid ER Diagram
 
@@ -38,6 +41,45 @@ erDiagram
     users ||--o{ user_tokens : "has many"
     users ||--o{ invitations : "invited_by"
     users o|--o| contacts : "me_contact"
+
+    contacts ||--o| contact_dav : "has DAV identity"
+    accounts ||--o{ contact_dav : "owns"
+    contact_dav ||--o{ dav_document_references : "indexes client UUID references"
+    accounts ||--o{ dav_document_references : "owns"
+    accounts ||--o| dav_sync_floors : "sync floor"
+    accounts ||--o{ avatar_assets : "owns avatar renditions"
+
+    avatar_assets {
+        text storage_key PK
+        bigint account_id FK
+        integer byte_size
+        string content_hash
+    }
+
+    contact_dav {
+        bigint contact_id PK,FK
+        bigint account_id FK
+        uuid uid
+        text resource_name
+        bigint revision
+        jsonb document
+        jsonb archived_document
+        timestamp representation_modified_at
+        text representation_fingerprint
+        boolean requires_precondition
+        text_array extras
+    }
+
+    dav_document_references {
+        bigint account_id FK
+        bigint source_contact_id FK
+        uuid target_uid
+    }
+
+    dav_sync_floors {
+        bigint account_id PK,FK
+        bigint revision
+    }
 
     contacts ||--o{ addresses : "has many"
     contacts ||--o{ contact_fields : "has many"
@@ -167,6 +209,7 @@ erDiagram
 
     contact_field_types {
         bigserial id PK
+        text system_key
         bigint account_id FK
         string name
         string protocol
@@ -175,6 +218,7 @@ erDiagram
 
     relationship_types {
         bigserial id PK
+        text system_key
         bigint account_id FK
         string name
         string name_reverse_relationship
@@ -247,9 +291,14 @@ erDiagram
         bigint contact_id FK
         bigint account_id FK
         string file_name
-        string file_path
+        string storage_key
         integer file_size
         string content_type
+        text avatar_storage_key
+        integer avatar_file_size
+        string avatar_signature
+        string avatar_content_hash
+        map avatar_crop
     }
 
     life_events {
@@ -433,7 +482,7 @@ Central hub entity. **Supports soft-delete via `deleted_at`.**
 |---|---|---|---|---|
 | `id` | `bigserial` | NO | auto | `PRIMARY KEY` |
 | `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
-| `first_name` | `varchar(255)` | NO | — | |
+| `first_name` | `varchar(255)` | NO | — | Empty string for family-only contacts; at least one first/last name required by application |
 | `last_name` | `varchar(255)` | YES | `NULL` | |
 | `display_name` | `varchar(255)` | YES | `NULL` | Computed or overridden |
 | `nickname` | `varchar(255)` | YES | `NULL` | |
@@ -518,6 +567,7 @@ Reference data. Rows with `account_id = NULL` are global defaults; per-account r
 |---|---|---|---|---|
 | `id` | `bigserial` | NO | auto | `PRIMARY KEY` |
 | `account_id` | `bigint` | YES | `NULL` | `FK → accounts(id) ON DELETE CASCADE` |
+| `system_key` | `text` | YES | `NULL` | Trusted built-in identity; requires global row |
 | `name` | `varchar(255)` | NO | — | |
 | `protocol` | `varchar(255)` | YES | `NULL` | e.g. "mailto:", "tel:", "https://" |
 | `icon` | `varchar(255)` | YES | `NULL` | |
@@ -525,6 +575,8 @@ Reference data. Rows with `account_id = NULL` are global defaults; per-account r
 | `updated_at` | `timestamptz` | NO | `now()` | |
 
 **Indexes:**
+
+- `contact_field_types_system_key_index` — UNIQUE on non-null `system_key`
 
 - `contact_field_types_account_id_name_index` — UNIQUE on `(COALESCE(account_id, 0), name)`
 
@@ -541,12 +593,15 @@ Reference data. Rows with `account_id = NULL` are global defaults.
 |---|---|---|---|---|
 | `id` | `bigserial` | NO | auto | `PRIMARY KEY` |
 | `account_id` | `bigint` | YES | `NULL` | `FK → accounts(id) ON DELETE CASCADE` |
+| `system_key` | `text` | YES | `NULL` | Trusted built-in identity; requires global row |
 | `name` | `varchar(255)` | NO | — | |
 | `name_reverse_relationship` | `varchar(255)` | NO | — | |
 | `inserted_at` | `timestamptz` | NO | `now()` | |
 | `updated_at` | `timestamptz` | NO | `now()` | |
 
 **Indexes:**
+
+- `relationship_types_system_key_index` — UNIQUE on non-null `system_key`
 
 - `relationship_types_account_id_name_index` — UNIQUE on `(COALESCE(account_id, 0), name)`
 
@@ -726,15 +781,21 @@ Reference data, seeded. Rows with `account_id = NULL` are global defaults.
 | `contact_id` | `bigint` | NO | — | `FK → contacts(id) ON DELETE CASCADE` |
 | `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
 | `file_name` | `varchar(255)` | NO | — | |
-| `file_path` | `varchar(255)` | NO | — | |
+| `storage_key` | `varchar(255)` | NO | — | Original image |
 | `file_size` | `integer` | NO | — | |
 | `content_type` | `varchar(255)` | NO | — | |
+| `avatar_storage_key` | `text` | YES | — | Processed square JPEG rendition |
+| `avatar_file_size` | `integer` | YES | — | Rendition byte size |
+| `avatar_signature` | `varchar(255)` | YES | — | Source, crop and processor version digest |
+| `avatar_content_hash` | `varchar(255)` | YES | — | Rendition digest for unchanged DAV PUT-back |
+| `avatar_crop` | `jsonb` | YES | — | Oriented source crop for reproducible rendition repair |
 | `inserted_at` | `timestamptz` | NO | `now()` | |
 | `updated_at` | `timestamptz` | NO | `now()` | |
 
 **Indexes:**
 
 - `photos_contact_id_index` — on `(contact_id)`
+- `photos_account_id_avatar_storage_key_index` — on `(account_id, avatar_storage_key)`
 
 ---
 
@@ -907,6 +968,88 @@ Pure join table. **No `id`, `inserted_at`, or `updated_at` columns.**
 
 ---
 
+### 28. `contact_dav`
+
+Protocol identity, rich client document and publication state. No surrogate `id`; publication time is independent of native contact timestamps.
+
+| Column | Postgres Type | Nullable | Default | Constraints |
+|---|---|---|---|---|
+| `contact_id` | `bigint` | NO | — | `PRIMARY KEY`, `FK → contacts(id) ON DELETE CASCADE` |
+| `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
+| `uid` | `uuid` | NO | — | Account-unique canonical UUID, including hidden contacts |
+| `resource_name` | `text` | NO | — | Account-unique |
+| `revision` | `bigint` | NO | `nextval('contact_dav_revision_seq')` | |
+| `document` | `jsonb` | NO | `'{}'` | Lossless compact document; rich map exposed by Ecto type |
+| `archived_document` | `jsonb` | YES | `NULL` | Private pre-merge document snapshot; never rendered |
+| `representation_modified_at` | `timestamp(6)` | NO | UTC migration time | DAV publication time |
+| `representation_fingerprint` | `text` | YES | `NULL` | Both version representations, excluding REV value |
+| `requires_precondition` | `boolean` | NO | `false` | Current explicit validator required on migrated rows |
+| `extras` | `text[]` | NO | `'{}'` | Quarantined legacy lines; never rendered |
+
+**Indexes:**
+
+- `contact_dav_pkey` — PRIMARY KEY on `(contact_id)`
+- `contact_dav_account_id_uid_index` — UNIQUE on `(account_id, uid)`
+- `contact_dav_account_id_resource_name_index` — UNIQUE on `(account_id, resource_name)`
+- `contact_dav_account_id_revision_index` — on `(account_id, revision)`
+
+---
+
+### 29. `dav_sync_floors`
+
+Hard-delete invalidation floor per account. No surrogate `id` or timestamps.
+
+| Column | Postgres Type | Nullable | Default | Constraints |
+|---|---|---|---|---|
+| `account_id` | `bigint` | NO | — | `PRIMARY KEY`, `FK → accounts(id) ON DELETE CASCADE` |
+| `revision` | `bigint` | NO | — | Fresh sequence value on hard deletion |
+
+**Indexes:**
+
+- `dav_sync_floors_pkey` — PRIMARY KEY on `(account_id)`
+
+---
+
+### 30. `avatar_assets`
+
+Rendition ownership and byte accounting independent of source-photo rows. A
+trashed merge loser may still reference a rendition after source deduplication.
+No surrogate `id` or timestamps.
+
+| Column | Postgres Type | Nullable | Default | Constraints |
+|---|---|---|---|---|
+| `storage_key` | `text` | NO | — | `PRIMARY KEY` |
+| `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
+| `byte_size` | `integer` | NO | — | Encoded rendition size |
+| `content_hash` | `varchar(255)` | NO | — | SHA-256 digest of encoded bytes |
+
+**Indexes:**
+
+- `avatar_assets_pkey` — PRIMARY KEY on `(storage_key)`
+- `avatar_assets_account_id_index` — on `(account_id)`
+
+---
+
+### 31. `dav_document_references`
+
+Derived, account-scoped UUID dependency index. It lets visibility/identity changes
+invalidate documents that contain unresolved client relationship URIs. It does
+not create a native relationship or resolve text by name. Rebuilt atomically
+from the active document; no surrogate key or timestamps.
+
+| Column | Postgres Type | Nullable | Default | Constraints |
+|---|---|---|---|---|
+| `account_id` | `bigint` | NO | — | `FK → accounts(id) ON DELETE CASCADE` |
+| `source_contact_id` | `bigint` | NO | — | `FK → contact_dav(contact_id) ON DELETE CASCADE` |
+| `target_uid` | `uuid` | NO | — | May remain unresolved |
+
+**Indexes:**
+
+- `dav_document_references_identity_index` — UNIQUE on `(account_id, source_contact_id, target_uid)`
+- `dav_document_references_account_id_target_uid_index` — on `(account_id, target_uid)`
+
+---
+
 ## Schema Policies
 
 ### Soft-Delete
@@ -921,7 +1064,7 @@ Pure join table. **No `id`, `inserted_at`, or `updated_at` columns.**
 
 | Pattern | Tables | ON DELETE |
 |---|---|---|
-| Cascade (parent owns child) | Most FK relationships | `CASCADE` |
+| Cascade (parent owns child) | Most FK relationships, including `contact_dav.contact_id`, `contact_dav.account_id`, `dav_sync_floors.account_id` | `CASCADE` |
 | Set NULL (preserve child, clear reference) | `users.me_contact_id`, `contacts.gender_id`, `activities.activity_type_category_id`, `activities.emotion_id`, `calls.emotion_id`, `audit_logs.actor_id` | `SET NULL` |
 | No FK (intentional denormalization) | `audit_logs.contact_id` | N/A — plain integer column |
 
@@ -947,11 +1090,11 @@ Two tables are pure join tables with no surrogate key or timestamps:
 
 ### Additive-Only Migrations
 
-All schema changes follow an additive-only policy: no column drops, no table drops until a major version. This ensures safe rollbacks and zero-downtime deployments.
+The CardDAV rework is validated on a fresh isolated installation, with no production-data upgrade requirement. Its migration creates two tables and one sequence, without triggers or PL/pgSQL.
 
 ### Timestamp Convention
 
-All tables use `inserted_at` and `updated_at` (Phoenix/Ecto convention) with type `timestamptz` and default `now()`, except pure join tables which have no timestamps.
+All tables use `inserted_at` and `updated_at` (Phoenix/Ecto convention) with type `timestamptz` and default `now()`, except pure join tables and the CardDAV state tables, which have no timestamps.
 
 ### Encryption
 

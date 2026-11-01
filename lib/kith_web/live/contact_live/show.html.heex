@@ -34,6 +34,14 @@
       </div>
     </div>
 
+    <KithWeb.AvatarComponents.crop_dialog
+      :if={@avatar_crop}
+      source={avatar_crop_source(@avatar_crop)}
+      file_input={@uploads.avatar.ref}
+      entries={@uploads.avatar.entries}
+      upload={match?({:upload, _}, @avatar_crop)}
+    />
+
     <%!-- ========== HERO BANNER ========== --%>
     <div class="bg-gradient-to-br from-[var(--color-accent-subtle)] to-amber-100 dark:from-amber-950/30 dark:to-amber-900/20 rounded-[var(--radius-lg)] p-5 lg:p-6 mb-4 relative border border-[var(--color-accent-subtle)]">
       <div class="flex items-center gap-4 lg:gap-5">
@@ -60,28 +68,49 @@
           <%!-- Avatar picker popover --%>
           <%= if @show_avatar_picker do %>
             <div
-              phx-click-away="toggle-avatar-picker"
+              phx-click-away={if is_nil(@avatar_crop), do: "toggle-avatar-picker"}
               class="absolute top-full start-0 mt-2 z-20 w-64 rounded-[var(--radius-lg)] bg-[var(--color-surface-overlay)] border border-[var(--color-border)] shadow-[var(--shadow-dropdown)] p-3"
             >
               <p class="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                 Change avatar
               </p>
               <form
-                id={"contact-avatar-upload-#{@contact.id}"}
-                phx-submit="upload-avatar"
+                id="avatar-upload-form"
+                phx-hook="AvatarUpload"
+                phx-submit="validate-avatar"
                 phx-change="validate-avatar"
                 class="mb-3"
               >
                 <.live_file_input
                   upload={@uploads.avatar}
+                  aria-label="Choose avatar image"
                   class="w-full text-xs rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-2 py-1.5 file:me-2 file:rounded-[var(--radius-md)] file:border-0 file:bg-[var(--color-surface-sunken)] file:px-2 file:py-0.5 file:text-xs file:font-medium"
                 />
-                <button
-                  type="submit"
-                  disabled={@uploads.avatar.entries == []}
-                  class="mt-1.5 w-full inline-flex items-center justify-center gap-1 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-accent-foreground)] px-3 py-1.5 text-xs font-medium hover:bg-[var(--color-accent-hover)] transition-colors cursor-pointer disabled:opacity-50"
+                <p
+                  :for={error <- upload_errors(@uploads.avatar)}
+                  role="alert"
+                  class="text-xs text-red-600 mt-2"
                 >
-                  Upload &amp; set as avatar
+                  {avatar_upload_error(error)}
+                </p>
+                <p
+                  :for={
+                    error <-
+                      Enum.flat_map(@uploads.avatar.entries, &upload_errors(@uploads.avatar, &1))
+                  }
+                  role="alert"
+                  class="text-xs text-red-600 mt-2"
+                >
+                  {avatar_upload_error(error)}
+                </p>
+                <button
+                  :for={entry <- @uploads.avatar.entries}
+                  type="button"
+                  phx-click="cancel-avatar-upload"
+                  phx-value-ref={entry.ref}
+                  class="text-xs underline mt-2"
+                >
+                  Remove selected image
                 </button>
               </form>
               <%= if @avatar_photos != [] do %>
@@ -95,7 +124,7 @@
                       phx-value-id={photo.id}
                       class={[
                         "aspect-square rounded-[var(--radius-md)] overflow-hidden cursor-pointer ring-2 transition-all hover:ring-[var(--color-accent)]",
-                        if(@contact.avatar == photo.storage_key,
+                        if(Contacts.avatar_photo?(@contact, photo),
                           do: "ring-[var(--color-accent)]",
                           else: "ring-transparent"
                         )

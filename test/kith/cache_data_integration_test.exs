@@ -66,7 +66,7 @@ defmodule Kith.CacheDataIntegrationTest do
 
     unboxed(fn ->
       contact = insert(:contact, account: ctx.first)
-      bytes = "synthetic-jpeg-photo"
+      bytes = Kith.AvatarFixtures.image_binary(suffix: ".jpg")
 
       vcard =
         "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Cache Photo\r\nN:Photo;Cache;;;\r\nPHOTO;ENCODING=b;TYPE=JPEG:#{Base.encode64(bytes)}\r\nEND:VCARD\r\n"
@@ -76,10 +76,10 @@ defmodule Kith.CacheDataIntegrationTest do
       assert {:ok, :ok} = Contacts.replace_contact_children(contact, ctx.first.id, nested)
       assert :miss = Cache.get({:storage_usage, ctx.first.id})
       assert {:ok, size} = Storage.usage(ctx.first.id)
-      assert size == byte_size(bytes)
       assert [photo] = Contacts.list_photos(contact.id)
+      assert size == byte_size(bytes) + photo.avatar_file_size
       assert {:ok, ^bytes} = Storage.read(photo.storage_key)
-      assert Repo.get!(Kith.Contacts.Contact, contact.id).avatar == photo.storage_key
+      assert Repo.get!(Kith.Contacts.Contact, contact.id).avatar == photo.avatar_storage_key
     end)
   end
 
