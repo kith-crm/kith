@@ -1,0 +1,3516 @@
+{
+  "runtime": {
+    "otp": "28",
+    "elixir": "1.19.5"
+  },
+  "nodes": [
+    {
+      "name": "asn1_compiler",
+      "version": "0.1.1",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "asn1_compiler",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.4",
+      "runtime_matches": true
+    },
+    {
+      "name": "assent",
+      "version": "0.3.2",
+      "dependencies": [
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 0.0.0",
+          "package": "certifi"
+        },
+        {
+          "version": "0.24.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.15",
+          "package": "finch"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 1.8",
+          "package": "jose"
+        },
+        {
+          "version": "0.7.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.4",
+          "package": "req"
+        },
+        {
+          "version": "1.1.9",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": ">= 0.0.0",
+          "package": "ssl_verify_fun"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "assent",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.13",
+      "runtime_matches": true
+    },
+    {
+      "name": "bandit",
+      "version": "1.14.1",
+      "dependencies": [
+        {
+          "version": "1.1.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1",
+          "package": "hpax"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.18",
+          "package": "plug"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        },
+        {
+          "version": "1.6.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.6",
+          "package": "thousand_island"
+        },
+        {
+          "version": "0.5.3",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.5",
+          "package": "websock"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "bandit",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.13",
+      "runtime_matches": true
+    },
+    {
+      "name": "bunt",
+      "version": "1.0.0",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "bunt",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.1",
+      "runtime_matches": true
+    },
+    {
+      "name": "castore",
+      "version": "1.0.22",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "castore",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.0",
+      "runtime_matches": true
+    },
+    {
+      "name": "cbor",
+      "version": "1.0.2",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "cbor",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.0",
+      "runtime_matches": true
+    },
+    {
+      "name": "cc_precompiler",
+      "version": "0.1.11",
+      "dependencies": [
+        {
+          "version": "0.10.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.7",
+          "package": "elixir_make"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "cc_precompiler",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.11",
+      "runtime_matches": true
+    },
+    {
+      "name": "cldr_utils",
+      "version": "2.29.7",
+      "dependencies": [
+        {
+          "version": "1.0.22",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.1 or ~> 1.0",
+          "package": "castore"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 2.5",
+          "package": "certifi"
+        },
+        {
+          "version": "3.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.9 or ~> 2.0 or ~> 3.0",
+          "package": "decimal"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "cldr_utils",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "comeonin",
+      "version": "5.5.1",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "comeonin",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.7",
+      "runtime_matches": true
+    },
+    {
+      "name": "credo",
+      "version": "1.7.19",
+      "dependencies": [
+        {
+          "version": "1.0.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.2.1 or ~> 1.0",
+          "package": "bunt"
+        },
+        {
+          "version": "1.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.2 or ~> 1.0",
+          "package": "file_system"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "credo",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": ">= 1.13.0",
+      "runtime_matches": true
+    },
+    {
+      "name": "db_connection",
+      "version": "2.10.2",
+      "dependencies": [
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "db_connection",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.11",
+      "runtime_matches": true
+    },
+    {
+      "name": "decimal",
+      "version": "3.2.0",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "decimal",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "dialyxir",
+      "version": "1.4.8",
+      "dependencies": [
+        {
+          "version": "0.2.9",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": ">= 0.2.8",
+          "package": "erlex"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "dialyxir",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": ">= 1.6.0",
+      "runtime_matches": true
+    },
+    {
+      "name": "digital_token",
+      "version": "1.0.0",
+      "dependencies": [
+        {
+          "version": "2.29.7",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.17",
+          "package": "cldr_utils"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "digital_token",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.10",
+      "runtime_matches": true
+    },
+    {
+      "name": "ecto",
+      "version": "3.14.2",
+      "dependencies": [
+        {
+          "version": "3.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.0",
+          "package": "decimal"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ecto",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "ecto_sql",
+      "version": "3.14.0",
+      "dependencies": [
+        {
+          "version": "2.10.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.9",
+          "package": "db_connection"
+        },
+        {
+          "version": "3.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.0",
+          "package": "decimal"
+        },
+        {
+          "version": "3.14.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.14.0",
+          "package": "ecto"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.8",
+          "package": "myxql"
+        },
+        {
+          "version": "0.22.4",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.19 or ~> 1.0",
+          "package": "postgrex"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 2.1.1 or ~> 2.2",
+          "package": "tds"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4.0 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ecto_sql",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "elixir_make",
+      "version": "0.10.1",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "elixir_make",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "eqrcode",
+      "version": "0.2.1",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "eqrcode",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.6",
+      "runtime_matches": true
+    },
+    {
+      "name": "erlex",
+      "version": "0.2.9",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "erlex",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.6",
+      "runtime_matches": true
+    },
+    {
+      "name": "esbuild",
+      "version": "0.10.1",
+      "dependencies": [
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.4",
+          "package": "jason"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "esbuild",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "ex_aws",
+      "version": "2.7.0",
+      "dependencies": [
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 5.0",
+          "package": "configparser_ex"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 4.0",
+          "package": "hackney"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.1",
+          "package": "jason"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 2.8 or ~> 3.0",
+          "package": "jsx"
+        },
+        {
+          "version": "2.0.7",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.2 or ~> 2.0",
+          "package": "mime"
+        },
+        {
+          "version": "0.7.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.5.10 or ~> 0.6 or ~> 1.0",
+          "package": "req"
+        },
+        {
+          "version": "0.7.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.7",
+          "package": "sweet_xml"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4.3 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ex_aws",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "ex_aws_s3",
+      "version": "2.5.9",
+      "dependencies": [
+        {
+          "version": "2.7.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.0",
+          "package": "ex_aws"
+        },
+        {
+          "version": "0.7.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": ">= 0.0.0",
+          "package": "sweet_xml"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ex_aws_s3",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.13",
+      "runtime_matches": true
+    },
+    {
+      "name": "ex_cldr",
+      "version": "2.47.5",
+      "dependencies": [
+        {
+          "version": "2.29.7",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.29",
+          "package": "cldr_utils"
+        },
+        {
+          "version": "3.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.6 or ~> 2.0 or ~> 3.0",
+          "package": "decimal"
+        },
+        {
+          "version": "1.0.2",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.19 or ~> 1.0",
+          "package": "gettext"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.5 or ~> 1.0",
+          "package": "nimble_parsec"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ex_cldr",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "ex_cldr_calendars",
+      "version": "2.4.4",
+      "dependencies": [
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.2",
+          "package": "calendar_interval"
+        },
+        {
+          "version": "1.0.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "digital_token"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 2.10",
+          "package": "ex_cldr_lists"
+        },
+        {
+          "version": "2.38.3",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.36",
+          "package": "ex_cldr_numbers"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 3.20",
+          "package": "ex_cldr_units"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.21",
+          "package": "ex_doc"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ex_cldr_calendars",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "ex_cldr_currencies",
+      "version": "2.17.2",
+      "dependencies": [
+        {
+          "version": "2.47.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.38",
+          "package": "ex_cldr"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ex_cldr_currencies",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "ex_cldr_dates_times",
+      "version": "2.25.6",
+      "dependencies": [
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.2",
+          "package": "calendar_interval"
+        },
+        {
+          "version": "2.4.4",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.4",
+          "package": "ex_cldr_calendars"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 3.20",
+          "package": "ex_cldr_units"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        },
+        {
+          "version": "0.28.4",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.26",
+          "package": "tz"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ex_cldr_dates_times",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "ex_cldr_numbers",
+      "version": "2.38.3",
+      "dependencies": [
+        {
+          "version": "3.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.6 or ~> 2.0 or ~> 3.0",
+          "package": "decimal"
+        },
+        {
+          "version": "1.0.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0 or ~> 2.0",
+          "package": "digital_token"
+        },
+        {
+          "version": "2.47.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.45",
+          "package": "ex_cldr"
+        },
+        {
+          "version": "2.17.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.17",
+          "package": "ex_cldr_currencies"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ex_cldr_numbers",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "ex_cldr_territories",
+      "version": "2.12.0",
+      "dependencies": [
+        {
+          "version": "2.47.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.47",
+          "package": "ex_cldr"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ex_cldr_territories",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "ex_machina",
+      "version": "2.8.2",
+      "dependencies": [
+        {
+          "version": "3.14.2",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 2.2 or ~> 3.0",
+          "package": "ecto"
+        },
+        {
+          "version": "3.14.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 3.0",
+          "package": "ecto_sql"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ex_machina",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.11",
+      "runtime_matches": true
+    },
+    {
+      "name": "ex_phone_number",
+      "version": "0.4.12",
+      "dependencies": [
+        {
+          "version": "0.7.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.7",
+          "package": "sweet_xml"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "ex_phone_number",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "expo",
+      "version": "1.1.1",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "expo",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.11",
+      "runtime_matches": true
+    },
+    {
+      "name": "file_system",
+      "version": "1.1.1",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "file_system",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.11",
+      "runtime_matches": true
+    },
+    {
+      "name": "finch",
+      "version": "0.24.0",
+      "dependencies": [
+        {
+          "version": "2.0.7",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0 or ~> 2.0",
+          "package": "mime"
+        },
+        {
+          "version": "1.11.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.8",
+          "package": "mint"
+        },
+        {
+          "version": "1.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "nimble_options"
+        },
+        {
+          "version": "1.1.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1",
+          "package": "nimble_pool"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "finch",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "fine",
+      "version": "0.1.6",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "fine",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "flop",
+      "version": "0.29.1",
+      "dependencies": [
+        {
+          "version": "3.14.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.11",
+          "package": "ecto"
+        },
+        {
+          "version": "1.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "nimble_options"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "flop",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.11",
+      "runtime_matches": true
+    },
+    {
+      "name": "flop_phoenix",
+      "version": "0.27.0",
+      "dependencies": [
+        {
+          "version": "0.29.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.29.0",
+          "package": "flop"
+        },
+        {
+          "version": "1.8.16",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": ">= 1.6.0 and < 1.9.0",
+          "package": "phoenix"
+        },
+        {
+          "version": "4.4.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 4.0",
+          "package": "phoenix_html"
+        },
+        {
+          "version": "1.2.13",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1",
+          "package": "phoenix_live_view"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "flop_phoenix",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "fuse",
+      "version": "2.5.0",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "fuse",
+      "build_tools": [
+        "rebar3"
+      ],
+      "elixir_requirement": null,
+      "runtime_matches": true
+    },
+    {
+      "name": "gen_smtp",
+      "version": "1.3.0",
+      "dependencies": [
+        {
+          "version": "2.3.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": ">= 1.8.0",
+          "package": "ranch"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "gen_smtp",
+      "build_tools": [
+        "rebar3"
+      ],
+      "elixir_requirement": null,
+      "runtime_matches": true
+    },
+    {
+      "name": "geolix",
+      "version": "2.1.0",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "geolix",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.7",
+      "runtime_matches": true
+    },
+    {
+      "name": "geolix_adapter_mmdb2",
+      "version": "0.7.0",
+      "dependencies": [
+        {
+          "version": "2.1.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.0",
+          "package": "geolix"
+        },
+        {
+          "version": "3.0.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.0",
+          "package": "mmdb2_decoder"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "geolix_adapter_mmdb2",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.9",
+      "runtime_matches": true
+    },
+    {
+      "name": "gettext",
+      "version": "1.0.2",
+      "dependencies": [
+        {
+          "version": "1.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.5.1 or ~> 1.0",
+          "package": "expo"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "gettext",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "hammer",
+      "version": "7.5.1",
+      "dependencies": [
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.8",
+          "package": "igniter"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "hammer",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "hammer_backend_redis",
+      "version": "7.2.0",
+      "dependencies": [
+        {
+          "version": "7.5.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 7.0",
+          "package": "hammer"
+        },
+        {
+          "version": "1.10.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.5",
+          "package": "redix"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "hammer_backend_redis",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "hpax",
+      "version": "1.1.0",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "hpax",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "html_sanitize_ex",
+      "version": "1.5.6",
+      "dependencies": [
+        {
+          "version": "3.5.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.15 or ~> 3.1",
+          "package": "mochiweb"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "html_sanitize_ex",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.0",
+      "runtime_matches": true
+    },
+    {
+      "name": "idna",
+      "version": "7.1.0",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "idna",
+      "build_tools": [
+        "rebar3"
+      ],
+      "elixir_requirement": null,
+      "runtime_matches": true
+    },
+    {
+      "name": "jason",
+      "version": "1.4.5",
+      "dependencies": [
+        {
+          "version": "3.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0 or ~> 2.0 or ~> 3.0",
+          "package": "decimal"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "jason",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.4",
+      "runtime_matches": true
+    },
+    {
+      "name": "lazy_html",
+      "version": "0.1.13",
+      "dependencies": [
+        {
+          "version": "0.1.11",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.1",
+          "package": "cc_precompiler"
+        },
+        {
+          "version": "0.10.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.9",
+          "package": "elixir_make"
+        },
+        {
+          "version": "0.1.6",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.1.0",
+          "package": "fine"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "lazy_html",
+      "build_tools": [
+        "make",
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "libcluster",
+      "version": "3.5.0",
+      "dependencies": [
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1",
+          "package": "jason"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.3",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "libcluster",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.13",
+      "runtime_matches": true
+    },
+    {
+      "name": "logger_json",
+      "version": "7.0.4",
+      "dependencies": [
+        {
+          "version": "3.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": ">= 0.0.0",
+          "package": "decimal"
+        },
+        {
+          "version": "3.14.2",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 3.11",
+          "package": "ecto"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.4",
+          "package": "jason"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.15",
+          "package": "plug"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "logger_json",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.16 or ~> 1.15.1",
+      "runtime_matches": true
+    },
+    {
+      "name": "mime",
+      "version": "2.0.7",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "mime",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.10",
+      "runtime_matches": true
+    },
+    {
+      "name": "mint",
+      "version": "1.11.0",
+      "dependencies": [
+        {
+          "version": "1.0.22",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.1.0 or ~> 1.0",
+          "package": "castore"
+        },
+        {
+          "version": "1.1.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1",
+          "package": "hpax"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "mint",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "mmdb2_decoder",
+      "version": "3.0.1",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "mmdb2_decoder",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.7",
+      "runtime_matches": true
+    },
+    {
+      "name": "mochiweb",
+      "version": "3.5.0",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "mochiweb",
+      "build_tools": [
+        "rebar3"
+      ],
+      "elixir_requirement": null,
+      "runtime_matches": true
+    },
+    {
+      "name": "mox",
+      "version": "1.3.2",
+      "dependencies": [
+        {
+          "version": "1.0.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "nimble_ownership"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "mox",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "nebulex",
+      "version": "3.1.0",
+      "dependencies": [
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 1.4",
+          "package": "decorator"
+        },
+        {
+          "version": "1.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.5 or ~> 1.0",
+          "package": "nimble_options"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "nebulex",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "nebulex_local",
+      "version": "3.1.0",
+      "dependencies": [
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 1.7",
+          "package": "ex2ms"
+        },
+        {
+          "version": "3.1.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.1",
+          "package": "nebulex"
+        },
+        {
+          "version": "1.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.5 or ~> 1.0",
+          "package": "nimble_options"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 1.1",
+          "package": "shards"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "nebulex_local",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "nimble_options",
+      "version": "1.1.1",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "nimble_options",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.9",
+      "runtime_matches": true
+    },
+    {
+      "name": "nimble_ownership",
+      "version": "1.0.2",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "nimble_ownership",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.11",
+      "runtime_matches": true
+    },
+    {
+      "name": "nimble_pool",
+      "version": "1.1.0",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "nimble_pool",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.7",
+      "runtime_matches": true
+    },
+    {
+      "name": "oban",
+      "version": "2.24.2",
+      "dependencies": [
+        {
+          "version": "3.14.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.10",
+          "package": "ecto_sql"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.9",
+          "package": "ecto_sqlite3"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.5",
+          "package": "igniter"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.1",
+          "package": "jason"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.7",
+          "package": "myxql"
+        },
+        {
+          "version": "0.22.4",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.20",
+          "package": "postgrex"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.3",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "oban",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "oban_met",
+      "version": "1.3.3",
+      "dependencies": [
+        {
+          "version": "2.24.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.23",
+          "package": "oban"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "oban_met",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "oban_web",
+      "version": "2.13.1",
+      "dependencies": [
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.2",
+          "package": "jason"
+        },
+        {
+          "version": "2.24.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.24",
+          "package": "oban"
+        },
+        {
+          "version": "1.3.3",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1",
+          "package": "oban_met"
+        },
+        {
+          "version": "1.8.16",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.7",
+          "package": "phoenix"
+        },
+        {
+          "version": "4.4.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.3 or ~> 4.0",
+          "package": "phoenix_html"
+        },
+        {
+          "version": "1.2.13",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "phoenix_live_view"
+        },
+        {
+          "version": "2.4.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.1",
+          "package": "phoenix_pubsub"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "oban_web",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "octo_fetch",
+      "version": "0.5.0",
+      "dependencies": [
+        {
+          "version": "1.0.22",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.1 or ~> 1.0",
+          "package": "castore"
+        },
+        {
+          "version": "1.1.9",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1",
+          "package": "ssl_verify_fun"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "octo_fetch",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.13",
+      "runtime_matches": true
+    },
+    {
+      "name": "pbkdf2_elixir",
+      "version": "2.3.1",
+      "dependencies": [
+        {
+          "version": "5.5.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 5.3",
+          "package": "comeonin"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "pbkdf2_elixir",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.7",
+      "runtime_matches": true
+    },
+    {
+      "name": "peep",
+      "version": "4.4.0",
+      "dependencies": [
+        {
+          "version": "1.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1",
+          "package": "nimble_options"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.16",
+          "package": "plug"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "telemetry"
+        },
+        {
+          "version": "1.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "telemetry_metrics"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "peep",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "phoenix",
+      "version": "1.8.16",
+      "dependencies": [
+        {
+          "version": "1.14.1",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "bandit"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        },
+        {
+          "version": "2.4.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.4",
+          "package": "phoenix_pubsub"
+        },
+        {
+          "version": "1.1.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "phoenix_template"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 2.0",
+          "package": "phoenix_view"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.14",
+          "package": "plug"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 2.7",
+          "package": "plug_cowboy"
+        },
+        {
+          "version": "2.2.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.2",
+          "package": "plug_crypto"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        },
+        {
+          "version": "0.7.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.5",
+          "package": "websock_adapter"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "phoenix",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "phoenix_ecto",
+      "version": "4.7.0",
+      "dependencies": [
+        {
+          "version": "3.14.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.5",
+          "package": "ecto"
+        },
+        {
+          "version": "4.4.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 2.14.2 or ~> 3.0 or ~> 4.1",
+          "package": "phoenix_html"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.9",
+          "package": "plug"
+        },
+        {
+          "version": "0.22.4",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.16 or ~> 1.0",
+          "package": "postgrex"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "phoenix_ecto",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.11",
+      "runtime_matches": true
+    },
+    {
+      "name": "phoenix_html",
+      "version": "4.4.0",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "phoenix_html",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.7",
+      "runtime_matches": true
+    },
+    {
+      "name": "phoenix_live_dashboard",
+      "version": "0.9.1",
+      "dependencies": [
+        {
+          "version": "3.14.2",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 3.6.2 or ~> 3.7",
+          "package": "ecto"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.5",
+          "package": "ecto_mysql_extras"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.7",
+          "package": "ecto_psql_extras"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 1.1.7 or ~> 1.2.0",
+          "package": "ecto_sqlite3_extras"
+        },
+        {
+          "version": "2.0.7",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.6 or ~> 2.0",
+          "package": "mime"
+        },
+        {
+          "version": "1.2.13",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "phoenix_live_view"
+        },
+        {
+          "version": "1.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.6 or ~> 1.0",
+          "package": "telemetry_metrics"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "phoenix_live_dashboard",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "phoenix_live_reload",
+      "version": "1.7.0",
+      "dependencies": [
+        {
+          "version": "1.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.2.10 or ~> 1.0",
+          "package": "file_system"
+        },
+        {
+          "version": "1.8.16",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.4",
+          "package": "phoenix"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "phoenix_live_reload",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.11",
+      "runtime_matches": true
+    },
+    {
+      "name": "phoenix_live_view",
+      "version": "1.2.13",
+      "dependencies": [
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 0.6.16 and < 1.0.0-0",
+          "package": "igniter"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        },
+        {
+          "version": "0.1.13",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.1.0",
+          "package": "lazy_html"
+        },
+        {
+          "version": "1.8.16",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.6.15 or ~> 1.7.0 or ~> 1.8.0",
+          "package": "phoenix"
+        },
+        {
+          "version": "4.4.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.3 or ~> 4.0",
+          "package": "phoenix_html"
+        },
+        {
+          "version": "1.1.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "phoenix_template"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 2.0",
+          "package": "phoenix_view"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.15",
+          "package": "plug"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4.2 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "phoenix_live_view",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "phoenix_pubsub",
+      "version": "2.4.1",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "phoenix_pubsub",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.13",
+      "runtime_matches": true
+    },
+    {
+      "name": "phoenix_template",
+      "version": "1.1.0",
+      "dependencies": [
+        {
+          "version": "4.4.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 2.14.2 or ~> 3.0 or ~> 4.0",
+          "package": "phoenix_html"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "phoenix_template",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.16",
+      "runtime_matches": true
+    },
+    {
+      "name": "plug",
+      "version": "1.20.3",
+      "dependencies": [
+        {
+          "version": "2.0.7",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0 or ~> 2.0",
+          "package": "mime"
+        },
+        {
+          "version": "2.2.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1.1 or ~> 1.2 or ~> 2.0",
+          "package": "plug_crypto"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4.3 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "plug",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "plug_crypto",
+      "version": "2.2.1",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "plug_crypto",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "postgrex",
+      "version": "0.22.4",
+      "dependencies": [
+        {
+          "version": "2.10.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.9",
+          "package": "db_connection"
+        },
+        {
+          "version": "3.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.5 or ~> 2.0 or ~> 3.0",
+          "package": "decimal"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.1.0",
+          "package": "table"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "postgrex",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "pot",
+      "version": "1.0.2",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "pot",
+      "build_tools": [
+        "rebar3"
+      ],
+      "elixir_requirement": null,
+      "runtime_matches": true
+    },
+    {
+      "name": "prom_ex",
+      "version": "1.12.0",
+      "dependencies": [
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 1.8.0",
+          "package": "absinthe"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 1.1.0",
+          "package": "broadway"
+        },
+        {
+          "version": "3.14.2",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": ">= 3.14.0",
+          "package": "ecto"
+        },
+        {
+          "version": "0.24.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.18",
+          "package": "finch"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.4",
+          "package": "jason"
+        },
+        {
+          "version": "2.24.2",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": ">= 2.10.0",
+          "package": "oban"
+        },
+        {
+          "version": "0.5.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4",
+          "package": "octo_fetch"
+        },
+        {
+          "version": "4.4.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 3.0 or ~> 4.0",
+          "package": "peep"
+        },
+        {
+          "version": "1.8.16",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": ">= 1.7.0",
+          "package": "phoenix"
+        },
+        {
+          "version": "1.2.13",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": ">= 0.20.0",
+          "package": "phoenix_live_view"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": ">= 1.16.0",
+          "package": "plug"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 2.6.0",
+          "package": "plug_cowboy"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": ">= 1.0.0",
+          "package": "telemetry"
+        },
+        {
+          "version": "1.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "telemetry_metrics"
+        },
+        {
+          "version": "1.2.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.2",
+          "package": "telemetry_metrics_prometheus_core"
+        },
+        {
+          "version": "1.3.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1",
+          "package": "telemetry_poller"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "prom_ex",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "ranch",
+      "version": "2.3.0",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "ranch",
+      "build_tools": [
+        "make",
+        "rebar3"
+      ],
+      "elixir_requirement": null,
+      "runtime_matches": true
+    },
+    {
+      "name": "redix",
+      "version": "1.10.0",
+      "dependencies": [
+        {
+          "version": "1.0.22",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.1.0 or ~> 1.0",
+          "package": "castore"
+        },
+        {
+          "version": "1.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.5.0 or ~> 1.0",
+          "package": "nimble_options"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4.0 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "redix",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "req",
+      "version": "0.7.5",
+      "dependencies": [
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.3.1",
+          "package": "brotli"
+        },
+        {
+          "version": "0.24.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.21",
+          "package": "finch"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        },
+        {
+          "version": "2.0.7",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 2.0.6 or ~> 2.1",
+          "package": "mime"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "nimble_csv"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.0",
+          "package": "plug"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "req",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.15",
+      "runtime_matches": true
+    },
+    {
+      "name": "sentry",
+      "version": "14.0.1",
+      "dependencies": [
+        {
+          "version": "0.24.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.21",
+          "package": "finch"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 1.8.0 and < 5.0.0",
+          "package": "hackney"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.1",
+          "package": "jason"
+        },
+        {
+          "version": "1.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "nimble_options"
+        },
+        {
+          "version": "1.0.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "nimble_ownership"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 0.0.0",
+          "package": "opentelemetry"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 0.0.0",
+          "package": "opentelemetry_api"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 0.0.0",
+          "package": "opentelemetry_exporter"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 0.0.0",
+          "package": "opentelemetry_semantic_conventions"
+        },
+        {
+          "version": "1.8.16",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.6",
+          "package": "phoenix"
+        },
+        {
+          "version": "1.2.13",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.20 or ~> 1.0",
+          "package": "phoenix_live_view"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.6",
+          "package": "plug"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "sentry",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.13",
+      "runtime_matches": true
+    },
+    {
+      "name": "sobelow",
+      "version": "0.18.1",
+      "dependencies": [
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "sobelow",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "ssl_verify_fun",
+      "version": "1.1.9",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "ssl_verify_fun",
+      "build_tools": [
+        "make",
+        "mix",
+        "rebar3"
+      ],
+      "elixir_requirement": null,
+      "runtime_matches": true
+    },
+    {
+      "name": "sweet_xml",
+      "version": "0.7.5",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "sweet_xml",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "swoosh",
+      "version": "1.29.3",
+      "dependencies": [
+        {
+          "version": "1.14.1",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": ">= 1.0.0",
+          "package": "bandit"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 1.1 or ~> 2.4",
+          "package": "cowboy"
+        },
+        {
+          "version": "2.7.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 2.1",
+          "package": "ex_aws"
+        },
+        {
+          "version": "0.24.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.6",
+          "package": "finch"
+        },
+        {
+          "version": "1.3.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.13 or ~> 1.0",
+          "package": "gen_smtp"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 1.9.0 and < 5.0.0",
+          "package": "hackney"
+        },
+        {
+          "version": "7.1.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": ">= 6.0.0 and < 8.0.0",
+          "package": "idna"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "jason"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.2",
+          "package": "mail"
+        },
+        {
+          "version": "2.0.7",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1 or ~> 2.0",
+          "package": "mime"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.2.3",
+          "package": "mua"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.4",
+          "package": "multipart"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.9",
+          "package": "plug"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": ">= 1.0.0",
+          "package": "plug_cowboy"
+        },
+        {
+          "version": "0.7.5",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.5.10 or ~> 0.6 or ~> 1.0",
+          "package": "req"
+        },
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4.2 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "swoosh",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.16",
+      "runtime_matches": true
+    },
+    {
+      "name": "tailwind",
+      "version": "0.5.2",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "tailwind",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "telemetry",
+      "version": "1.4.2",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "telemetry",
+      "build_tools": [
+        "rebar3"
+      ],
+      "elixir_requirement": null,
+      "runtime_matches": true
+    },
+    {
+      "name": "telemetry_metrics",
+      "version": "1.2.0",
+      "dependencies": [
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "telemetry_metrics",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.14",
+      "runtime_matches": true
+    },
+    {
+      "name": "telemetry_metrics_prometheus_core",
+      "version": "1.2.1",
+      "dependencies": [
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        },
+        {
+          "version": "1.2.0",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.6 or ~> 1.0",
+          "package": "telemetry_metrics"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "telemetry_metrics_prometheus_core",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "telemetry_poller",
+      "version": "1.3.0",
+      "dependencies": [
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "telemetry_poller",
+      "build_tools": [
+        "rebar3"
+      ],
+      "elixir_requirement": null,
+      "runtime_matches": true
+    },
+    {
+      "name": "thousand_island",
+      "version": "1.6.0",
+      "dependencies": [
+        {
+          "version": "1.4.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.4 or ~> 1.0",
+          "package": "telemetry"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "thousand_island",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.13",
+      "runtime_matches": true
+    },
+    {
+      "name": "tz",
+      "version": "0.28.4",
+      "dependencies": [
+        {
+          "version": "1.0.22",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 0.1 or ~> 1.0",
+          "package": "castore"
+        },
+        {
+          "version": "1.11.0",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": "~> 1.6",
+          "package": "mint"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "tz",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.9",
+      "runtime_matches": true
+    },
+    {
+      "name": "wax_",
+      "version": "0.7.0",
+      "dependencies": [
+        {
+          "version": "0.1.1",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.1.0",
+          "package": "asn1_compiler"
+        },
+        {
+          "version": "1.0.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.0",
+          "package": "cbor"
+        },
+        {
+          "version": "1.4.5",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.1",
+          "package": "jason"
+        },
+        {
+          "version": "0.9.2",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.8",
+          "package": "x509"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "wax_",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.12",
+      "runtime_matches": true
+    },
+    {
+      "name": "websock",
+      "version": "0.5.3",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "websock",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.9",
+      "runtime_matches": true
+    },
+    {
+      "name": "websock_adapter",
+      "version": "0.7.0",
+      "dependencies": [
+        {
+          "version": "1.14.1",
+          "matches": true,
+          "installed": true,
+          "optional": true,
+          "requirement": ">= 0.6.0",
+          "package": "bandit"
+        },
+        {
+          "version": "1.20.3",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 1.14",
+          "package": "plug"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 2.6",
+          "package": "plug_cowboy"
+        },
+        {
+          "version": null,
+          "matches": true,
+          "installed": false,
+          "optional": true,
+          "requirement": "~> 0.1",
+          "package": "roadrunner_plug"
+        },
+        {
+          "version": "0.5.3",
+          "matches": true,
+          "installed": true,
+          "optional": false,
+          "requirement": "~> 0.5",
+          "package": "websock"
+        }
+      ],
+      "repository": "hexpm",
+      "package": "websock_adapter",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.9",
+      "runtime_matches": true
+    },
+    {
+      "name": "x509",
+      "version": "0.9.2",
+      "dependencies": [],
+      "repository": "hexpm",
+      "package": "x509",
+      "build_tools": [
+        "mix"
+      ],
+      "elixir_requirement": "~> 1.5",
+      "runtime_matches": true
+    }
+  ],
+  "direct": [
+    {
+      "name": "phoenix",
+      "matches": true,
+      "requirement": "~> 1.8.5"
+    },
+    {
+      "name": "phoenix_ecto",
+      "matches": true,
+      "requirement": "~> 4.5"
+    },
+    {
+      "name": "ecto_sql",
+      "matches": true,
+      "requirement": "~> 3.14"
+    },
+    {
+      "name": "postgrex",
+      "matches": true,
+      "requirement": ">= 0.0.0"
+    },
+    {
+      "name": "phoenix_html",
+      "matches": true,
+      "requirement": "~> 4.4"
+    },
+    {
+      "name": "plug",
+      "matches": true,
+      "requirement": "~> 1.20.3"
+    },
+    {
+      "name": "phoenix_live_view",
+      "matches": true,
+      "requirement": "~> 1.2.13"
+    },
+    {
+      "name": "phoenix_live_dashboard",
+      "matches": true,
+      "requirement": "~> 0.9.1"
+    },
+    {
+      "name": "telemetry_metrics",
+      "matches": true,
+      "requirement": "~> 1.0"
+    },
+    {
+      "name": "telemetry_poller",
+      "matches": true,
+      "requirement": "~> 1.0"
+    },
+    {
+      "name": "gettext",
+      "matches": true,
+      "requirement": "~> 1.0"
+    },
+    {
+      "name": "jason",
+      "matches": true,
+      "requirement": "~> 1.2"
+    },
+    {
+      "name": "libcluster",
+      "matches": true,
+      "requirement": "~> 3.4"
+    },
+    {
+      "name": "bandit",
+      "matches": true,
+      "requirement": "~> 1.5"
+    },
+    {
+      "name": "heroicons",
+      "matches": true,
+      "requirement": null
+    },
+    {
+      "name": "oban",
+      "matches": true,
+      "requirement": "~> 2.18"
+    },
+    {
+      "name": "oban_web",
+      "matches": true,
+      "requirement": "~> 2.11"
+    },
+    {
+      "name": "swoosh",
+      "matches": true,
+      "requirement": "~> 1.17"
+    },
+    {
+      "name": "gen_smtp",
+      "matches": true,
+      "requirement": "~> 1.2"
+    },
+    {
+      "name": "ex_aws",
+      "matches": true,
+      "requirement": "~> 2.7"
+    },
+    {
+      "name": "ex_aws_s3",
+      "matches": true,
+      "requirement": "~> 2.5"
+    },
+    {
+      "name": "sweet_xml",
+      "matches": true,
+      "requirement": "~> 0.7"
+    },
+    {
+      "name": "req",
+      "matches": true,
+      "requirement": "~> 0.7.5"
+    },
+    {
+      "name": "finch",
+      "matches": true,
+      "requirement": "~> 0.21"
+    },
+    {
+      "name": "pot",
+      "matches": true,
+      "requirement": "~> 1.0"
+    },
+    {
+      "name": "eqrcode",
+      "matches": true,
+      "requirement": "~> 0.1"
+    },
+    {
+      "name": "wax_",
+      "matches": true,
+      "requirement": "~> 0.6"
+    },
+    {
+      "name": "assent",
+      "matches": true,
+      "requirement": "~> 0.3.2"
+    },
+    {
+      "name": "pbkdf2_elixir",
+      "matches": true,
+      "requirement": "~> 2.2"
+    },
+    {
+      "name": "hammer",
+      "matches": true,
+      "requirement": "~> 7.5"
+    },
+    {
+      "name": "hammer_backend_redis",
+      "matches": true,
+      "requirement": "~> 7.2"
+    },
+    {
+      "name": "redix",
+      "matches": true,
+      "requirement": "~> 1.10"
+    },
+    {
+      "name": "nebulex",
+      "matches": true,
+      "requirement": "~> 3.1"
+    },
+    {
+      "name": "nebulex_local",
+      "matches": true,
+      "requirement": "~> 3.1"
+    },
+    {
+      "name": "tz",
+      "matches": true,
+      "requirement": "~> 0.28.4"
+    },
+    {
+      "name": "ex_cldr",
+      "matches": true,
+      "requirement": "~> 2.47.5"
+    },
+    {
+      "name": "ex_cldr_dates_times",
+      "matches": true,
+      "requirement": "~> 2.20"
+    },
+    {
+      "name": "ex_cldr_calendars",
+      "matches": true,
+      "requirement": "~> 2.4.4"
+    },
+    {
+      "name": "ex_cldr_numbers",
+      "matches": true,
+      "requirement": "~> 2.38.3"
+    },
+    {
+      "name": "ex_cldr_territories",
+      "matches": true,
+      "requirement": "~> 2.9"
+    },
+    {
+      "name": "logger_json",
+      "matches": true,
+      "requirement": "~> 7.0"
+    },
+    {
+      "name": "sentry",
+      "matches": true,
+      "requirement": "~> 14.0"
+    },
+    {
+      "name": "prom_ex",
+      "matches": true,
+      "requirement": "~> 1.12"
+    },
+    {
+      "name": "fuse",
+      "matches": true,
+      "requirement": "~> 2.5"
+    },
+    {
+      "name": "geolix",
+      "matches": true,
+      "requirement": "~> 2.1"
+    },
+    {
+      "name": "geolix_adapter_mmdb2",
+      "matches": true,
+      "requirement": "~> 0.7"
+    },
+    {
+      "name": "html_sanitize_ex",
+      "matches": true,
+      "requirement": "~> 1.4"
+    },
+    {
+      "name": "ex_phone_number",
+      "matches": true,
+      "requirement": "~> 0.4"
+    },
+    {
+      "name": "flop",
+      "matches": true,
+      "requirement": "~> 0.29.1"
+    },
+    {
+      "name": "flop_phoenix",
+      "matches": true,
+      "requirement": "~> 0.27.0"
+    },
+    {
+      "name": "phoenix_live_reload",
+      "matches": true,
+      "requirement": "~> 1.7"
+    },
+    {
+      "name": "esbuild",
+      "matches": true,
+      "requirement": "~> 0.10.1"
+    },
+    {
+      "name": "tailwind",
+      "matches": true,
+      "requirement": "~> 0.5.2"
+    },
+    {
+      "name": "lazy_html",
+      "matches": true,
+      "requirement": ">= 0.1.0"
+    },
+    {
+      "name": "credo",
+      "matches": true,
+      "requirement": "~> 1.7.19"
+    },
+    {
+      "name": "dialyxir",
+      "matches": true,
+      "requirement": "~> 1.4.8"
+    },
+    {
+      "name": "sobelow",
+      "matches": true,
+      "requirement": "~> 0.18.1"
+    },
+    {
+      "name": "ex_machina",
+      "matches": true,
+      "requirement": "~> 2.8.2"
+    },
+    {
+      "name": "mox",
+      "matches": true,
+      "requirement": "~> 1.2"
+    }
+  ],
+  "runtime_failures": [],
+  "generated_at": "2026-11-01T08:17:25.375530Z",
+  "lock_sha256": "68702c297165b2c40e2496aee5f9da66112bd7213b15ced51a8b87824769ccf5",
+  "hex_nodes": 98,
+  "installed_edges": 197,
+  "constraint_failures": []
+}

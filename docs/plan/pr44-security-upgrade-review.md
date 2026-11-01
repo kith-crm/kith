@@ -1,6 +1,6 @@
 # PR44 dependency security and upgrade review
 
-> Current policy: the user permits latest compatible releases and maintained older packages. See the [policy revision](#policy-revision-latest-compatible-and-maintained-older-packages). Original strict-policy blockers and research below are historical; the verified application and audit requirements remain unchanged.
+> Current implementation: retain the working ASN helper and verify narrow POT input, throttling and form fixes. See [current decisions](#retention-decisions-and-pot-integration-fixes) and [current validation](pr44-implementation-evidence/pot-reviewed-validation.json). The latest-compatible policy still applies; earlier research/validation snapshots below are historical.
 
 Reviewed on 1 November 2026 against [PR 44](https://github.com/kith-crm/kith/pull/44), commit `3ac2faba0012b461b573f03c739d4abeac097511`.
 
@@ -358,3 +358,26 @@ Both latest-compatible selections are accepted. Maintenance evidence supports re
 **ASN1 Compiler, Bunt, Fuse and POT remain maintenance followups.** Their upstream maintenance support is unconfirmed by the reviewed evidence. They are not asserted abandoned, vulnerable or incompatible, and release age alone does not force their replacement. Conversely, absence of archival/deprecation does not justify calling them confirmed maintained. Full maintenance-policy closure is not claimed while these four statuses remain unresolved.
 
 Fresh strict Hex/root-npm/assets-npm audits pass and the graph remains **98 Hex packages / 197 installed edges**, with zero installed-constraint or runtime-floor failures. Application code, dependency manifests/locks, audit gate, build configuration and tests exactly match the earlier verified source fingerprints. The full application/release suites were not needlessly rerun for this documentation-only policy revision. No dependency override, fork or infrastructure/authentication migration was introduced.
+
+## Retention decisions and POT integration fixes
+
+Following the user's preference for a minor ASN fork only when justified, **retain ASN1 Compiler 0.1.1**. The prepared Wax alternative introduces an owned compiler lifecycle, caching, partial-failure recovery and packaging code. No demonstrated Kith CVE or current build/compatibility failure justifies that extra ownership. The current helper passes the new cold Linux/arm64 musl build and complete application tests. No fork was created; upstream maintenance remains unconfirmed.
+
+**Retain POT 1.0.2 with reviewed Kith boundaries.** Independent RFC 4226/6238 SHA1/SHA256/SHA512 vectors, time boundaries, existing Base32 secret/encryption compatibility and the exact configured window agree. This establishes tested algorithm/integration behavior, not an upstream maintenance commitment or full MFA security certification. Bunt and Fuse remain at their existing versions as discussed; no Credo fork or egress service was introduced.
+
+The bounded POT review reproduced and fixed three application integration defects:
+
+1. Non-binary OTP/recovery values and malformed/empty secrets could raise request errors. Kith now rejects them before authentication; compatible padded/lowercase Base32 secrets still work.
+2. A valid five-minute browser challenge allowed repeated second-factor guesses without a budget. Browser verification now has a separate **10 attempts/minute per verified IP**, and browser/API verification share **10 attempts/minute per user** after first-factor proof. Existing password-login and API-IP rules remain separate. Denials return 429 and a rounded-up Retry-After; backend failures do not authorize a session/token.
+3. Both TOTP/recovery form inputs were enabled, required and shared an ID. Actual Chromium OTP submission posted a valid code plus an empty duplicate; recovery's hidden OTP field failed native form validation. The inactive input is now disabled and recovery has a distinct ID. Real OTP login succeeds; recovery submits one code, consumes exactly one recovery record and rejects subsequent reuse.
+
+The configured **current and next two 30-second intervals** remain unchanged. The old “previous period” documentation was corrected. Stateless TOTP/signed-challenge reuse remains unchanged; no accepted-counter persistence or replay protection was added. POT's binary comparisons are not claimed constant-time. These are explicit existing characteristics, not a claim of complete RFC deployment/security compliance. OTP auto-submit retains native `form.submit()` and JS digit checks, so it bypasses native HTML constraint validation; recovery's native validity is exercised. Successful CSRF-protected submission is verified, without claiming a new invalid-CSRF negative test.
+
+Baseline regressions were observed before fixing: **15 targeted tests / six failures**, duplicate OTP POST values in Chromium, and an invalid recovery form despite a valid visible recovery code. Final checks pass:
+
+- **1,986 ExUnit tests**, including all slow/external tests and 16 new review regressions; zero failures/skips.
+- **23 mandatory browser tests**, including both real TOTP flows; **14 JavaScript tests** and **five real Redis tests**; zero failures/skips.
+- `mix quality`, strict Hex/root-npm/assets-npm audits and the complete **98-node / 197-edge** Hex constraint/floor check.
+- A new **cold Linux/arm64 musl production build**, app/worker/migration modes, new OTP/guard/budget probes in actual web/worker processes, existing Oban 12→14→12→14 rollback, credential/cache/metrics/assets checks, and actual Caddy/WebSocket/identity/redaction checks.
+
+Package versions and `mix.lock` are unchanged. The current implementation, image ID, source fingerprints, measured outputs, prior failure controls and limitations are in [pot-reviewed-validation.json](pr44-implementation-evidence/pot-reviewed-validation.json), with detailed [POT review](pr44-implementation-evidence/pot-security-review.json). Earlier validation and policy-only “unchanged source” statements apply to their historical snapshots; this new report covers the application changes above. Upstream maintenance uncertainty remains recorded, without labeling retained packages actively maintained or silently claiming the original all-latest/two-year policy is met. Nothing was pushed, merged or deployed.

@@ -13,6 +13,15 @@ defmodule PR44Control do
     base = %{email: email, token: token, account_id: user.account_id, user_id: user.id}
 
     case args["scenario"] do
+      "totp" ->
+        secret = Accounts.generate_totp_secret()
+        {:ok, {_user, recovery_codes}} = Accounts.enable_totp(user, secret, :pot.totp(secret))
+
+        Map.merge(base, %{
+          secret_hex: secret |> Base.decode32!(padding: false) |> Base.encode16(case: :lower),
+          recovery_code: hd(recovery_codes)
+        })
+
       "duplicates" ->
         a = contact!(user, "Alex Colleague")
         b = contact!(user, "Incomplete Record")
@@ -49,6 +58,11 @@ defmodule PR44Control do
       "import" ->
         base
     end
+  end
+
+  def run("totp_snapshot", args) do
+    user = Accounts.get_user!(args["user_id"])
+    %{enabled: user.totp_enabled, recovery_codes: Accounts.recovery_code_count(user)}
   end
 
   def run("automerge", args) do

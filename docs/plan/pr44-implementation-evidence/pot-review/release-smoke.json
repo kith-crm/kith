@@ -1,0 +1,56 @@
+{
+  "status": "passed",
+  "scope": "local prebuilt production image",
+  "generated_at": "2026-11-01T08:20:48.806663+00:00",
+  "image_id": "sha256:09ae42250f5732680dd071ab5cabbe7a22872396764bf892055fba73a41c8e81",
+  "platform": "linux/arm64",
+  "modes": [
+    "migrate",
+    "web",
+    "worker"
+  ],
+  "sentry": [
+    "unset",
+    "empty",
+    "whitespace",
+    "enabled"
+  ],
+  "oban_versions": [
+    12,
+    14,
+    12,
+    14
+  ],
+  "credentials": [
+    "legacy-read-both-columns",
+    "new-writes-both-columns",
+    "document-job-empty-workload",
+    "pending-key-retention",
+    "cancellation-key-release"
+  ],
+  "metrics": [
+    "unauthenticated-401",
+    "authenticated-scrape"
+  ],
+  "cache": [
+    "app-worker-store-put-get-ttl",
+    "connected-node-symmetric-invalidation",
+    "worker-photo-document-write-invalidates-web-usage",
+    "worker-duplicate-dismissal-invalidates-web-count"
+  ],
+  "client_ip": [
+    "actual-http-forged-headers-ignored",
+    "json-logger-uses-socket-identity"
+  ],
+  "totp": [
+    "independent-OTP-crypto-reference",
+    "malformed-values-fail-closed",
+    "account-and-IP-budgets-in-web-and-worker"
+  ],
+  "limits": [
+    "No external provider API calls",
+    "No nonempty document downloads",
+    "Cold build is a separate coordinator check",
+    "Connected-node invalidation only; disconnected entries rely on bounded TTL"
+  ]
+}

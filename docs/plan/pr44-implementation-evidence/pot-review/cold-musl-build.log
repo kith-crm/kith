@@ -1,0 +1,646 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 2.34kB 0.0s done
+#1 DONE 0.1s
+
+#2 [internal] load metadata for docker.io/library/alpine:3.23.5
+#2 DONE 1.3s
+
+#3 [internal] load metadata for docker.io/hexpm/elixir:1.19.5-erlang-28.5.0.5-alpine-3.23.5
+#3 DONE 1.3s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 598B done
+#4 DONE 0.0s
+
+#5 [builder  1/17] FROM docker.io/hexpm/elixir:1.19.5-erlang-28.5.0.5-alpine-3.23.5@sha256:5e076025710ce038e2225999fb46988c74c719d23c93d16aa2055b8171cdc7a9
+#5 resolve docker.io/hexpm/elixir:1.19.5-erlang-28.5.0.5-alpine-3.23.5@sha256:5e076025710ce038e2225999fb46988c74c719d23c93d16aa2055b8171cdc7a9 0.0s done
+#5 CACHED
+
+#6 [runner 1/6] FROM docker.io/library/alpine:3.23.5@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+#6 resolve docker.io/library/alpine:3.23.5@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 0.0s done
+#6 CACHED
+
+#7 [internal] load build context
+#7 transferring context: 3.04MB 0.3s done
+#7 DONE 0.3s
+
+#8 [runner 2/6] RUN apk add --no-cache     libssl3     libcrypto3     libstdc++     libgcc     ncurses-libs     ca-certificates     curl     && rm -rf /var/cache/apk/*
+#8 1.947 ( 1/18) Installing ca-certificates (20261020-r0)
+#8 2.059 ( 2/18) Installing brotli-libs (1.2.1-r0)
+#8 2.140 ( 3/18) Installing c-ares (1.34.9-r0)
+#8 2.199 ( 4/18) Installing libunistring (1.4.1-r0)
+#8 2.266 ( 5/18) Installing libidn2 (2.3.8-r0)
+#8 2.318 ( 6/18) Installing nghttp2-libs (1.69.0-r0)
+#8 2.373 ( 7/18) Installing libpsl (0.21.5-r3)
+#8 2.427 ( 8/18) Installing zstd-libs (1.5.7-r2)
+#8 2.488 ( 9/18) Installing libcurl (8.23.0-r0)
+#8 2.551 (10/18) Installing curl (8.23.0-r0)
+#8 2.608 (11/18) Installing libgcc (15.2.0-r2)
+#8 2.659 (12/18) Installing libstdc++ (15.2.0-r2)
+#8 2.747 (13/18) Installing ncurses-terminfo-base (6.5_p20251123-r0)
+#8 2.823 (14/18) Installing libncursesw (6.5_p20251123-r0)
+#8 2.881 (15/18) Installing libformw (6.5_p20251123-r0)
+#8 2.933 (16/18) Installing libmenuw (6.5_p20251123-r0)
+#8 2.986 (17/18) Installing libpanelw (6.5_p20251123-r0)
+#8 3.072 (18/18) Installing ncurses-libs (6.5_p20251123-r0)
+#8 3.073 Executing busybox-1.37.0-r30.trigger
+#8 3.110 Executing ca-certificates-20261020-r0.trigger
+#8 3.296 OK: 17.3 MiB in 34 packages
+#8 DONE 3.7s
+
+#9 [builder  2/17] RUN apk add --no-cache git build-base nodejs npm
+#9 1.892 ( 1/39) Upgrading musl (1.2.5-r23 -> 1.2.5-r24)
+#9 1.972 ( 2/39) Installing jansson (2.14.1-r0)
+#9 2.028 ( 3/39) Installing zstd-libs (1.5.7-r2)
+#9 2.088 ( 4/39) Installing binutils (2.45.1-r0)
+#9 2.382 ( 5/39) Installing libmagic (5.46-r2)
+#9 2.503 ( 6/39) Installing file (5.46-r2)
+#9 2.551 ( 7/39) Installing libgomp (15.2.0-r2)
+#9 2.603 ( 8/39) Installing libatomic (15.2.0-r2)
+#9 2.652 ( 9/39) Installing gmp (6.3.0-r4)
+#9 2.711 (10/39) Installing isl26 (0.26-r1)
+#9 2.821 (11/39) Installing mpfr4 (4.2.2-r0)
+#9 2.887 (12/39) Installing mpc1 (1.3.1-r1)
+#9 2.938 (13/39) Installing gcc (15.2.0-r2)
+#9 ...
+
+#10 [runner 3/6] RUN addgroup -g 1000 kith && adduser -u 1000 -G kith -D kith
+#10 DONE 0.7s
+
+#11 [runner 4/6] WORKDIR /app
+#11 DONE 0.2s
+
+#9 [builder  2/17] RUN apk add --no-cache git build-base nodejs npm
+#9 6.278 (14/39) Installing libstdc++-dev (15.2.0-r2)
+#9 6.658 (15/39) Installing musl-dev (1.2.5-r24)
+#9 6.836 (16/39) Installing g++ (15.2.0-r2)
+#9 7.280 (17/39) Installing make (4.4.1-r3)
+#9 7.333 (18/39) Installing fortify-headers (1.1-r5)
+#9 7.387 (19/39) Installing patch (2.8-r0)
+#9 7.439 (20/39) Installing build-base (0.5-r3)
+#9 7.439 (21/39) Installing brotli-libs (1.2.1-r0)
+#9 7.499 (22/39) Installing c-ares (1.34.9-r0)
+#9 7.550 (23/39) Installing libunistring (1.4.1-r0)
+#9 7.616 (24/39) Installing libidn2 (2.3.8-r0)
+#9 7.666 (25/39) Installing nghttp2-libs (1.69.0-r0)
+#9 7.718 (26/39) Installing libpsl (0.21.5-r3)
+#9 7.801 (27/39) Installing libcurl (8.23.0-r0)
+#9 7.870 (28/39) Installing libexpat (2.9.0-r0)
+#9 7.925 (29/39) Installing pcre2 (10.49-r0)
+#9 7.995 (30/39) Installing git (2.52.0-r0)
+#9 8.186 (31/39) Installing git-init-template (2.52.0-r0)
+#9 8.240 (32/39) Installing ada-libs (3.3.0-r0)
+#9 8.296 (33/39) Installing icu-data-en (76.1-r1)
+#9 8.404   Executing icu-data-en-76.1-r1.post-install
+#9 8.431   * 
+#9 8.431   * If you need ICU with non-English locales and legacy charset support, install
+#9 8.431   * package icu-data-full.
+#9 8.431   * 
+#9 8.432 (34/39) Installing icu-libs (76.1-r1)
+#9 8.550 (35/39) Installing simdjson (3.12.0-r0)
+#9 8.607 (36/39) Installing simdutf (7.5.0-r1)
+#9 8.662 (37/39) Installing sqlite-libs (3.53.4-r0)
+#9 8.737 (38/39) Installing nodejs (24.22.1-r1)
+#9 9.282 (39/39) Installing npm (11.11.0-r0)
+#9 9.807 Executing busybox-1.37.0-r30.trigger
+#9 9.848 OK: 327.3 MiB in 65 packages
+#9 DONE 10.4s
+
+#12 [builder  3/17] WORKDIR /app
+#12 DONE 0.1s
+
+#13 [builder  4/17] RUN mix local.hex --force && mix local.rebar --force
+#13 2.607 * creating /root/.mix/archives/hex-2.6.0
+#13 4.522 * creating /root/.mix/elixir/1-19-otp-28/rebar3
+#13 DONE 4.6s
+
+#14 [builder  5/17] COPY mix.exs mix.lock ./
+#14 DONE 0.1s
+
+#15 [builder  6/17] RUN mix deps.get --only prod
+#15 1.015 * Getting heroicons (https://github.com/tailwindlabs/heroicons.git - v2.2.0)
+#15 1.801 remote: Enumerating objects: 9314, done.        
+#15 1.801 remote: Counting objects:   0% (1/9314)        remote: Counting objects:   1% (94/9314)        remote: Counting objects:   2% (187/9314)        remote: Counting objects:   3% (280/9314)        remote: Counting objects:   4% (373/9314)        remote: Counting objects:   5% (466/9314)        remote: Counting objects:   6% (559/9314)        remote: Counting objects:   7% (652/9314)        remote: Counting objects:   8% (746/9314)        remote: Counting objects:   9% (839/9314)        remote: Counting objects:  10% (932/9314)        remote: Counting objects:  11% (1025/9314)        remote: Counting objects:  12% (1118/9314)        remote: Counting objects:  13% (1211/9314)        remote: Counting objects:  14% (1304/9314)        remote: Counting objects:  15% (1398/9314)        remote: Counting objects:  16% (1491/9314)        remote: Counting objects:  17% (1584/9314)        remote: Counting objects:  18% (1677/9314)        remote: Counting objects:  19% (1770/9314)        remote: Counting objects:  20% (1863/9314)        remote: Counting objects:  21% (1956/9314)        remote: Counting objects:  22% (2050/9314)        remote: Counting objects:  23% (2143/9314)        remote: Counting objects:  24% (2236/9314)        remote: Counting objects:  25% (2329/9314)        remote: Counting objects:  26% (2422/9314)        remote: Counting objects:  27% (2515/9314)        remote: Counting objects:  28% (2608/9314)        remote: Counting objects:  29% (2702/9314)        remote: Counting objects:  30% (2795/9314)        remote: Counting objects:  31% (2888/9314)        remote: Counting objects:  32% (2981/9314)        remote: Counting objects:  33% (3074/9314)        remote: Counting objects:  34% (3167/9314)        remote: Counting objects:  35% (3260/9314)        remote: Counting objects:  36% (3354/9314)        remote: Counting objects:  37% (3447/9314)        remote: Counting objects:  38% (3540/9314)        remote: Counting objects:  39% (3633/9314)        remote: Counting objects:  40% (3726/9314)        remote: Counting objects:  41% (3819/9314)        remote: Counting objects:  42% (3912/9314)        remote: Counting objects:  43% (4006/9314)        remote: Counting objects:  44% (4099/9314)        remote: Counting objects:  45% (4192/9314)        remote: Counting objects:  46% (4285/9314)        remote: Counting objects:  47% (4378/9314)        remote: Counting objects:  48% (4471/9314)        remote: Counting objects:  49% (4564/9314)        remote: Counting objects:  50% (4657/9314)        remote: Counting objects:  51% (4751/9314)        remote: Counting objects:  52% (4844/9314)        remote: Counting objects:  53% (4937/9314)        remote: Counting objects:  54% (5030/9314)        remote: Counting objects:  55% (5123/9314)        remote: Counting objects:  56% (5216/9314)        remote: Counting objects:  57% (5309/9314)        remote: Counting objects:  58% (5403/9314)        remote: Counting objects:  59% (5496/9314)        remote: Counting objects:  60% (5589/9314)        remote: Counting objects:  61% (5682/9314)        remote: Counting objects:  62% (5775/9314)        remote: Counting objects:  63% (5868/9314)        remote: Counting objects:  64% (5961/9314)        remote: Counting objects:  65% (6055/9314)        remote: Counting objects:  66% (6148/9314)        remote: Counting objects:  67% (6241/9314)        remote: Counting objects:  68% (6334/9314)        remote: Counting objects:  69% (6427/9314)        remote: Counting objects:  70% (6520/9314)        remote: Counting objects:  71% (6613/9314)        remote: Counting objects:  72% (6707/9314)        remote: Counting objects:  73% (6800/9314)        remote: Counting objects:  74% (6893/9314)        remote: Counting objects:  75% (6986/9314)        remote: Counting objects:  76% (7079/9314)        remote: Counting objects:  77% (7172/9314)        remote: Counting objects:  78% (7265/9314)        remote: Counting objects:  79% (7359/9314)        remote: Counting objects:  80% (7452/9314)        remote: Counting objects:  81% (7545/9314)        remote: Counting objects:  82% (7638/9314)        remote: Counting objects:  83% (7731/9314)        remote: Counting objects:  84% (7824/9314)        remote: Counting objects:  85% (7917/9314)        remote: Counting objects:  86% (8011/9314)        remote: Counting objects:  87% (8104/9314)        remote: Counting objects:  88% (8197/9314)        remote: Counting objects:  89% (8290/9314)        remote: Counting objects:  90% (8383/9314)        remote: Counting objects:  91% (8476/9314)        remote: Counting objects:  92% (8569/9314)        remote: Counting objects:  93% (8663/9314)        remote: Counting objects:  94% (8756/9314)        remote: Counting objects:  95% (8849/9314)        remote: Counting objects:  96% (8942/9314)        remote: Counting objects:  97% (9035/9314)        remote: Counting objects:  98% (9128/9314)        remote: Counting objects:  99% (9221/9314)        remote: Counting objects: 100% (9314/9314)        remote: Counting objects: 100% (9314/9314), done.        
+#15 1.801 remote: Compressing objects:   0% (1/5403)        remote: Compressing objects:   1% (55/5403)        remote: Compressing objects:   2% (109/5403)        remote: Compressing objects:   3% (163/5403)        remote: Compressing objects:   4% (217/5403)        remote: Compressing objects:   5% (271/5403)        remote: Compressing objects:   6% (325/5403)        remote: Compressing objects:   7% (379/5403)        remote: Compressing objects:   8% (433/5403)        remote: Compressing objects:   9% (487/5403)        remote: Compressing objects:  10% (541/5403)        remote: Compressing objects:  11% (595/5403)        remote: Compressing objects:  12% (649/5403)        remote: Compressing objects:  13% (703/5403)        remote: Compressing objects:  14% (757/5403)        remote: Compressing objects:  15% (811/5403)        remote: Compressing objects:  16% (865/5403)        remote: Compressing objects:  17% (919/5403)        remote: Compressing objects:  18% (973/5403)        remote: Compressing objects:  19% (1027/5403)        remote: Compressing objects:  20% (1081/5403)        remote: Compressing objects:  21% (1135/5403)        remote: Compressing objects:  22% (1189/5403)        remote: Compressing objects:  23% (1243/5403)        remote: Compressing objects:  24% (1297/5403)        remote: Compressing objects:  25% (1351/5403)        remote: Compressing objects:  26% (1405/5403)        remote: Compressing objects:  27% (1459/5403)        remote: Compressing objects:  28% (1513/5403)        remote: Compressing objects:  29% (1567/5403)        remote: Compressing objects:  30% (1621/5403)        remote: Compressing objects:  31% (1675/5403)        remote: Compressing objects:  32% (1729/5403)        remote: Compressing objects:  33% (1783/5403)        remote: Compressing objects:  34% (1838/5403)        remote: Compressing objects:  35% (1892/5403)        remote: Compressing objects:  36% (1946/5403)        remote: Compressing objects:  37% (2000/5403)        remote: Compressing objects:  38% (2054/5403)        remote: Compressing objects:  39% (2108/5403)        remote: Compressing objects:  40% (2162/5403)        remote: Compressing objects:  41% (2216/5403)        remote: Compressing objects:  42% (2270/5403)        remote: Compressing objects:  43% (2324/5403)        remote: Compressing objects:  44% (2378/5403)        remote: Compressing objects:  45% (2432/5403)        remote: Compressing objects:  46% (2486/5403)        remote: Compressing objects:  47% (2540/5403)        remote: Compressing objects:  48% (2594/5403)        remote: Compressing objects:  49% (2648/5403)        remote: Compressing objects:  50% (2702/5403)        remote: Compressing objects:  51% (2756/5403)        remote: Compressing objects:  52% (2810/5403)        remote: Compressing objects:  53% (2864/5403)        remote: Compressing objects:  54% (2918/5403)        remote: Compressing objects:  55% (2972/5403)        remote: Compressing objects:  56% (3026/5403)        remote: Compressing objects:  57% (3080/5403)        remote: Compressing objects:  58% (3134/5403)        remote: Compressing objects:  59% (3188/5403)        remote: Compressing objects:  60% (3242/5403)        remote: Compressing objects:  61% (3296/5403)        remote: Compressing objects:  62% (3350/5403)        remote: Compressing objects:  63% (3404/5403)        remote: Compressing objects:  64% (3458/5403)        remote: Compressing objects:  65% (3512/5403)        remote: Compressing objects:  66% (3566/5403)        remote: Compressing objects:  67% (3621/5403)        remote: Compressing objects:  68% (3675/5403)        remote: Compressing objects:  69% (3729/5403)        remote: Compressing objects:  70% (3783/5403)        remote: Compressing objects:  71% (3837/5403)        remote: Compressing objects:  72% (3891/5403)        remote: Compressing objects:  73% (3945/5403)        remote: Compressing objects:  74% (3999/5403)        remote: Compressing objects:  75% (4053/5403)        remote: Compressing objects:  76% (4107/5403)        remote: Compressing objects:  77% (4161/5403)        remote: Compressing objects:  78% (4215/5403)        remote: Compressing objects:  79% (4269/5403)        remote: Compressing objects:  80% (4323/5403)        remote: Compressing objects:  81% (4377/5403)        remote: Compressing objects:  82% (4431/5403)        remote: Compressing objects:  83% (4485/5403)        remote: Compressing objects:  84% (4539/5403)        remote: Compressing objects:  85% (4593/5403)        remote: Compressing objects:  86% (4647/5403)        remote: Compressing objects:  87% (4701/5403)        remote: Compressing objects:  88% (4755/5403)        remote: Compressing objects:  89% (4809/5403)        remote: Compressing objects:  90% (4863/5403)        remote: Compressing objects:  91% (4917/5403)        remote: Compressing objects:  92% (4971/5403)        remote: Compressing objects:  93% (5025/5403)        remote: Compressing objects:  94% (5079/5403)        remote: Compressing objects:  95% (5133/5403)        remote: Compressing objects:  96% (5187/5403)        remote: Compressing objects:  97% (5241/5403)        remote: Compressing objects:  98% (5295/5403)        remote: Compressing objects:  99% (5349/5403)        remote: Compressing objects: 100% (5403/5403)        remote: Compressing objects: 100% (5403/5403), done.        
+#15 2.280 remote: Total 9314 (delta 4193), reused 8343 (delta 3849), pack-reused 0 (from 0)        
+#15 3.241 Resolving Hex dependencies...
+#15 3.343 Resolution completed in 0.094s
+#15 3.358 * Getting phoenix (Hex package)
+#15 4.396 * Getting phoenix_ecto (Hex package)
+#15 4.400 * Getting ecto_sql (Hex package)
+#15 4.413 * Getting postgrex (Hex package)
+#15 4.421 * Getting phoenix_html (Hex package)
+#15 4.424 * Getting plug (Hex package)
+#15 4.426 * Getting phoenix_live_view (Hex package)
+#15 4.690 * Getting phoenix_live_dashboard (Hex package)
+#15 4.693 * Getting telemetry_metrics (Hex package)
+#15 4.695 * Getting telemetry_poller (Hex package)
+#15 4.700 * Getting gettext (Hex package)
+#15 4.701 * Getting jason (Hex package)
+#15 4.702 * Getting libcluster (Hex package)
+#15 4.703 * Getting bandit (Hex package)
+#15 4.704 * Getting oban (Hex package)
+#15 4.706 * Getting oban_web (Hex package)
+#15 4.708 * Getting swoosh (Hex package)
+#15 4.710 * Getting gen_smtp (Hex package)
+#15 4.712 * Getting ex_aws (Hex package)
+#15 4.713 * Getting ex_aws_s3 (Hex package)
+#15 4.714 * Getting sweet_xml (Hex package)
+#15 4.714 * Getting req (Hex package)
+#15 4.716 * Getting finch (Hex package)
+#15 4.717 * Getting pot (Hex package)
+#15 4.719 * Getting eqrcode (Hex package)
+#15 4.720 * Getting wax_ (Hex package)
+#15 4.721 * Getting assent (Hex package)
+#15 4.722 * Getting pbkdf2_elixir (Hex package)
+#15 4.723 * Getting hammer (Hex package)
+#15 4.724 * Getting hammer_backend_redis (Hex package)
+#15 4.726 * Getting redix (Hex package)
+#15 4.728 * Getting nebulex (Hex package)
+#15 4.731 * Getting nebulex_local (Hex package)
+#15 4.733 * Getting tz (Hex package)
+#15 4.735 * Getting ex_cldr (Hex package)
+#15 4.738 * Getting ex_cldr_dates_times (Hex package)
+#15 4.739 * Getting ex_cldr_calendars (Hex package)
+#15 4.741 * Getting ex_cldr_numbers (Hex package)
+#15 4.743 * Getting ex_cldr_territories (Hex package)
+#15 4.745 * Getting logger_json (Hex package)
+#15 4.746 * Getting sentry (Hex package)
+#15 4.749 * Getting prom_ex (Hex package)
+#15 4.751 * Getting fuse (Hex package)
+#15 4.753 * Getting geolix (Hex package)
+#15 4.754 * Getting geolix_adapter_mmdb2 (Hex package)
+#15 4.755 * Getting html_sanitize_ex (Hex package)
+#15 4.756 * Getting ex_phone_number (Hex package)
+#15 4.758 * Getting flop (Hex package)
+#15 4.759 * Getting flop_phoenix (Hex package)
+#15 4.761 * Getting esbuild (Hex package)
+#15 4.763 * Getting tailwind (Hex package)
+#15 4.764 * Getting ecto (Hex package)
+#15 4.766 * Getting nimble_options (Hex package)
+#15 4.767 * Getting decimal (Hex package)
+#15 4.768 * Getting telemetry (Hex package)
+#15 4.769 * Getting mochiweb (Hex package)
+#15 4.770 * Getting mmdb2_decoder (Hex package)
+#15 4.771 * Getting octo_fetch (Hex package)
+#15 4.772 * Getting peep (Hex package)
+#15 4.774 * Getting telemetry_metrics_prometheus_core (Hex package)
+#15 4.775 * Getting castore (Hex package)
+#15 4.776 * Getting ssl_verify_fun (Hex package)
+#15 4.778 * Getting nimble_ownership (Hex package)
+#15 4.778 * Getting digital_token (Hex package)
+#15 4.779 * Getting ex_cldr_currencies (Hex package)
+#15 4.780 * Getting cldr_utils (Hex package)
+#15 4.781 * Getting comeonin (Hex package)
+#15 4.782 * Getting asn1_compiler (Hex package)
+#15 4.783 * Getting cbor (Hex package)
+#15 4.785 * Getting x509 (Hex package)
+#15 4.786 * Getting mime (Hex package)
+#15 4.787 * Getting mint (Hex package)
+#15 4.789 * Getting nimble_pool (Hex package)
+#15 4.789 * Getting hpax (Hex package)
+#15 4.790 * Getting ranch (Hex package)
+#15 4.792 * Getting idna (Hex package)
+#15 4.793 * Getting oban_met (Hex package)
+#15 4.794 * Getting phoenix_pubsub (Hex package)
+#15 4.795 * Getting thousand_island (Hex package)
+#15 4.796 * Getting websock (Hex package)
+#15 4.797 * Getting expo (Hex package)
+#15 4.798 * Getting phoenix_template (Hex package)
+#15 4.799 * Getting plug_crypto (Hex package)
+#15 4.799 * Getting db_connection (Hex package)
+#15 4.800 * Getting websock_adapter (Hex package)
+#15 4.801 You have added/upgraded packages you could sponsor, run `mix hex.sponsor` to learn more
+#15 DONE 5.3s
+
+#16 [builder  7/17] RUN mix deps.compile
+#16 0.879 ==> mime
+#16 0.881 Compiling 1 file (.ex)
+#16 1.000 Generated mime app
+#16 1.043 ==> x509
+#16 1.043 Compiling 24 files (.ex)
+#16 1.640 Generated x509 app
+#16 1.679 ==> nimble_options
+#16 1.680 Compiling 3 files (.ex)
+#16 1.926 Generated nimble_options app
+#16 1.946 ==> comeonin
+#16 1.946 Compiling 3 files (.ex)
+#16 1.969 Generated comeonin app
+#16 1.989 ==> pbkdf2_elixir
+#16 1.989 Compiling 5 files (.ex)
+#16 2.038 Generated pbkdf2_elixir app
+#16 2.060 ==> plug_crypto
+#16 2.060 Compiling 5 files (.ex)
+#16 2.140 Generated plug_crypto app
+#16 2.168 ==> hpax
+#16 2.168 Compiling 4 files (.ex)
+#16 2.485 Generated hpax app
+#16 2.810 ==> kith
+#16 2.810 ===> Analyzing applications...
+#16 2.838 ===> Compiling fuse
+#16 3.393 ===> Analyzing applications...
+#16 3.422 ===> Compiling ranch
+#16 4.042 ===> Analyzing applications...
+#16 4.110 ===> Compiling gen_smtp
+#16 5.054 ==> ssl_verify_fun
+#16 5.055 Compiling 7 files (.erl)
+#16 5.112 Generated ssl_verify_fun app
+#16 5.136 ==> asn1_compiler
+#16 5.136 Compiling 1 file (.ex)
+#16 5.189     warning: :asn1ct.compile/2 is undefined (module :asn1ct is not available or is yet to be defined)
+#16 5.189     │
+#16 5.189  74 │       :asn1ct.compile(to_charlist(input), options)
+#16 5.189     │               ~
+#16 5.189     │
+#16 5.189     └─ lib/mix/tasks/compile.asn1.ex:74:15: Mix.Tasks.Compile.Asn1.run/1
+#16 5.189 
+#16 5.194 Generated asn1_compiler app
+#16 5.221 ==> mmdb2_decoder
+#16 5.221 Compiling 5 files (.ex)
+#16 5.286 Generated mmdb2_decoder app
+#16 5.311 ==> castore
+#16 5.311 Compiling 1 file (.ex)
+#16 5.324 Generated castore app
+#16 5.355 ==> octo_fetch
+#16 5.355 Compiling 3 files (.ex)
+#16 5.429 Generated octo_fetch app
+#16 5.448 ==> mint
+#16 5.448 Compiling 1 file (.erl)
+#16 5.510 Compiling 21 files (.ex)
+#16 6.385 Generated mint app
+#16 6.676 ==> kith
+#16 6.676 ===> Analyzing applications...
+#16 6.736 ===> Compiling mochiweb
+#16 8.215 ==> geolix
+#16 8.215 Compiling 8 files (.ex)
+#16 8.355 Generated geolix app
+#16 8.407 ==> geolix_adapter_mmdb2
+#16 8.407 Compiling 26 files (.ex)
+#16 8.589 Generated geolix_adapter_mmdb2 app
+#16 8.653 ==> decimal
+#16 8.653 Compiling 4 files (.ex)
+#16 9.414 Generated decimal app
+#16 9.445 ==> jason
+#16 9.445 Compiling 10 files (.ex)
+#16 10.52 Generated jason app
+#16 10.54 ==> esbuild
+#16 10.54 Compiling 4 files (.ex)
+#16 10.62 Generated esbuild app
+#16 10.64 ==> cldr_utils
+#16 10.64 Compiling 12 files (.ex)
+#16 10.87 Generated cldr_utils app
+#16 11.20 ==> kith
+#16 11.20 ===> Analyzing applications...
+#16 11.61 ===> Compiling idna
+#16 27.91 ===> Analyzing applications...
+#16 27.96 ===> Compiling telemetry
+#16 28.26 ==> telemetry_metrics
+#16 28.26 Compiling 7 files (.ex)
+#16 28.36 Generated telemetry_metrics app
+#16 28.66 ==> kith
+#16 28.66 ===> Analyzing applications...
+#16 28.69 ===> Compiling telemetry_poller
+#16 28.87 ==> libcluster
+#16 28.87 Compiling 13 files (.ex)
+#16 29.02 Generated libcluster app
+#16 29.06 ==> redix
+#16 29.06 Compiling 17 files (.ex)
+#16 29.45 Generated redix app
+#16 29.48 ==> nebulex
+#16 29.48 Compiling 41 files (.ex)
+#16 29.69 Generated nebulex app
+#16 29.76 ==> ecto
+#16 29.76 Compiling 56 files (.ex)
+#16 31.20 Generated ecto app
+#16 31.25 ==> telemetry_metrics_prometheus_core
+#16 31.25 Compiling 9 files (.ex)
+#16 31.28 warning: first..last inside match is deprecated, you must always match on the step: first..last//var or first..last//_ if you want to ignore it
+#16 31.28   lib/core/registry.ex:87: TelemetryMetricsPrometheus.Core.Registry.validate_distribution_buckets!/1
+#16 31.28 
+#16 31.38 Generated telemetry_metrics_prometheus_core app
+#16 31.40 ==> thousand_island
+#16 31.40 Compiling 18 files (.ex)
+#16 31.52 Generated thousand_island app
+#16 31.55 ==> db_connection
+#16 31.55 Compiling 18 files (.ex)
+#16 31.90 Generated db_connection app
+#16 31.95 ==> flop
+#16 31.95 Compiling 18 files (.ex)
+#16 32.33 Generated flop app
+#16 32.35 ==> cbor
+#16 32.35 Compiling 5 files (.ex)
+#16 32.48 Generated cbor app
+#16 32.50 ==> wax_
+#16 32.50 Compiling 3 files (.asn1)
+#16 32.56 Compiling 3 files (.erl)
+#16 32.70 Compiling 25 files (.ex)
+#16 32.94 Generated wax_ app
+#16 33.22 ==> kith
+#16 33.22 ===> Analyzing applications...
+#16 33.26 ===> Compiling pot
+#16 33.52 ==> phoenix_html
+#16 33.52 Compiling 6 files (.ex)
+#16 33.67 Generated phoenix_html app
+#16 33.69 ==> phoenix_template
+#16 33.69 Compiling 4 files (.ex)
+#16 33.74 Generated phoenix_template app
+#16 33.77 ==> expo
+#16 33.77 Compiling 2 files (.erl)
+#16 33.98 Compiling 22 files (.ex)
+#16 34.13 Generated expo app
+#16 34.16 ==> gettext
+#16 34.16 Compiling 18 files (.ex)
+#16 34.31 Generated gettext app
+#16 34.33 ==> ex_cldr
+#16 34.33 Compiling 1 file (.yrl)
+#16 34.35 Compiling 1 file (.xrl)
+#16 34.37 Compiling 2 files (.erl)
+#16 34.47 Compiling 46 files (.ex)
+#16 47.03 Compiling lib/cldr/validity/subdivision.ex (it's taking more than 10s)
+#16 49.28 Compiling lib/cldr/validity/language.ex (it's taking more than 10s)
+#16 50.21 Generated ex_cldr app
+#16 50.23 ==> ex_cldr_territories
+#16 50.23 Compiling 3 files (.ex)
+#16 50.44 Generated ex_cldr_territories app
+#16 50.46 ==> ex_cldr_currencies
+#16 50.46 Compiling 11 files (.ex)
+#16 50.67 Generated ex_cldr_currencies app
+#16 50.69 ==> phoenix_pubsub
+#16 50.69 Compiling 13 files (.ex)
+#16 50.89 Generated phoenix_pubsub app
+#16 50.91 ==> html_sanitize_ex
+#16 50.91 Compiling 13 files (.ex)
+#16 51.75 Generated html_sanitize_ex app
+#16 51.78 ==> digital_token
+#16 51.78 Compiling 7 files (.ex)
+#16 52.43 Generated digital_token app
+#16 52.44 ==> ex_cldr_numbers
+#16 52.44 Compiling 2 files (.xrl)
+#16 52.62 Compiling 2 files (.yrl)
+#16 52.77 Compiling 4 files (.erl)
+#16 135.6 Compiling 27 files (.ex)
+#16 136.1 Generated ex_cldr_numbers app
+#16 136.2 ==> ex_cldr_calendars
+#16 136.2 Compiling 33 files (.ex)
+#16 136.9 Generated ex_cldr_calendars app
+#16 136.9 ==> plug
+#16 136.9 Compiling 1 file (.erl)
+#16 137.0 Compiling 42 files (.ex)
+#16 138.3 Generated plug app
+#16 138.4 ==> logger_json
+#16 138.4 Compiling 17 files (.ex)
+#16 138.6 Generated logger_json app
+#16 138.6 ==> postgrex
+#16 138.6 Compiling 70 files (.ex)
+#16 142.0 Generated postgrex app
+#16 142.0 ==> phoenix_ecto
+#16 142.0 Compiling 7 files (.ex)
+#16 142.2 Generated phoenix_ecto app
+#16 142.2 ==> ecto_sql
+#16 142.2 Compiling 25 files (.ex)
+#16 142.7 Generated ecto_sql app
+#16 142.7 ==> oban
+#16 142.7 Compiling 70 files (.ex)
+#16 143.3 Generated oban app
+#16 143.4 ==> oban_met
+#16 143.4 Compiling 11 files (.ex)
+#16 143.6 Generated oban_met app
+#16 143.6 ==> tz
+#16 143.6 Compiling 16 files (.ex)
+#16 146.5 Generated tz app
+#16 146.6 ==> peep
+#16 146.6 Compiling 18 files (.ex)
+#16 146.7 Generated peep app
+#16 146.7 ==> hammer
+#16 146.7 Compiling 14 files (.ex)
+#16 146.8 Generated hammer app
+#16 146.8 ==> eqrcode
+#16 146.8 Compiling 10 files (.ex)
+#16 147.0 Generated eqrcode app
+#16 147.1 ==> nebulex_local
+#16 147.1 Compiling 10 files (.ex)
+#16 147.3 Generated nebulex_local app
+#16 147.3 ==> nimble_pool
+#16 147.3 Compiling 2 files (.ex)
+#16 147.5 Generated nimble_pool app
+#16 147.5 ==> finch
+#16 147.5 Compiling 23 files (.ex)
+#16 148.1 Generated finch app
+#16 148.1 ==> req
+#16 148.1 Compiling 24 files (.ex)
+#16 148.9 Generated req app
+#16 148.9 ==> assent
+#16 148.9 Compiling 38 files (.ex)
+#16 149.2 Generated assent app
+#16 149.2 ==> ex_cldr_dates_times
+#16 149.2 Compiling 2 files (.xrl)
+#16 149.2 Compiling 2 files (.erl)
+#16 149.4 Compiling 24 files (.ex)
+#16 150.2 Generated ex_cldr_dates_times app
+#16 150.2 ==> tailwind
+#16 150.2 Compiling 3 files (.ex)
+#16 150.3 Generated tailwind app
+#16 150.3 ==> websock
+#16 150.3 Compiling 1 file (.ex)
+#16 150.3 Generated websock app
+#16 150.3 ==> bandit
+#16 150.3 Compiling 54 files (.ex)
+#16 151.0 Generated bandit app
+#16 151.0 ==> websock_adapter
+#16 151.0 Compiling 5 files (.ex)
+#16 151.1 Generated websock_adapter app
+#16 151.1 ==> phoenix
+#16 151.1 Compiling 75 files (.ex)
+#16 151.9 Generated phoenix app
+#16 152.0 ==> phoenix_live_view
+#16 152.0 Compiling 55 files (.ex)
+#16 153.4 Generated phoenix_live_view app
+#16 153.4 ==> phoenix_live_dashboard
+#16 153.4 Compiling 36 files (.ex)
+#16 154.2 Generated phoenix_live_dashboard app
+#16 154.2 ==> oban_web
+#16 154.2 Compiling 76 files (.ex)
+#16 156.9 Generated oban_web app
+#16 156.9 ==> prom_ex
+#16 156.9 Compiling 40 files (.ex)
+#16 157.3      warning: Plug.Cowboy.child_spec/1 is undefined (module Plug.Cowboy is not available or is yet to be defined)
+#16 157.3      │
+#16 157.3  556 │       Plug.Cowboy.child_spec(
+#16 157.3      │                   ~
+#16 157.3      │
+#16 157.3      └─ lib/prom_ex.ex:556:19: PromEx.metrics_server_child_spec/4
+#16 157.3 
+#16 157.3 Generated prom_ex app
+#16 157.4 ==> flop_phoenix
+#16 157.4 Compiling 6 files (.ex)
+#16 158.0 Generated flop_phoenix app
+#16 158.0 ==> sweet_xml
+#16 158.0 Compiling 2 files (.ex)
+#16 158.2      warning: a struct for SweetXpath is expected on struct update:
+#16 158.2 
+#16 158.2          %SweetXpath{xpath | namespaces: [{to_charlist(prefix), to_charlist(uri)} | xpath.namespaces]}
+#16 158.2 
+#16 158.2      but got type:
+#16 158.2 
+#16 158.2          dynamic()
+#16 158.2 
+#16 158.2      where "xpath" was given the type:
+#16 158.2 
+#16 158.2          # type: dynamic()
+#16 158.2          # from: lib/sweet_xml.ex:245:21
+#16 158.2          xpath
+#16 158.2 
+#16 158.2      when defining the variable "xpath", you must also pattern match on "%SweetXpath{}".
+#16 158.2 
+#16 158.2      hint: given pattern matching is enough to catch typing errors, you may optionally convert the struct update into a map update. For example, instead of:
+#16 158.2 
+#16 158.2          user = some_function()
+#16 158.2          %User{user | name: "John Doe"}
+#16 158.2 
+#16 158.2      it is enough to write:
+#16 158.2 
+#16 158.2          %User{} = user = some_function()
+#16 158.2          %{user | name: "John Doe"}
+#16 158.2 
+#16 158.2      typing violation found at:
+#16 158.2      │
+#16 158.2  246 │     %SweetXpath{xpath | namespaces: [{to_charlist(prefix), to_charlist(uri)}
+#16 158.2      │     ~
+#16 158.2      │
+#16 158.2      └─ lib/sweet_xml.ex:246:5: SweetXml.add_namespace/3
+#16 158.2 
+#16 158.2 Generated sweet_xml app
+#16 158.2 ==> ex_aws
+#16 158.2 Compiling 29 files (.ex)
+#16 158.4 Generated ex_aws app
+#16 158.5 ==> swoosh
+#16 158.5 Compiling 64 files (.ex)
+#16 159.0 Generated swoosh app
+#16 159.1 ==> ex_aws_s3
+#16 159.1 Compiling 7 files (.ex)
+#16 159.3 Generated ex_aws_s3 app
+#16 159.3 ==> ex_phone_number
+#16 159.3 Compiling 22 files (.ex)
+#16 160.0 Generated ex_phone_number app
+#16 160.0 ==> nimble_ownership
+#16 160.0 Compiling 2 files (.ex)
+#16 160.1 Generated nimble_ownership app
+#16 160.1 ==> sentry
+#16 160.1 Compiling 76 files (.ex)
+#16 160.8 Generated sentry app
+#16 160.9 ==> hammer_backend_redis
+#16 160.9 Compiling 5 files (.ex)
+#16 161.0 Generated hammer_backend_redis app
+#16 DONE 161.1s
+
+#17 [builder  8/17] COPY config/config.exs config/prod.exs config/
+#17 DONE 0.0s
+
+#18 [builder  9/17] COPY config/runtime.exs config/
+#18 DONE 0.0s
+
+#19 [builder 10/17] COPY assets assets
+#19 DONE 0.1s
+
+#20 [builder 11/17] COPY priv priv
+#20 DONE 0.3s
+
+#21 [builder 12/17] COPY lib lib
+#21 DONE 0.1s
+
+#22 [builder 13/17] RUN mix assets.setup
+#22 1.425 
+#22 1.425 up to date, audited 8 packages in 722ms
+#22 1.427 
+#22 1.427 found 0 vulnerabilities
+#22 1.700 ==> mime
+#22 1.701 Compiling 1 file (.ex)
+#22 1.786 Generated mime app
+#22 1.845 
+#22 1.845 08:18:16.287 [debug] Downloading tailwind from https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.3/tailwindcss-linux-arm64-musl
+#22 1.876 
+#22 1.876 08:18:16.318 [notice] Invalid option {max_header_size,32768} ignored 
+#22 1.876 
+#22 5.212 
+#22 5.212 08:18:19.655 [debug] Downloading esbuild from https://registry.npmjs.org/@esbuild/linux-arm64/0.28.2
+#22 DONE 6.6s
+
+#23 [builder 14/17] RUN mix compile
+#23 1.211 Compiling 280 files (.ex)
+#23 2.949 
+#23 2.949 08:18:24.014 [info] Downloaded locale :ar version v2.47.5
+#23 3.251 
+#23 3.251 08:18:24.319 [info] Downloaded locale :de version v2.47.5
+#23 3.638 
+#23 3.638 08:18:24.705 [info] Downloaded locale :es version v2.47.5
+#23 3.987 
+#23 3.987 08:18:25.053 [info] Downloaded locale :fr version v2.47.5
+#23 4.295 
+#23 4.295 08:18:25.362 [info] Downloaded locale :ja version v2.47.5
+#23 5.142 
+#23 5.142 08:18:26.210 [info] Downloaded locale :pt version v2.47.5
+#23 5.446 
+#23 5.446 08:18:26.513 [info] Downloaded locale :zh version v2.47.5
+#23 5.459 Generating Kith.Cldr for 9 locales named [:ar, :de, :en, :es, :fr, ...] with a default locale named :en
+#23 31.23 Compiling lib/kith/cldr.ex (it's taking more than 10s)
+#23 41.80 Generated kith app
+#23 DONE 42.0s
+
+#24 [builder 15/17] RUN mix assets.vendor
+#24 DONE 1.0s
+
+#25 [builder 16/17] RUN mix assets.deploy
+#25 1.346 ≈ tailwindcss v4.3.3
+#25 1.346 
+#25 1.582 Done in 235ms
+#25 1.641 
+#25 1.641   ../priv/static/assets/js/app.js  418.5kb
+#25 1.641 
+#25 1.641 ⚡ Done in 35ms
+#25 1.776 Check your digested files at "priv/static"
+#25 DONE 1.8s
+
+#26 [builder 17/17] RUN mix release
+#26 1.042 * assembling kith-0.1.0 on MIX_ENV=prod
+#26 1.047 * using config/runtime.exs to configure the release at runtime
+#26 1.936 * skipping elixir.bat for windows (bin/elixir.bat not found in the Elixir installation)
+#26 1.939 * skipping iex.bat for windows (bin/iex.bat not found in the Elixir installation)
+#26 4.528 
+#26 4.528 Release created at _build/prod/rel/kith
+#26 4.528 
+#26 4.528     # To start your system
+#26 4.528     _build/prod/rel/kith/bin/kith start
+#26 4.528 
+#26 4.528 Once the release is running:
+#26 4.528 
+#26 4.528     # To connect to it remotely
+#26 4.528     _build/prod/rel/kith/bin/kith remote
+#26 4.528 
+#26 4.528     # To stop it gracefully (you may also send SIGINT/SIGTERM)
+#26 4.528     _build/prod/rel/kith/bin/kith stop
+#26 4.528 
+#26 4.528 To list all commands:
+#26 4.528 
+#26 4.528     _build/prod/rel/kith/bin/kith
+#26 4.528 
+#26 DONE 4.9s
+
+#27 [runner 5/6] COPY --from=builder --chown=kith:kith /app/_build/prod/rel/kith ./
+#27 DONE 1.2s
+
+#28 [runner 6/6] RUN mkdir -p /app/uploads && chown kith:kith /app/uploads
+#28 DONE 0.3s
+
+#29 exporting to image
+#29 exporting layers
+#29 exporting layers 2.8s done
+#29 exporting manifest sha256:e90e940bb557ff11148476c245b32ad39051da14611ec90fb4be62196a3c1f5d 0.0s done
+#29 exporting config sha256:13425b3294977b05cea6842110c70eca6a0a3b6eaae1ac135bf94d9a5da9e966 0.0s done
+#29 exporting attestation manifest sha256:70973697bfad5f6d2da128ef884a1a836f41f9920f7035222b311374b68b4fe2 done
+#29 exporting manifest list sha256:09ae42250f5732680dd071ab5cabbe7a22872396764bf892055fba73a41c8e81 done
+#29 naming to docker.io/library/kith:pr44-pot-reviewed done
+#29 unpacking to docker.io/library/kith:pr44-pot-reviewed
+#29 unpacking to docker.io/library/kith:pr44-pot-reviewed 1.3s done
+#29 DONE 4.1s

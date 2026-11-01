@@ -11,6 +11,7 @@ defmodule Kith.RateLimiter do
 
   @login_limit {10, 60_000}
   @signup_limit {5, 60_000}
+  @totp_limit {10, 60_000}
   @api_limit {1000, 3_600_000}
 
   def child_spec(opts) do
@@ -59,6 +60,16 @@ defmodule Kith.RateLimiter do
   def check_signup(ip) do
     {limit, period} = @signup_limit
     check("signup:#{format_ip(ip)}", limit, period)
+  end
+
+  def check_totp(ip) do
+    {limit, period} = @totp_limit
+    check("totp_ip:#{format_ip(ip)}", limit, period)
+  end
+
+  def check_totp_user(user_id) do
+    {limit, period} = @totp_limit
+    check("totp_user:#{user_id}", limit, period)
   end
 
   def check_api(account_id) do

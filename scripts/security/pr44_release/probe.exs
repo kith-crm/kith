@@ -75,6 +75,7 @@ defmodule PR44ReleaseSmoke do
     true = is_pid(Process.whereis(Kith.TaskSupervisor))
     true = is_pid(Oban.whereis(Oban))
     cache_smoke(mode)
+    totp_smoke(mode)
 
     if mode == "worker" do
       nil = Process.whereis(KithWeb.Endpoint)
@@ -359,6 +360,38 @@ defmodule PR44ReleaseSmoke do
       "SELECT id, args, state::text, worker, queue, scheduled_at FROM oban_jobs WHERE id=ANY($1) ORDER BY id",
       [ids]
     ).rows
+  end
+
+  defp totp_smoke(mode) do
+    raw_key = "12345678901234567890"
+    secret = Base.encode32(raw_key, padding: false)
+    "755224" = :pot.hotp(secret, 0)
+    counter = div(System.system_time(:second), 30) + 1
+    mac = :crypto.mac(:hmac, :sha, raw_key, <<counter::unsigned-big-integer-size(64)>>)
+    offset = Bitwise.band(:binary.last(mac), 15)
+
+    truncated =
+      mac |> binary_part(offset, 4) |> :binary.decode_unsigned() |> Bitwise.band(0x7FFFFFFF)
+
+    code = truncated |> rem(1_000_000) |> Integer.to_string() |> String.pad_leading(6, "0")
+    true = Kith.Accounts.valid_totp_code?(secret, code)
+
+    for malformed <- [nil, 123_456, [], %{"nested" => "123456"}] do
+      false = Kith.Accounts.valid_totp_code?(secret, malformed)
+    end
+
+    false = Kith.Accounts.valid_totp_code?("!", code)
+    false = Kith.Accounts.valid_totp_code?("", code)
+    remaining = 60_000 - rem(System.system_time(:millisecond), 60_000)
+    if remaining < 1000, do: Process.sleep(remaining + 1)
+    key = "release-totp-#{mode}-#{System.system_time(:nanosecond)}"
+    for _ <- 1..10, do: :ok = Kith.RateLimiter.check_totp_user(key)
+    {:error, :rate_limited, retry} = Kith.RateLimiter.check_totp_user(key)
+    true = retry in 1..60_000
+    for _ <- 1..10, do: :ok = Kith.RateLimiter.check_totp(key)
+    {:error, :rate_limited, _} = Kith.RateLimiter.check_totp(key)
+    :ok = Kith.RateLimiter.check_login(key)
+    marker("totp", %{mode: mode, otp_reference: true, malformed_rejected: true, limits: true})
   end
 
   defp marker(check, details),

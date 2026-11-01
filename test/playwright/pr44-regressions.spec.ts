@@ -1,6 +1,7 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { createHmac } from "node:crypto";
 import { passwordLogin } from "./helpers/password-login";
 
 // This suite needs the explicit local harness, never a production server.
@@ -75,6 +76,70 @@ async function api(request: APIRequestContext, account: Account, route: string, 
 
 test.beforeEach(async ({ page }) => {
   page.on("dialog", async (dialog) => { await dialog.accept(); });
+});
+
+// RFC 6238 reference calculation in Node, independent of the upgraded POT code.
+function authenticatorCode(secretHex: string, intervalOffset = 0): string {
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000) + intervalOffset));
+  const digest = createHmac("sha1", Buffer.from(secretHex, "hex")).update(counter).digest();
+  const offset = digest[digest.length - 1] & 15;
+  return String((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+test("TOTP authenticator auto-submit posts one code with real CSRF protection", async ({ page }) => {
+  const account = control("prepare", { scenario: "totp" });
+  await passwordLogin(page, account.email, "ValidP@ssword123!", /\/users\/two-factor$/);
+  await connected(page);
+  const form = page.locator("#totp_challenge_form");
+  await expect(form.locator("input[name='_csrf_token']")).not.toHaveValue("");
+  // A next-interval reference code also avoids expiry at a 30-second boundary;
+  // accepting it is the existing POT current/future window, unchanged here.
+  const code = authenticatorCode(account.secret_hex, 1);
+  const [response] = await Promise.all([
+    page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/users/totp-verify"),
+    page.getByLabel("Authentication code", { exact: true }).fill(code),
+  ]);
+  const posted = new URLSearchParams(response.request().postData() ?? "");
+  expect(posted.getAll("totp[code]")).toEqual([code]);
+  expect(posted.get("_csrf_token")).toBeTruthy();
+  expect([302, 303]).toContain(response.status());
+  await expect(page).toHaveURL(/\/(dashboard|contacts)$/);
+  expect(control("totp_snapshot", account)).toEqual({ enabled: true, recovery_codes: 8 });
+});
+
+test("TOTP recovery form validates, consumes one code and rejects its reuse", async ({ page }) => {
+  const account = control("prepare", { scenario: "totp" });
+  const challenge = async () => {
+    await passwordLogin(page, account.email, "ValidP@ssword123!", /\/users\/two-factor$/);
+    await connected(page);
+    await page.getByRole("button", { name: "Use a recovery code instead", exact: true }).click();
+    await page.getByLabel("Recovery code", { exact: true }).fill(account.recovery_code);
+    await expect(page.locator("#totp_code")).toBeDisabled();
+    await expect(page.locator("#totp_recovery_code")).toBeEnabled();
+  };
+  await challenge();
+  const form = page.locator("#totp_challenge_form");
+  expect(await form.evaluate((element) => (element as HTMLFormElement).checkValidity())).toBe(true);
+  const verify = async () => {
+    const [response] = await Promise.all([
+      page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/users/totp-verify"),
+      page.getByRole("button", { name: "Verify", exact: true }).click(),
+    ]);
+    const posted = new URLSearchParams(response.request().postData() ?? "");
+    expect(posted.getAll("totp[code]")).toEqual([account.recovery_code]);
+    expect(posted.get("_csrf_token")).toBeTruthy();
+    expect([302, 303]).toContain(response.status());
+  };
+  await verify();
+  await expect(page).toHaveURL(/\/(dashboard|contacts)$/);
+  expect(control("totp_snapshot", account).recovery_codes).toBe(7);
+  await page.context().clearCookies();
+  await challenge();
+  await verify();
+  await expect(page).toHaveURL(/\/users\/two-factor$/);
+  await expect(page.getByText("Invalid authentication code.", { exact: true })).toBeVisible();
+  expect(control("totp_snapshot", account).recovery_codes).toBe(7);
 });
 
 test("native entry animations preserve selection and flash motion and dismissal", async ({ page }) => {

@@ -185,6 +185,10 @@ for name in ['web-probe','worker-probe','cache-cluster-probe']:
     # RPC can forward ordinary logs to its CLI formatter. Check secret safety
     # here; JSON formatting is asserted on the real node consoles above.
     assert 'pr44-do-not-log-credential' not in (root/f'{name}.log').read_text()
+for name,mode in [('web-probe','web'),('worker-probe','worker')]:
+    entries=[json.loads(line) for line in (root/f'{name}.log').read_text().splitlines() if line.startswith('{')]
+    totp=next(item for item in entries if item.get('pr44_release_check') == 'totp')
+    assert totp['mode']==mode and all(totp[key] is True for key in ['otp_reference','malformed_rejected','limits']),totp
 for name in ['web','worker']:
     entries=[json.loads(line) for line in (root/f'{name}.log').read_text().splitlines() if line.strip()]
     marker=next(item for item in entries if item.get('message') == f'PR44_RELEASE_LOG {name}')
@@ -207,6 +211,7 @@ checks={
  'metrics':['unauthenticated-401','authenticated-scrape'],
  'cache':['app-worker-store-put-get-ttl','connected-node-symmetric-invalidation','worker-photo-document-write-invalidates-web-usage','worker-duplicate-dismissal-invalidates-web-count'],
  'client_ip':['actual-http-forged-headers-ignored','json-logger-uses-socket-identity'],
+ 'totp':['independent-OTP-crypto-reference','malformed-values-fail-closed','account-and-IP-budgets-in-web-and-worker'],
  'limits':['No external provider API calls','No nonempty document downloads','Cold build is a separate coordinator check','Connected-node invalidation only; disconnected entries rely on bounded TTL'],
 }
 (root/'release-smoke.json').write_text(json.dumps(checks,indent=2)+'\n')

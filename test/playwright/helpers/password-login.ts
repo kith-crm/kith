@@ -2,7 +2,7 @@ import { expect, type Page } from "@playwright/test";
 
 // Independent scenarios share a real loopback peer. Respect the production
 // login budget rather than disabling it or treating an unrelated failure as retryable.
-export async function passwordLogin(page: Page, email: string, password: string) {
+export async function passwordLogin(page: Page, email: string, password: string, expectedLanding: RegExp = /\/(dashboard|contacts)$/) {
   for (let attempt = 0; attempt < 2; attempt++) {
     await page.goto("/users/log-in");
     await expect(page.locator("[data-phx-main].phx-connected")).toBeVisible();
@@ -27,7 +27,7 @@ export async function passwordLogin(page: Page, email: string, password: string)
     }
 
     expect([302, 303]).toContain(response.status());
-    await expect(page).toHaveURL(/\/(dashboard|contacts)$/);
+    await expect(page).toHaveURL(expectedLanding);
     return;
   }
 }

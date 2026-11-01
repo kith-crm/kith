@@ -16318,5 +16318,113 @@
     ],
     "followup_meaning": "Upstream maintenance is not established by available evidence. These are not known CVE/compatibility failures or assertions of abandonment; do not label them confirmed maintained.",
     "evidence": "pr44-implementation-evidence/policy-review.json"
+  },
+  "pot_asn_revision": {
+    "generated_at": "2026-11-01T08:25:00.613029+00:00",
+    "status": "Verified guarded POT integration and working ASN1 retention; package versions unchanged",
+    "retention_decisions": {
+      "asn1_compiler": {
+        "version": "0.1.1",
+        "decision": "retain current working release; no fork created",
+        "reason": "No demonstrated current Kith CVE/build/compatibility failure. The prepared Wax patch owns a compiler lifecycle/cache/failure-recovery/packaging implementation, rather than a minimal helper fix. Existing current-source cold Linux/musl and WebAuthn application tests pass.",
+        "upstream_maintenance_confirmed": false,
+        "candidate": "../pr44-upstream/wax-otp-asn1-review.md"
+      },
+      "pot": {
+        "version": "1.0.2",
+        "decision": "retain reviewed implementation with Kith input/throttle/form fixes and owned regressions",
+        "algorithm_review": "RFC4226/6238 SHA1/SHA256/SHA512 vectors, epoch/boundary cases and independent OTP crypto reference agree; no new library or key/enrollment migration.",
+        "upstream_maintenance_confirmed": false,
+        "evidence": "pot-security-review.json"
+      },
+      "bunt": {
+        "decision": "retain existing version as previously discussed; no dependency change",
+        "upstream_maintenance_confirmed": false
+      },
+      "fuse": {
+        "decision": "retain existing version as previously discussed; no egress service introduced",
+        "upstream_maintenance_confirmed": false
+      }
+    },
+    "changes": [
+      "Malformed OTP/recovery values and malformed/empty/non-byte-aligned secrets fail closed. Existing generated/padded/lowercase Base32 secrets remain compatible.",
+      "Browser second-factor attempts have a separate10/minute verified-IP budget; valid-password API and signed-browser-challenge verification share10/minute/user. Existing password10/minute/IP and API20/minute/IP remain separate.",
+      "Inactive OTP/recovery inputs are disabled; recovery input has a unique id. Real submissions contain one active code and recovery HTML validation works.",
+      "Accounts documentation now accurately describes existing current+next2intervals."
+    ],
+    "preserved_behaviors": [
+      "POT window:addwindow1/window1 still accepts current and next two30second intervals, not the previous interval.",
+      "Existing stateless OTP reuse and signed-challenge reuse behavior is unchanged. No accepted-counter storage/replay protection was added.",
+      "No constant-time token comparison guarantee or timing experiment is claimed.",
+      "Existing TOTP encrypted secret format/key and all retained dependency versions are unchanged.",
+      "OTP native form.submit auto-submit uses JS six-digit validation and bypasses native HTML constraint validation; recovery checkValidity is covered.",
+      "CSRF-protected successful submission and token presence verified; no new invalid-CSRF negative test is claimed."
+    ],
+    "checks": {
+      "exunit": {
+        "tests": 1986,
+        "failures": 0,
+        "skips": 0,
+        "tags_included": [
+          "slow",
+          "external"
+        ],
+        "new_review_tests": 16
+      },
+      "javascript": {
+        "tests": 14,
+        "failures": 0,
+        "skips": 0
+      },
+      "browser": {
+        "tests": 23,
+        "failures": 0,
+        "skips": 0,
+        "new_real_second_factor_cases": 2
+      },
+      "redis": {
+        "tests": 5,
+        "failures": 0
+      },
+      "quality": "passed; only two existing generated CLDR contract warnings matched existing rule",
+      "hex_advisories": 0,
+      "hex_retirements": 0,
+      "npm_root_vulnerabilities": 0,
+      "npm_assets_vulnerabilities": 0,
+      "hex_nodes": 98,
+      "installed_edges": 197,
+      "constraint_failures": 0,
+      "runtime_floor_failures": 0,
+      "cold_linux_musl_build": "passed",
+      "production_modes": [
+        "app",
+        "worker",
+        "migrate"
+      ],
+      "production_totp_probes": [
+        "independent-OTP-crypto-reference",
+        "malformed-values-fail-closed",
+        "account-and-IP-budgets-in-web-and-worker"
+      ],
+      "release_rollback_credentials_cache_metrics_assets": "passed",
+      "actual_caddy_websocket_identity_and_redaction": "passed"
+    },
+    "image": {
+      "tag": "kith:pr44-pot-reviewed",
+      "id": "sha256:09ae42250f5732680dd071ab5cabbe7a22872396764bf892055fba73a41c8e81",
+      "platform": "linux/arm64",
+      "build": "docker build --no-cache --progress=plain -t kith:pr44-pot-reviewed ."
+    },
+    "lock_sha256": "68702c297165b2c40e2496aee5f9da66112bd7213b15ced51a8b87824769ccf5",
+    "dependency_versions_changed": false,
+    "limits": [
+      "Upstream maintenance remains unconfirmed for ASN1 Compiler,Bunt,Fuse,POT; retention is not a claim of new upstream releases or support commitments.",
+      "No original strict all-latest/two-year policy compliance claim. Latest-compatible user policy governs versions.",
+      "Existing TOTP replay and comparison characteristics remain explicit; this is not a complete MFA redesign or security certification.",
+      "Production build verified on Linuxarm64 musl, not amd64 or every upstream runtime/device matrix.",
+      "No live external provider accounts; local fixtures and synthetic credentials.",
+      "No fork, upstream communication, push, merge or deployment performed."
+    ],
+    "evidence": "pr44-implementation-evidence/pot-reviewed-validation.json"
   }
 }

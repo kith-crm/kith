@@ -43,6 +43,7 @@ defmodule KithWeb.UserLive.TotpChallenge do
                 type="text"
                 name="totp[code]"
                 id="totp_code"
+                x-bind:disabled="recoveryMode"
                 inputmode="numeric"
                 pattern="[0-9]{6}"
                 autocomplete="one-time-code"
@@ -58,6 +59,8 @@ defmodule KithWeb.UserLive.TotpChallenge do
           <div x-show="recoveryMode" x-cloak>
             <UI.input
               field={@form[:code]}
+              id="totp_recovery_code"
+              {%{"x-bind:disabled" => "!recoveryMode"}}
               name="totp[code]"
               type="text"
               label="Recovery code"

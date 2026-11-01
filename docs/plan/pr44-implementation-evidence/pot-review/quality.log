@@ -1,0 +1,32 @@
+Compiling 6 files (.ex)
+Generated kith app
+Checking 280 source files (this might take a while) ...
+
+Please report incorrect results: https://github.com/rrrene/credo/issues
+
+Analysis took 3.0 seconds (0.4s to load, 2.5s running 65 checks on 280 files)
+3608 mods/funs, found no issues.
+
+Use `mix credo explain` to explain issues, `mix credo --help` for options.
+Sobelow: 28 exact, source-bound exceptions reviewed; no unreviewed findings
+Finding suitable PLTs
+Checking PLT...
+[:asn1, :assent, :bandit, :castore, :cbor, :cldr_utils, :comeonin, :compiler, :crypto, :db_connection, :decimal, :digital_token, :ecto, :ecto_sql, :eex, :elixir, :eqrcode, :esbuild, :ex_aws, :ex_aws_s3, :ex_cldr, :ex_cldr_calendars, :ex_cldr_currencies, :ex_cldr_dates_times, :ex_cldr_numbers, :ex_cldr_territories, :ex_phone_number, :ex_unit, :expo, :file_system, :finch, :flop, :flop_phoenix, :fuse, :gen_smtp, :geolix, :geolix_adapter_mmdb2, :gettext, :hammer, :hammer_backend_redis, :hpax, :html_sanitize_ex, :idna, :inets, :jason, :kernel, :kith, :libcluster, :logger, :logger_json, :mime, :mint, :mix, :mmdb2_decoder, :mochiweb, :nebulex, :nebulex_local, :nimble_options, :nimble_ownership, :nimble_pool, :oban, :oban_met, :oban_web, :octo_fetch, :pbkdf2_elixir, :peep, :phoenix, :phoenix_ecto, :phoenix_html, :phoenix_live_dashboard, :phoenix_live_reload, :phoenix_live_view, :phoenix_pubsub, :phoenix_template, :plug, :plug_crypto, :postgrex, :pot, :prom_ex, :public_key, :ranch, :redix, :req, :runtime_tools, :sasl, :sentry, :ssl, :ssl_verify_fun, :stdlib, :sweet_xml, :swoosh, :syntax_tools, :tailwind, :telemetry, :telemetry_metrics, :telemetry_metrics_prometheus_core, :telemetry_poller, :thousand_island, :tools, :tz, ...]
+PLT is up to date!
+ignore_warnings: .dialyzer_ignore.exs
+
+Starting Dialyzer
+[
+  check_plt: false,
+  init_plt: ~c"/Users/basharqassis/Projects/kith/priv/plts/dialyzer.plt",
+  files: [~c"/Users/basharqassis/Projects/kith/_build/dev/lib/kith/ebin/Elixir.Kith.Imports.Sources.MonicaApi.RateLimiter.beam",
+   ~c"/Users/basharqassis/Projects/kith/_build/dev/lib/kith/ebin/Elixir.KithWeb.UserLive.ConfirmEmailPending.beam",
+   ~c"/Users/basharqassis/Projects/kith/_build/dev/lib/kith/ebin/Elixir.Kith.Imports.Sources.VCard.beam",
+   ~c"/Users/basharqassis/Projects/kith/_build/dev/lib/kith/ebin/Elixir.Kith.Policy.beam",
+   ~c"/Users/basharqassis/Projects/kith/_build/dev/lib/kith/ebin/Elixir.KithWeb.KithUI.beam",
+   ...],
+  ...
+]
+Total errors: 2, Skipped: 2, Unnecessary Skips: 0
+done in 0m15.97s
+done (passed successfully)

@@ -116,5 +116,29 @@ defmodule Kith.RedisRateLimiterProbe do
     assert Process.whereis(Kith.RateLimiter.Redis) == nil
   end
 
-  defp unique_key, do: "redis-probe-#{System.unique_integer([:positive])}"
+  test "second-factor rules share the user budget and keep password/IP budgets independent" do
+    remaining = 60_000 - rem(System.system_time(:millisecond), 60_000)
+    if remaining < 1000, do: Process.sleep(remaining + 1)
+    user = unique_key()
+    ip = unique_key()
+
+    results =
+      1..40
+      |> Task.async_stream(fn _ -> RateLimiter.check_totp_user(user) end,
+        max_concurrency: 40,
+        ordered: false
+      )
+      |> Enum.map(fn {:ok, result} -> result end)
+
+    assert Enum.count(results, &(&1 == :ok)) == 10
+    assert Enum.count(results, &match?({:error, :rate_limited, _}, &1)) == 30
+    assert :ok = RateLimiter.check_totp_user(unique_key())
+    for _ <- 1..10, do: assert(:ok = RateLimiter.check_totp(ip))
+    assert {:error, :rate_limited, milliseconds} = RateLimiter.check_totp(ip)
+    assert milliseconds in 1..60_000
+    assert :ok = RateLimiter.check_login(ip)
+  end
+
+  defp unique_key,
+    do: "redis-probe-#{System.system_time(:nanosecond)}-#{System.unique_integer([:positive])}"
 end
