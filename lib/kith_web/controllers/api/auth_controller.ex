@@ -43,6 +43,29 @@ defmodule KithWeb.API.AuthController do
   end
 
   defp authenticate_with_optional_totp(conn, user, totp_code) do
+    case Kith.RateLimiter.check_totp_user(user.id) do
+      :ok -> authenticate_second_factor(conn, user, totp_code)
+      {:error, :rate_limited, retry_after_ms} -> second_factor_rate_limited(conn, retry_after_ms)
+    end
+  end
+
+  defp second_factor_rate_limited(conn, retry_after_ms) do
+    conn
+    |> put_resp_header(
+      "retry-after",
+      to_string(Kith.RateLimiter.retry_after_seconds(retry_after_ms))
+    )
+    |> put_status(429)
+    |> put_resp_content_type("application/problem+json")
+    |> json(%{
+      type: "about:blank",
+      title: "Too Many Requests",
+      status: 429,
+      detail: "Too many authentication code attempts. Please try again later."
+    })
+  end
+
+  defp authenticate_second_factor(conn, user, totp_code) do
     cond do
       Accounts.valid_totp_code?(user.totp_secret, totp_code) ->
         issue_token(conn, user)

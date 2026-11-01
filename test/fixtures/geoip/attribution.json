@@ -1,0 +1,21 @@
+{
+  "upstream": "maxmind/MaxMind-DB",
+  "revision": "1b0113ab55f0428c00fe30b9709742ac52f4e9cc",
+  "license": "Apache-2.0",
+  "license_file": "LICENSE-APACHE",
+  "scope": "Artificial public test data; no GeoLite2 commercial database or real credentials",
+  "files": [
+    {
+      "file": "GeoIP2-City-Test.mmdb",
+      "source_url": "https://raw.githubusercontent.com/maxmind/MaxMind-DB/1b0113ab55f0428c00fe30b9709742ac52f4e9cc/test-data/GeoIP2-City-Test.mmdb",
+      "sha256": "1394af009121820d43b620fea19fc4b6f09141698091c00f70f225a982389035",
+      "bytes": 18035
+    },
+    {
+      "file": "LICENSE-APACHE",
+      "source_url": "https://raw.githubusercontent.com/maxmind/MaxMind-DB/1b0113ab55f0428c00fe30b9709742ac52f4e9cc/LICENSE-APACHE",
+      "sha256": "aac73b3148f6d1d7111dbca32099f68d26c644c6813ae1e4f05f6579aa2663fe",
+      "bytes": 11360
+    }
+  ]
+}

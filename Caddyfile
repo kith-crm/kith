@@ -1,37 +1,61 @@
 # Kith Reverse Proxy Configuration
 # KITH_HOSTNAME controls TLS behavior:
-#   - "localhost" → HTTP only (development)
+#   - "localhost" → Caddy local TLS (use an explicit http:// site for HTTP fixtures)
 #   - "kith.example.com" → automatic TLS via Let's Encrypt
+{
+	# Reverse-proxy failures also carry a request on the runtime error logger.
+	log {
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "[?].*$" ""
+				request>headers delete
+				resp_headers delete
+			}
+		}
+	}
+}
 
 {$KITH_HOSTNAME:localhost} {
-    # Reverse proxy to Phoenix app
-    # Caddy natively handles WebSocket upgrade for LiveView
-    reverse_proxy app:4000 {
-        transport http {
-            versions h1 h2c
-        }
-    }
+	# Reverse proxy to Phoenix app
+	# Caddy natively handles WebSocket upgrade for LiveView
+	reverse_proxy app:4000 {
+		header_up X-Kith-Client-IP {remote_host}
+		transport http {
+			# WebSocket Upgrade uses HTTP/1.1; h2c rejects that upstream header.
+			versions 1.1
+		}
+	}
 
-    # Security headers
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        # Remove server identification
-        -Server
-    }
+	# Security headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Remove server identification
+		-Server
+	}
 
-    # Static asset caching — Phoenix fingerprinted assets get immutable cache
-    @static path /assets/*
-    header @static Cache-Control "public, max-age=31536000, immutable"
+	# Static asset caching — Phoenix fingerprinted assets get immutable cache
+	@static path /assets/*
+	header @static Cache-Control "public, max-age=31536000, immutable"
 
-    # Compression
-    encode gzip zstd
+	# Compression
+	encode gzip zstd
 
-    # Logging
-    log {
-        output stdout
-        format json
-    }
+	# Logging
+	log {
+		output stdout
+		# Keep paths/status/client identity without credential-bearing queries
+		# or header payloads (including untrusted forwarded headers).
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "[?].*$" ""
+				request>headers delete
+				resp_headers delete
+			}
+		}
+	}
 }

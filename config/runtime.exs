@@ -11,6 +11,8 @@ end
 
 config :kith, KithWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+config :kith, :trusted_proxies, Kith.TrustedProxies.parse!(System.get_env("TRUSTED_PROXIES", ""))
+
 # Outbound request budget for the Monica API importer, per minute. Set it a
 # call or two below Monica's own RATE_LIMIT_PER_MINUTE_API. Unset keeps the
 # config.exs default (55), so test.exs is preserved.
@@ -74,15 +76,19 @@ if config_env() == :prod do
     http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}],
     secret_key_base: secret_key_base
 
-  # Cloak encryption vault — production key from env
+  # Credential vault — preserve env/secret-file loading and validate in every
+  # production mode, including release migrations which do not start the app.
   cloak_key =
     Kith.ConfigHelpers.read_secret("CLOAK_KEY") ||
       raise "CLOAK_KEY is required in production (base64-encoded 32-byte key)"
 
-  config :kith, Kith.Vault,
-    ciphers: [
-      default: {Cloak.Ciphers.AES.GCM, tag: "AES.GCM.V1", key: Base.decode64!(cloak_key)}
-    ]
+  decoded_cloak_key =
+    case Base.decode64(cloak_key) do
+      {:ok, key} when byte_size(key) == 32 -> key
+      _ -> raise "CLOAK_KEY must be base64-encoded and decode to exactly 32 bytes"
+    end
+
+  config :kith, Kith.Vault, key: decoded_cloak_key
 
   # WebAuthn — rp_id must match KITH_HOSTNAME exactly
   config :wax_,
@@ -214,8 +220,7 @@ if config_env() == :prod do
       System.get_env("REDIS_URL") ||
         raise "REDIS_URL is required when RATE_LIMIT_BACKEND=redis"
 
-    config :hammer,
-      backend: {Hammer.Backend.Redis, [expiry_ms: 60_000 * 60, redis_url: redis_url]}
+    config :kith, Kith.RateLimiter, backend: :redis, redis_url: redis_url
   end
 
   # Oban — only the worker container processes jobs in production.
@@ -308,7 +313,11 @@ if config_env() == :prod do
   end
 
   # Sentry error tracking (optional — only when SENTRY_DSN is set)
-  if sentry_dsn = System.get_env("SENTRY_DSN") do
+  sentry_dsn = System.get_env("SENTRY_DSN", "") |> String.trim()
+
+  if sentry_dsn != "" do
+    System.put_env("SENTRY_DSN", sentry_dsn)
+
     config :sentry,
       dsn: sentry_dsn,
       environment_name: System.get_env("SENTRY_ENVIRONMENT", "production"),
@@ -320,6 +329,11 @@ if config_env() == :prod do
       filter: Kith.SentryFilter,
       before_send: {Kith.SentryEventHandler, :before_send},
       enable_source_code_context: true
+  else
+    # Sentry re-reads this variable when validating partial runtime updates;
+    # an empty variable would override the disabled configuration on that path.
+    System.delete_env("SENTRY_DSN")
+    config :sentry, client: Kith.SentryReqClient, dsn: nil
   end
 
   # Geolix — local MaxMind GeoLite2 database (optional)
@@ -329,14 +343,6 @@ if config_env() == :prod do
         %{id: :city, adapter: Geolix.Adapter.MMDB2, source: geoip_path}
       ]
   end
-
-  # Trusted proxies for real IP extraction
-  trusted_proxies =
-    System.get_env("TRUSTED_PROXIES", "127.0.0.1/8")
-    |> String.split(",", trim: true)
-    |> Enum.map(&String.trim/1)
-
-  config :remote_ip, headers: ~w[x-forwarded-for], proxies: trusted_proxies
 
   # Metrics endpoint authentication
   metrics_token =
@@ -360,6 +366,8 @@ if config_env() == :prod do
   # the Monica import workers, so a log line says which import it belongs to.
   config :logger, :default_handler,
     formatter:
-      {LoggerJSON.Formatters.Basic,
-       metadata: [:request_id, :user_id, :account_id, :reason, :import_id, :worker]}
+      LoggerJSON.Formatters.Basic.new(
+        metadata: [:request_id, :client_ip, :user_id, :account_id, :reason, :import_id, :worker],
+        redactors: [Kith.LogRedactor.new()]
+      )
 end

@@ -42,7 +42,7 @@ defmodule KithWeb.UserLive.Login do
               autocomplete="username"
               spellcheck="false"
               required
-              phx-mounted={JS.focus()}
+              autofocus
             />
             <UI.input
               field={f[:password]}

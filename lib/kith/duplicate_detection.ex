@@ -1,6 +1,7 @@
 defmodule Kith.DuplicateDetection do
   import Ecto.Query, warn: false
   import Kith.Scope
+  alias Kith.Cache.Invalidation
   alias Kith.Contacts.Address
   alias Kith.Contacts.Contact
   alias Kith.Contacts.ContactField
@@ -12,8 +13,10 @@ defmodule Kith.DuplicateDetection do
   @default_page_size 20
 
   def dismiss_candidate(%DuplicateCandidate{} = candidate) do
-    invalidate_cluster_count(candidate.account_id)
-    candidate |> DuplicateCandidate.dismiss_changeset() |> Repo.update()
+    candidate
+    |> DuplicateCandidate.dismiss_changeset()
+    |> Repo.update()
+    |> Invalidation.after_commit(cluster_count_key(candidate.account_id))
   end
 
   @doc "Whether this account has saved a not-duplicates decision for the pair."
@@ -21,9 +24,10 @@ defmodule Kith.DuplicateDetection do
     {low, high} = if one_id < other_id, do: {one_id, other_id}, else: {other_id, one_id}
 
     Repo.exists?(
-      from d in DuplicateCandidate,
+      from(d in DuplicateCandidate,
         where: d.account_id == ^account_id and d.status == "dismissed",
         where: d.contact_id == ^low and d.duplicate_contact_id == ^high
+      )
     )
   end
 
@@ -62,7 +66,10 @@ defmodule Kith.DuplicateDetection do
   does) — this function does not open one itself, since wrapping it here
   would only nest inside that outer transaction and swallow a rollback
   raised by any step, silently losing it as this function's result is
-  discarded and always `:ok`.
+  discarded and always `:ok`. The outer owner must invalidate the account's
+  `{:duplicate_cluster_count, account_id}` key after committing; the production
+  `Contacts.merge_cluster/4` boundary does so. Invalidating here would let a
+  separate reader cache precommit data while this transaction is still open.
 
   `unchecked_ids` is defensively subtracted from the merged set: if a caller
   passes an id in both, treating it as "merged" wins (it's a member being
@@ -145,8 +152,6 @@ defmodule Kith.DuplicateDetection do
   end
 
   defp merge_or_insert(account_id, low, high, candidate) do
-    invalidate_cluster_count(account_id)
-
     existing =
       Repo.one(
         from(d in DuplicateCandidate,
@@ -235,14 +240,22 @@ defmodule Kith.DuplicateDetection do
   a change made outside this module.
   """
   def cluster_count(account_id) do
-    case Cachex.fetch(:kith_cache, cluster_count_key(account_id), fn _key ->
-           {:commit, compute_cluster_count(account_id), ttl: @cluster_count_ttl}
-         end) do
+    if Repo.in_transaction?(),
+      do: compute_cluster_count(account_id),
+      else: cached_cluster_count(account_id)
+  end
+
+  defp cached_cluster_count(account_id) do
+    case Kith.Cache.fetch(
+           cluster_count_key(account_id),
+           fn ->
+             {:ok, compute_cluster_count(account_id)}
+           end,
+           ttl: @cluster_count_ttl
+         ) do
       {:ok, count} -> count
-      {:commit, count} -> count
-      # A cache that is down or erroring must not take the badge — and with it
-      # every authenticated page — down with it.
-      _ -> compute_cluster_count(account_id)
+      # Cache or lock failure must not take every authenticated page down.
+      {:error, _reason} -> compute_cluster_count(account_id)
     end
   end
 
@@ -252,14 +265,6 @@ defmodule Kith.DuplicateDetection do
   end
 
   defp cluster_count_key(account_id), do: {:duplicate_cluster_count, account_id}
-
-  # Called from every path that inserts, updates or resolves a candidate row.
-  # Placed on the low-level writes rather than the public entry points so a new
-  # caller cannot route around it.
-  defp invalidate_cluster_count(account_id) do
-    Cachex.del(:kith_cache, cluster_count_key(account_id))
-    :ok
-  end
 
   defp build_clusters(account_id) do
     {acc, pending} = derive_groups(account_id)
@@ -565,7 +570,6 @@ defmodule Kith.DuplicateDetection do
   Returns `:ok`, or `{:error, reason}` if the transaction failed.
   """
   def dismiss_selection(account_id, selected_ids, unchecked_ids) do
-    invalidate_cluster_count(account_id)
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     selected_ids = owned_ids(account_id, selected_ids)
@@ -584,6 +588,7 @@ defmodule Kith.DuplicateDetection do
       |> Enum.uniq()
       |> Enum.each(fn {low, high} -> upsert_dismissed(account_id, low, high, now) end)
     end)
+    |> Invalidation.after_commit(cluster_count_key(account_id))
     |> case do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
@@ -710,21 +715,27 @@ defmodule Kith.DuplicateDetection do
 
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    Enum.each(all_pairs, fn {{id1, id2}, score, reasons} ->
-      {contact_id, dup_id} = if id1 < id2, do: {id1, id2}, else: {id2, id1}
+    try do
+      Enum.each(all_pairs, fn {{id1, id2}, score, reasons} ->
+        {contact_id, dup_id} = if id1 < id2, do: {id1, id2}, else: {id2, id1}
 
-      unless MapSet.member?(existing, {contact_id, dup_id}) do
-        %DuplicateCandidate{account_id: account_id}
-        |> DuplicateCandidate.changeset(%{
-          contact_id: contact_id,
-          duplicate_contact_id: dup_id,
-          score: score,
-          reasons: reasons,
-          detected_at: now
-        })
-        |> Repo.insert(on_conflict: :nothing)
-      end
-    end)
+        unless MapSet.member?(existing, {contact_id, dup_id}) do
+          %DuplicateCandidate{account_id: account_id}
+          |> DuplicateCandidate.changeset(%{
+            contact_id: contact_id,
+            duplicate_contact_id: dup_id,
+            score: score,
+            reasons: reasons,
+            detected_at: now
+          })
+          |> Repo.insert(on_conflict: :nothing)
+        end
+      end)
+    after
+      # Inserts commit independently. Invalidate once even if a later insert
+      # raises, so earlier successful writes cannot leave a stale badge.
+      Invalidation.after_commit(:ok, cluster_count_key(account_id))
+    end
   end
 
   defp find_name_matches(account_id) do
@@ -760,7 +771,7 @@ defmodule Kith.DuplicateDetection do
     # checks on the trimmed form prevent whitespace-only values from forming a
     # cartesian product across all such rows.
     query =
-      from cf1 in ContactField,
+      from(cf1 in ContactField,
         join: cf2 in ContactField,
         on:
           fragment("LOWER(TRIM(?))", cf1.value) == fragment("LOWER(TRIM(?))", cf2.value) and
@@ -777,6 +788,7 @@ defmodule Kith.DuplicateDetection do
         where: not is_nil(cf1.value) and fragment("TRIM(?) <> ''", cf1.value),
         where: not is_nil(cf2.value) and fragment("TRIM(?) <> ''", cf2.value),
         select: {cf1.contact_id, cf2.contact_id}
+      )
 
     query
     |> Repo.all()
@@ -792,7 +804,7 @@ defmodule Kith.DuplicateDetection do
     # `Kith.Contacts.PhoneFormatter.normalize/2`), so this becomes a plain
     # equality join.
     query =
-      from cf1 in ContactField,
+      from(cf1 in ContactField,
         join: cf2 in ContactField,
         on: cf1.value == cf2.value and cf1.id < cf2.id,
         join: cft1 in ContactFieldType,
@@ -807,6 +819,7 @@ defmodule Kith.DuplicateDetection do
         where: not is_nil(cf1.value) and fragment("TRIM(?) <> ''", cf1.value),
         where: not is_nil(cf2.value) and fragment("TRIM(?) <> ''", cf2.value),
         select: {cf1.contact_id, cf2.contact_id}
+      )
 
     query
     |> Repo.all()
@@ -820,7 +833,7 @@ defmodule Kith.DuplicateDetection do
   defp find_address_matches(account_id) do
     # Match on normalized line1 + postal_code
     query =
-      from a1 in Address,
+      from(a1 in Address,
         join: a2 in Address,
         on:
           fragment("LOWER(TRIM(?))", a1.line1) == fragment("LOWER(TRIM(?))", a2.line1) and
@@ -835,6 +848,7 @@ defmodule Kith.DuplicateDetection do
         where: a2.line1 != "" and not is_nil(a2.line1),
         where: a2.postal_code != "" and not is_nil(a2.postal_code),
         select: {a1.contact_id, a2.contact_id}
+      )
 
     query
     |> Repo.all()

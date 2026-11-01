@@ -98,7 +98,7 @@ mix phx.server                              # Terminal 1
 npx playwright test --project=e2e           # Terminal 2
 
 # Isolated browser regressions (starts its own fixture server)
-npm run test:pr44
+npm run test:regressions
 ```
 
 ### Test Tags

@@ -2,12 +2,12 @@ defmodule Kith.Application do
   @moduledoc false
 
   use Application
-  import Cachex.Spec
 
   require Logger
 
   @impl true
   def start(_type, _args) do
+    Kith.Vault.validate_key!()
     log_oban_pruner_retention()
     children = base_children() ++ mode_children()
     opts = [strategy: :one_for_one, name: Kith.Supervisor]
@@ -44,11 +44,12 @@ defmodule Kith.Application do
     :logger.add_handler(:sentry_handler, Sentry.LoggerHandler, %{})
 
     [
-      Kith.Vault,
       Kith.Repo,
       {Finch, name: Swoosh.Finch, pools: %{:default => [size: 10]}},
+      Kith.RateLimiter,
+      Kith.Cache.Locks,
+      Kith.Cache.Store,
       {Oban, Application.fetch_env!(:kith, Oban)},
-      {Cachex, name: :kith_cache, expiration: expiration(default: :timer.hours(24))},
       {Task.Supervisor, name: Kith.TaskSupervisor},
       # PubSub lives here (not in mode_children) so worker mode also starts
       # it. Required for cross-container progress broadcasts in the

@@ -69,9 +69,6 @@ jobs:
       - name: Credo static analysis
         run: mix credo --strict
 
-      - name: Sobelow security scan
-        run: mix run --no-start scripts/security/sobelow_check.exs
-
       - name: Setup database
         run: mix ecto.create && mix ecto.migrate
 
@@ -100,8 +97,8 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci && npm ci --prefix assets
 
-      - name: Enforce dependency security policy
-        run: mix run --no-start scripts/security/dependency_audit.exs
+      - name: Audit dependencies and application security
+        run: mix ci.audit
 
       - name: Test JavaScript hooks
         run: npm run test:js
@@ -120,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      MIX_TEST_PARTITION: pr44_browser
+      MIX_TEST_PARTITION: browser_regressions
       ERL_FLAGS: "+S 4:4"
     services:
       postgres:
@@ -166,14 +163,14 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: mix assets.setup && mix assets.vendor && mix assets.build
       - name: Run deterministic browser regressions
-        run: npm run test:pr44
+        run: npm run test:regressions
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2; Node24 action runtime
         if: always()
         with:
           name: browser-regression-results
           path: |
             test-results/
-            tmp/pr44-browser/
+            tmp/browser-regressions/
           retention-days: 7
 
   dialyzer:

@@ -150,6 +150,7 @@ defmodule KithWeb.SettingsLive.AuditLog do
 
         <%!-- Filters --%>
         <form
+          id="audit-log-filter-form"
           phx-change="filter"
           phx-submit="filter"
           class="mt-6 grid grid-cols-1 md:grid-cols-5 gap-3"

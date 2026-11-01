@@ -2,12 +2,16 @@ defmodule Kith.Contacts.Contact do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @derive {Flop.Schema,
-           filterable: [],
-           sortable: [:display_name, :inserted_at, :last_talked_to],
-           default_order: %{order_by: [:display_name], order_directions: [:asc]},
-           default_limit: 20,
-           max_limit: 100}
+  use Flop.Schema
+
+  @flop_options [
+    filterable: [],
+    sortable: [:display_name, :inserted_at, :last_talked_to],
+    default_order: %{order_by: [:display_name], order_directions: [:asc]},
+    tiebreaker: {:primary_key, :asc},
+    default_limit: 20,
+    max_limit: 100
+  ]
 
   @type t :: %__MODULE__{}
 

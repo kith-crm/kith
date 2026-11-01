@@ -66,7 +66,12 @@
               <p class="text-xs font-medium text-[var(--color-text-secondary)] mb-2">
                 Change avatar
               </p>
-              <form phx-submit="upload-avatar" phx-change="validate-avatar" class="mb-3">
+              <form
+                id={"contact-avatar-upload-#{@contact.id}"}
+                phx-submit="upload-avatar"
+                phx-change="validate-avatar"
+                class="mb-3"
+              >
                 <.live_file_input
                   upload={@uploads.avatar}
                   class="w-full text-xs rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-2 py-1.5 file:me-2 file:rounded-[var(--radius-md)] file:border-0 file:bg-[var(--color-surface-sunken)] file:px-2 file:py-0.5 file:text-xs file:font-medium"

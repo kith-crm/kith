@@ -164,7 +164,8 @@ defmodule KithWeb.UI do
   attr :error_class, :any, default: nil
 
   attr :rest, :global,
-    include: ~w(accept autocomplete capture cols disabled form list max maxlength min minlength
+    include:
+      ~w(accept autocomplete autofocus capture cols disabled form list max maxlength min minlength
          multiple pattern placeholder readonly required rows size step)
 
   slot :inner_block
@@ -437,7 +438,7 @@ defmodule KithWeb.UI do
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
       class={[
-        "fixed top-4 end-4 z-50 w-80 sm:w-96 animate-in slide-in-from-top-2 fade-in duration-300",
+        "fixed top-4 end-4 z-50 w-80 sm:w-96 motion-safe:animate-kith-flash-in duration-300",
         "rounded-[var(--radius-lg)] border p-4 shadow-[var(--shadow-dropdown)]",
         flash_classes(@kind)
       ]}

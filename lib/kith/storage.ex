@@ -87,19 +87,15 @@ defmodule Kith.Storage do
   @doc """
   Returns total storage usage in bytes for an account.
   Queries the sum of file_size across photos and documents tables.
-  Results cached in Cachex with 5-minute TTL.
+  Results cached locally with 5-minute TTL.
   """
   def usage(account_id) do
-    cache_key = {:storage_usage, account_id}
-
-    case Cachex.get(:kith_cache, cache_key) do
-      {:ok, nil} ->
-        total = compute_usage(account_id)
-        Cachex.put(:kith_cache, cache_key, total, ttl: :timer.minutes(5))
-        {:ok, total}
-
-      {:ok, cached} ->
-        {:ok, cached}
+    if Kith.Repo.in_transaction?() do
+      {:ok, compute_usage(account_id)}
+    else
+      Kith.Cache.fetch({:storage_usage, account_id}, fn -> {:ok, compute_usage(account_id)} end,
+        ttl: :timer.minutes(5)
+      )
     end
   end
 
@@ -108,7 +104,7 @@ defmodule Kith.Storage do
   Call after successful upload or delete.
   """
   def bust_usage_cache(account_id) do
-    Cachex.del(:kith_cache, {:storage_usage, account_id})
+    Kith.Cache.delete({:storage_usage, account_id})
   end
 
   @doc "Returns the configured max upload size in bytes."

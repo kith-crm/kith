@@ -327,8 +327,7 @@ defmodule KithWeb.ContactLive.TasksComponent do
                         phx-target={@myself}
                         class="mt-0.5 rounded-full border-2 border-[var(--color-border)] size-5 hover:border-[var(--color-accent)] transition-colors cursor-pointer flex-shrink-0"
                         title="Mark complete"
-                      >
-                      </button>
+                      ></button>
                     <% else %>
                       <.icon
                         name="hero-check-circle-solid"

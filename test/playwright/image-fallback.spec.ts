@@ -1,5 +1,6 @@
 import { test, expect, type Page, type WebSocketRoute } from "@playwright/test";
 import { execSync } from "node:child_process";
+import { passwordLogin } from "./helpers/password-login";
 
 const seed = process.env.IMG_SEED_JSON ? JSON.parse(process.env.IMG_SEED_JSON) : null;
 // Upper bound we wait before asserting that something did NOT happen (no further
@@ -10,12 +11,7 @@ const NOTHING_HAPPENS_MS = 1500;
 test.skip(!seed, "IMG_SEED_JSON not set (see test/playwright/fixtures/s3/README.md)");
 
 async function login(page: Page) {
-  await page.goto("/users/log-in");
-  await page.waitForSelector("[data-phx-main].phx-connected");
-  await page.getByRole("textbox", { name: /email/i }).fill(seed.email);
-  await page.locator('input[type="password"]').fill(seed.password);
-  await page.getByRole("button", { name: /log in/i }).click();
-  await page.waitForURL(/\/(dashboard|contacts)/);
+  await passwordLogin(page, seed.email, seed.password);
 }
 
 test("a missing photo retries once, never shows the broken image, then says unavailable", async ({ page }) => {

@@ -191,14 +191,12 @@ defmodule Kith.DAV.CardDAVPlug do
 
     # RFC 4918 §9.1.4: Reject Depth: infinity
     if depth == "infinity" do
-      xml = """
-      <?xml version="1.0" encoding="UTF-8"?>
-      <d:error xmlns:d="DAV:"><d:propfind-finite-depth/></d:error>
-      """
-
       conn
       |> put_resp_content_type("application/xml")
-      |> send_resp(403, xml)
+      |> send_resp(403, """
+      <?xml version="1.0" encoding="UTF-8"?>
+      <d:error xmlns:d="DAV:"><d:propfind-finite-depth/></d:error>
+      """)
     else
       handle_addressbook_propfind_depth(conn, request_type, depth)
     end
@@ -600,7 +598,9 @@ defmodule Kith.DAV.CardDAVPlug do
   defp compute_etag(%{id: id, updated_at: updated_at}) do
     data = "#{id}-#{DateTime.to_unix(updated_at)}"
 
-    :crypto.hash(:md5, data)
+    # ETags are opaque validators. Existing DAV clients perform one fresh read
+    # after this digest change; conditional writes still compare quoted values.
+    :crypto.hash(:sha256, data)
     |> Base.encode16(case: :lower)
   end
 

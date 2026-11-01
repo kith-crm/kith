@@ -1066,7 +1066,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
           </div>
 
           <div class="mt-4 border-t border-[var(--color-border-subtle)] pt-4">
-            <form phx-change="search" phx-submit="search">
+            <form id="cluster-add-contact-search" phx-change="search" phx-submit="search">
               <label class="block text-xs text-[var(--color-text-tertiary)] mb-1.5">
                 Add contact
               </label>

@@ -1,18 +1,27 @@
 Code.require_file("boot.exs", __DIR__)
 
-defmodule PR44Control do
+defmodule Kith.RegressionControl do
   import Ecto.Query
   alias Kith.{Accounts, Contacts, Imports, Reminders, Repo}
   alias Kith.Contacts.{Contact, DuplicateCandidate, Note}
   alias Kith.Reminders.{Dispatcher, ReminderInstance}
 
   def run("prepare", args) do
-    email = "pr44-#{System.system_time(:microsecond)}@test.local"
+    email = "regression-#{System.system_time(:microsecond)}@test.local"
     {:ok, user} = Accounts.register_user(%{"email" => email, "password" => "ValidP@ssword123!"})
     {token, _} = Accounts.generate_api_token(user)
     base = %{email: email, token: token, account_id: user.account_id, user_id: user.id}
 
     case args["scenario"] do
+      "totp" ->
+        secret = Accounts.generate_totp_secret()
+        {:ok, {_user, recovery_codes}} = Accounts.enable_totp(user, secret, :pot.totp(secret))
+
+        Map.merge(base, %{
+          secret_hex: secret |> Base.decode32!(padding: false) |> Base.encode16(case: :lower),
+          recovery_code: hd(recovery_codes)
+        })
+
       "duplicates" ->
         a = contact!(user, "Alex Colleague")
         b = contact!(user, "Incomplete Record")
@@ -49,6 +58,11 @@ defmodule PR44Control do
       "import" ->
         base
     end
+  end
+
+  def run("totp_snapshot", args) do
+    user = Accounts.get_user!(args["user_id"])
+    %{enabled: user.totp_enabled, recovery_codes: Accounts.recovery_code_count(user)}
   end
 
   def run("automerge", args) do
@@ -258,5 +272,5 @@ defmodule PR44Control do
 end
 
 [action, payload] = System.argv()
-result = PR44Control.run(action, Jason.decode!(payload))
-IO.puts("PR44_RESULT=" <> Jason.encode!(result))
+result = Kith.RegressionControl.run(action, Jason.decode!(payload))
+IO.puts("KITH_TEST_RESULT=" <> Jason.encode!(result))

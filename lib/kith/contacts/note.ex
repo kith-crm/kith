@@ -3,13 +3,13 @@ defmodule Kith.Contacts.Note do
   import Ecto.Changeset
 
   schema "notes" do
-    field :body, :string
-    field :favorite, :boolean, default: false
-    field :is_private, :boolean, default: false
+    field(:body, :string)
+    field(:favorite, :boolean, default: false)
+    field(:is_private, :boolean, default: false)
 
-    belongs_to :contact, Kith.Contacts.Contact
-    belongs_to :account, Kith.Accounts.Account
-    belongs_to :author, Kith.Accounts.User
+    belongs_to(:contact, Kith.Contacts.Contact)
+    belongs_to(:account, Kith.Accounts.Account)
+    belongs_to(:author, Kith.Accounts.User)
 
     timestamps(type: :utc_datetime)
   end
@@ -27,7 +27,7 @@ defmodule Kith.Contacts.Note do
         changeset
 
       body ->
-        sanitized = HtmlSanitizeEx.Scrubber.scrub(body, __MODULE__.Scrubber)
+        sanitized = Kith.RichText.sanitize(body)
         put_change(changeset, :body, sanitized)
     end
   end
@@ -50,6 +50,8 @@ defmodule Kith.Contacts.Note do
     Meta.allow_tag_with_these_attributes("br", [])
     Meta.allow_tag_with_these_attributes("strong", [])
     Meta.allow_tag_with_these_attributes("em", [])
+    Meta.allow_tag_with_these_attributes("del", [])
+    Meta.allow_tag_with_these_attributes("pre", [])
     Meta.allow_tag_with_these_attributes("ul", [])
     Meta.allow_tag_with_these_attributes("ol", [])
     Meta.allow_tag_with_these_attributes("li", [])

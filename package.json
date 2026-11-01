@@ -11,22 +11,21 @@
   "scripts": {
     "test": "npm run test:js",
     "test:js": "node --test test/js/*.test.mjs",
-    "test:pr44": "bash test/playwright/fixtures/pr44/run.sh",
+    "test:regressions": "bash test/playwright/fixtures/regressions/run.sh",
     "prepare": "husky"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "esbuild": "0.25.4",
+    "esbuild": "0.28.2",
     "husky": "^9.1.7"
   },
   "dependencies": {
-    "@alpinejs/csp": "^3.15.11",
-    "@playwright/test": "^1.58.2",
-    "alpinejs": "^3.15.11",
+    "@alpinejs/csp": "3.17.5",
+    "@playwright/test": "1.64.1",
+    "alpinejs": "3.17.5",
     "dompurify": "3.4.17",
-    "tailwindcss-animate": "^1.0.7",
     "trix": "2.1.19"
   }
 }

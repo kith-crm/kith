@@ -180,7 +180,13 @@ defmodule KithWeb.ContactLive.RemindersComponent do
 
       <%= if @show_form do %>
         <div class="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] p-2.5 mb-2">
-          <.form for={%{}} phx-submit="save" phx-change="type-changed" phx-target={@myself}>
+          <.form
+            id={"#{@id}-reminder-form"}
+            for={%{}}
+            phx-submit="save"
+            phx-change="type-changed"
+            phx-target={@myself}
+          >
             <div class="space-y-2">
               <p
                 :if={@form_error}

@@ -476,7 +476,7 @@ defmodule KithWeb.JournalLive.Index do
 
                         <%!-- Content --%>
                         <div class="mt-2 prose prose-sm max-w-none text-[var(--color-text-secondary)]">
-                          {raw(entry.content)}
+                          {Kith.RichText.render(entry.content)}
                         </div>
 
                         <%!-- Footer: date + actions --%>

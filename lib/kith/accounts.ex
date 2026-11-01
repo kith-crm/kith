@@ -374,11 +374,25 @@ defmodule Kith.Accounts do
   end
 
   @doc """
-  Verifies a TOTP code against a secret. Allows window of 1 (previous period).
+  Verifies a six-digit TOTP code against a nonempty Base32 secret.
+
+  The existing POT configuration accepts the current and next two 30-second
+  intervals, not the preceding interval. This boundary preserves that window.
   """
-  def valid_totp_code?(secret, code) do
-    :pot.valid_totp(code, secret, window: 1, addwindow: 1)
+  def valid_totp_code?(secret, code)
+      when is_binary(secret) and byte_size(secret) > 0 and is_binary(code) and
+             byte_size(code) == 6 do
+    with true <- :pot.valid_token(code),
+         key when is_binary(key) and byte_size(key) > 0 <- :pot_base32.decode(secret) do
+      :pot.valid_totp(code, secret, window: 1, addwindow: 1)
+    else
+      _ -> false
+    end
+  rescue
+    _error in [ArgumentError, FunctionClauseError] -> false
   end
+
+  def valid_totp_code?(_secret, _code), do: false
 
   @doc """
   Enables TOTP for a user after verifying the confirmation code.
@@ -468,7 +482,7 @@ defmodule Kith.Accounts do
   @doc """
   Verifies and consumes a recovery code. Returns true if valid (and deletes it).
   """
-  def use_recovery_code(user, code) do
+  def use_recovery_code(user, code) when is_binary(code) and byte_size(code) == 9 do
     codes = Repo.all(from(rc in UserRecoveryCode, where: rc.user_id == ^user.id))
 
     Enum.find(codes, fn rc -> UserRecoveryCode.valid_code?(code, rc.hashed_code) end)
@@ -481,6 +495,8 @@ defmodule Kith.Accounts do
         true
     end
   end
+
+  def use_recovery_code(_user, _code), do: false
 
   ## WebAuthn Credentials
 

@@ -304,7 +304,7 @@ defmodule KithWeb.SettingsLive.Account do
               This cannot be undone.
             </p>
 
-            <form phx-submit="reset-account" phx-change="validate-reset">
+            <form id="account-reset-form" phx-submit="reset-account" phx-change="validate-reset">
               <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
                 Type <span class="font-semibold">RESET</span> to confirm
               </label>
@@ -336,7 +336,7 @@ defmodule KithWeb.SettingsLive.Account do
               Permanently delete this account and all associated data. This action cannot be undone.
             </p>
 
-            <form phx-submit="delete-account" phx-change="validate-delete">
+            <form id="account-delete-form" phx-submit="delete-account" phx-change="validate-delete">
               <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-2">
                 Type <span class="font-semibold">{@account.name}</span> to confirm
               </label>
