@@ -198,6 +198,86 @@ defmodule Kith.EmailsTest do
     assert email.html_body =~ "table-layout:fixed;"
   end
 
+  describe "absolute_url/1" do
+    setup do
+      original = Application.fetch_env!(:kith, KithWeb.Endpoint)
+      on_exit(fn -> Application.put_env(:kith, KithWeb.Endpoint, original) end)
+      :ok
+    end
+
+    test "uses the public URL rather than the internal listener, including a path prefix" do
+      Application.put_env(:kith, KithWeb.Endpoint,
+        http: [port: 4000],
+        url: [scheme: "https", host: "kith.example", port: 443, path: "/crm/"]
+      )
+
+      assert Emails.absolute_url("/contacts/42") == "https://kith.example/crm/contacts/42"
+
+      assert Emails.absolute_url("/users/confirm/token?source=email") ==
+               "https://kith.example/crm/users/confirm/token?source=email"
+
+      assert Emails.absolute_url("https://other.example/invite") ==
+               "https://other.example/invite"
+    end
+
+    test "falls back to listener settings and preserves nonstandard ports" do
+      for {config, expected} <- [
+            {[http: [port: 4002], url: [host: "localhost"]], "http://localhost:4002"},
+            {[https: [], url: [host: "kith.example"]], "https://kith.example"},
+            {[url: [host: "kith.example"]], "http://kith.example"},
+            {[url: [scheme: "https", host: "kith.example", port: "8443", path: "/"]],
+             "https://kith.example:8443"}
+          ] do
+        Application.put_env(:kith, KithWeb.Endpoint, config)
+        assert Emails.absolute_url("/contacts/42") == expected <> "/contacts/42"
+      end
+    end
+
+    test "builds reminder and account emails without endpoint runtime state" do
+      key = {Phoenix.Endpoint, KithWeb.Endpoint}
+      original = :persistent_term.get(key, nil)
+      :persistent_term.erase(key)
+
+      on_exit(fn ->
+        if original, do: :persistent_term.put(key, original), else: :persistent_term.erase(key)
+      end)
+
+      Application.put_env(:kith, KithWeb.Endpoint,
+        http: [port: 4000],
+        url: [scheme: "https", host: "kith.example", port: 443]
+      )
+
+      assert_raise RuntimeError, ~r/could not find persistent term/, fn ->
+        KithWeb.Endpoint.url()
+      end
+
+      instance = %{
+        account: %{timezone: "Etc/UTC"},
+        occurrence_date: ~D[2026-10-28],
+        kind: "on_day",
+        days_before: 0,
+        reminder: %{
+          type: "birthday",
+          title: nil,
+          description: nil,
+          contact: %{id: 42, display_name: "Sam Rivera", first_name: "Sam"}
+        }
+      }
+
+      reminder =
+        Kith.Emails.ReminderNotification.build(test_user(), instance,
+          now: ~U[2026-10-28 12:00:00Z]
+        )
+
+      confirmation = Emails.email_verification(test_user(), "/users/confirm/token")
+
+      assert reminder.html_body =~ "https://kith.example/contacts/42"
+      assert reminder.text_body =~ "https://kith.example/contacts/42"
+      assert confirmation.html_body =~ "https://kith.example/users/confirm/token"
+      assert confirmation.text_body =~ "https://kith.example/users/confirm/token"
+    end
+  end
+
   test "configured sender supports both string and named tuple forms" do
     original = Application.get_env(:kith, Kith.Mailer, [])
     on_exit(fn -> Application.put_env(:kith, Kith.Mailer, original) end)

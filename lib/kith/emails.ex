@@ -188,12 +188,32 @@ defmodule Kith.Emails do
     })
   end
 
-  @doc "Resolves application-relative URLs against this instance's configured endpoint."
+  @doc "Resolves application-relative URLs from configuration, including in endpoint-free workers."
   def absolute_url("/" <> path) do
-    KithWeb.Endpoint.url() <> "/" <> path
+    endpoint = Application.fetch_env!(:kith, KithWeb.Endpoint)
+    url = Keyword.get(endpoint, :url, [])
+
+    {scheme, port} = listener_url_defaults(endpoint)
+    port = url[:port] || port
+    port = if is_binary(port), do: String.to_integer(port), else: port
+    prefix = String.trim_trailing(url[:path] || "", "/")
+
+    URI.to_string(%URI{
+      scheme: url[:scheme] || scheme,
+      host: to_string(url[:host] || "localhost"),
+      port: port
+    }) <> prefix <> "/" <> path
   end
 
   def absolute_url(url), do: url
+
+  defp listener_url_defaults(endpoint) do
+    cond do
+      https = endpoint[:https] -> {"https", https[:port] || 443}
+      http = endpoint[:http] -> {"http", http[:port] || 80}
+      true -> {"http", 80}
+    end
+  end
 
   defp action_email(recipient, attrs) do
     url = absolute_url(attrs.url)

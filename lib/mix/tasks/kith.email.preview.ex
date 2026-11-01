@@ -44,27 +44,23 @@ defmodule Mix.Tasks.Kith.Email.Preview do
 
   defp samples do
     user = %{email: "preview@example.test", locale: "en"}
-    base_url = KithWeb.Endpoint.url()
 
     account_emails = [
-      {"confirmation",
-       Emails.email_verification(user, base_url <> "/users/confirm/sample-token")},
-      {"password-reset",
-       Emails.password_reset(user, base_url <> "/users/reset-password/sample-token")},
-      {"email-change",
-       Emails.email_change(user, base_url <> "/users/settings/confirm-email/sample-token")},
+      {"confirmation", Emails.email_verification(user, "/users/confirm/sample-token")},
+      {"password-reset", Emails.password_reset(user, "/users/reset-password/sample-token")},
+      {"email-change", Emails.email_change(user, "/users/settings/confirm-email/sample-token")},
       {"invitation",
        Emails.invitation(user.email, %{
          account_name: "The Morgan Family",
          inviter_name: "Alex Morgan",
          role: "editor",
-         accept_url: base_url <> "/invitations/sample-token"
+         accept_url: "/invitations/sample-token"
        })}
     ]
 
     library_emails = [
       {"welcome", Emails.welcome(user)},
-      {"export", Emails.data_export_ready(user, base_url <> "/export/sample-download-token")}
+      {"export", Emails.data_export_ready(user, "/export/sample-download-token")}
     ]
 
     account_emails ++ reminder_samples(user) ++ library_emails

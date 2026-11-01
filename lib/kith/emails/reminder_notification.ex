@@ -18,7 +18,7 @@ defmodule Kith.Emails.ReminderNotification do
     weekday = formatted_date(instance.occurrence_date, locale, "EEEE")
     relative = relative_date(instance.occurrence_date, today)
     event = event(reminder.type, reminder.title)
-    url = KithWeb.Endpoint.url() <> "/contacts/#{reminder.contact.id}"
+    url = Emails.absolute_url("/contacts/#{reminder.contact.id}")
     subject = subject(reminder.type, instance.kind, instance.days_before, name, reminder.title)
     note = nonblank(reminder.description)
 
