@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "scope": "isolated Credo parent candidate only",
+  "byte_parity_cases": 24,
+  "tests": 2,
+  "json_issues": 1,
+  "strict_exit_status": 4,
+  "candidate_hex_nodes": 2,
+  "bunt_removed": true
+}

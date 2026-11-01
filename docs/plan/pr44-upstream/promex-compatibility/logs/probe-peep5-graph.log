@@ -1,0 +1,9 @@
+==> prom_ex
+     warning: Plug.Cowboy.child_spec/1 is undefined (module Plug.Cowboy is not available or is yet to be defined)
+     │
+ 561 │       Plug.Cowboy.child_spec(
+     │                   ~
+     │
+     └─ (prom_ex 1.12.0) lib/prom_ex.ex:561:19: PromEx.metrics_server_child_spec/4
+
+26 Hex nodes; 50 installed edges including candidate parent; zero mismatches

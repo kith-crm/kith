@@ -438,7 +438,7 @@ defmodule KithWeb.UI do
       phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
       role="alert"
       class={[
-        "fixed top-4 end-4 z-50 w-80 sm:w-96 animate-in slide-in-from-top-2 fade-in duration-300",
+        "fixed top-4 end-4 z-50 w-80 sm:w-96 animate-kith-flash-in duration-300",
         "rounded-[var(--radius-lg)] border p-4 shadow-[var(--shadow-dropdown)]",
         flash_classes(@kind)
       ]}

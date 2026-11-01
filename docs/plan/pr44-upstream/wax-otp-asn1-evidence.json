@@ -1,0 +1,217 @@
+{
+  "generated_at": "2026-11-01T02:09:44.483125+00:00",
+  "kith_head_at_probe": "dd90a81d3303c7fd6204cea85c8b30b0f4915740",
+  "status": "upstream_candidate_only_not_released_not_installed_in_kith",
+  "source": {
+    "url": "https://repo.hex.pm/tarballs/wax_-0.7.0.tar",
+    "sha256": "473b3378608418747e67746b7164576f1690a4ed1e044a4c8085a754269d21ce",
+    "version": "0.7.0"
+  },
+  "runtime": {
+    "platform": "Darwin 27.2.0 arm64",
+    "elixir": "1.19.5",
+    "otp": "28.5.0.5",
+    "erts": "16.4.0.5",
+    "asn1": "5.4.3"
+  },
+  "command": "./docs/plan/pr44-upstream/wax-otp-asn1-probe.sh /tmp/kith-pr44-wax-otp-asn1-manifest-fix",
+  "result": {
+    "runner_exit": 0,
+    "original_probe": {
+      "tests": 4,
+      "failures": 0
+    },
+    "candidate_probe": {
+      "tests": 4,
+      "failures": 0
+    },
+    "restored_probe": {
+      "tests": 4,
+      "failures": 0
+    },
+    "legacy_ber_record_samples": 48,
+    "schema_versions": [
+      {
+        "module": "AndroidKeyAttestationV1",
+        "source_sha256": "100527312cba1ab67392bb3d09774326ebb4ee2f827487ccb39fa97d8105129a",
+        "candidate_source_unchanged": true,
+        "generated_erlang_identical": true,
+        "generated_header_identical": true,
+        "generated_erlang_sha256": "9f778c4ea106cdf68e3cfd4ab6a4c5534112f251b50d74bfeb78069da6b1908a",
+        "generated_header_sha256": "ac7632632708abdc96691001178b7183653b74a89e2bd4195c3ceb78d0dc3617"
+      },
+      {
+        "module": "AndroidKeyAttestationV2",
+        "source_sha256": "a438c40ce19984b46808260fd3007a21fc7fb95c2d2147a3acc439a7bf91f728",
+        "candidate_source_unchanged": true,
+        "generated_erlang_identical": true,
+        "generated_header_identical": true,
+        "generated_erlang_sha256": "1fc27fbbcae097544834bf9e19b88130a7ab9c5d2a434868f329eac987b2e434",
+        "generated_header_sha256": "664c4aedb287b4f73151f287dd85491eab1591249111b1d1722efac5180c9e88"
+      },
+      {
+        "module": "AndroidKeyAttestationV3",
+        "source_sha256": "a677f19b6f71a0ae7630add035b05a1ea661b2081e4a3872b39b5512afb44e03",
+        "candidate_source_unchanged": true,
+        "generated_erlang_identical": true,
+        "generated_header_identical": true,
+        "generated_erlang_sha256": "71781a4aa21520497c9502710dc56951c614a48786e94179fc5ee27092014b66",
+        "generated_header_sha256": "563e0541b1057ab575aa100e543d59a4f5defb14cbdd138805c1bb44b09726a6"
+      }
+    ],
+    "incremental_compilation": "unchanged schemas skipped",
+    "missing_output": "deleted V2 Erlang output regenerated",
+    "clean": "generated schema outputs removed and rebuilt",
+    "malformed_schema_negative_control": "corrupt module declaration makes compile fail; restored source recompiles",
+    "packaging": "compiler source and all three schemas included; src and _build absent from package",
+    "fresh_packaged_production_release": "compiled and released from newly extracted Hex package; all48 legacy schema samples and signed registration/assertion passed under release",
+    "hex_audit": "No retired or security advisory packages found; HEX_IGNORE_ADVISORIES and HEX_IGNORE_RETIREMENTS explicitly empty",
+    "mixed_restored_probe": {
+      "tests": 4,
+      "failures": 0
+    },
+    "partial_generation_regression": {
+      "setup": "Valid V1 schema adds optional probeFlag; V2 schema has invalid declaration. V1 outputs change before V2 fails.",
+      "failure_exit_nonzero": true,
+      "success_manifest_absent_after_failure": true,
+      "restore_compile_regenerated_all_three_schemas": true,
+      "restored_generated_erlang_and_headers_identical_to_legacy": true,
+      "restored_legacy_roundtrips_and_signed_flow_passed": true
+    }
+  },
+  "graph_summaries": [
+    {
+      "nodes": 12,
+      "variant": "original",
+      "mismatches": [],
+      "installed_edges": 8,
+      "versions": {
+        "asn1_compiler": "0.1.1",
+        "cbor": "1.0.2",
+        "dialyxir": "1.4.8",
+        "erlex": "0.2.9",
+        "earmark_parser": "1.4.46",
+        "ex_doc": "0.40.4",
+        "makeup_elixir": "1.0.1",
+        "makeup_erlang": "1.1.0",
+        "jason": "1.4.5",
+        "makeup": "1.2.3",
+        "nimble_parsec": "1.4.2",
+        "x509": "0.9.2"
+      }
+    },
+    {
+      "nodes": 11,
+      "variant": "candidate",
+      "mismatches": [],
+      "installed_edges": 8,
+      "versions": {
+        "cbor": "1.0.2",
+        "dialyxir": "1.4.8",
+        "erlex": "0.2.9",
+        "earmark_parser": "1.4.46",
+        "ex_doc": "0.40.4",
+        "makeup_elixir": "1.0.1",
+        "makeup_erlang": "1.1.0",
+        "jason": "1.4.5",
+        "makeup": "1.2.3",
+        "nimble_parsec": "1.4.2",
+        "x509": "0.9.2"
+      }
+    },
+    {
+      "nodes": 11,
+      "variant": "release-source",
+      "mismatches": [],
+      "installed_edges": 8,
+      "versions": {
+        "cbor": "1.0.2",
+        "dialyxir": "1.4.8",
+        "erlex": "0.2.9",
+        "earmark_parser": "1.4.46",
+        "ex_doc": "0.40.4",
+        "makeup_elixir": "1.0.1",
+        "makeup_erlang": "1.1.0",
+        "jason": "1.4.5",
+        "makeup": "1.2.3",
+        "nimble_parsec": "1.4.2",
+        "x509": "0.9.2"
+      }
+    }
+  ],
+  "production_hex_closure": {
+    "cbor": "1.0.2",
+    "jason": "1.4.5",
+    "x509": "0.9.2"
+  },
+  "removed": [
+    "asn1_compiler 0.1.1"
+  ],
+  "new_hex_dependencies": [],
+  "runtime_application_change": [
+    "asn1 explicitly added to extra_applications"
+  ],
+  "limits": [
+    "No genuine upstream release exists for this candidate; Kith mix.exs and mix.lock remain unchanged by this slice.",
+    "Tested only Darwin arm64 OTP28/Elixir1.19.5, not Linux/musl or the full declared Elixir/OTP support matrix.",
+    "Hex source excludes the full upstream Wax test suite; probe is additional targeted coverage, not that suite.",
+    "Synthetic BER records cover all three unchanged Android schemas, but no physical authenticator, Android certificate chain or TPM/FIDO-U2F/Apple attestation fixture was exercised.",
+    "Wax public verification functions were tested with synthetic ES256 packed self-attestation registration and assertions; Kith account registration/session behavior is outside this isolated upstream slice.",
+    "The standalone upstream-project lock includes Wax developer documentation tools. These tools are not inherited by Kith as Wax consumer dependencies."
+  ],
+  "artifacts": {
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/candidate-compile.log": "5ff7da360b3f04ce04dac2f9478686910ba748cf4b6db5d0ed98423478200aee",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/candidate-probe.log": "131b5ca077b0da4a26f7a95c716b49ddb6759109bfec04907a86c43ab273eea7",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/candidate-resolve.log": "eb6659ca31eee4b5624452c445369fdd479307b6545491190f838a587b075df3",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/candidate.mix.lock": "cf1fe117adfd0b3c1ef6ab6556f68a677804c5fa37aa4a3f6de60823aad747c8",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/clean.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/graphs.jsonl": "c3b9a36b180d9b56391e0c6fb65eb826bce71b17f21da927a8852d2622f0fe9d",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/incremental.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/invalid-schema-negative.log": "d6a1721147be13c460e6bec64295b13900b9a903dc2cfef2fe2d114ccc9ff0e9",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/missing-output.log": "8ec8adbb2caac577b271cdc1ef9b20c9d4d1b3cbc8b658719759b088d57d755d",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/mixed-restored-compile.log": "8ec8adbb2caac577b271cdc1ef9b20c9d4d1b3cbc8b658719759b088d57d755d",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/mixed-restored-equivalence.log": "ba8ae0ae5f4e2490086ff056b99ed40af348ed2c7b296b54af1be2c2ddf2441b",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/mixed-restored-probe.log": "dc6acd085f945af7dd0a3fba625ddb889db8e57a5e40eca6bdee6fc18cd89ff0",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/mixed-schema-negative.log": "e1678a30e0430cda9c8a7e879b250467ead3892aebdbba1592a68c89a7b286f6",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/old-mixed-failure.log": "e1678a30e0430cda9c8a7e879b250467ead3892aebdbba1592a68c89a7b286f6",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/old-mixed-restored-compile.log": "872c2e539dd57eeed0dd871e3156764a203d77aedfb2f892b8e80587267663ee",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/old-mixed-restored-probe.log": "c4a0892ff305a6d028726ea835793d63987b4896e3b2947be5c3f80482793e62",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/original-compile.log": "b3ea22208be97f324b1c214b273bf15988c3216c51a49106c5ede9e93d00fc02",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/original-probe.log": "89e514722aa1d80d56db682fad1a97551a58a1753f67da930a605ef32bfd841d",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/original-resolve.log": "0a7f2d66b32729fd56d3b93fe00f598edd9ef348cf0f64ac0f787d100ad27738",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/original.mix.lock": "658f4fc31aeaf683f2853bdc9d771202c68a22a2fd7432b8b6437d0060ee1e73",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/package.log": "6934ab1fab0e38db2b46031279e371bfd381378bcf10d6278cf0bb505395f291",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/patch.log": "4711bd4c04037feb619afcc17b216958318808231071f6489c05867558deb31b",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/recompile.log": "9f6d90bfa64f5dcc0ac71cf66054aa71d04f2458ed1d12c683349e50585e07cf",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/release-audit.log": "25ce35312da15695b9ab9e466ebdba2c1460f780ca6a14e164646fee228030d6",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/release-build.log": "388f1819ecdc6ae46ef52f9f4289ce641b007e7df3ffca68d99ea04bc9ed6192",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/release-compile.log": "5ff7da360b3f04ce04dac2f9478686910ba748cf4b6db5d0ed98423478200aee",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/release-probe.log": "eeb83b5bec397113699b508f015fd997c267545f363a94fc50c13579529da40c",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/release-resolve.log": "b1a81df3bf2c04fa2c83ab2e6f46ebeeb83dc495ce609002dea881d27767e40c",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/release-source.mix.lock": "cf1fe117adfd0b3c1ef6ab6556f68a677804c5fa37aa4a3f6de60823aad747c8",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/restored-compile.log": "8ec8adbb2caac577b271cdc1ef9b20c9d4d1b3cbc8b658719759b088d57d755d",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/restored-probe.log": "70ee2739ad09ef43e9914d62cf37571fc562b25b8bb701b8135197a4c4cff11b",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/runner.log": "98422772eb5aa686b71aaa08f39ed1a4f40d53361c4d649d19e718bba5057075",
+    "docs/plan/pr44-upstream/wax-otp-asn1-evidence/runtime.log": "74405a38225c738c63a85d9d63f192e8da76f1a40f9cbddadeae9d97cc936f60"
+  },
+  "legacy_fixtures_sha256": "ad7c8cc542cdd91060e240bfe6d305a93d4a034ef98ef5330558b4624723b069",
+  "repro_artifacts": {
+    "docs/plan/pr44-upstream/wax-otp-asn1.patch": "3ea290844e178dfcab94943660d8f7314a2ac3a9cf97ab485e51658997539b51",
+    "docs/plan/pr44-upstream/wax-otp-asn1-probe.sh": "f55eea5907cffe18e7ca67a17029aaa49e26e2b8b992f8b0161e75cde3a35070",
+    "docs/plan/pr44-upstream/wax-otp-asn1-probe.exs": "ca0942e8ba53e929b5ae26751014be2e12338ab1c13f2b247e3766c7368ad7b1",
+    "docs/plan/pr44-upstream/wax-otp-asn1-release-probe.exs": "d58bd367d95c2cebf6694f878737afb7810742b488d86170d0f3f37a10da28b3"
+  },
+  "old_candidate_negative_control": {
+    "patch_sha256": "e6cb7bb8297d0e74ef26a341df801dfe097008592a7d627f25375223aa1b1378",
+    "partial_generation_failed": true,
+    "success_manifest_incorrectly_survived": true,
+    "restoring_both_original_schemas_incorrectly_skipped_asn1_generation": true,
+    "stale_earlier_erlang_output_was_compiled": true,
+    "restored_probe": {
+      "tests": 4,
+      "failures": 1,
+      "exit": 2
+    },
+    "failure": "AndroidKeyAttestationV1 legacy record contract detects extra optional field after restoration"
+  }
+}

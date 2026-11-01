@@ -1,0 +1,14 @@
+==> x509
+Compiling 24 files (.ex)
+Generated x509 app
+==> jason
+Compiling 10 files (.ex)
+Generated jason app
+==> cbor
+Compiling 5 files (.ex)
+Generated cbor app
+==> wax_
+Compiling 3 Wax ASN.1 schemas with OTP
+Compiling 3 files (.erl)
+Compiling 25 files (.ex)
+Generated wax_ app

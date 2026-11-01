@@ -1,0 +1,143 @@
+--- a/mix.exs
++++ b/mix.exs
+@@ -1,3 +1,5 @@
++Code.require_file("mix/wax_asn1.exs", __DIR__)
++
+ defmodule Wax.MixProject do
+   use Mix.Project
+ 
+@@ -9,7 +11,7 @@
+       elixir: "~> 1.12",
+       start_permanent: Mix.env() == :prod,
+       deps: deps(),
+-      compilers: [:asn1 | Mix.compilers()],
++      compilers: [:wax_asn1 | Mix.compilers()],
+       dialyzer: [plt_add_apps: [:mix]],
+       docs: [
+         main: "readme",
+@@ -22,14 +24,13 @@
+ 
+   def application do
+     [
+-      extra_applications: [:logger, :inets],
++      extra_applications: [:logger, :inets, :asn1],
+       mod: {Wax.Application, []}
+     ]
+   end
+ 
+   defp deps do
+     [
+-      {:asn1_compiler, "~> 0.1.0", runtime: false},
+       {:cbor, "~> 1.0"},
+       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
+       {:ex_doc, "~> 0.27", only: :dev, runtime: false},
+@@ -40,7 +41,7 @@
+ 
+   def package() do
+     [
+-      files: ~w(asn1 lib .formatter.exs mix.exs README* LICENSE* CHANGELOG*),
++      files: ~w(asn1 lib mix .formatter.exs mix.exs README* LICENSE* CHANGELOG*),
+       licenses: ["Apache-2.0"],
+       links: %{"GitHub" => "https://github.com/tanguilp/wax"}
+     ]
+--- /dev/null
++++ b/mix/wax_asn1.exs
+@@ -0,0 +1,98 @@
++defmodule Mix.Tasks.Compile.WaxAsn1 do
++  @moduledoc false
++  use Mix.Task.Compiler
++
++  @recursive true
++  @manifest ".compile.wax_asn1"
++  @extensions ~w(erl hrl asn1db)
++
++  @impl true
++  def run(args) do
++    sources = Path.wildcard("asn1/*.asn1") |> Enum.sort()
++    if sources == [], do: Mix.raise("Wax ASN.1 schemas are missing")
++
++    modules = Enum.map(sources, &Path.basename(&1, ".asn1"))
++    fingerprint = fingerprint(sources)
++    previous = read_manifest()
++
++    outputs_exist? =
++      Enum.all?(modules, &Enum.all?(outputs(&1), fn path -> File.regular?(path) end))
++
++    if "--force" not in args and previous == {fingerprint, modules} and outputs_exist? do
++      {:noop, []}
++    else
++      compile(sources, modules, previous, fingerprint)
++    end
++  end
++
++  @impl true
++  def manifests, do: [manifest()]
++
++  @impl true
++  def clean do
++    case read_manifest() do
++      {_fingerprint, modules} -> Enum.each(modules, &remove_outputs/1)
++      nil -> :ok
++    end
++
++    File.rm(manifest())
++    :ok
++  end
++
++  defp compile(sources, modules, previous, fingerprint) do
++    # A later schema can fail after an earlier one has overwritten its outputs.
++    # Invalidate the previous success first, so restoring the old inputs cannot
++    # make those partial outputs look like an unchanged successful build.
++    case File.rm(manifest()) do
++      :ok -> :ok
++      {:error, :enoent} -> :ok
++      error -> Mix.raise("Cannot invalidate Wax ASN.1 manifest: #{inspect(error)}")
++    end
++
++    File.mkdir_p!("src")
++    Mix.shell().info("Compiling #{length(sources)} Wax ASN.1 schemas with OTP")
++
++    Enum.each(sources, fn source ->
++      # Preserve the preceding compiler's BER rule and record representation.
++      # :noobj leaves BEAM compilation to Mix's normal Erlang compiler.
++      case :asn1ct.compile(String.to_charlist(source), [:noobj, outdir: String.to_charlist("src")]) do
++        :ok -> :ok
++        error -> Mix.raise("Wax ASN.1 compilation failed for #{source}: #{inspect(error)}")
++      end
++    end)
++
++    case previous do
++      {_fingerprint, old_modules} -> Enum.each(old_modules -- modules, &remove_outputs/1)
++      nil -> :ok
++    end
++
++    File.mkdir_p!(Mix.Project.manifest_path())
++    File.write!(manifest(), :erlang.term_to_binary({fingerprint, modules}))
++    {:ok, []}
++  end
++
++  defp fingerprint(sources) do
++    inputs = Enum.map(sources, &{&1, File.read!(&1)})
++
++    :crypto.hash(
++      :sha256,
++      :erlang.term_to_binary(
++        {System.version(), :erlang.system_info(:system_version), File.read!(__ENV__.file), inputs}
++      )
++    )
++  end
++
++  defp outputs(module), do: Enum.map(@extensions, &Path.join("src", "#{module}.#{&1}"))
++  defp remove_outputs(module), do: Enum.each(outputs(module), &File.rm/1)
++  defp manifest, do: Path.join(Mix.Project.manifest_path(), @manifest)
++
++  defp read_manifest do
++    with {:ok, binary} <- File.read(manifest()) do
++      :erlang.binary_to_term(binary, [:safe])
++    else
++      _ -> nil
++    end
++  rescue
++    ArgumentError -> nil
++  end
++end

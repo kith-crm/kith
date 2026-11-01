@@ -42,6 +42,10 @@ pids+=("$!")
 
 mix ecto.create
 mix ecto.migrate
+# Plug.Static serves compressed sidecars in test mode. Regenerate them with the
+# current sources so an older app.css.gz cannot hide a changed browser asset.
+mix assets.build
+mix phx.digest
 mix run --no-start -e 'Code.require_file("test/playwright/fixtures/pr44/boot.exs"); Code.require_file("priv/repo/seeds.exs")' > "$log_dir/seeds.log" 2>&1
 mix run --no-start test/playwright/fixtures/pr44/server.exs > "$log_dir/phoenix.log" 2>&1 &
 pids+=("$!")

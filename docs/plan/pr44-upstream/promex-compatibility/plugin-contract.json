@@ -1,0 +1,1899 @@
+[
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "application",
+      "dependency",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "Information regarding the application's dependencies.",
+    "event_name": [
+      "promex_upstream_probe",
+      "application",
+      "dependency",
+      "info"
+    ],
+    "tags": [
+      "name",
+      "version",
+      "modules"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "application",
+      "git_author",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The application's author of the last Git commit at the time of deployment.",
+    "event_name": [
+      "promex_upstream_probe",
+      "application",
+      "git_author",
+      "info"
+    ],
+    "tags": [
+      "author"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "application",
+      "git_sha",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The application's Git SHA at the time of deployment.",
+    "event_name": [
+      "promex_upstream_probe",
+      "application",
+      "git_sha",
+      "info"
+    ],
+    "tags": [
+      "sha"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "application",
+      "primary",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "Information regarding the primary application.",
+    "event_name": [
+      "promex_upstream_probe",
+      "application",
+      "primary",
+      "info"
+    ],
+    "tags": [
+      "name",
+      "version",
+      "modules"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "application",
+      "uptime",
+      "milliseconds",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "millisecond",
+    "description": "The total number of wall clock milliseconds that have passed since the application started.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "application",
+      "uptime",
+      "count"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "memory",
+      "allocated",
+      "bytes"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "byte",
+    "description": "The total amount of memory currently allocated.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "memory"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "memory",
+      "atom",
+      "total",
+      "bytes"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "byte",
+    "description": "The total amount of memory currently allocated for atoms.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "memory"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "memory",
+      "binary",
+      "total",
+      "bytes"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "byte",
+    "description": "The total amount of memory currently allocated for binaries.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "memory"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "memory",
+      "code",
+      "total",
+      "bytes"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "byte",
+    "description": "The total amount of memory currently allocated for Erlang code.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "memory"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "memory",
+      "ets",
+      "total",
+      "bytes"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "byte",
+    "description": "The total amount of memory currently allocated for ETS tables.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "memory"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "memory",
+      "persistent_term",
+      "total",
+      "bytes"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "byte",
+    "description": "The total amount of memory currently allocated to Erlang :persistent_term.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "memory"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "memory",
+      "processes",
+      "total",
+      "bytes"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "byte",
+    "description": "The total amount of memory currently allocated to Erlang processes.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "memory"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "active_task",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The number of processes and ports that are ready to run, or are currently running.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "active_task",
+      "count"
+    ],
+    "tags": [
+      "type"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "atom",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "A count of how many atoms are currently allocated.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "atom",
+      "count"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "context_switch",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The total number of context switches since the system started.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "context_switch",
+      "count"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "ets",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "A count of how many ETS tables currently exist.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "ets",
+      "count"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "gc",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The total number of garbage collections since the system started.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "gc",
+      "count"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "gc",
+      "reclaimed",
+      "bytes"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "byte",
+    "description": "The total number of bytes reclaimed since the system started.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "gc",
+      "bytes_reclaimed"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "port",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "A count of how many ports are currently active.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "port",
+      "count"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "port_io",
+      "byte",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "byte",
+    "description": "The total number of bytes sent and received through ports since the system started.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "port_io",
+      "count"
+    ],
+    "tags": [
+      "type"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "process",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "A count of how many Erlang processes are currently running.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "process",
+      "count"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "reduction",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The total number of reductions since the system started.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "reduction",
+      "count"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "run_queue",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The number of processes and ports that are ready to run and are in the run queue.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "run_queue",
+      "count"
+    ],
+    "tags": [
+      "type"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "stats",
+      "uptime",
+      "milliseconds",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "millisecond",
+    "description": "The total number of wall clock milliseconds that have passed since the system started.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "uptime",
+      "count"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "atom_limit",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The maximum number of atoms allowed.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "atom_limit"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "dirty_cpu_schedulers",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The total number of dirty CPU scheduler threads used by the BEAM.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "dirty_cpu_schedulers"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "dirty_cpu_schedulers_online",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The total number of dirty CPU schedulers that are online.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "dirty_cpu_schedulers_online"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "dirty_io_schedulers",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The total number of dirty I/O schedulers used to execute I/O bound native functions.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "dirty_io_schedulers"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "ets_limit",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The maximum number of ETS tables allowed (this is partially obsolete given that the number of ETS tables is limited by available memory).",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "ets_limit"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "jit_support",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "Whether the BEAM instance is running with the JIT compiler.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "jit_support"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "logical_processors",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The total number of logical processors on the host machine.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "logical_processors"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "logical_processors_available",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The total number of logical processors available to the BEAM.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "logical_processors_available"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "logical_processors_online",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The total number of logical processors online on the host machine.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "logical_processors_online"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "port_limit",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The maximum number of ports that can simultaneously exist on the BEAM instance.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "port_limit"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "process_limit",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The maximum number of processes that can simultaneously exist on the BEAM instance.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "process_limit"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "schedulers",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The number of scheduler threads in use by the BEAM.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "schedulers"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "schedulers_online",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The number of scheduler threads that are online.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "schedulers_online"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "smp_support",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "Whether the BEAM instance has been compiled with SMP support.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "smp_support"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "thread_pool_size",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The number of async threads in the async threads pool used for async driver calls.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "thread_pool_size"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "thread_support",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "Whether the BEAM instance has been compiled with threading support.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "thread_support"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "time_correction_support",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "Whether the BEAM instance has time correction support.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "time_correction_support"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "version",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The OTP release major version.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "version"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "beam",
+      "system",
+      "word_size_bytes",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The size of Erlang term words in bytes.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "beam",
+      "word_size_bytes"
+    ],
+    "tags": [],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "ecto",
+      "repo",
+      "init",
+      "pool",
+      "size"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The configured pool size value for the repo.",
+    "event_name": [
+      "ecto",
+      "repo",
+      "init"
+    ],
+    "tags": [
+      "repo"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "ecto",
+      "repo",
+      "init",
+      "status",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "Information regarding the initialized repo.",
+    "event_name": [
+      "ecto",
+      "repo",
+      "init"
+    ],
+    "tags": [
+      "repo",
+      "database_name",
+      "database_host"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "ecto",
+      "repo",
+      "init",
+      "timeout",
+      "duration"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The configured timeout value for the repo.",
+    "event_name": [
+      "ecto",
+      "repo",
+      "init"
+    ],
+    "tags": [
+      "repo"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "ecto",
+      "repo",
+      "query",
+      "decode",
+      "time",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The time spent decoding the data received from the database.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "ecto",
+      "query"
+    ],
+    "tags": [
+      "repo"
+    ],
+    "buckets": [
+      5,
+      50,
+      100,
+      500,
+      2500
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "ecto",
+      "repo",
+      "query",
+      "execution",
+      "time",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The time spent executing the query.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "ecto",
+      "query"
+    ],
+    "tags": [
+      "repo",
+      "source",
+      "command"
+    ],
+    "buckets": [
+      10,
+      50,
+      250,
+      2500,
+      10000,
+      30000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "ecto",
+      "repo",
+      "query",
+      "idle",
+      "time",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The time the connection spent waiting before being checked out for the query.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "ecto",
+      "query"
+    ],
+    "tags": [
+      "repo"
+    ],
+    "buckets": [
+      10,
+      50,
+      250,
+      1000,
+      5000,
+      10000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "ecto",
+      "repo",
+      "query",
+      "queue",
+      "time",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The time spent waiting to check out a database connection.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "ecto",
+      "query"
+    ],
+    "tags": [
+      "repo"
+    ],
+    "buckets": [
+      10,
+      50,
+      250,
+      1000,
+      5000,
+      10000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "ecto",
+      "repo",
+      "query",
+      "results",
+      "returned"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "unit",
+    "description": "The number of result rows returned from a query.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "ecto",
+      "query"
+    ],
+    "tags": [
+      "repo",
+      "source",
+      "command"
+    ],
+    "buckets": [
+      5,
+      10,
+      50,
+      100,
+      500,
+      1000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "ecto",
+      "repo",
+      "query",
+      "total",
+      "time",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The sum of the other time measurements.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "ecto",
+      "query"
+    ],
+    "tags": [
+      "repo",
+      "source",
+      "command"
+    ],
+    "buckets": [
+      10,
+      50,
+      250,
+      2500,
+      10000,
+      30000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "circuit",
+      "open",
+      "total"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Counter",
+    "unit": "unit",
+    "description": "The number of circuit open events that have occurred.",
+    "event_name": [
+      "oban",
+      "circuit",
+      "open"
+    ],
+    "tags": [
+      "name",
+      "circuit_breaker"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "circuit",
+      "trip",
+      "total"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Counter",
+    "unit": "unit",
+    "description": "The number of circuit breaker events that have occurred",
+    "event_name": [
+      "oban",
+      "circuit",
+      "trip"
+    ],
+    "tags": [
+      "name",
+      "circuit_breaker"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "init",
+      "dispatch",
+      "cooldown",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The Oban supervisor's dispatch cooldown value.",
+    "event_name": [
+      "oban",
+      "supervisor",
+      "init"
+    ],
+    "tags": [
+      "name"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "init",
+      "queue",
+      "concurrency",
+      "limit"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The concurrency limits of each of the Oban queue.",
+    "event_name": [
+      "prom_ex",
+      "oban",
+      "queue",
+      "limit",
+      "proxy"
+    ],
+    "tags": [
+      "name",
+      "queue"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "init",
+      "shutdown",
+      "grace",
+      "period",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The Oban supervisor's shutdown grace period value.",
+    "event_name": [
+      "oban",
+      "supervisor",
+      "init"
+    ],
+    "tags": [
+      "name"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "init",
+      "status",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "Information regarding the initialized oban supervisor.",
+    "event_name": [
+      "oban",
+      "supervisor",
+      "init"
+    ],
+    "tags": [
+      "name",
+      "node",
+      "plugins",
+      "prefix",
+      "queues",
+      "repo"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "job",
+      "complete",
+      "attempts"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "unit",
+    "description": "The number of times a job was attempted prior to completing.",
+    "event_name": [
+      "oban",
+      "job",
+      "stop"
+    ],
+    "tags": [
+      "name",
+      "queue",
+      "state",
+      "worker"
+    ],
+    "buckets": [
+      1,
+      5,
+      10
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "job",
+      "exception",
+      "attempts"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "unit",
+    "description": "The number of times a job was attempted prior to throwing an exception.",
+    "event_name": [
+      "oban",
+      "job",
+      "exception"
+    ],
+    "tags": [
+      "name",
+      "queue",
+      "state",
+      "worker"
+    ],
+    "buckets": [
+      1,
+      5,
+      10
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "job",
+      "exception",
+      "duration",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The amount of time it took to process a job the encountered an exception.",
+    "event_name": [
+      "oban",
+      "job",
+      "exception"
+    ],
+    "tags": [
+      "name",
+      "queue",
+      "state",
+      "worker",
+      "kind",
+      "error"
+    ],
+    "buckets": [
+      10,
+      100,
+      500,
+      1000,
+      5000,
+      20000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "job",
+      "exception",
+      "queue",
+      "time",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The amount of time that the Oban job was waiting in queue for processing prior to resulting in an exception.",
+    "event_name": [
+      "oban",
+      "job",
+      "exception"
+    ],
+    "tags": [
+      "name",
+      "queue",
+      "state",
+      "worker",
+      "kind",
+      "error"
+    ],
+    "buckets": [
+      10,
+      100,
+      500,
+      1000,
+      5000,
+      20000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "job",
+      "processing",
+      "duration",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The amount of time it takes to processes an Oban job.",
+    "event_name": [
+      "oban",
+      "job",
+      "stop"
+    ],
+    "tags": [
+      "name",
+      "queue",
+      "state",
+      "worker"
+    ],
+    "buckets": [
+      10,
+      100,
+      500,
+      1000,
+      5000,
+      20000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "job",
+      "queue",
+      "time",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The amount of time that the Oban job was waiting in queue for processing.",
+    "event_name": [
+      "oban",
+      "job",
+      "stop"
+    ],
+    "tags": [
+      "name",
+      "queue",
+      "state",
+      "worker"
+    ],
+    "buckets": [
+      10,
+      100,
+      500,
+      1000,
+      5000,
+      20000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "producer",
+      "dispatched",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "unit",
+    "description": "The number of jobs that were dispatched.",
+    "event_name": [
+      "oban",
+      "producer",
+      "stop"
+    ],
+    "tags": [
+      "queue",
+      "name"
+    ],
+    "buckets": [
+      5,
+      10,
+      50,
+      100
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "producer",
+      "duration",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "How long it took to dispatch the job.",
+    "event_name": [
+      "oban",
+      "producer",
+      "stop"
+    ],
+    "tags": [
+      "queue",
+      "name"
+    ],
+    "buckets": [
+      10,
+      100,
+      500,
+      1000,
+      5000,
+      10000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "producer",
+      "exception",
+      "duration",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "How long it took for the producer to raise an exception.",
+    "event_name": [
+      "oban",
+      "producer",
+      "exception"
+    ],
+    "tags": [
+      "queue",
+      "name"
+    ],
+    "buckets": [
+      10,
+      100,
+      500,
+      1000,
+      5000,
+      10000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "oban",
+      "queue",
+      "length",
+      "count"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The total number jobs that are in the queue in the designated state",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "oban",
+      "queue",
+      "length",
+      "count"
+    ],
+    "tags": [
+      "name",
+      "queue",
+      "state"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "phoenix",
+      "channel",
+      "handled_in",
+      "duration",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The time it takes for the application to respond to channel messages.",
+    "event_name": [
+      "phoenix",
+      "channel_handled_in"
+    ],
+    "tags": [
+      "endpoint",
+      "handler",
+      "event"
+    ],
+    "buckets": [
+      10,
+      100,
+      500,
+      1000,
+      5000,
+      10000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "phoenix",
+      "channel",
+      "joined",
+      "total"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Counter",
+    "unit": "unit",
+    "description": "The number of channel joins that have occurred.",
+    "event_name": [
+      "phoenix",
+      "channel_joined"
+    ],
+    "tags": [
+      "result",
+      "transport",
+      "endpoint"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "phoenix",
+      "endpoint",
+      "port",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The configured port of the Endpoint module.",
+    "event_name": [
+      "phoenix",
+      "endpoint",
+      "init"
+    ],
+    "tags": [
+      "port",
+      "endpoint"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "phoenix",
+      "endpoint",
+      "url",
+      "info"
+    ],
+    "type": "Elixir.Telemetry.Metrics.LastValue",
+    "unit": "unit",
+    "description": "The configured URL of the Endpoint module.",
+    "event_name": [
+      "phoenix",
+      "endpoint",
+      "init"
+    ],
+    "tags": [
+      "url",
+      "endpoint"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "phoenix",
+      "http",
+      "request",
+      "duration",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The time it takes for the application to respond to HTTP requests.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "phoenix",
+      "stop"
+    ],
+    "tags": [
+      "status",
+      "method",
+      "path",
+      "controller",
+      "action",
+      "host"
+    ],
+    "buckets": [
+      10,
+      100,
+      500,
+      1000,
+      5000,
+      10000,
+      30000
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "phoenix",
+      "http",
+      "requests",
+      "total"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Counter",
+    "unit": "unit",
+    "description": "The number of requests have been serviced.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "phoenix",
+      "stop"
+    ],
+    "tags": [
+      "status",
+      "method",
+      "path",
+      "controller",
+      "action",
+      "host"
+    ],
+    "buckets": null
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "phoenix",
+      "http",
+      "response",
+      "size",
+      "bytes"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "byte",
+    "description": "The size of the HTTP response payload.",
+    "event_name": [
+      "prom_ex",
+      "plugin",
+      "phoenix",
+      "stop"
+    ],
+    "tags": [
+      "status",
+      "method",
+      "path",
+      "controller",
+      "action",
+      "host"
+    ],
+    "buckets": [
+      64,
+      512,
+      4096,
+      65536,
+      262144,
+      1048576,
+      4194304,
+      16777216
+    ]
+  },
+  {
+    "name": [
+      "kith",
+      "prom_ex",
+      "phoenix",
+      "socket",
+      "connected",
+      "duration",
+      "milliseconds"
+    ],
+    "type": "Elixir.Telemetry.Metrics.Distribution",
+    "unit": "millisecond",
+    "description": "The time it takes for the application to establish a socket connection.",
+    "event_name": [
+      "phoenix",
+      "socket_connected"
+    ],
+    "tags": [
+      "result",
+      "transport",
+      "endpoint"
+    ],
+    "buckets": [
+      10,
+      100,
+      500,
+      1000,
+      5000,
+      10000
+    ]
+  }
+]

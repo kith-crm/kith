@@ -1,0 +1,17 @@
+Resolving Hex dependencies...
+Resolution completed in 0.025s
+Unchanged:
+  cldr_utils 2.29.7
+  decimal 3.2.0
+  digital_token 2.1.0
+  ex_cldr 2.47.5
+  ex_cldr_currencies 2.17.2
+  ex_cldr_numbers 2.38.3
+  jason 1.4.5
+* Getting digital_token (Hex package)
+* Getting ex_cldr_numbers (Hex package)
+* Getting ex_cldr (Hex package)
+* Getting cldr_utils (Hex package)
+* Getting decimal (Hex package)
+* Getting jason (Hex package)
+* Getting ex_cldr_currencies (Hex package)

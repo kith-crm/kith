@@ -1,0 +1,3 @@
+Compiling 3 Wax ASN.1 schemas with OTP
+AndroidKeyAttestationV2.asn1:1: syntax error before: 'INVALID'
+** (Mix) Wax ASN.1 compilation failed for asn1/AndroidKeyAttestationV2.asn1: {:error, [{:structured_error, {~c"AndroidKeyAttestationV2.asn1", 1}, :asn1ct_parser2, {:syntax_error, :INVALID}}]}

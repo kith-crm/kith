@@ -10,9 +10,6 @@
    The heroicons installation itself is managed by your mix.exs */
 @plugin "../vendor/heroicons";
 
-/* tailwindcss-animate plugin for premium micro-interactions */
-@plugin "tailwindcss-animate";
-
 /* Add variants based on LiveView classes */
 @custom-variant phx-click-loading (.phx-click-loading&, .phx-click-loading &);
 @custom-variant phx-submit-loading (.phx-submit-loading&, .phx-submit-loading &);
@@ -64,6 +61,24 @@
    ============================================================================ */
 
 @theme {
+  /* Native entry motions retain the previous plugin's ease timing and distances. */
+  --animate-kith-flash-in: kith-flash-in 300ms ease;
+  --animate-kith-selection-in: kith-selection-in 200ms ease;
+
+  @keyframes kith-flash-in {
+    from {
+      opacity: 0;
+      transform: translateY(-0.5rem);
+    }
+  }
+
+  @keyframes kith-selection-in {
+    from {
+      opacity: 0;
+      transform: translateY(1rem);
+    }
+  }
+
   /* -- Typography --------------------------------------------------------- */
   --font-sans: 'Plus Jakarta Sans Variable', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
   --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, 'Cascadia Code', 'Fira Code', monospace;

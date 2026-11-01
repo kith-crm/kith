@@ -1,0 +1,20 @@
+* assembling wax_-0.7.0 on MIX_ENV=prod
+* skipping runtime configuration (config/runtime.exs not found)
+
+Release created at _build/prod/rel/wax_
+
+    # To start your system
+    _build/prod/rel/wax_/bin/wax_ start
+
+Once the release is running:
+
+    # To connect to it remotely
+    _build/prod/rel/wax_/bin/wax_ remote
+
+    # To stop it gracefully (you may also send SIGINT/SIGTERM)
+    _build/prod/rel/wax_/bin/wax_ stop
+
+To list all commands:
+
+    _build/prod/rel/wax_/bin/wax_
+

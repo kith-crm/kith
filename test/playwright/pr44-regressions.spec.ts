@@ -77,6 +77,83 @@ test.beforeEach(async ({ page }) => {
   page.on("dialog", async (dialog) => { await dialog.accept(); });
 });
 
+test("native entry animations preserve selection and flash motion and dismissal", async ({ page }) => {
+  const account = control("prepare", { scenario: "duplicates" });
+  await login(page, account);
+  await page.goto("/contacts");
+  await connected(page);
+
+  // Observe the real CSS animations when LiveView inserts each component. Sampling
+  // their timeline avoids racing a 200ms animation against browser automation.
+  await page.evaluate(() => {
+    (window as any).pr44EntryMotions = {};
+    document.addEventListener("animationstart", (event) => {
+      if (!["kith-flash-in", "kith-selection-in"].includes(event.animationName)) return;
+      const element = event.target as HTMLElement;
+      const animation = element.getAnimations().find(
+        (candidate) => candidate instanceof CSSAnimation && candidate.animationName === event.animationName,
+      );
+      if (!animation?.effect) return;
+      const duration = Number(animation.effect.getTiming().duration);
+      const style = getComputedStyle(element);
+      const timing = style.animationTimingFunction;
+      const transitionDuration = style.transitionDuration;
+      const rem = parseFloat(getComputedStyle(document.documentElement).fontSize);
+      const sample = (time: number) => {
+        animation.currentTime = time;
+        const computed = getComputedStyle(element);
+        return {
+          opacity: Number(computed.opacity),
+          y: new DOMMatrixReadOnly(computed.transform).m42,
+        };
+      };
+      animation.pause();
+      const start = sample(0);
+      const middle = sample(duration / 2);
+      const end = sample(duration);
+      (window as any).pr44EntryMotions[event.animationName] = {
+        duration, timing, transitionDuration, rem, start, middle, end,
+      };
+      animation.currentTime = 0;
+      animation.play();
+    });
+  });
+
+  await page.locator("tbody tr input[type='checkbox']").first().check();
+  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() =>
+    !!(window as any).pr44EntryMotions["kith-selection-in"],
+  )).toBe(true);
+  await page.locator("button[phx-click='bulk-favorite']").click();
+  const flash = page.locator("#flash-info");
+  await expect(flash).toContainText("1 contact(s) favorited.");
+  await expect.poll(() => page.evaluate(() =>
+    !!(window as any).pr44EntryMotions["kith-flash-in"],
+  )).toBe(true);
+
+  const motions = await page.evaluate(() => (window as any).pr44EntryMotions);
+  for (const [name, duration, distance] of [
+    ["kith-selection-in", 200, 1],
+    ["kith-flash-in", 300, -0.5],
+  ] as const) {
+    const motion = motions[name];
+    expect(motion.duration, name).toBe(duration);
+    expect(motion.timing, name).toBe("ease");
+    expect(motion.transitionDuration, name).toBe(`${duration / 1000}s`);
+    expect(motion.start.opacity, name).toBeCloseTo(0, 4);
+    expect(motion.start.y, name).toBeCloseTo(distance * motion.rem, 3);
+    expect(motion.middle.opacity, name).toBeGreaterThan(0);
+    expect(motion.middle.opacity, name).toBeLessThan(1);
+    expect(Math.abs(motion.middle.y), name).toBeGreaterThan(0);
+    expect(Math.abs(motion.middle.y), name).toBeLessThan(Math.abs(motion.start.y));
+    expect(motion.end.opacity, name).toBeCloseTo(1, 4);
+    expect(motion.end.y, name).toBeCloseTo(0, 3);
+  }
+
+  await flash.getByRole("button", { name: "close", exact: true }).click();
+  await expect(flash).toBeHidden();
+});
+
 test("contact search recovers its form state after a LiveView reconnect", async ({ page }) => {
   const account = control("prepare", { scenario: "duplicates" });
   const errors: string[] = [];

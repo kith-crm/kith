@@ -26,7 +26,6 @@
     "@playwright/test": "1.64.1",
     "alpinejs": "3.17.5",
     "dompurify": "3.4.17",
-    "tailwindcss-animate": "^1.0.7",
     "trix": "2.1.19"
   }
 }

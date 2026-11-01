@@ -1,0 +1,394 @@
+{
+  "status": "passed",
+  "checks": "actual Caddy overwrite, IPv4/IPv6 peers, direct untrusted peer, malformed trusted header, API/login budgets, actual browser WebSocket signup budget and transported identity, request log identity",
+  "observations": [
+    {
+      "probe": "caddy-ipv4",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 200
+    },
+    {
+      "probe": "caddy-ipv6",
+      "client": "fd44:44:44::3",
+      "peer": "172.30.44.2",
+      "status": 200
+    },
+    {
+      "probe": "direct-untrusted",
+      "client": "172.30.45.4",
+      "peer": "172.30.45.4",
+      "status": 200
+    },
+    {
+      "probe": "trusted-malformed",
+      "client": "172.30.44.2",
+      "peer": "172.30.44.2",
+      "status": 200
+    },
+    {
+      "probe": "log-redaction",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 200
+    },
+    {
+      "probe": "api-throttle-1",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-2",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-3",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-4",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-5",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-6",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-7",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-8",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-9",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-10",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-11",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-12",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-13",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-14",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-15",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-16",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-17",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-18",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-19",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-20",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 400
+    },
+    {
+      "probe": "api-throttle-21",
+      "client": "172.30.46.3",
+      "peer": "172.30.44.2",
+      "status": 429
+    }
+  ],
+  "browser": {
+    "status": "passed",
+    "browser": "Chromium",
+    "verified_client": "172.30.44.1",
+    "forged_client": "192.0.2.222",
+    "email": "pr44-proxy-signup-1793498884268@example.test",
+    "websocket_handshake_status": 101,
+    "forged_websocket_header_observed": true,
+    "websocket_save_roundtrips": 6,
+    "sixth_signup_attempt_blocked": true,
+    "browser_login_fetches": [
+      {
+        "status": 200,
+        "redirected": true,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": null
+      },
+      {
+        "status": 200,
+        "redirected": true,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": null
+      },
+      {
+        "status": 200,
+        "redirected": true,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": null
+      },
+      {
+        "status": 200,
+        "redirected": true,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": null
+      },
+      {
+        "status": 200,
+        "redirected": true,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": null
+      },
+      {
+        "status": 200,
+        "redirected": true,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": null
+      },
+      {
+        "status": 200,
+        "redirected": true,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": null
+      },
+      {
+        "status": 200,
+        "redirected": true,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": null
+      },
+      {
+        "status": 200,
+        "redirected": true,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": null
+      },
+      {
+        "status": 200,
+        "redirected": true,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": null
+      },
+      {
+        "status": 429,
+        "redirected": false,
+        "client": "172.30.44.1",
+        "peer": "172.30.44.2",
+        "retry_after": "46"
+      }
+    ],
+    "origin_checks_disabled": false,
+    "page_errors": []
+  },
+  "socket_observations": [
+    {
+      "connected": true,
+      "kind": "websocket_signup_mount",
+      "socket_peer": "172.30.44.2",
+      "canonical_header_values": [
+        "172.30.44.1"
+      ],
+      "signup_peer": "172.30.44.1"
+    },
+    {
+      "connected": true,
+      "counter": 1,
+      "kind": "websocket_signup_save",
+      "signup_peer": "172.30.44.1",
+      "email": "pr44-proxy-signup-1793498884268@example.test",
+      "user_exists": false
+    },
+    {
+      "connected": true,
+      "counter": 2,
+      "kind": "websocket_signup_save",
+      "signup_peer": "172.30.44.1",
+      "email": "pr44-proxy-signup-1793498884268@example.test",
+      "user_exists": false
+    },
+    {
+      "connected": true,
+      "counter": 3,
+      "kind": "websocket_signup_save",
+      "signup_peer": "172.30.44.1",
+      "email": "pr44-proxy-signup-1793498884268@example.test",
+      "user_exists": false
+    },
+    {
+      "connected": true,
+      "counter": 4,
+      "kind": "websocket_signup_save",
+      "signup_peer": "172.30.44.1",
+      "email": "pr44-proxy-signup-1793498884268@example.test",
+      "user_exists": false
+    },
+    {
+      "connected": true,
+      "counter": 5,
+      "kind": "websocket_signup_save",
+      "signup_peer": "172.30.44.1",
+      "email": "pr44-proxy-signup-1793498884268@example.test",
+      "user_exists": false
+    },
+    {
+      "connected": true,
+      "counter": 6,
+      "kind": "websocket_signup_save",
+      "signup_peer": "172.30.44.1",
+      "email": "pr44-proxy-signup-1793498884268@example.test",
+      "user_exists": false
+    },
+    {
+      "status": 302,
+      "counter": 1,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    },
+    {
+      "status": 302,
+      "counter": 2,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    },
+    {
+      "status": 302,
+      "counter": 3,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    },
+    {
+      "status": 302,
+      "counter": 4,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    },
+    {
+      "status": 302,
+      "counter": 5,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    },
+    {
+      "status": 302,
+      "counter": 6,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    },
+    {
+      "status": 302,
+      "counter": 7,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    },
+    {
+      "status": 302,
+      "counter": 8,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    },
+    {
+      "status": 302,
+      "counter": 9,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    },
+    {
+      "status": 302,
+      "counter": 10,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    },
+    {
+      "status": 429,
+      "counter": 11,
+      "kind": "http_login_post",
+      "client": "172.30.44.1",
+      "socket_peer": "172.30.44.2"
+    }
+  ],
+  "users_created": 0,
+  "caddy_access_logs_redacted": true,
+  "caddy_upstream_failure_logs_redacted": true,
+  "caddy_access_log_observations": 58
+}

@@ -30,7 +30,7 @@ COPY config/config.exs config/prod.exs config/
 # but values are read from env vars at container startup
 COPY config/runtime.exs config/
 
-# Compile assets (npm packages needed for Alpine.js CSP, Trix, tailwindcss-animate)
+# Compile assets (npm packages needed for Alpine.js CSP and Trix)
 COPY assets assets
 COPY priv priv
 COPY lib lib
