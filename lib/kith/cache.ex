@@ -6,10 +6,12 @@ defmodule Kith.Cache do
 
   TTLs are milliseconds and default to 24 hours. Reads never renew expiration.
   All access uses a queued node-local per-key lock, including reads that can
-  promote an entry between Nebulex generations. Invalidation therefore cannot be undone by
-  an earlier fill or promotion. Values carry the backend's identity so a fill
-  spanning a backend restart cannot expose a stale value through the
-  replacement cache.
+  promote an entry between Nebulex generations. Invalidation therefore cannot
+  be undone by an earlier fill or promotion. Values carry both the granting
+  lock server and backend identities, so a fill spanning either restart cannot
+  expose stale data through the replacement cache.
+  Lock acquisition failures return errors; fetch still runs its callback once
+  without caching. Callback exceptions and exits propagate unchanged.
   """
 
   alias Kith.Cache.{Locks, Store}
@@ -20,14 +22,14 @@ defmodule Kith.Cache do
   @entry_tag :kith_cache_entry
 
   def get(key) do
-    locked(key, fn ->
-      with {:ok, identity} <- identity(), do: read(key, identity)
+    locked(key, fn lock_server ->
+      with {:ok, identity} <- identity(lock_server), do: read(key, identity)
     end)
   end
 
   def put(key, value, opts \\ []) do
-    locked(key, fn ->
-      with {:ok, identity} <- identity(), do: write(key, value, identity, opts)
+    locked(key, fn lock_server ->
+      with {:ok, identity} <- identity(lock_server), do: write(key, value, identity, opts)
     end)
   end
 
@@ -38,24 +40,31 @@ defmodule Kith.Cache do
   end
 
   @doc false
-  def delete_local(key), do: locked(key, fn -> backend(fn -> Store.delete(key) end) end)
+  def delete_local(key),
+    do: locked(key, fn _lock_server -> backend(fn -> Store.delete(key) end) end)
 
   @doc "Returns the remaining TTL in milliseconds, without extending it."
-  def ttl(key), do: locked(key, fn -> remaining_ttl(key) end)
+  def ttl(key), do: locked(key, fn lock_server -> remaining_ttl(key, lock_server) end)
 
   def fetch(key, fallback, opts \\ []) when is_function(fallback, 0) do
-    locked(key, fn -> fetch_unlocked(key, fallback, opts) end)
+    locked(
+      key,
+      fn lock_server -> fetch_unlocked(key, fallback, opts, lock_server) end,
+      fn _error ->
+        fallback.()
+      end
+    )
   end
 
-  defp remaining_ttl(key) do
-    with {:ok, identity} <- identity(),
+  defp remaining_ttl(key, lock_server) do
+    with {:ok, identity} <- identity(lock_server),
          {:ok, _value} <- read(key, identity) do
       backend(fn -> Store.ttl(key) end)
     end
   end
 
-  defp fetch_unlocked(key, fallback, opts) do
-    case identity() do
+  defp fetch_unlocked(key, fallback, opts, lock_server) do
+    case identity(lock_server) do
       {:ok, identity} -> read_or_load(key, fallback, identity, opts)
       {:error, _reason} -> fallback.()
     end
@@ -72,7 +81,8 @@ defmodule Kith.Cache do
     case fallback.() do
       {:ok, value} = result ->
         # Keep callback errors/exceptions outside the cache error boundary.
-        if identity() == {:ok, identity}, do: write(key, value, identity, opts)
+        {_store, lock_server} = identity
+        if identity(lock_server) == {:ok, identity}, do: write(key, value, identity, opts)
         result
 
       {:error, _reason} = error ->
@@ -95,13 +105,21 @@ defmodule Kith.Cache do
     end)
   end
 
-  defp identity do
-    with {:ok, %{cache_pid: pid}} when is_pid(pid) <- backend(fn -> Store.info(:server) end),
-         do: {:ok, pid}
+  defp identity(lock_server) do
+    with true <- Process.whereis(Locks) == lock_server,
+         {:ok, %{cache_pid: pid}} when is_pid(pid) <- backend(fn -> Store.info(:server) end) do
+      {:ok, {pid, lock_server}}
+    else
+      false -> {:error, :unavailable}
+      error -> error
+    end
   end
 
-  defp locked(key, operation) do
-    Locks.with_lock(key, operation)
+  defp locked(key, operation, unavailable \\ fn error -> error end) do
+    case Locks.with_lock(key, operation) do
+      {:ok, result} -> result
+      {:error, _reason} = error -> unavailable.(error)
+    end
   end
 
   defp invalidate_peers(key) do

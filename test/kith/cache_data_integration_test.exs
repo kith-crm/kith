@@ -8,13 +8,14 @@ defmodule Kith.CacheDataIntegrationTest do
 
   alias Ecto.Adapters.SQL.Sandbox
   alias Kith.Cache
-  alias Kith.Cache.Store
+  alias Kith.Cache.{Locks, Store}
   alias Kith.{Contacts, DuplicateDetection, Repo, Storage}
 
   setup do
     {first, second} = unboxed(fn -> {insert(:account), insert(:account)} end)
 
     on_exit(fn ->
+      ensure_started(Locks)
       ensure_store_started()
 
       unboxed(fn ->
@@ -272,6 +273,28 @@ defmodule Kith.CacheDataIntegrationTest do
     end)
   end
 
+  test "storage totals and duplicate badges survive lock outage and recovery", ctx do
+    unboxed(fn ->
+      contact = insert(:contact, account: ctx.first)
+      assert {:ok, _} = Contacts.create_photo(contact, media_attrs("lock-outage.jpg", 123))
+      candidate = pair(ctx.first)
+      assert {:ok, 123} = Storage.usage(ctx.first.id)
+      assert DuplicateDetection.cluster_count(ctx.first.id) == 1
+      assert :ok = Supervisor.terminate_child(Kith.Supervisor, Locks)
+      assert {:ok, 123} = Storage.usage(ctx.first.id)
+      assert DuplicateDetection.cluster_count(ctx.first.id) == 1
+      assert {:ok, _} = Contacts.create_document(contact, media_attrs("lock-outage.pdf", 50))
+      assert {:ok, _} = DuplicateDetection.dismiss_candidate(candidate)
+      assert {:ok, 173} = Storage.usage(ctx.first.id)
+      assert DuplicateDetection.cluster_count(ctx.first.id) == 0
+      ensure_started(Locks)
+      assert :miss = Cache.get({:storage_usage, ctx.first.id})
+      assert :miss = Cache.get({:duplicate_cluster_count, ctx.first.id})
+      assert {:ok, 173} = Storage.usage(ctx.first.id)
+      assert DuplicateDetection.cluster_count(ctx.first.id) == 0
+    end)
+  end
+
   test "a blocked dismissal cannot leave a reader's precommit count cached", ctx do
     candidate = unboxed(fn -> pair(ctx.first) end)
     parent = self()
@@ -360,8 +383,10 @@ defmodule Kith.CacheDataIntegrationTest do
 
   defp unboxed(fun), do: Sandbox.unboxed_run(Repo, fun)
 
-  defp ensure_store_started do
-    case Supervisor.restart_child(Kith.Supervisor, Store) do
+  defp ensure_store_started, do: ensure_started(Store)
+
+  defp ensure_started(child) do
+    case Supervisor.restart_child(Kith.Supervisor, child) do
       {:ok, _pid} -> :ok
       {:error, :running} -> :ok
     end

@@ -103,16 +103,9 @@ REDIS_URL=redis://redis:6379
 
 ### Startup Behavior
 
-The application **must not crash** if Redis is unavailable at startup. The startup sequence is:
+When `RATE_LIMIT_BACKEND=redis`, startup connects to Redis and verifies that the server is Redis 7 or newer. An unavailable or unsupported server prevents the application from starting. Configure readiness checks and alerts for Redis availability before starting web or worker containers.
 
-1. If `RATE_LIMIT_BACKEND=redis`, attempt to connect to Redis.
-2. If connection fails, log a warning at the `warn` level:
-   ```
-   [warn] Redis unavailable at startup — falling back to ETS rate limiting
-   ```
-3. Continue startup using ETS as the backend.
-
-This fallback ensures the application remains available during Redis maintenance windows. A health check or alert should be used to detect the degraded state.
+The Redis backend fails closed: connection errors at runtime fail the rate-limited operation rather than authorizing it or switching to local ETS counters. It never falls back to ETS automatically, because independent counters would lose the shared attempt budget across nodes. Restore Redis connectivity before retrying failed operations.
 
 ### Summary
 
@@ -120,7 +113,7 @@ This fallback ensures the application remains available during Redis maintenance
 |---|---|---|
 | Single node | `ets` | Default, no configuration needed |
 | Multi-node | `redis` | Set `RATE_LIMIT_BACKEND=redis` + `REDIS_URL` |
-| Redis unavailable | `ets` (fallback) | Warn log emitted; app continues |
+| Redis unavailable | `redis` | Startup fails; runtime rate-limited operations fail without ETS fallback |
 
 ---
 

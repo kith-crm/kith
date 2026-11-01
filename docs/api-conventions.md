@@ -218,7 +218,7 @@ Content-Type: application/problem+json
 }
 ```
 
-Response also includes the header: `Retry-After: <unix-timestamp>`
+Response also includes the header: `Retry-After: <seconds>`. The remaining wait is rounded up to whole seconds, with a minimum of one second.
 
 ---
 
@@ -291,7 +291,7 @@ Returns `204 No Content`.
 ### Rate Limiting
 
 - **Limit:** 1,000 requests per hour per account.
-- **Exceeded:** `429 Too Many Requests` + `Retry-After: <unix-timestamp>` header.
+- **Exceeded:** `429 Too Many Requests` + `Retry-After: <seconds>` header (remaining wait rounded up, minimum one second).
 
 ---
 

@@ -209,7 +209,7 @@ checks={
  'modes':['migrate','web','worker'], 'sentry':['unset','empty','whitespace','enabled'],
  'oban_versions':[12,14,12,14], 'credentials':['legacy-read-both-columns','new-writes-both-columns','document-job-empty-workload','pending-key-retention','cancellation-key-release'],
  'metrics':['unauthenticated-401','authenticated-scrape'],
- 'cache':['app-worker-store-put-get-ttl','connected-node-symmetric-invalidation','worker-photo-document-write-invalidates-web-usage','worker-duplicate-dismissal-invalidates-web-count'],
+ 'cache':['app-worker-store-put-get-ttl','app-worker-lock-outage-fallback','app-worker-lock-restart-rejects-stale-fill','connected-node-symmetric-invalidation','worker-photo-document-write-invalidates-web-usage','worker-duplicate-dismissal-invalidates-web-count'],
  'client_ip':['actual-http-forged-headers-ignored','json-logger-uses-socket-identity'],
  'totp':['independent-OTP-crypto-reference','malformed-values-fail-closed','account-and-IP-budgets-in-web-and-worker'],
  'limits':['No external provider API calls','No nonempty document downloads','Cold build is a separate coordinator check','Connected-node invalidation only; disconnected entries rely on bounded TTL'],

@@ -372,10 +372,7 @@ defmodule Kith.Contacts do
         {:error, reason} -> Repo.rollback(reason)
       end
     end)
-    |> Invalidation.after_commit([
-      {:storage_usage, contact.account_id},
-      {:duplicate_cluster_count, contact.account_id}
-    ])
+    |> Invalidation.after_contact_removal(contact.account_id)
   end
 
   @doc """
@@ -403,10 +400,7 @@ defmodule Kith.Contacts do
 
       count
     end)
-    |> Invalidation.after_commit([
-      {:storage_usage, account_id},
-      {:duplicate_cluster_count, account_id}
-    ])
+    |> Invalidation.after_contact_removal(account_id)
   end
 
   ## Addresses
@@ -1836,10 +1830,7 @@ defmodule Kith.Contacts do
   def merge_cluster(scope, survivor_id, loser_ids, resolution) do
     case Merge.run(scope, survivor_id, loser_ids, resolution) do
       {:ok, contact} = result ->
-        Invalidation.after_commit(result, [
-          {:storage_usage, contact.account_id},
-          {:duplicate_cluster_count, contact.account_id}
-        ])
+        Invalidation.after_contact_removal(result, contact.account_id)
 
       error ->
         error

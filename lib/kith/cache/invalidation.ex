@@ -9,6 +9,14 @@ defmodule Kith.Cache.Invalidation do
   shared caching inside transactions so uncommitted values are never published.
   """
 
+  @doc "Invalidates storage usage and duplicate counts after contacts are deleted or merged."
+  def after_contact_removal(result, account_id) do
+    after_commit(result, [
+      {:storage_usage, account_id},
+      {:duplicate_cluster_count, account_id}
+    ])
+  end
+
   def after_commit(result, keys) do
     if (result == :ok or match?({:ok, _}, result)) and not Kith.Repo.in_transaction?() do
       Enum.each(List.wrap(keys), &Kith.Cache.delete/1)

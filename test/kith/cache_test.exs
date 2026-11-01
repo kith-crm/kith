@@ -2,12 +2,13 @@ defmodule Kith.CacheTest do
   use ExUnit.Case, async: false
 
   alias Kith.Cache
-  alias Kith.Cache.Store
+  alias Kith.Cache.{Locks, Store}
 
   setup do
     key = {:cache_boundary, System.unique_integer([:positive, :monotonic])}
 
     on_exit(fn ->
+      ensure_started(Locks)
       ensure_store_started()
       Cache.delete(key)
     end)
@@ -35,6 +36,7 @@ defmodule Kith.CacheTest do
       Cache.fetch(key, fn -> raise "database failure" end)
     end
 
+    assert catch_exit(Cache.fetch(key, fn -> exit(:callback_exit) end)) == :callback_exit
     assert :miss = Cache.get(key)
   end
 
@@ -199,7 +201,8 @@ defmodule Kith.CacheTest do
   end
 
   test "an epoch mismatch rejects a late write racing the restart", %{key: key} do
-    assert {:ok, %{cache_pid: old_identity}} = Store.info(:server)
+    assert {:ok, %{cache_pid: old_store}} = Store.info(:server)
+    old_identity = {old_store, Process.whereis(Locks)}
     assert :ok = Supervisor.terminate_child(Kith.Supervisor, Store)
     ensure_store_started()
     # Simulate a restart after the fill's last identity check, before its put.
@@ -208,8 +211,115 @@ defmodule Kith.CacheTest do
     assert {:ok, :fresh} = Cache.fetch(key, fn -> {:ok, :fresh} end)
   end
 
-  defp ensure_store_started do
-    case Supervisor.restart_child(Kith.Supervisor, Store) do
+  test "a fill spanning a lock restart cannot undo a newer invalidation", %{key: key} do
+    parent = self()
+
+    fill =
+      Task.async(fn ->
+        Cache.fetch(key, fn ->
+          send(parent, :fill_started)
+          receive do: (:continue -> {:ok, :stale})
+        end)
+      end)
+
+    assert_receive :fill_started
+    assert {:ok, %{cache_pid: store}} = Store.info(:server)
+    assert :ok = Supervisor.terminate_child(Kith.Supervisor, Locks)
+    ensure_started(Locks)
+    assert {:ok, %{cache_pid: ^store}} = Store.info(:server)
+    assert :ok = Cache.delete(key)
+    send(fill.pid, :continue)
+    assert {:ok, :stale} = Task.await(fill)
+    assert :miss = Cache.get(key)
+    assert {:ok, :fresh} = Cache.fetch(key, fn -> {:ok, :fresh} end)
+  end
+
+  test "a late write from an obsolete lock generation is never readable", %{key: key} do
+    assert :ok = Cache.put(key, :before_restart)
+    assert {:ok, old_entry} = Store.fetch(key)
+    assert :ok = Supervisor.terminate_child(Kith.Supervisor, Locks)
+    ensure_started(Locks)
+    assert :ok = Cache.delete(key)
+    # Simulate a restart between the fill's last generation check and its write.
+    assert :ok = Store.put(key, old_entry, ttl: 1_000)
+    assert :miss = Cache.get(key)
+    assert {:ok, :fresh} = Cache.fetch(key, fn -> {:ok, :fresh} end)
+  end
+
+  test "lock outages return errors and run uncached callbacks exactly once", %{key: key} do
+    assert :ok = Supervisor.terminate_child(Kith.Supervisor, Locks)
+    assert {:error, {:lock_exit, _}} = Cache.get(key)
+    assert {:error, {:lock_exit, _}} = Cache.put(key, :value)
+    assert {:error, {:lock_exit, _}} = Cache.delete(key)
+    assert {:error, {:lock_exit, _}} = Cache.ttl(key)
+    parent = self()
+
+    assert {:ok, :uncached} =
+             Cache.fetch(key, fn ->
+               send(parent, :callback_called)
+               {:ok, :uncached}
+             end)
+
+    assert_received :callback_called
+    refute_received :callback_called
+
+    assert_raise RuntimeError, "callback error", fn ->
+      Cache.fetch(key, fn -> raise "callback error" end)
+    end
+
+    assert catch_exit(Cache.fetch(key, fn -> exit(:callback_exit) end)) == :callback_exit
+    ensure_started(Locks)
+    assert :miss = Cache.get(key)
+  end
+
+  test "queued callers survive lock server death using the outage contract", %{key: key} do
+    parent = self()
+
+    fill =
+      Task.async(fn ->
+        Cache.fetch(key, fn ->
+          send(parent, :fill_started)
+          receive do: (:continue -> {:ok, :old})
+        end)
+      end)
+
+    assert_receive :fill_started
+    reader = Task.async(fn -> Cache.get(key) end)
+
+    waiter =
+      Task.async(fn ->
+        Cache.fetch(key, fn ->
+          send(parent, :fallback_called)
+          {:ok, :uncached}
+        end)
+      end)
+
+    await_waiters(key, 2, System.monotonic_time(:millisecond) + 1_000)
+    assert :ok = Supervisor.terminate_child(Kith.Supervisor, Locks)
+    assert {:error, {:lock_exit, _}} = Task.await(reader)
+    assert {:ok, :uncached} = Task.await(waiter)
+    assert_received :fallback_called
+    refute_received :fallback_called
+    ensure_started(Locks)
+    send(fill.pid, :continue)
+    assert {:ok, :old} = Task.await(fill)
+    assert :miss = Cache.get(key)
+  end
+
+  defp await_waiters(key, count, deadline) do
+    {_owner, _monitor, waiting} = :sys.get_state(Locks) |> Map.fetch!(key)
+
+    if :queue.len(waiting) < count do
+      assert System.monotonic_time(:millisecond) < deadline, "callers did not queue"
+      Process.sleep(1)
+      await_waiters(key, count, deadline)
+    end
+  end
+
+  defp ensure_store_started, do: ensure_started(Store)
+
+  defp ensure_started(child) do
+    case Supervisor.restart_child(Kith.Supervisor, child) do
       {:ok, _pid} -> :ok
       {:error, :running} -> :ok
     end

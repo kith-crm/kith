@@ -156,8 +156,50 @@ defmodule PR44ReleaseSmoke do
       true = ttl_after <= ttl_before
       :ok = Cache.delete(key)
       :miss = Cache.get(key)
+      cache_lock_recovery(key)
     after
       Cache.delete(key)
+    end
+  end
+
+  defp cache_lock_recovery(key) do
+    parent = self()
+    {:ok, %{cache_pid: store}} = Cache.Store.info(:server)
+
+    fill =
+      Task.async(fn ->
+        Cache.fetch(key, fn ->
+          send(parent, {:cache_fill_started, self()})
+
+          receive do
+            :resume -> {:ok, :stale}
+          after
+            5_000 -> raise "Cache restart probe did not resume"
+          end
+        end)
+      end)
+
+    receive do
+      {:cache_fill_started, filling_pid} when filling_pid == fill.pid -> :ok
+    after
+      5_000 -> raise "Cache restart probe did not start"
+    end
+
+    try do
+      :ok = Supervisor.terminate_child(Kith.Supervisor, Cache.Locks)
+      {:error, _reason} = Cache.get(key)
+      {:ok, :uncached} = Cache.fetch(key, fn -> {:ok, :uncached} end)
+      {:ok, _pid} = Supervisor.restart_child(Kith.Supervisor, Cache.Locks)
+      {:ok, %{cache_pid: ^store}} = Cache.Store.info(:server)
+      :ok = Cache.delete(key)
+      send(fill.pid, :resume)
+      {:ok, :stale} = Task.await(fill)
+      :miss = Cache.get(key)
+      {:ok, :fresh} = Cache.fetch(key, fn -> {:ok, :fresh} end)
+      {:ok, :fresh} = Cache.get(key)
+    after
+      Supervisor.restart_child(Kith.Supervisor, Cache.Locks)
+      Task.shutdown(fill, :brutal_kill)
     end
   end
 

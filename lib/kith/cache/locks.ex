@@ -5,13 +5,24 @@ defmodule Kith.Cache.Locks do
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   def with_lock(key, operation) do
-    :ok = GenServer.call(__MODULE__, {:acquire, key}, :infinity)
+    case acquire(key) do
+      {:ok, server} ->
+        try do
+          {:ok, operation.(server)}
+        after
+          # An operation may outlive this server. Never release its replacement's lock.
+          GenServer.cast(server, {:release, key, self()})
+        end
 
-    try do
-      operation.()
-    after
-      GenServer.cast(__MODULE__, {:release, key, self()})
+      {:error, _reason} = error ->
+        error
     end
+  end
+
+  defp acquire(key) do
+    GenServer.call(__MODULE__, {:acquire, key}, :infinity)
+  catch
+    :exit, reason -> {:error, {:lock_exit, reason}}
   end
 
   @impl true
@@ -59,7 +70,7 @@ defmodule Kith.Cache.Locks do
     # Monitoring the granted owner also releases a slot for a queued caller
     # that died while waiting. Provider callbacks stay in their caller process.
     monitor = Process.monitor(owner)
-    GenServer.reply(from, :ok)
+    GenServer.reply(from, {:ok, self()})
     Map.put(locks, key, {owner, monitor, waiting})
   end
 end
