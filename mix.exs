@@ -12,6 +12,11 @@ defmodule Kith.MixProject do
       deps: deps(),
       dialyzer: dialyzer(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
+      test_ignore_filters: [
+        ~r"^test/playwright/seed\.exs$",
+        ~r"^test/playwright/fixtures/pr44/(?:boot|control|server)\.exs$",
+        ~r"^test/playwright/fixtures/s3/seed\.exs$"
+      ],
       listeners: [Phoenix.CodeReloader]
     ]
   end
@@ -104,8 +109,8 @@ defmodule Kith.MixProject do
       {:sweet_xml, "~> 0.7"},
 
       # HTTP Client
-      {:req, "~> 0.5"},
-      {:finch, "~> 0.18"},
+      {:req, "~> 0.6.3"},
+      {:finch, "~> 0.21"},
 
       # Auth
       {:pot, "~> 1.0"},
@@ -144,7 +149,6 @@ defmodule Kith.MixProject do
       {:geolix_adapter_mmdb2, "~> 0.6"},
 
       # Security
-      {:plug_content_security_policy, "~> 0.2"},
       {:remote_ip, "~> 1.2"},
 
       # HTML Sanitization (rich text from Trix editor)
@@ -166,8 +170,7 @@ defmodule Kith.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:ex_machina, "~> 2.8", only: :test},
-      {:mox, "~> 1.2", only: :test},
-      {:wallaby, "~> 0.30", only: :test, runtime: false}
+      {:mox, "~> 1.2", only: :test}
     ]
   end
 
@@ -212,7 +215,7 @@ defmodule Kith.MixProject do
         "compile --warnings-as-errors",
         "format --check-formatted",
         "credo --strict",
-        "sobelow --config",
+        "run --no-start scripts/security/sobelow_check.exs",
         "dialyzer"
       ]
     ]

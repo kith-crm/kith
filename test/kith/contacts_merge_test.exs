@@ -32,26 +32,6 @@ defmodule Kith.Contacts.MergeTest do
     %{user: user, account_id: account_id, contact_a: contact_a, contact_b: contact_b}
   end
 
-  # Enqueues a real notification job for `reminder` and records it the way
-  # Reminders.enqueue_jobs_for_reminder/2 would.
-  defp notification_job!(reminder) do
-    {:ok, job} =
-      Oban.insert(
-        Kith.Workers.ReminderNotificationWorker.new(%{
-          reminder_id: reminder.id,
-          type: "on_day",
-          days_before: 0
-        })
-      )
-
-    Repo.update_all(
-      from(r in Kith.Reminders.Reminder, where: r.id == ^reminder.id),
-      set: [enqueued_oban_job_ids: [job.id]]
-    )
-
-    job
-  end
-
   # The 3-arity call the wizard actually makes — `field_choices` starts empty
   # and gains one entry per click. apply_legacy_choices/4 resolves each field
   # independently (a per-field reduce over `choices`), so it cannot reproduce
@@ -69,6 +49,26 @@ defmodule Kith.Contacts.MergeTest do
   defp foreign_contact do
     other_account_id = AccountsFixtures.user_fixture().account_id
     ContactsFixtures.contact_fixture(other_account_id, %{first_name: "Stranger"})
+  end
+
+  defp resolution(fields \\ %{}), do: %{fields: fields, drop: %{}}
+
+  defp first_met_reminders(contact_id) do
+    Repo.all(
+      from(r in Kith.Reminders.Reminder,
+        where: r.type == "first_met" and r.contact_id == ^contact_id
+      )
+    )
+  end
+
+  defp opt_in_first_met(contact_id, date) do
+    Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^contact_id),
+      set: [first_met_at: date, first_met_reminder: true]
+    )
+
+    contact = Repo.get!(Kith.Contacts.Contact, contact_id)
+    {:ok, _} = Kith.Reminders.sync_first_met(contact)
+    contact
   end
 
   describe "merge_contacts/3" do
@@ -550,8 +550,6 @@ defmodule Kith.Contacts.MergeTest do
       scope = Kith.Accounts.Scope.for_user(ctx.user)
       %{scope: scope}
     end
-
-    defp resolution(fields \\ %{}), do: %{fields: fields, drop: %{}}
 
     test "merges three contacts into one survivor", ctx do
       c =
@@ -1208,24 +1206,29 @@ defmodule Kith.Contacts.MergeTest do
     end
 
     test "keeps the survivor's birthday reminder and drops colliding loser ones", ctx do
-      birthday_a =
-        Kith.RemindersFixtures.birthday_reminder_fixture(
-          ctx.account_id,
-          ctx.contact_a.id,
-          ctx.user.id
-        )
+      # Birthday reminders are now derived from `contact.birthdate` (Task 4), so
+      # unlike the sibling tests in this describe block, exercising this
+      # collision requires contacts that actually carry a birthdate rather than
+      # a bare `birthday_reminder_fixture/4` row.
+      survivor =
+        Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1985-01-05]
+        })
 
-      birthday_b =
-        Kith.RemindersFixtures.birthday_reminder_fixture(
-          ctx.account_id,
-          ctx.contact_b.id,
-          ctx.user.id
-        )
+      loser =
+        Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1990-06-15]
+        })
+
+      birthday_a = Kith.Reminders.get_birthday_reminder(survivor.id, ctx.account_id)
+      birthday_b = Kith.Reminders.get_birthday_reminder(loser.id, ctx.account_id)
 
       Kith.RemindersFixtures.reminder_instance_fixture(birthday_b)
 
-      {:ok, survivor} =
-        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
+      {:ok, merged} =
+        Contacts.merge_cluster(ctx.scope, survivor.id, [loser.id], %{
           fields: %{},
           drop: %{}
         })
@@ -1233,7 +1236,7 @@ defmodule Kith.Contacts.MergeTest do
       remaining =
         Repo.all(
           from(r in Kith.Reminders.Reminder,
-            where: r.type == "birthday" and r.contact_id == ^survivor.id
+            where: r.type == "birthday" and r.contact_id == ^merged.id
           )
         )
 
@@ -1249,60 +1252,39 @@ defmodule Kith.Contacts.MergeTest do
              ) == 0
     end
 
-    test "cancels the Oban jobs of the birthday reminders it deletes", ctx do
-      birthday_a =
-        Kith.RemindersFixtures.birthday_reminder_fixture(
-          ctx.account_id,
-          ctx.contact_a.id,
-          ctx.user.id
-        )
+    test "when only losers have birthday reminders, keeps the lowest-id one", ctx do
+      # As above: the survivor must end up with the winning birthdate for its
+      # birthday reminder to survive the merge, so the resolution explicitly
+      # gap-fills it from loser b (the merge no longer keeps a birthday
+      # reminder that does not match the merged birthdate).
+      survivor =
+        Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Alice"})
 
-      birthday_b =
-        Kith.RemindersFixtures.birthday_reminder_fixture(
-          ctx.account_id,
-          ctx.contact_b.id,
-          ctx.user.id
-        )
-
-      kept_job = notification_job!(birthday_a)
-      doomed_job = notification_job!(birthday_b)
-
-      {:ok, _survivor} =
-        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id], %{
-          fields: %{},
-          drop: %{}
+      loser_b =
+        Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Alice",
+          birthdate: ~D[1990-06-15]
         })
 
-      # birthday_b is the reminder the merge destroys, so its scheduled
-      # notification must go with it (design spec §2 step 7). Every other
-      # reminder just changes owner and keeps its job.
-      assert Repo.get!(Oban.Job, doomed_job.id).state == "cancelled"
-      assert Repo.get!(Oban.Job, kept_job.id).state == "available"
-    end
+      loser_c =
+        Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{
+          first_name: "Carol",
+          birthdate: ~D[1992-02-29]
+        })
 
-    test "when only losers have birthday reminders, keeps the lowest-id one", ctx do
-      c = Kith.ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Carol"})
+      birthday_b = Kith.Reminders.get_birthday_reminder(loser_b.id, ctx.account_id)
+      _birthday_c = Kith.Reminders.get_birthday_reminder(loser_c.id, ctx.account_id)
 
-      birthday_b =
-        Kith.RemindersFixtures.birthday_reminder_fixture(
-          ctx.account_id,
-          ctx.contact_b.id,
-          ctx.user.id
-        )
-
-      _birthday_c =
-        Kith.RemindersFixtures.birthday_reminder_fixture(ctx.account_id, c.id, ctx.user.id)
-
-      {:ok, survivor} =
-        Contacts.merge_cluster(ctx.scope, ctx.contact_a.id, [ctx.contact_b.id, c.id], %{
-          fields: %{},
+      {:ok, merged} =
+        Contacts.merge_cluster(ctx.scope, survivor.id, [loser_b.id, loser_c.id], %{
+          fields: %{birthdate: ~D[1990-06-15], birthdate_year_unknown: false},
           drop: %{}
         })
 
       remaining =
         Repo.all(
           from(r in Kith.Reminders.Reminder,
-            where: r.type == "birthday" and r.contact_id == ^survivor.id
+            where: r.type == "birthday" and r.contact_id == ^merged.id
           )
         )
 
@@ -2107,8 +2089,7 @@ defmodule Kith.Contacts.MergeTest do
           birthdate: ~D[1985-07-22]
         })
 
-      {:ok, survivor_reminder} = Kith.Reminders.create_birthday_reminder(survivor, ctx.user.id)
-      {:ok, _loser_reminder} = Kith.Reminders.create_birthday_reminder(loser, ctx.user.id)
+      survivor_reminder = Kith.Reminders.get_birthday_reminder(survivor.id, ctx.account_id)
 
       # Force the loser's birthdate to win.
       assert {:ok, merged} =
@@ -2126,10 +2107,7 @@ defmodule Kith.Contacts.MergeTest do
       assert reminder.next_reminder_date == Kith.TimeHelper.next_birthday_date(~D[1985-07-22])
     end
 
-    test "clearing the birthdate leaves the surviving birthday reminder alone", ctx do
-      # A merge that clears a birthdate is not the same event as a user
-      # removing one, so the kept reminder survives untouched — the engine
-      # destroys birthday reminders only to resolve the unique-index collision.
+    test "clearing the birthdate removes the birthday reminder", ctx do
       survivor =
         ContactsFixtures.contact_fixture(ctx.account_id, %{
           first_name: "Alice",
@@ -2138,7 +2116,7 @@ defmodule Kith.Contacts.MergeTest do
 
       loser = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Alice"})
 
-      {:ok, reminder} = Kith.Reminders.create_birthday_reminder(survivor, ctx.user.id)
+      assert Kith.Reminders.get_birthday_reminder(survivor.id, ctx.account_id)
 
       assert {:ok, merged} =
                Contacts.merge_cluster(ctx.scope, survivor.id, [loser.id], %{
@@ -2147,12 +2125,7 @@ defmodule Kith.Contacts.MergeTest do
                })
 
       assert is_nil(merged.birthdate)
-
-      kept = Kith.Reminders.get_birthday_reminder(merged.id, ctx.account_id)
-
-      assert kept
-      assert kept.id == reminder.id
-      assert kept.next_reminder_date == reminder.next_reminder_date
+      assert Kith.Reminders.get_birthday_reminder(merged.id, ctx.account_id) == nil
     end
 
     test "merging two needs_review contacts keeps the survivor reviewable", ctx do
@@ -2224,15 +2197,7 @@ defmodule Kith.Contacts.MergeTest do
         )
 
       assert kept.id == ctx.survivor_reminder.id
-      assert kept.frequency == "monthly"
-    end
-
-    test "cancels the Oban jobs of the reminder it discards", ctx do
-      job = notification_job!(ctx.loser_reminder)
-
-      {:ok, _survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
-
-      assert Repo.get(Oban.Job, job.id).state in ["cancelled", "discarded"]
+      assert Kith.Reminders.Reminder.frequency_preset(kept) == "monthly"
     end
 
     # The regression this whole task exists for: a second active reminder makes
@@ -2293,7 +2258,7 @@ defmodule Kith.Contacts.MergeTest do
 
       Repo.update_all(
         from(r in Kith.Reminders.Reminder, where: r.id == ^reminder.id),
-        set: [active: false, enqueued_oban_job_ids: []]
+        set: [active: false]
       )
 
       # A birthdate on the loser that the merge will gap-fill onto the
@@ -2306,13 +2271,12 @@ defmodule Kith.Contacts.MergeTest do
       Map.put(ctx, :reminder, reminder)
     end
 
-    test "does not enqueue jobs for a deactivated reminder", ctx do
+    test "keeps a deactivated birthday reminder inactive", ctx do
       {:ok, _survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
 
       kept = Repo.get!(Kith.Reminders.Reminder, ctx.reminder.id)
 
       assert kept.active == false
-      assert kept.enqueued_oban_job_ids == []
     end
 
     test "still tracks the merged birthdate on the date field", ctx do
@@ -2322,6 +2286,46 @@ defmodule Kith.Contacts.MergeTest do
 
       assert survivor.birthdate == ~D[1990-06-15]
       assert kept.next_reminder_date == Kith.TimeHelper.next_birthday_date(~D[1990-06-15])
+    end
+  end
+
+  describe "first-met reminders" do
+    test "two opted-in contacts merge into one first_met reminder", ctx do
+      opt_in_first_met(ctx.contact_a.id, ~D[2012-09-01])
+      opt_in_first_met(ctx.contact_b.id, ~D[2014-02-02])
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert [r] = first_met_reminders(survivor.id)
+      assert r.anchor_date == survivor.first_met_at
+    end
+
+    test "the survivor opts in when only a merged-away contact had opted in", ctx do
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [first_met_at: ~D[2012-09-01]]
+      )
+
+      opt_in_first_met(ctx.contact_b.id, ~D[2012-09-01])
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert survivor.first_met_reminder
+      assert Repo.get!(Kith.Contacts.Contact, survivor.id).first_met_reminder
+      assert Kith.Reminders.get_first_met_reminder(survivor.id, ctx.account_id)
+    end
+
+    test "moves a loser-only first_met reminder to the survivor", ctx do
+      Repo.update_all(from(c in Kith.Contacts.Contact, where: c.id == ^ctx.contact_a.id),
+        set: [first_met_at: ~D[2012-09-01]]
+      )
+
+      opt_in_first_met(ctx.contact_b.id, ~D[2012-09-01])
+      [loser_row] = first_met_reminders(ctx.contact_b.id)
+
+      {:ok, survivor} = Contacts.merge_contacts(ctx.contact_a.id, ctx.contact_b.id)
+
+      assert [r] = first_met_reminders(survivor.id)
+      assert r.id == loser_row.id
     end
   end
 end

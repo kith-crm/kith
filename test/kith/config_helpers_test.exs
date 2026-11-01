@@ -3,18 +3,20 @@ defmodule Kith.ConfigHelpersTest do
 
   alias Kith.ConfigHelpers
 
-  describe "oban_pruner_max_age_seconds/0" do
-    test "defaults to 7 days when OBAN_PRUNER_MAX_AGE_DAYS is unset" do
-      System.delete_env("OBAN_PRUNER_MAX_AGE_DAYS")
-
-      assert ConfigHelpers.oban_pruner_max_age_seconds() == 7 * 24 * 60 * 60
+  describe "s3_endpoint_config/1" do
+    test "keeps the https scheme of the endpoint" do
+      assert ConfigHelpers.s3_endpoint_config("https://s3.example.com") ==
+               [scheme: "https://", host: "s3.example.com", port: 443]
     end
 
-    test "reads OBAN_PRUNER_MAX_AGE_DAYS when set" do
-      System.put_env("OBAN_PRUNER_MAX_AGE_DAYS", "30")
-      on_exit(fn -> System.delete_env("OBAN_PRUNER_MAX_AGE_DAYS") end)
+    test "keeps the http scheme and a custom port" do
+      assert ConfigHelpers.s3_endpoint_config("http://localhost:9000") ==
+               [scheme: "http://", host: "localhost", port: 9000]
+    end
 
-      assert ConfigHelpers.oban_pruner_max_age_seconds() == 30 * 24 * 60 * 60
+    test "keeps a custom port on an https endpoint" do
+      assert ConfigHelpers.s3_endpoint_config("https://minio.internal:9443") ==
+               [scheme: "https://", host: "minio.internal", port: 9443]
     end
   end
 

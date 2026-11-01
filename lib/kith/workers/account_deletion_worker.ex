@@ -36,13 +36,10 @@ defmodule Kith.Workers.AccountDeletionWorker do
           metadata: %{account_name: account.name}
         })
 
-        # 1. Cancel all Oban reminder jobs
-        cancel_reminder_jobs(account_id)
-
-        # 2. Delete stored files
+        # 1. Delete stored files
         delete_stored_files(account_id)
 
-        # 3. Delete all user tokens (sessions already cleared, but ensure clean)
+        # 2. Delete all user tokens (sessions already cleared, but ensure clean)
         user_ids =
           from(u in Kith.Accounts.User, where: u.account_id == ^account_id, select: u.id)
           |> Repo.all()
@@ -50,28 +47,16 @@ defmodule Kith.Workers.AccountDeletionWorker do
         from(t in Kith.Accounts.UserToken, where: t.user_id in ^user_ids)
         |> Repo.delete_all()
 
-        # 4. Delete users
+        # 3. Delete users
         from(u in Kith.Accounts.User, where: u.account_id == ^account_id)
         |> Repo.delete_all()
 
-        # 5. Delete account (CASCADE handles remaining tables)
+        # 4. Delete account (CASCADE handles remaining tables)
         Repo.delete(account)
 
         Logger.info("AccountDeletionWorker: completed deletion for account #{account_id}")
         :ok
     end
-  end
-
-  defp cancel_reminder_jobs(account_id) do
-    job_ids =
-      from(r in Kith.Reminders.Reminder,
-        where: r.account_id == ^account_id,
-        select: r.enqueued_oban_job_ids
-      )
-      |> Repo.all()
-      |> List.flatten()
-
-    Enum.each(job_ids, &Oban.cancel_job/1)
   end
 
   defp delete_stored_files(account_id) do

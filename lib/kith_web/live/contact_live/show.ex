@@ -180,32 +180,26 @@ defmodule KithWeb.ContactLive.Show do
   def handle_event("upload-avatar", _params, socket) do
     contact = socket.assigns.contact
 
-    [photo] =
+    results =
       consume_uploaded_entries(socket, :avatar, fn %{path: path}, entry ->
-        key = "contacts/#{contact.id}/photos/#{entry.uuid}-#{entry.client_name}"
-        {:ok, _} = Kith.Storage.upload(path, key)
-
-        {:ok, photo} =
-          Contacts.create_photo(contact, %{
-            file_name: entry.client_name,
-            storage_key: key,
-            file_size: entry.client_size,
-            content_type: entry.client_type
-          })
-
-        {:ok, photo}
+        {:ok, KithWeb.ContactUploads.save(contact, path, entry, :photo)}
       end)
 
-    {:ok, updated_contact} = Contacts.set_avatar(contact, photo)
+    with [{:ok, photo}] <- results,
+         {:ok, updated_contact} <- Contacts.set_avatar(contact, photo) do
+      updated_contact =
+        Kith.Repo.preload(updated_contact, [:tags, :gender, :first_met_through], force: true)
 
-    updated_contact =
-      Kith.Repo.preload(updated_contact, [:tags, :gender, :first_met_through], force: true)
-
-    {:noreply,
-     socket
-     |> assign(:contact, updated_contact)
-     |> assign(:show_avatar_picker, false)
-     |> put_flash(:info, "Avatar updated.")}
+      {:noreply,
+       socket
+       |> assign(:contact, updated_contact)
+       |> assign(:show_avatar_picker, false)
+       |> clear_flash(:error)
+       |> put_flash(:info, "Avatar updated.")}
+    else
+      _ ->
+        {:noreply, put_flash(socket, :error, "Avatar could not be uploaded. Please try again.")}
+    end
   end
 
   def handle_event("remove-tag", %{"tag_id" => tag_id}, socket) do
@@ -243,7 +237,7 @@ defmodule KithWeb.ContactLive.Show do
     today = Date.utc_today()
     years = today.year - birthdate.year
 
-    if Date.compare(Date.new!(today.year, birthdate.month, birthdate.day), today) == :gt do
+    if Date.compare(Kith.TimeHelper.anniversary_in_year(birthdate, today.year), today) == :gt do
       years - 1
     else
       years
@@ -263,12 +257,12 @@ defmodule KithWeb.ContactLive.Show do
 
       birthdate ->
         today = Date.utc_today()
-        this_year = Date.new!(today.year, birthdate.month, birthdate.day)
+        this_year = Kith.TimeHelper.anniversary_in_year(birthdate, today.year)
 
         next_birthday =
           if Date.compare(this_year, today) in [:gt, :eq],
             do: this_year,
-            else: Date.new!(today.year + 1, birthdate.month, birthdate.day)
+            else: Kith.TimeHelper.anniversary_in_year(birthdate, today.year + 1)
 
         days = Date.diff(next_birthday, today)
 

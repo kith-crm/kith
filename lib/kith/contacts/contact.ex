@@ -39,6 +39,7 @@ defmodule Kith.Contacts.Contact do
     field :first_met_year_unknown, :boolean, default: false
     field :first_met_where, :string
     field :first_met_additional_info, :string
+    field :first_met_reminder, :boolean, default: false
     field :birthdate_year_unknown, :boolean, default: false
 
     belongs_to :account, Kith.Accounts.Account
@@ -100,6 +101,7 @@ defmodule Kith.Contacts.Contact do
       :first_met_where,
       :first_met_through_id,
       :first_met_additional_info,
+      :first_met_reminder,
       :birthdate_year_unknown
     ])
     |> validate_required([:first_name, :account_id])
@@ -137,6 +139,7 @@ defmodule Kith.Contacts.Contact do
       :first_met_where,
       :first_met_through_id,
       :first_met_additional_info,
+      :first_met_reminder,
       :birthdate_year_unknown
     ])
     |> validate_required([:first_name])

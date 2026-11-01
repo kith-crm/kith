@@ -200,10 +200,10 @@ defmodule KithWeb.ReminderLive.Upcoming do
                           <button
                             :for={
                               {duration, label} <- [
-                                {"15_minutes", "15 minutes"},
-                                {"1_hour", "1 hour"},
-                                {"1_day", "1 day"},
-                                {"3_days", "3 days"}
+                                {"fifteen_minutes", "15 minutes"},
+                                {"one_hour", "1 hour"},
+                                {"one_day", "1 day"},
+                                {"three_days", "3 days"}
                               ]
                             }
                             phx-click="snooze-instance"
@@ -231,17 +231,19 @@ defmodule KithWeb.ReminderLive.Upcoming do
   defp type_icon("stay_in_touch"), do: "hero-hand-raised"
   defp type_icon("one_time"), do: "hero-map-pin"
   defp type_icon("recurring"), do: "hero-arrow-path"
+  defp type_icon("first_met"), do: "hero-sparkles"
   defp type_icon(_), do: "hero-bell"
 
   defp type_label("birthday"), do: "Birthday"
   defp type_label("stay_in_touch"), do: "Stay in touch"
   defp type_label("one_time"), do: "One-time"
   defp type_label("recurring"), do: "Recurring"
+  defp type_label("first_met"), do: "First met"
   defp type_label(_), do: "Reminder"
 
-  defp snooze_label("15_minutes"), do: "15 minutes"
-  defp snooze_label("1_hour"), do: "1 hour"
-  defp snooze_label("1_day"), do: "1 day"
-  defp snooze_label("3_days"), do: "3 days"
+  defp snooze_label("fifteen_minutes"), do: "15 minutes"
+  defp snooze_label("one_hour"), do: "1 hour"
+  defp snooze_label("one_day"), do: "1 day"
+  defp snooze_label("three_days"), do: "3 days"
   defp snooze_label(_), do: "a while"
 end

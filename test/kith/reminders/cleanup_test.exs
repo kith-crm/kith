@@ -43,21 +43,6 @@ defmodule Kith.Reminders.CleanupTest do
     assert count_for(Reminder, ctx.other_account) == 1
   end
 
-  test "cancels Oban jobs tracked on the target's reminders", ctx do
-    {:ok, job} =
-      Oban.insert(Kith.Workers.ReminderNotificationWorker.new(%{"reminder_instance_id" => 0}))
-
-    target_reminder = reminder_fixture(ctx.target_account, ctx.target_contact.id, ctx.target_user)
-
-    target_reminder
-    |> Ecto.Changeset.change(enqueued_oban_job_ids: [job.id])
-    |> Repo.update!()
-
-    assert :ok = Cleanup.wipe_for_account(ctx.target_account)
-
-    assert Repo.get!(Oban.Job, job.id).state == "cancelled"
-  end
-
   test "is idempotent on empty account", ctx do
     assert :ok = Cleanup.wipe_for_account(ctx.target_account)
     assert :ok = Cleanup.wipe_for_account(ctx.target_account)

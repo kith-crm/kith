@@ -1,0 +1,434 @@
+{
+  "contacts": [
+    {
+      "id": 1,
+      "first_name": "Mona",
+      "stay_in_touch_frequency": null,
+      "stay_in_touch_trigger_date": null,
+      "information": {
+        "dates": {
+          "birthdate": {
+            "is_age_based": false,
+            "is_year_unknown": false,
+            "date": "1990-06-15T00:00:00Z"
+          }
+        },
+        "how_you_met": {
+          "first_met_date": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "first_name": "Paul",
+      "stay_in_touch_frequency": null,
+      "stay_in_touch_trigger_date": null,
+      "information": {
+        "dates": {
+          "birthdate": {
+            "is_age_based": false,
+            "is_year_unknown": false,
+            "date": "1992-02-29T00:00:00Z"
+          }
+        },
+        "how_you_met": {
+          "first_met_date": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "first_name": "Solo",
+      "stay_in_touch_frequency": null,
+      "stay_in_touch_trigger_date": null,
+      "information": {
+        "dates": {
+          "birthdate": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        },
+        "how_you_met": {
+          "first_met_date": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "first_name": "Yara",
+      "stay_in_touch_frequency": null,
+      "stay_in_touch_trigger_date": null,
+      "information": {
+        "dates": {
+          "birthdate": {
+            "is_age_based": false,
+            "is_year_unknown": true,
+            "date": "2026-07-04T00:00:00Z"
+          }
+        },
+        "how_you_met": {
+          "first_met_date": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "first_name": "Dora",
+      "stay_in_touch_frequency": null,
+      "stay_in_touch_trigger_date": null,
+      "information": {
+        "dates": {
+          "birthdate": {
+            "is_age_based": false,
+            "is_year_unknown": false,
+            "date": "1950-04-20T00:00:00Z"
+          }
+        },
+        "how_you_met": {
+          "first_met_date": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "first_name": "Fiona",
+      "stay_in_touch_frequency": null,
+      "stay_in_touch_trigger_date": null,
+      "information": {
+        "dates": {
+          "birthdate": {
+            "is_age_based": false,
+            "is_year_unknown": false,
+            "date": "1985-01-15T00:00:00Z"
+          }
+        },
+        "how_you_met": {
+          "first_met_date": {
+            "is_age_based": false,
+            "is_year_unknown": false,
+            "date": "2021-09-01T00:00:00Z"
+          }
+        }
+      }
+    },
+    {
+      "id": 7,
+      "first_name": "Noel",
+      "stay_in_touch_frequency": null,
+      "stay_in_touch_trigger_date": null,
+      "information": {
+        "dates": {
+          "birthdate": {
+            "is_age_based": false,
+            "is_year_unknown": false,
+            "date": "1988-11-02T00:00:00Z"
+          }
+        },
+        "how_you_met": {
+          "first_met_date": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "first_name": "Liam",
+      "stay_in_touch_frequency": null,
+      "stay_in_touch_trigger_date": null,
+      "information": {
+        "dates": {
+          "birthdate": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        },
+        "how_you_met": {
+          "first_met_date": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "first_name": "Gina",
+      "stay_in_touch_frequency": 14,
+      "stay_in_touch_trigger_date": "2026-10-28T00:00:00Z",
+      "information": {
+        "dates": {
+          "birthdate": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        },
+        "how_you_met": {
+          "first_met_date": {
+            "is_age_based": null,
+            "is_year_unknown": null,
+            "date": null
+          }
+        }
+      }
+    }
+  ],
+  "reminders": [
+    {
+      "id": 1,
+      "title": "Wish happy birthday to Mona",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 1,
+      "initial_date": "1990-06-15T00:00:00Z",
+      "delible": true,
+      "contact_id": 1
+    },
+    {
+      "id": 2,
+      "title": "Wish happy birthday to Paul",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 1,
+      "initial_date": "1992-02-29T00:00:00Z",
+      "delible": false,
+      "contact_id": 2
+    },
+    {
+      "id": 3,
+      "title": "Wedding anniversary",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 1,
+      "initial_date": "2015-03-09T00:00:00Z",
+      "delible": true,
+      "contact_id": 3
+    },
+    {
+      "id": 4,
+      "title": "Call mum",
+      "description": null,
+      "frequency_type": "week",
+      "frequency_number": 2,
+      "initial_date": "2026-01-05T00:00:00Z",
+      "delible": true,
+      "contact_id": 3
+    },
+    {
+      "id": 5,
+      "title": "Pay rent",
+      "description": null,
+      "frequency_type": "month",
+      "frequency_number": 1,
+      "initial_date": "2024-02-01T00:00:00Z",
+      "delible": true,
+      "contact_id": 3
+    },
+    {
+      "id": 6,
+      "title": "Renew passport",
+      "description": null,
+      "frequency_type": "one_time",
+      "frequency_number": 1,
+      "initial_date": "2020-01-01T00:00:00Z",
+      "delible": true,
+      "contact_id": 3
+    },
+    {
+      "id": 7,
+      "title": "Dentist",
+      "description": null,
+      "frequency_type": "one_time",
+      "frequency_number": 1,
+      "initial_date": "2027-01-10T00:00:00Z",
+      "delible": true,
+      "contact_id": 3
+    },
+    {
+      "id": 8,
+      "title": "Wish happy birthday to Yara",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 1,
+      "initial_date": "2026-07-04T00:00:00Z",
+      "delible": false,
+      "contact_id": 4
+    },
+    {
+      "id": 9,
+      "title": "On this date, Dora would have celebrated their birthday",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 1,
+      "initial_date": "1950-04-20T00:00:00Z",
+      "delible": false,
+      "contact_id": 5
+    },
+    {
+      "id": 10,
+      "title": "Anniversary of the death of Dora",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 1,
+      "initial_date": "2020-08-01T00:00:00Z",
+      "delible": true,
+      "contact_id": 5
+    },
+    {
+      "id": 11,
+      "title": "Wish happy birthday to Fiona",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 1,
+      "initial_date": "1985-01-15T00:00:00Z",
+      "delible": false,
+      "contact_id": 6
+    },
+    {
+      "id": 12,
+      "title": "Anniversary of the day you first met",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 1,
+      "initial_date": "2021-09-01T00:00:00Z",
+      "delible": false,
+      "contact_id": 6
+    },
+    {
+      "id": 13,
+      "title": "Water plants",
+      "description": null,
+      "frequency_type": "week",
+      "frequency_number": 2,
+      "initial_date": "2026-01-05T00:00:00Z",
+      "delible": true,
+      "contact_id": 9
+    },
+    {
+      "id": 14,
+      "title": "Pay card (31st)",
+      "description": null,
+      "frequency_type": "month",
+      "frequency_number": 1,
+      "initial_date": "2025-01-31T00:00:00Z",
+      "delible": true,
+      "contact_id": 9
+    },
+    {
+      "id": 15,
+      "title": "Quarterly review",
+      "description": null,
+      "frequency_type": "month",
+      "frequency_number": 3,
+      "initial_date": "2025-11-30T00:00:00Z",
+      "delible": true,
+      "contact_id": 9
+    },
+    {
+      "id": 16,
+      "title": "Leap-day thing",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 2,
+      "initial_date": "2016-02-29T00:00:00Z",
+      "delible": true,
+      "contact_id": 9
+    },
+    {
+      "id": 17,
+      "title": "One-time today",
+      "description": null,
+      "frequency_type": "one_time",
+      "frequency_number": 1,
+      "initial_date": "2026-10-14T00:00:00Z",
+      "delible": true,
+      "contact_id": 9
+    },
+    {
+      "id": 18,
+      "title": "One-time past (never sent)",
+      "description": null,
+      "frequency_type": "one_time",
+      "frequency_number": 1,
+      "initial_date": "2025-03-01T00:00:00Z",
+      "delible": true,
+      "contact_id": 9
+    },
+    {
+      "id": 19,
+      "title": "One-time past (sent)",
+      "description": null,
+      "frequency_type": "one_time",
+      "frequency_number": 1,
+      "initial_date": "2026-10-12T00:00:00Z",
+      "delible": true,
+      "contact_id": 9
+    },
+    {
+      "id": 20,
+      "title": "One-time future",
+      "description": "Has a description",
+      "frequency_type": "one_time",
+      "frequency_number": 1,
+      "initial_date": "2027-02-14T00:00:00Z",
+      "delible": true,
+      "contact_id": 9
+    },
+    {
+      "id": 21,
+      "title": "Zero frequency",
+      "description": null,
+      "frequency_type": "month",
+      "frequency_number": 0,
+      "initial_date": "2027-06-01T00:00:00Z",
+      "delible": true,
+      "contact_id": 9
+    },
+    {
+      "id": 22,
+      "title": "Fiona birthday party",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 1,
+      "initial_date": "2026-01-15T00:00:00Z",
+      "delible": true,
+      "contact_id": 6
+    },
+    {
+      "id": 23,
+      "title": "Promotion",
+      "description": null,
+      "frequency_type": "year",
+      "frequency_number": 1,
+      "initial_date": "2019-05-10T00:00:00Z",
+      "delible": true,
+      "contact_id": 8
+    }
+  ]
+}

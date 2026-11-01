@@ -39,7 +39,12 @@
       <div class="flex items-center gap-4 lg:gap-5">
         <%!-- Avatar with change overlay --%>
         <div class="relative group shrink-0">
-          <KithUI.avatar name={@contact.display_name} src={avatar_url(@contact)} size={:xl} />
+          <KithUI.avatar
+            id={"contact-avatar-#{@contact.id}"}
+            name={@contact.display_name}
+            src={avatar_url(@contact)}
+            size={:xl}
+          />
           <%= if can?(assigns, :update, :contact) do %>
             <button
               phx-click="toggle-avatar-picker"

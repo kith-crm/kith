@@ -113,6 +113,32 @@ defmodule KithWeb.ContactLive.ShowTest do
   end
 
   describe "birthday badge" do
+    test "a 29 February birthday renders the expected next-birthday text in any year", %{
+      conn: conn,
+      account_id: account_id
+    } do
+      today = Date.utc_today()
+
+      # Independent of the production helper: in a common year the anniversary is 28 Feb.
+      next =
+        [today.year, today.year + 1]
+        |> Enum.map(&Date.new!(&1, 2, if(Calendar.ISO.leap_year?(&1), do: 29, else: 28)))
+        |> Enum.find(&(Date.compare(&1, today) != :lt))
+
+      days = Date.diff(next, today)
+
+      expected =
+        cond do
+          days == 0 -> "Birthday today"
+          days == 1 -> "Birthday tomorrow"
+          true -> "Birthday in #{days} days"
+        end
+
+      leap = contact_fixture(account_id, %{birthdate: ~D[1992-02-29]})
+      {:ok, _view, html} = live(conn, ~p"/contacts/#{leap.id}")
+      assert html =~ expected
+    end
+
     test "shows birthday badge when contact has birthdate", %{conn: conn, account_id: account_id} do
       birthday_contact =
         contact_fixture(account_id, %{birthdate: Date.add(Date.utc_today(), 5)})

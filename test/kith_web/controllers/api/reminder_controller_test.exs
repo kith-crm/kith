@@ -152,4 +152,120 @@ defmodule KithWeb.API.ReminderControllerTest do
       assert conn2.status == 204
     end
   end
+
+  describe "schedule fields" do
+    test "create accepts a preset and returns interval fields", %{conn: conn, contact: contact} do
+      conn =
+        post(conn, ~p"/api/contacts/#{contact.id}/reminders", %{
+          "reminder" => %{
+            "type" => "recurring",
+            "title" => "Rent",
+            "frequency" => "monthly",
+            "anchor_date" => "2024-02-01"
+          }
+        })
+
+      data = json_response(conn, 201)["data"]
+      assert data["frequency"] == "monthly"
+      assert data["interval_unit"] == "month"
+      assert data["interval_count"] == 1
+      assert data["anchor_date"] == "2024-02-01"
+      assert Date.compare(Date.from_iso8601!(data["next_reminder_date"]), Date.utc_today()) != :lt
+    end
+
+    test "create accepts unit + count outside the presets", %{conn: conn, contact: contact} do
+      conn =
+        post(conn, ~p"/api/contacts/#{contact.id}/reminders", %{
+          "reminder" => %{
+            "type" => "recurring",
+            "title" => "Every 3 weeks",
+            "interval_unit" => "week",
+            "interval_count" => 3,
+            "anchor_date" => Date.to_iso8601(Date.utc_today())
+          }
+        })
+
+      data = json_response(conn, 201)["data"]
+      assert data["frequency"] == nil
+      assert {data["interval_unit"], data["interval_count"]} == {"week", 3}
+    end
+
+    test "birthday reminders can't be created, edited or deleted", %{conn: conn, contact: contact} do
+      conn1 =
+        post(conn, ~p"/api/contacts/#{contact.id}/reminders", %{
+          "reminder" => %{"type" => "birthday", "anchor_date" => "1990-06-15"}
+        })
+
+      assert json_response(conn1, 422)
+
+      {:ok, contact} = Kith.Contacts.update_contact(contact, %{birthdate: ~D[1990-06-15]})
+      birthday = Kith.Reminders.get_birthday_reminder(contact.id, contact.account_id)
+
+      conn2 = patch(conn, ~p"/api/reminders/#{birthday.id}", %{"reminder" => %{"title" => "x"}})
+      assert json_response(conn2, 422)
+
+      conn3 = delete(conn, ~p"/api/reminders/#{birthday.id}")
+      assert json_response(conn3, 422)
+    end
+  end
+
+  describe "first_met reminders are read-only" do
+    setup %{contact: contact} do
+      {:ok, contact} =
+        Kith.Contacts.update_contact(contact, %{
+          first_met_at: ~D[2012-09-01],
+          first_met_reminder: true
+        })
+
+      %{first_met: Kith.Reminders.get_first_met_reminder(contact.id, contact.account_id)}
+    end
+
+    test "create is rejected", %{conn: conn, contact: contact} do
+      conn =
+        post(conn, ~p"/api/contacts/#{contact.id}/reminders", %{
+          "reminder" => %{"type" => "first_met", "anchor_date" => "2012-09-01"}
+        })
+
+      assert json_response(conn, 422)["detail"] ==
+               "First-met reminders are managed from the contact's first-met date."
+    end
+
+    test "update is rejected", %{conn: conn, first_met: first_met} do
+      conn = patch(conn, ~p"/api/reminders/#{first_met.id}", %{"reminder" => %{"title" => "x"}})
+
+      assert json_response(conn, 422)["detail"] ==
+               "First-met reminders are managed from the contact's first-met date."
+
+      unchanged = Kith.Repo.get!(Kith.Reminders.Reminder, first_met.id)
+      assert unchanged.title == first_met.title
+      assert unchanged.updated_at == first_met.updated_at
+    end
+
+    test "delete is rejected", %{conn: conn, first_met: first_met} do
+      conn = delete(conn, ~p"/api/reminders/#{first_met.id}")
+
+      assert json_response(conn, 422)["detail"] ==
+               "First-met reminders are managed from the contact's first-met date."
+
+      assert Kith.Repo.get(Kith.Reminders.Reminder, first_met.id)
+    end
+  end
+
+  test "description and day intervals round-trip", %{conn: conn, contact: contact} do
+    conn =
+      post(conn, ~p"/api/contacts/#{contact.id}/reminders", %{
+        "reminder" => %{
+          "type" => "recurring",
+          "title" => "Water",
+          "anchor_date" => "2026-01-01",
+          "interval_unit" => "day",
+          "interval_count" => 10,
+          "description" => "Ferns"
+        }
+      })
+
+    data = json_response(conn, 201)["data"]
+    assert data["interval_unit"] == "day"
+    assert data["description"] == "Ferns"
+  end
 end

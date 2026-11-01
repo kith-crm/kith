@@ -1,0 +1,549 @@
+{
+  "review_date_local": "2026-10-29",
+  "generated_at_utc": "2026-10-28T23:58:19.858520+00:00",
+  "scope": "Independent compatibility review for the two action package upgrades introduced by PR44 warning remediation. No application compilation performed.",
+  "reviewed_repository_files": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/dev-build.yml",
+    "package.json",
+    "package-lock.json",
+    "assets/package.json",
+    "assets/package-lock.json",
+    "scripts/security/dependency_audit.exs",
+    "scripts/ci/coverage-report.sh",
+    "test/playwright/fixtures/pr44/run.sh"
+  ],
+  "reviewed_workflow_sha256": "693560e4b61fb7667dd5738b2d4c6c78c150a31865f068ac80015becbc2db201",
+  "runtime_evidence": {
+    "official_node24_support_url": "https://github.com/actions/runner/releases/tag/v2.327.1",
+    "prior_ci_job_url": "https://github.com/kith-crm/kith/actions/runs/40782716142/job/123148149221",
+    "prior_observed_runner": "2.338.0",
+    "prior_observed_os": "Ubuntu24.04.5",
+    "prior_runner_image": "ubuntu-24.04 /20261025.353.1",
+    "current_profile": "All jobs use GitHub-hosted ubuntu-latest; no self-hosted or GHES profile. Node24 is the action runtime; node-version22 remains the project runtime.",
+    "limitation": "Prior runner evidence establishes platform compatibility, not execution of the new pins."
+  },
+  "actions": [
+    {
+      "package": "actions/setup-node",
+      "from": "v4",
+      "to": "v7.1.0",
+      "prior_ci_resolved_commit": "49933ea5288caeca8642d1e84afbd3f7d6820020",
+      "pinned_commit": "949feb2413d6458794dcd2491c4babbbce0c15c1",
+      "release_verification": {
+        "release_url": "https://github.com/actions/setup-node/releases/tag/v7.1.0",
+        "published_at": "2026-10-08T02:52:34Z",
+        "tag_ref_url": "https://api.github.com/repos/actions/setup-node/git/ref/tags/v7.1.0",
+        "tag_resolves_to_pin": true,
+        "commit_url": "https://github.com/actions/setup-node/commit/949feb2413d6458794dcd2491c4babbbce0c15c1",
+        "github_signature_verified": true,
+        "github_signature_reason": "valid"
+      },
+      "runtime": {
+        "action_yml_using": "node24",
+        "action_package_node_engine": ">=24.0.0",
+        "minimum_runner": "2.327.1",
+        "application_node_version": "22",
+        "action_yml_url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/action.yml"
+      },
+      "migration_review": [
+        {
+          "release": "v5.0.0",
+          "source_url": "https://github.com/actions/setup-node/releases/tag/v5.0.0",
+          "change": "Node24 action runtime requires runner >=2.327.1; packageManager detection can enable cache without an explicit cache input.",
+          "kith_assessment": "Both jobs keep project Node22. Test job explicitly disables automatic caching; browser explicitly selects npm. Hosted runner compatibility supported by prior runner2.338.0 evidence."
+        },
+        {
+          "release": "v6.0.0",
+          "source_url": "https://github.com/actions/setup-node/releases/tag/v6.0.0",
+          "change": "Automatic package-manager detection is restricted to npm; other managers need explicit cache input.",
+          "kith_assessment": "Only npm is used; no pnpm/yarn or implicit manager dependency."
+        },
+        {
+          "release": "v6.1.0",
+          "source_url": "https://github.com/actions/setup-node/releases/tag/v6.1.0",
+          "change": "Removed always-auth input/registry handling; cache/tooling dependencies updated.",
+          "kith_assessment": "No always-auth, registry-url or npm publishing configuration exists in our workflows."
+        },
+        {
+          "release": "v6.2.0",
+          "source_url": "https://github.com/actions/setup-node/releases/tag/v6.2.0",
+          "change": "Cache toolkit update and documentation changes, including lockfile requirements.",
+          "kith_assessment": "Root package-lock.json is present before setup-node; npm ci always installs from locks."
+        },
+        {
+          "release": "v6.3.0",
+          "source_url": "https://github.com/actions/setup-node/releases/tag/v6.3.0",
+          "change": "node-version-file package.json parsing prefers devEngines.runtime; mirror auth and dependency fixes; uses crypto.randomUUID.",
+          "kith_assessment": "Explicit node-version 22 bypasses version files; no mirror inputs configured."
+        },
+        {
+          "release": "v6.4.0",
+          "source_url": "https://github.com/actions/setup-node/releases/tag/v6.4.0",
+          "change": "Actions toolkit dependencies updated.",
+          "kith_assessment": "Selected action lock and all production engine declarations checked against Node24; this does not alter Kith npm lockfiles."
+        },
+        {
+          "release": "v6.5.0",
+          "source_url": "https://github.com/actions/setup-node/releases/tag/v6.5.0",
+          "change": "Cache toolkit and security dependency overrides updated.",
+          "kith_assessment": "Action-owned cache code runs on Node24; Kith installs remain separate on Node22."
+        },
+        {
+          "release": "v7.0.0",
+          "source_url": "https://github.com/actions/setup-node/releases/tag/v7.0.0",
+          "change": "Action internals move to ESM; removes dummy NODE_AUTH_TOKEN; adds cache key outputs and improves cache-write denial handling.",
+          "kith_assessment": "No registry-url/auth token fallback or downstream cache outputs used. Runner launches action.yml entrypoints; application module scopes remain independent."
+        },
+        {
+          "release": "v7.1.0",
+          "source_url": "https://github.com/actions/setup-node/releases/tag/v7.1.0",
+          "change": "Adds mise.toml and absolute version-file support, verifies installed Node version, retries manifest fetch; toolkit/build dependencies updated.",
+          "kith_assessment": "Version-file additions unused. Node22 from hosted tool cache or official download must pass new verification; fresh hosted execution remains required."
+        }
+      ],
+      "dependency_graph": {
+        "package_json_url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/package.json",
+        "lockfile_url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/package-lock.json",
+        "lockfile_sha256": "ca72b6550785f29a35830f9f9399d124fa80c76598f27ba0dbdbeef9fe2c8216",
+        "direct_runtime_versions": {
+          "@actions/cache": "6.3.0",
+          "@actions/core": "3.0.1",
+          "@actions/exec": "3.0.0",
+          "@actions/github": "9.1.1",
+          "@actions/glob": "0.7.0",
+          "@actions/http-client": "4.0.1",
+          "@actions/io": "3.0.2",
+          "@actions/tool-cache": "4.0.0",
+          "semver": "7.8.5",
+          "smol-toml": "1.7.1"
+        },
+        "production_lock_nodes": 59,
+        "node_engine_range_counts": {
+          "unspecified": 23,
+          ">=18.0.0": 3,
+          ">=20.0.0": 11,
+          ">= 20": 8,
+          ">= 14": 3,
+          "18 || 20 || >=22": 2,
+          "20 || >=22": 1,
+          ">=6.0": 1,
+          ">=0.8.x": 1,
+          ">=14.0.0": 1,
+          ">=10": 1,
+          ">= 18": 1,
+          ">=0.6.11 <=0.7.0 || >=0.7.3": 1,
+          ">=18.17": 1,
+          ">=16.0.0": 1
+        },
+        "engine_assessment": "All explicit production lockfile Node ranges admit Node24; nodes with no engine declaration remain unspecified. This is compatibility analysis, not execution or an audit of all transitive source code.",
+        "runtime_separation": "Bundled action toolkit dependencies are action-owned and are not installed into either Kith npm dependency tree."
+      },
+      "source_review": {
+        "scope": "Every TypeScript file under src at pinned commit, action.yml, package/lock metadata, README and applicable migration guidance; mapped reachable paths to all repository workflows. Ancillary prerelease/merge code has no current workflow caller.",
+        "files": [
+          {
+            "path": "src/authutil.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/authutil.ts",
+            "sha256": "295e125e7c37ffcace774dfb3e39ced341506d7c09c91c29576a9a36c58ca4ed"
+          },
+          {
+            "path": "src/cache-restore.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/cache-restore.ts",
+            "sha256": "8ac2beebb16c5680b8afbbcf0ead1d11f64eacbca4a34439c7dcd2e675e62b3a"
+          },
+          {
+            "path": "src/cache-save.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/cache-save.ts",
+            "sha256": "c4dc282d17437999734e20d0d36bfa4da28edb8caf4d23aad6f171deefa3ebd4"
+          },
+          {
+            "path": "src/cache-utils.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/cache-utils.ts",
+            "sha256": "8236bdd110136616d2dcca58fcba4ab2eb09868774e5b8aa48d95cd3fd9fdcf9"
+          },
+          {
+            "path": "src/constants.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/constants.ts",
+            "sha256": "82dcd499bab5084ba2eae0081e3b9e37e04e360bd7cebe9c7b438b84750b74ed"
+          },
+          {
+            "path": "src/distributions/base-distribution-prerelease.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/distributions/base-distribution-prerelease.ts",
+            "sha256": "fea7eaaee790fb6dc5e2cfe3a6ad6230ac9adda81ddefe6068f33546aa2ce996"
+          },
+          {
+            "path": "src/distributions/base-distribution.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/distributions/base-distribution.ts",
+            "sha256": "ea74bec3695a0c4f0825aea8a662aa4ad439b257465ec3427bcde044a400844e"
+          },
+          {
+            "path": "src/distributions/base-models.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/distributions/base-models.ts",
+            "sha256": "bdefaef182703118be43a43cac6b5baed2463cdc2e366468db7fd5d9778ae453"
+          },
+          {
+            "path": "src/distributions/installer-factory.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/distributions/installer-factory.ts",
+            "sha256": "26ab1a9035b7266a2a8c627aa8d151b52035b070e88f3c99c4b84ade823dd813"
+          },
+          {
+            "path": "src/distributions/nightly/nightly_builds.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/distributions/nightly/nightly_builds.ts",
+            "sha256": "b353b1f34e7272d70ff55baeaad294610763c669b7786661239fc6db6dd064f1"
+          },
+          {
+            "path": "src/distributions/official_builds/official_builds.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/distributions/official_builds/official_builds.ts",
+            "sha256": "b357341bc74993f69f72833788791a32f491598b6999110e8eb8584cdc6320db"
+          },
+          {
+            "path": "src/distributions/rc/rc_builds.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/distributions/rc/rc_builds.ts",
+            "sha256": "48e9187d338fd2fd55665caa4d6a858efd2f53ec6be27a97ec4ab8170d30b492"
+          },
+          {
+            "path": "src/distributions/v8-canary/canary_builds.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/distributions/v8-canary/canary_builds.ts",
+            "sha256": "51ede1f42f9f2c5fe4b01c714f9788f6da3cd5bf6b0de0b890b8b745153acab0"
+          },
+          {
+            "path": "src/main.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/main.ts",
+            "sha256": "949832c4a31a22332548496dfabbbe9d6c87241b9b3ba231844f7baf57747637"
+          },
+          {
+            "path": "src/setup-node.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/setup-node.ts",
+            "sha256": "533fb31558a04b24655d91326194ff50f7ecde0bd60c63677015d6f2f0e6133d"
+          },
+          {
+            "path": "src/util.ts",
+            "url": "https://github.com/actions/setup-node/blob/949feb2413d6458794dcd2491c4babbbce0c15c1/src/util.ts",
+            "sha256": "def0d082b0a5d1e7db1cbadc2b230ae1da026c873cb895765a3ae0f607c7a1d6"
+          }
+        ],
+        "limitations": [
+          "Did not rebuild or execute upstream bundled dist JavaScript. GitHub signature verification authenticates the upstream commit but does not prove source-to-bundle reproducibility.",
+          "Did not line-audit all toolkit/transitive implementations. Lock graph engines and direct API contracts were reviewed; action-service integration remains a hosted validation gap."
+        ]
+      },
+      "prior_ci_resolved_release_tags": [
+        "v4",
+        "v4.4.0"
+      ]
+    },
+    {
+      "package": "actions/upload-artifact",
+      "from": "v4",
+      "to": "v7.0.2",
+      "prior_ci_resolved_commit": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+      "pinned_commit": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+      "release_verification": {
+        "release_url": "https://github.com/actions/upload-artifact/releases/tag/v7.0.2",
+        "published_at": "2026-10-07T10:08:14Z",
+        "tag_ref_url": "https://api.github.com/repos/actions/upload-artifact/git/ref/tags/v7.0.2",
+        "tag_resolves_to_pin": true,
+        "commit_url": "https://github.com/actions/upload-artifact/commit/cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+        "github_signature_verified": true,
+        "github_signature_reason": "valid"
+      },
+      "runtime": {
+        "action_yml_using": "node24",
+        "action_package_node_engine": ">=24",
+        "minimum_runner": "2.327.1",
+        "application_node_version": "22",
+        "action_yml_url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/action.yml"
+      },
+      "migration_review": [
+        {
+          "release": "v5.0.0",
+          "source_url": "https://github.com/actions/upload-artifact/releases/tag/v5.0.0",
+          "change": "Updates artifact toolkit for Node24 support; still defaults to Node20 in this intermediate release.",
+          "kith_assessment": "No direct action internals imported or custom JavaScript runtime forcing used."
+        },
+        {
+          "release": "v6.0.0",
+          "source_url": "https://github.com/actions/upload-artifact/releases/tag/v6.0.0",
+          "change": "Default action runtime becomes Node24, runner >=2.327.1; artifact toolkit removes punycode usage.",
+          "kith_assessment": "Hosted Ubuntu runner prior evidence2.338.0 satisfies floor; no self-hosted runner or GHES configuration."
+        },
+        {
+          "release": "v7.0.0",
+          "source_url": "https://github.com/actions/upload-artifact/releases/tag/v7.0.0",
+          "change": "ESM internals and optional direct unzipped single-file uploads. archive:false ignores name and rejects multi-file matches.",
+          "kith_assessment": "Both calls leave archive at true, so named multi-path compressed artifacts retain supported semantics."
+        },
+        {
+          "release": "v7.0.1",
+          "source_url": "https://github.com/actions/upload-artifact/releases/tag/v7.0.1",
+          "change": "Documentation/direct upload details and typespec HTTP runtime update.",
+          "kith_assessment": "Direct upload is unused; pinned lock resolves typespec HTTP runtime0.3.5."
+        },
+        {
+          "release": "v7.0.2",
+          "source_url": "https://github.com/actions/upload-artifact/releases/tag/v7.0.2",
+          "change": "Artifact toolkit6.3.1 improves download HTTP429 retry and valid Retry-After support.",
+          "kith_assessment": "Workflow uploads only; no download-artifact or merge action consumer. Upload retries/backend behavior needs hosted validation."
+        }
+      ],
+      "dependency_graph": {
+        "package_json_url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/package.json",
+        "lockfile_url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/package-lock.json",
+        "lockfile_sha256": "1d91c8ae4f454eb20c364e8c6498258c467daf11d48b703d007a7010b3c85415",
+        "direct_runtime_versions": {
+          "@actions/artifact": "6.3.1",
+          "@actions/core": "3.0.1",
+          "@actions/github": "9.1.1",
+          "@actions/glob": "0.6.1",
+          "@actions/io": "3.0.2",
+          "minimatch": "10.2.4"
+        },
+        "production_lock_nodes": 148,
+        "node_engine_range_counts": {
+          "unspecified": 64,
+          "*": 4,
+          ">=18.0.0": 3,
+          ">=20.0.0": 11,
+          ">=12": 6,
+          ">= 20": 10,
+          ">=14": 3,
+          ">=6.5": 1,
+          ">= 14": 8,
+          ">=8": 14,
+          "18 || 20 || >=22": 3,
+          ">=8.0.0": 1,
+          ">=0.2.0": 1,
+          ">=7.0.0": 1,
+          ">=0.8": 1,
+          ">= 8": 2,
+          ">=6.0": 1,
+          ">=6": 1,
+          ">=0.8.x": 1,
+          ">=16 || 14 >=14.17": 2,
+          ">=18": 1,
+          ">= 0.6.3": 1,
+          ">=0.10.0": 1,
+          ">=16 || 14 >=14.18": 1,
+          ">= 0.6.0": 1,
+          "^12.22.0 || ^14.17.0 || >=16.0.0": 1,
+          ">=10": 2,
+          ">=0.6.11 <=0.7.0 || >=0.7.3": 1,
+          ">=18.17": 1
+        },
+        "engine_assessment": "All explicit production lockfile Node ranges admit Node24; nodes with no engine declaration remain unspecified. This is compatibility analysis, not execution or an audit of all transitive source code.",
+        "runtime_separation": "Bundled action toolkit dependencies are action-owned and are not installed into either Kith npm dependency tree."
+      },
+      "source_review": {
+        "scope": "Every TypeScript file under src at pinned commit, action.yml, package/lock metadata, README and applicable migration guidance; mapped reachable paths to all repository workflows. Ancillary prerelease/merge code has no current workflow caller.",
+        "files": [
+          {
+            "path": "src/merge/constants.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/merge/constants.ts",
+            "sha256": "3b90dc24f0facc44cf94ce9b8f291544652bf18ced32384df22aad6bef306f86"
+          },
+          {
+            "path": "src/merge/index.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/merge/index.ts",
+            "sha256": "d9b9d8685ca3e6073d3a88bb812f3dc2290ca6b9651f323706277db29db37671"
+          },
+          {
+            "path": "src/merge/input-helper.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/merge/input-helper.ts",
+            "sha256": "b94b07bc80644c03a381598bd521059d63c02471748bd96b97d204f8b1c4d9f5"
+          },
+          {
+            "path": "src/merge/merge-artifacts.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/merge/merge-artifacts.ts",
+            "sha256": "0319a53ff36ee50b20eb0caa2e53e5e67c4509efe5a1be900dcdbda34a5e835c"
+          },
+          {
+            "path": "src/merge/merge-inputs.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/merge/merge-inputs.ts",
+            "sha256": "6474bdd9b506e0646cf1103dbe1d8af2a70f72db6ade0c3dc80830e5758196fe"
+          },
+          {
+            "path": "src/shared/search.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/shared/search.ts",
+            "sha256": "4cbd489c239640073ee1bd17b9f941aabcf34cb7f41d68edd2264ee0438174e9"
+          },
+          {
+            "path": "src/shared/upload-artifact.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/shared/upload-artifact.ts",
+            "sha256": "bfab1f3c0e5ada3dd46e64addb583730dd84e17a47f06e24f9bda3cd50b9153b"
+          },
+          {
+            "path": "src/upload/constants.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/upload/constants.ts",
+            "sha256": "df9f4735c7d401fba698eef69e42d29c0f95881a5037d38e7e519e88d408564b"
+          },
+          {
+            "path": "src/upload/index.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/upload/index.ts",
+            "sha256": "1e3f37cd57733b5715f9436a9ab86b09126e7173ea275a68ad468c4ce2d311bf"
+          },
+          {
+            "path": "src/upload/input-helper.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/upload/input-helper.ts",
+            "sha256": "982def8793858e4976192f3f5ade26f1e843eee069922a974228648dafc1298c"
+          },
+          {
+            "path": "src/upload/upload-artifact.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/upload/upload-artifact.ts",
+            "sha256": "645c95f89c7fa74b171875f9a8855314c6daf8ec08c46f796fd16fc197a22c2e"
+          },
+          {
+            "path": "src/upload/upload-inputs.ts",
+            "url": "https://github.com/actions/upload-artifact/blob/cf430e030ddbb5b0abf93d22962f4752f3646cd9/src/upload/upload-inputs.ts",
+            "sha256": "b02e8aa4442f587d444f7300eed814e260119f12155e5a6ea8a3ad16101bcd26"
+          }
+        ],
+        "limitations": [
+          "Did not rebuild or execute upstream bundled dist JavaScript. GitHub signature verification authenticates the upstream commit but does not prove source-to-bundle reproducibility.",
+          "Did not line-audit all toolkit/transitive implementations. Lock graph engines and direct API contracts were reviewed; action-service integration remains a hosted validation gap."
+        ]
+      },
+      "prior_ci_resolved_release_tags": [
+        "v4",
+        "v4.6.2"
+      ]
+    }
+  ],
+  "workflow_interactions": {
+    "setup_node": [
+      {
+        "job": "test",
+        "inputs": {
+          "node-version": "22",
+          "package-manager-cache": false
+        },
+        "effect": "Installs Node22; no npm cache writer. No registry-url/always-auth/mirror/version-file inputs."
+      },
+      {
+        "job": "browser-regressions",
+        "inputs": {
+          "node-version": "22",
+          "cache": "npm",
+          "cache-dependency-path": [
+            "package-lock.json",
+            "assets/package-lock.json"
+          ]
+        },
+        "effect": "Only npm download-cache writer; both lockfiles are hashed, actual installs remain npm ci, node_modules not restored."
+      }
+    ],
+    "cache_writers": [
+      {
+        "family": "Hex source deps",
+        "writers": [
+          "test",
+          "dialyzer"
+        ],
+        "separation": "Keys include github.job, runner OS and mix.lock hash; independent per-job restore prefixes prevent same-run reservation collision."
+      },
+      {
+        "family": "compiled BEAM _build",
+        "writers": [
+          "test",
+          "dialyzer"
+        ],
+        "separation": "Keys and fallback prefixes include OS, Elixir, OTP and MIX_ENV; test/dev differ. Final parent review tightened Elixir/OTP keys to exact setup-beam output versions, including resolved patches."
+      },
+      {
+        "family": "browser deps/_build",
+        "writers": [
+          "browser-regressions"
+        ],
+        "separation": "Own browser prefix, OS, Elixir, OTP and lock; MIX_ENV fixed test by workflow. Final parent review tightened Elixir/OTP keys to exact setup-beam output versions, including resolved patches."
+      },
+      {
+        "family": "PLT",
+        "writers": [
+          "dialyzer"
+        ],
+        "separation": "OS, actual setup-beam version outputs and lock included."
+      },
+      {
+        "family": "npm tarballs",
+        "writers": [
+          "browser-regressions"
+        ],
+        "separation": "Explicit npm cache only here; test disables automatic detection."
+      },
+      {
+        "family": "BuildKit GHA",
+        "writers": [
+          "docker-build",
+          "publish",
+          "dev-build"
+        ],
+        "separation": "Existing default BuildKit scope shared across workflows. Unchanged by this migration; possible cache replacement across builds is a performance boundary, not proof of compiled BEAM cache correctness."
+      }
+    ],
+    "artifact_calls": [
+      {
+        "job": "test",
+        "name": "exunit-coverage",
+        "paths": [
+          "cover/",
+          "tmp/ci-diagnostics/",
+          "tmp/security/"
+        ],
+        "retention_days": 7,
+        "archive": true,
+        "when": "always, after dependency audit and JS tests",
+        "root_layout": "Multi-path least-common-ancestor root is repository workspace. Coverage appears under cover/. No in-repository download consumer depends on prior flattened coverage layout."
+      },
+      {
+        "job": "browser-regressions",
+        "name": "browser-regression-results",
+        "paths": [
+          "test-results/",
+          "tmp/pr44-browser/"
+        ],
+        "retention_days": 7,
+        "archive": true,
+        "when": "always after browser execution",
+        "root_layout": "Workspace-relative multi-path layout unchanged."
+      }
+    ],
+    "artifact_compatibility": {
+      "distinct_names": true,
+      "merge_or_overwrite": false,
+      "download_artifact_consumers": 0,
+      "hidden_files": "Remain excluded by default, matching audited v4 pin; Playwright trace.zip/report/log paths are non-hidden. No secret-dotfile inclusion enabled.",
+      "missing_paths": "Default warn remains; early build failures may have no cover/browser output. Existing failure stays blocking independently of artifact absence.",
+      "ghes": "Unsupported in v4+ already; repository runs on github.com."
+    }
+  },
+  "concrete_defects_repaired": [
+    {
+      "problem": "Artifact upload preceded dependency audits although tmp/security was included. Audit script also printed reports without saving them.",
+      "repair": "Move existing always-upload step to end of test job; save raw Hex/root npm/assets npm output plus structured statuses/exception IDs before aggregate audit failure. Advisory choices and failure policy unchanged.",
+      "files": [
+        ".github/workflows/ci.yml",
+        "scripts/security/dependency_audit.exs"
+      ]
+    },
+    "Final parent review uses actual setup-beam version outputs in all compiled cache keys and includes both npm lockfiles in the sole npm cache writer key."
+  ],
+  "validation": {
+    "completed": [
+      "Pinned tag-to-commit resolution through official GitHub API; both commits report valid verified signatures.",
+      "Read selected pinned action source/metadata and release notes across every intermediate major and listed minor/patch release.",
+      "Repository-wide workflow/input/consumer search; no removed auth input or direct-upload option usage.",
+      "CI YAML parsed; audit script syntax parsed; git diff --check passed.",
+      "Isolated audit-capture harness with mock command executables and existing Jason BEAM: success returns0; simulated Hex status2 returns failure after all3 raw report files and valid structured JSON are written. No application compilation performed."
+    ],
+    "pending": [
+      "Fresh hosted CI action startup on Node24, project node --version22, and both npm installs.",
+      "Cold/warm parallel cache restore/save and fork-PR read-only cache behavior.",
+      "Upload/download/open both artifacts and confirm coverage, raw PostgreSQL, raw dependency-audit reports and browser traces have expected paths and7-day retention.",
+      "Observe action-owned punycode/url.parse warnings after upgrade; do not claim their absence based only on release notes."
+    ],
+    "bounded_gaps": [
+      "Concurrent independent workflow runs can still contend for identical immutable cache keys; same-run writers are separated.",
+      "BuildKit shared default scope is pre-existing and can affect reuse across CI/dev builds; no correctness claim based on cache hit alone."
+    ]
+  }
+}

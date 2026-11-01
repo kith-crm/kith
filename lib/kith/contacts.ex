@@ -33,7 +33,10 @@ defmodule Kith.Contacts do
   }
 
   alias Kith.Activities.{Activity, Call}
+  alias Kith.Imports.ContactCleanup
   alias Kith.Storage
+
+  require Logger
 
   ## Contacts
 
@@ -284,12 +287,38 @@ defmodule Kith.Contacts do
     %Contact{account_id: account_id}
     |> Contact.create_changeset(attrs)
     |> Repo.insert()
+    |> sync_derived_reminders(%Contact{})
   end
 
   def update_contact(%Contact{} = contact, attrs) do
     contact
     |> Contact.update_changeset(attrs)
     |> Repo.update()
+    |> sync_derived_reminders(contact)
+  end
+
+  # Every path that sets or clears a birthdate or first-met date (UI, REST API,
+  # CardDAV, the Monica importer) goes through create_contact/2 or
+  # update_contact/2. `old` is the contact before the write (`%Contact{}` on
+  # create, whose dates are nil and whose opt-in is false).
+  defp sync_derived_reminders({:ok, %Contact{} = new} = result, %Contact{} = old) do
+    if new.birthdate != old.birthdate,
+      do: log_sync_failure(:birthday, new, Kith.Reminders.sync_birthday(new))
+
+    if {new.first_met_at, new.first_met_reminder} != {old.first_met_at, old.first_met_reminder},
+      do: log_sync_failure(:first_met, new, Kith.Reminders.sync_first_met(new))
+
+    result
+  end
+
+  defp sync_derived_reminders(result, _old), do: result
+
+  defp log_sync_failure(_kind, _contact, {:ok, _}), do: :ok
+
+  defp log_sync_failure(kind, contact, {:error, reason}) do
+    Logger.warning(
+      "[Contacts] #{kind} reminder sync failed for contact #{contact.id}: #{inspect(reason)}"
+    )
   end
 
   def soft_delete_contact(%Contact{} = contact) do
@@ -317,26 +346,45 @@ defmodule Kith.Contacts do
   end
 
   def hard_delete_contact(%Contact{} = contact) do
-    Repo.delete(contact)
+    Repo.transaction(fn ->
+      # Lock the parent before inspecting children: a concurrent FK insert
+      # must not land between mapping cleanup and the cascade.
+      from(c in Contact,
+        where: c.id == ^contact.id and c.account_id == ^contact.account_id,
+        lock: "FOR UPDATE"
+      )
+      |> Repo.one!()
+
+      ContactCleanup.delete_for_contacts(contact.account_id, [contact.id])
+
+      case Repo.delete(contact) do
+        {:ok, deleted} -> deleted
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
 
   @doc """
-  Cancels reminder jobs for all trashed contacts in the given account, bulk-deletes them,
-  and returns `{:ok, count}` where `count` is the number of contacts permanently deleted.
+  Bulk-deletes all trashed contacts in the given account and returns `{:ok, count}`.
 
   The DB read and bulk-delete are wrapped in a transaction so concurrent purge workers
-  cannot interleave. Oban job cancellations inside are best-effort.
+  cannot interleave.
   """
   def empty_trash(account_id) do
     Repo.transaction(fn ->
-      trashed = list_trashed_contacts(account_id)
+      contact_ids =
+        from(c in Contact,
+          where: c.account_id == ^account_id and not is_nil(c.deleted_at),
+          order_by: c.id,
+          select: c.id,
+          lock: "FOR UPDATE"
+        )
+        |> Repo.all()
 
-      Enum.each(trashed, fn contact ->
-        Kith.Reminders.cancel_all_for_contact(contact.id, account_id)
-      end)
+      ContactCleanup.delete_for_contacts(account_id, contact_ids)
 
       {count, _} =
-        from(c in Contact, where: c.account_id == ^account_id and not is_nil(c.deleted_at))
+        from(c in Contact, where: c.account_id == ^account_id and c.id in ^contact_ids)
         |> Repo.delete_all()
 
       count
@@ -598,10 +646,24 @@ defmodule Kith.Contacts do
     note
   end
 
-  def create_note(%Contact{} = contact, user_id, attrs) do
+  @doc """
+  Creates a note. `opts` may carry `:inserted_at` / `:updated_at` (import-only
+  original timestamps). They are set on the struct, never cast from `attrs`.
+  """
+  def create_note(%Contact{} = contact, user_id, attrs, opts \\ []) do
     %Note{contact_id: contact.id, account_id: contact.account_id, author_id: user_id}
+    |> put_note_timestamps(opts)
     |> Note.changeset(attrs)
     |> Repo.insert()
+  end
+
+  defp put_note_timestamps(note, opts) do
+    Enum.reduce([:inserted_at, :updated_at], note, fn key, acc ->
+      case Keyword.get(opts, key) do
+        %DateTime{} = dt -> Map.put(acc, key, DateTime.truncate(dt, :second))
+        _ -> acc
+      end
+    end)
   end
 
   def update_note(%Note{} = note, attrs) do

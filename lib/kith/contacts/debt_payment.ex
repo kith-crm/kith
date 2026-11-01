@@ -3,7 +3,7 @@ defmodule Kith.Contacts.DebtPayment do
   import Ecto.Changeset
 
   schema "debt_payments" do
-    field :amount, :decimal
+    field :amount, Kith.Types.BoundedDecimal
     field :paid_at, :date
     field :notes, :string
 

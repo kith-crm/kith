@@ -17,21 +17,21 @@ defmodule KithWeb.UploadsController do
   def show(conn, %{"path" => path_parts}) do
     storage_key = Enum.join(path_parts, "/")
 
-    with :ok <- validate_path(storage_key),
+    with :ok <- Storage.validate_storage_key(storage_key),
          {account_id_str, _type, _filename} <- parse_storage_key(storage_key),
          :ok <- authorize(conn, account_id_str) do
-      file_path = Local.full_path(storage_key)
+      case Local.read(storage_key) do
+        {:ok, bytes} ->
+          conn
+          |> put_resp_content_type(Storage.content_type(storage_key), nil)
+          |> put_resp_header("x-content-type-options", "nosniff")
+          |> send_resp(200, bytes)
 
-      if File.exists?(file_path) do
-        content_type = Storage.content_type(storage_key)
+        {:error, :invalid_path} ->
+          conn |> put_status(400) |> json(%{error: "Invalid path"})
 
-        conn
-        |> put_resp_content_type(content_type)
-        |> send_file(200, file_path)
-      else
-        conn
-        |> put_status(404)
-        |> json(%{error: "File not found"})
+        {:error, _reason} ->
+          conn |> put_status(404) |> json(%{error: "File not found"})
       end
     else
       {:error, :invalid_path} ->
@@ -42,14 +42,6 @@ defmodule KithWeb.UploadsController do
 
       {:error, :bad_format} ->
         conn |> put_status(400) |> json(%{error: "Invalid storage key format"})
-    end
-  end
-
-  defp validate_path(key) do
-    if String.contains?(key, "..") do
-      {:error, :invalid_path}
-    else
-      :ok
     end
   end
 

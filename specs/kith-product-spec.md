@@ -427,7 +427,7 @@ In v1. Manual only.
 | Rich text | Trix editor via LiveView hook (for notes) |
 | i18n | Gettext (strings) + **`ex_cldr`** (dates, numbers, currencies) |
 | Build | esbuild (built into Phoenix 1.7+) |
-| Testing | ExUnit (unit), Wallaby (E2E browser) |
+| Testing | ExUnit (unit), Playwright (E2E browser) |
 
 ### Component Hierarchy (Required — PR gate before first contact profile LiveView is merged)
 
@@ -488,7 +488,7 @@ Alpine.js handles **UI chrome only**: dropdown menus, tooltips, clipboard, keybo
 | i18n | Gettext + **`ex_cldr`** | Strings + date/number/currency |
 | Logging | `logger_json` | JSON-structured in prod; plain text in dev |
 | Error tracking | `sentry-elixir` | Production only |
-| Testing | ExUnit + Wallaby | Unit + browser E2E |
+| Testing | ExUnit + Playwright | Unit + browser E2E |
 | Deployment | Docker + Docker Compose | See Section 14 |
 
 ### Architecture Decision Records (ADRs — required before first commit)

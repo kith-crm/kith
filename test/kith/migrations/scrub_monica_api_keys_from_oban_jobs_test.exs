@@ -13,7 +13,10 @@ defmodule Kith.Migrations.ScrubMonicaApiKeysFromObanJobsTest do
   # Ecto.Migrator deadlocks under the shared sandbox, so run the migration's
   # exact statement directly; the sandbox rolls it back.
   setup_all do
-    [{migration, _}] = Code.require_file(@migration_path)
+    migration = Kith.Repo.Migrations.ScrubMonicaApiKeysFromObanJobs
+    # A newly created test partition has already loaded this module while
+    # migrating. Reuse that exact module rather than redefining it in memory.
+    unless Code.ensure_loaded?(migration), do: Code.require_file(@migration_path)
     %{migration: migration}
   end
 

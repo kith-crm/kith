@@ -285,6 +285,7 @@ defmodule Kith.Workers.MonicaApiCrawlWorkerTest do
   end
 
   describe "failure and retry" do
+    @tag :capture_log
     test "a non-final failed attempt keeps the key; the final one wipes it",
          %{user: user, account_id: account_id} do
       import_job = api_import_fixture_with_stub(account_id, user.id)
@@ -300,6 +301,7 @@ defmodule Kith.Workers.MonicaApiCrawlWorkerTest do
       assert is_nil(Imports.get_import!(import_job.id).api_key_encrypted)
     end
 
+    @tag :capture_log
     test "regression: fail -> retry -> success completes and keeps the key for follow-ups",
          %{user: user, account_id: account_id} do
       # Previously attempt 1's failure wiped the key, and the successful
@@ -331,6 +333,7 @@ defmodule Kith.Workers.MonicaApiCrawlWorkerTest do
       assert_enqueued(worker: MonicaApiKeyReleaseWorker, args: %{"import_id" => import_job.id})
     end
 
+    @tag :capture_log
     test "a retry whose key is already wiped cancels without crawling",
          %{user: user, account_id: account_id} do
       stub_monica(:monica_crawl_no_key_stub)

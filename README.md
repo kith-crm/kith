@@ -97,8 +97,8 @@ mix test test/path/to_test.exs:42
 mix phx.server                              # Terminal 1
 npx playwright test --project=e2e           # Terminal 2
 
-# Browser tests with Wallaby
-WALLABY=1 mix test --only wallaby
+# Isolated browser regressions (starts its own fixture server)
+npm run test:pr44
 ```
 
 ### Test Tags
@@ -107,7 +107,6 @@ WALLABY=1 mix test --only wallaby
 |-----|---------|------------|
 | `:integration` | DB-touching tests (most tests) | `mix test` (default) |
 | `:external` | Hits real APIs (Immich, LocationIQ) | `EXTERNAL_TESTS=true mix test --only external` |
-| `:wallaby` | Browser E2E via Wallaby | `WALLABY=1 mix test --only wallaby` |
 | `:slow` | Large dataset performance tests | `mix test --only slow` |
 
 ## Code Quality

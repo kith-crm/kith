@@ -1,7 +1,9 @@
 defmodule Kith.Reminders.ReminderInstance do
   @moduledoc """
-  A fired instance of a reminder. Created by `ReminderNotificationWorker` when
-  a notification is sent. Tracks the lifecycle from pending → resolved/dismissed/failed.
+  A notice sent for one occurrence of a reminder. Created by
+  `Kith.Reminders.Dispatcher`; the unique index on (reminder_id,
+  occurrence_date, days_before) makes each notice send once.
+  Tracks the lifecycle from pending → resolved/dismissed/failed.
 
   Uses `fired_at` (Decision A) for the timestamp when the notification was sent.
   """
@@ -10,6 +12,7 @@ defmodule Kith.Reminders.ReminderInstance do
   import Ecto.Changeset
 
   @statuses ~w(pending resolved dismissed failed snoozed)
+  @kinds ~w(on_day advance)
 
   schema "reminder_instances" do
     field :status, :string, default: "pending"
@@ -18,6 +21,9 @@ defmodule Kith.Reminders.ReminderInstance do
     field :resolved_at, :utc_datetime
     field :snoozed_until, :utc_datetime
     field :snooze_count, :integer, default: 0
+    field :occurrence_date, :date
+    field :kind, :string
+    field :days_before, :integer
 
     belongs_to :reminder, Kith.Reminders.Reminder
     belongs_to :account, Kith.Accounts.Account
@@ -36,15 +42,30 @@ defmodule Kith.Reminders.ReminderInstance do
       :fired_at,
       :snoozed_until,
       :snooze_count,
+      :occurrence_date,
+      :kind,
+      :days_before,
       :reminder_id,
       :account_id,
       :contact_id
     ])
-    |> validate_required([:scheduled_for, :reminder_id, :account_id, :contact_id])
+    |> validate_required([
+      :scheduled_for,
+      :occurrence_date,
+      :kind,
+      :days_before,
+      :reminder_id,
+      :account_id,
+      :contact_id
+    ])
     |> validate_inclusion(:status, @statuses)
+    |> validate_inclusion(:kind, @kinds)
     |> foreign_key_constraint(:reminder_id)
     |> foreign_key_constraint(:account_id)
     |> foreign_key_constraint(:contact_id)
+    |> unique_constraint([:reminder_id, :occurrence_date, :days_before],
+      name: :reminder_instances_occurrence_idx
+    )
   end
 
   def resolve_changeset(instance) do

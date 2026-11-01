@@ -28,7 +28,8 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
       assert conn.status == 200
       [content_type] = get_resp_header(conn, "content-type")
-      assert content_type =~ "text/vcard"
+      assert content_type == "text/vcard; charset=utf-8"
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
     end
 
     test "response MUST include ETag header (RFC 6352 §5.1)",

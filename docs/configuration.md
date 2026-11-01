@@ -58,6 +58,7 @@ Variables are grouped by the implementation phase that introduces them. The "Pha
 |---|---|---|---|---|---|
 | `RATE_LIMIT_BACKEND` | enum(`ets`/`redis`) | `ets` | 01 | No | Rate limiting storage backend. `ets` is in-process and suitable for single-node deployments. `redis` is required for multi-node deployments. |
 | `REDIS_URL` | string | — | 01 | No | Redis connection URL (e.g., `redis://localhost:6379`). Required when `RATE_LIMIT_BACKEND=redis`. |
+| `MONICA_RATE_LIMIT_PER_MINUTE` | integer | `55` | 07 | No | Requests per minute Kith sends to a Monica instance during API import, per Monica host. Raise it together with `RATE_LIMIT_PER_MINUTE_API` on a self-hosted Monica, keeping this value a call or two below Monica's. Must be a positive integer. |
 
 ### Networking
 

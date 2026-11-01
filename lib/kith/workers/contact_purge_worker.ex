@@ -5,7 +5,8 @@ defmodule Kith.Workers.ContactPurgeWorker do
 
   - Batches at 500 to avoid long-running transactions
   - Each contact deletion is its own transaction
-  - Cancels any remaining Oban jobs for the contact's reminders
+  - Reminders and their instances go with the contact (FK cascade); a
+    queued reminder email whose instance is gone discards itself
   - Creates audit log entries with contact name snapshot (survives deletion)
   - Idempotent: safe to run multiple times
   """
@@ -15,7 +16,6 @@ defmodule Kith.Workers.ContactPurgeWorker do
   require Logger
 
   alias Kith.Contacts.Contact
-  alias Kith.Reminders
   alias Kith.Repo
 
   import Ecto.Query
@@ -59,21 +59,23 @@ defmodule Kith.Workers.ContactPurgeWorker do
   end
 
   defp purge_contact(contact) do
-    # Cancel any remaining Oban jobs for the contact's reminders
-    Reminders.cancel_all_for_contact(contact.id, contact.account_id)
-
     # Create audit log entry synchronously (we're already in an Oban job, no need to double-enqueue).
     # Must insert before deletion since the contact will be cascade-deleted.
-    Kith.AuditLogs.create_audit_log(contact.account_id, %{
-      user_id: nil,
-      user_name: "system",
-      event: "contact_purged",
-      contact_id: contact.id,
-      contact_name: contact.display_name || contact.first_name,
-      metadata: %{reason: "Contact permanently purged after 30-day trash window."}
-    })
+    Repo.transaction(fn ->
+      {:ok, _} =
+        Kith.AuditLogs.create_audit_log(contact.account_id, %{
+          user_id: nil,
+          user_name: "system",
+          event: "contact_purged",
+          contact_id: contact.id,
+          contact_name: contact.display_name || contact.first_name,
+          metadata: %{reason: "Contact permanently purged after 30-day trash window."}
+        })
 
-    # Hard-delete (CASCADE removes all sub-entities)
-    Repo.delete!(contact)
+      # The shared path removes import mappings and cascaded child rows in
+      # the same transaction. Soft-deleted contacts keep their mappings until here.
+      {:ok, deleted} = Kith.Contacts.hard_delete_contact(contact)
+      deleted
+    end)
   end
 end

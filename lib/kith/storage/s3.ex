@@ -7,14 +7,16 @@ defmodule Kith.Storage.S3 do
   - `AWS_S3_BUCKET`
   - `AWS_S3_ENDPOINT` (optional, for MinIO/custom S3-compatible services)
 
-  Generates presigned GET URLs with 1-hour expiry for secure file access.
+  Generates presigned GET URLs signed from the start of the current UTC hour and
+  valid for 2 hours, so a key has one URL per hour (LiveView diffs nothing,
+  browsers cache) and every URL handed out stays valid for at least an hour.
   """
 
   @behaviour Kith.Storage.Backend
 
   require Logger
 
-  @presign_expiry 3600
+  @presign_expiry 7200
 
   @impl true
   def upload(source_path, storage_key, opts \\ []) do
@@ -94,15 +96,20 @@ defmodule Kith.Storage.S3 do
   end
 
   @doc """
-  Generates a presigned GET URL for an S3 object.
-  The URL expires after 1 hour (3600 seconds).
+  Generates a presigned GET URL for an S3 object, signed from the start of the
+  current UTC hour (`:now` overrides the clock) and valid for `:expires_in`
+  seconds (default 7200). Same key, same hour → same URL.
   """
   def presigned_url(storage_key, opts \\ []) do
     expires_in = Keyword.get(opts, :expires_in, @presign_expiry)
+    start = opts |> Keyword.get(:now, NaiveDateTime.utc_now()) |> hour_floor()
 
     config = ExAws.Config.new(:s3)
 
-    case ExAws.S3.presigned_url(config, :get, bucket(), storage_key, expires_in: expires_in) do
+    case ExAws.S3.presigned_url(config, :get, bucket(), storage_key,
+           expires_in: expires_in,
+           start_datetime: start
+         ) do
       {:ok, url} ->
         url
 
@@ -110,6 +117,28 @@ defmodule Kith.Storage.S3 do
         Logger.error("S3 presigned URL generation failed: #{inspect(reason)}")
         "#error"
     end
+  end
+
+  defp hour_floor(%NaiveDateTime{} = t), do: %{t | minute: 0, second: 0, microsecond: {0, 0}}
+
+  @doc """
+  Returns the `scheme://host[:port]` origin that presigned URLs point at, for
+  the CSP `img-src` directive. Presigned URLs are path-style, so the ExAws
+  config host is the exact origin the browser will request.
+  """
+  def csp_img_src do
+    config = ExAws.Config.new(:s3)
+    scheme = Map.get(config, :scheme) || "https://"
+    host = Map.get(config, :host) || "s3.amazonaws.com"
+
+    case Map.get(config, :port) do
+      port when port in [nil, 80, 443] -> "#{scheme}#{host}"
+      port -> "#{scheme}#{host}:#{port}"
+    end
+  rescue
+    e ->
+      Logger.error("Failed to build S3 CSP img-src: " <> Exception.message(e))
+      ""
   end
 
   defp bucket do

@@ -16,6 +16,34 @@ defmodule Kith.ContactsSubEntitiesTest do
 
   ## Notes
 
+  describe "create_note timestamps" do
+    test "create_note/4 uses given timestamps", %{contact: contact, user: user} do
+      {:ok, note} =
+        Contacts.create_note(contact, user.id, %{"body" => "x"},
+          inserted_at: ~U[2024-02-20 12:00:00.123456Z],
+          updated_at: ~U[2024-03-01 08:00:00Z]
+        )
+
+      assert note.inserted_at == ~U[2024-02-20 12:00:00Z]
+      assert note.updated_at == ~U[2024-03-01 08:00:00Z]
+
+      reloaded = Kith.Repo.get!(Kith.Contacts.Note, note.id)
+      assert reloaded.inserted_at == ~U[2024-02-20 12:00:00Z]
+      assert reloaded.updated_at == ~U[2024-03-01 08:00:00Z]
+    end
+
+    test "create_note/3 still autogenerates", %{contact: contact, user: user} do
+      {:ok, note} = Contacts.create_note(contact, user.id, %{"body" => "x"})
+      assert DateTime.diff(DateTime.utc_now(), note.inserted_at) < 5
+    end
+
+    test "create_note ignores timestamp keys in attrs", %{contact: contact, user: user} do
+      attrs = %{"body" => "x", "inserted_at" => "2001-01-01T00:00:00Z"}
+      {:ok, note} = Contacts.create_note(contact, user.id, attrs)
+      assert note.inserted_at.year != 2001
+    end
+  end
+
   describe "notes" do
     test "list_notes/2 returns notes for contact", %{contact: contact, user: user} do
       note = note_fixture(contact, user.id)
