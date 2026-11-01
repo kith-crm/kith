@@ -292,6 +292,9 @@ defmodule KithWeb.ContactLive.Show do
     end)
   end
 
+  defp avatar_crop_source({:photo, photo}), do: Storage.url(photo.storage_key)
+  defp avatar_crop_source(_crop), do: nil
+
   defp open_avatar_crop(socket, id) do
     if Kith.Policy.can?(socket.assigns.current_scope.user, :update, :contact) do
       photo = Contacts.get_photo!(socket.assigns.account_id, String.to_integer(id))

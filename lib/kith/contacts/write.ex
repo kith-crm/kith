@@ -122,6 +122,21 @@ defmodule Kith.Contacts.Write do
     prepare_contacts(account_id, dependencies(account_id, ids))
   end
 
+  @doc "Reload an account-owned child and prepare any owners changed since it was read."
+  def reload_child!(%{__struct__: schema, account_id: account_id, id: id} = previous) do
+    unless active?(account_id),
+      do: raise(ArgumentError, "child preparation requires an active account write")
+
+    current = Repo.get_by!(schema, id: id, account_id: account_id)
+    previous_ids = child_owner_ids(previous)
+    current_ids = child_owner_ids(current)
+    if current_ids != previous_ids, do: prepare(account_id, current_ids)
+    current
+  end
+
+  defp child_owner_ids(child),
+    do: Enum.reject([child.contact_id, Map.get(child, :related_contact_id)], &is_nil/1)
+
   defp prepare_contacts(account_id, ids) do
     invalidate_documents(ids)
     Store.ensure_contact_rows(account_id, ids)

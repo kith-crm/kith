@@ -21,6 +21,8 @@ defmodule Kith.DAV.DocumentIndex do
     end)
   end
 
+  # Membership describes the original generated representation, including
+  # consumed entries. Scalar ownership must survive occurrence matching.
   def contains?(index, name, key), do: Map.has_key?(index.indices[name], key)
 
   def remaining(index) do

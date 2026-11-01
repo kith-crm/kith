@@ -631,6 +631,38 @@ defmodule Kith.DAV.DocumentTest do
     assert Repo.reload!(contact).occupation == nil
   end
 
+  for version <- [:v30, :v40] do
+    test "#{version} repeated identical scalars retain ownership after matching is consumed", %{
+      contact: contact
+    } do
+      raw =
+        card([
+          "FN:Jane Doe",
+          "N:Doe;Jane;;;",
+          "TITLE;LANGUAGE=en:Primary",
+          "TITLE;LANGUAGE=fr:Primary"
+        ])
+        |> String.replace(
+          "VERSION:4.0",
+          if(unquote(version) == :v30, do: "VERSION:3.0", else: "VERSION:4.0")
+        )
+
+      put_card(contact, raw)
+      assert Repo.reload!(contact).occupation == "Primary"
+
+      assert {:ok, _} = Contacts.update_contact(contact, %{company: "Shared edit"})
+      rendered = contact |> Repo.reload!() |> load() |> Document.render(version: unquote(version))
+      assert rendered =~ "TITLE;LANGUAGE=en:Primary"
+      assert rendered =~ "TITLE;LANGUAGE=fr:Primary"
+
+      assert {:ok, _} = Contacts.update_contact(contact, %{occupation: nil})
+      rendered = contact |> Repo.reload!() |> load() |> Document.render(version: unquote(version))
+      refute rendered =~ "TITLE"
+      put_card(contact, rendered)
+      assert Repo.reload!(contact).occupation == nil
+    end
+  end
+
   test "compact persistence roundtrips client syntax bindings and unknown internal entry metadata",
        %{contact: contact} do
     field = insert_field(contact, trusted_type().id, "shared@example.org")

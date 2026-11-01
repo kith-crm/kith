@@ -2,6 +2,24 @@ defmodule Kith.DAV.DocumentIndexTest do
   use ExUnit.Case, async: true
   alias Kith.DAV.DocumentIndex
 
+  test "membership retains original keys after every matching queue is consumed" do
+    entry = %{name: "TITLE", value: "Primary"}
+
+    index =
+      DocumentIndex.new([entry], %{
+        name: fn entry -> [entry.name] end,
+        value: fn entry -> [entry.value] end
+      })
+
+    assert {^entry, index} = DocumentIndex.take_first(index, [{:value, "Primary"}])
+    assert {nil, index} = DocumentIndex.take_first(index, [{:name, "TITLE"}])
+    assert {nil, index} = DocumentIndex.take_first(index, [{:value, "Primary"}])
+    assert DocumentIndex.remaining(index) == []
+    assert DocumentIndex.contains?(index, :name, "TITLE")
+    assert DocumentIndex.contains?(index, :value, "Primary")
+    refute DocumentIndex.contains?(index, :name, "BDAY")
+  end
+
   test "large alternate queues consume each occurrence once without changing identity" do
     entries = Enum.map(1..50_000, &%{id: &1, value: rem(&1, 7)})
 

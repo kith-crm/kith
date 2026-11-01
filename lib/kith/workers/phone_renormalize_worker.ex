@@ -107,10 +107,7 @@ defmodule Kith.Workers.PhoneRenormalizeWorker do
     field = Repo.get!(ContactField, id)
 
     Write.run(field.account_id, [field.contact_id], fn ->
-      current = Repo.get_by!(ContactField, id: id, account_id: field.account_id)
-
-      if current.contact_id != field.contact_id,
-        do: Write.prepare(current.account_id, [current.contact_id])
+      current = Write.reload_child!(field)
 
       {:ok, normalized} = PhoneFormatter.normalize(current.value, region)
 

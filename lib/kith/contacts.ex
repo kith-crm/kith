@@ -515,12 +515,7 @@ defmodule Kith.Contacts do
 
   def update_address(%Address{} = address, attrs) do
     Write.run(address.account_id, [address.contact_id], fn ->
-      current = Repo.get_by!(Address, id: address.id, account_id: address.account_id)
-
-      if current.contact_id != address.contact_id,
-        do: Write.prepare(current.account_id, [current.contact_id])
-
-      address = current
+      address = Write.reload_child!(address)
 
       result =
         address
@@ -540,12 +535,7 @@ defmodule Kith.Contacts do
 
   def delete_address(%Address{} = address) do
     Write.run(address.account_id, [address.contact_id], fn ->
-      current = Repo.get_by!(Address, id: address.id, account_id: address.account_id)
-
-      if current.contact_id != address.contact_id,
-        do: Write.prepare(current.account_id, [current.contact_id])
-
-      address = current
+      address = Write.reload_child!(address)
 
       Repo.delete(address)
     end)
@@ -594,12 +584,7 @@ defmodule Kith.Contacts do
 
   def update_contact_field(%ContactField{} = field, attrs) do
     Write.run(field.account_id, [field.contact_id], fn ->
-      current = Repo.get_by!(ContactField, id: field.id, account_id: field.account_id)
-
-      if current.contact_id != field.contact_id,
-        do: Write.prepare(current.account_id, [current.contact_id])
-
-      field = current
+      field = Write.reload_child!(field)
       attrs = maybe_normalize_phone(attrs)
 
       field
@@ -610,12 +595,7 @@ defmodule Kith.Contacts do
 
   def delete_contact_field(%ContactField{} = field) do
     Write.run(field.account_id, [field.contact_id], fn ->
-      current = Repo.get_by!(ContactField, id: field.id, account_id: field.account_id)
-
-      if current.contact_id != field.contact_id,
-        do: Write.prepare(current.account_id, [current.contact_id])
-
-      field = current
+      field = Write.reload_child!(field)
 
       Repo.delete(field)
     end)
@@ -768,14 +748,7 @@ defmodule Kith.Contacts do
       relationship.account_id,
       [relationship.contact_id, relationship.related_contact_id],
       fn ->
-        current =
-          Repo.get_by!(Relationship, id: relationship.id, account_id: relationship.account_id)
-
-        if {current.contact_id, current.related_contact_id} !=
-             {relationship.contact_id, relationship.related_contact_id},
-           do: Write.prepare(current.account_id, [current.contact_id, current.related_contact_id])
-
-        Repo.delete(current)
+        relationship |> Write.reload_child!() |> Repo.delete()
       end
     )
   end
@@ -912,12 +885,7 @@ defmodule Kith.Contacts do
   end
 
   defp delete_photo_locked(photo) do
-    current = Repo.get_by!(Photo, id: photo.id, account_id: photo.account_id)
-
-    if current.contact_id != photo.contact_id,
-      do: Write.prepare(current.account_id, [current.contact_id])
-
-    photo = current
+    photo = Write.reload_child!(photo)
     contact = Repo.get_by!(Contact, id: photo.contact_id, account_id: photo.account_id)
 
     if avatar_photo?(contact, photo) do
