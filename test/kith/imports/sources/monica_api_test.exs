@@ -281,6 +281,56 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert length(mapped_contact(account_id).contact_fields) == 2
     end
 
+    test "unsupported metadata remains generic across pages and recovery", %{
+      user: user,
+      account_id: account_id
+    } do
+      Req.Test.stub(@stub_name, fn conn ->
+        params = URI.decode_query(conn.query_string)
+
+        if params["limit"] == "1" do
+          Req.Test.json(conn, contacts_page_json([], 1, 2, 2))
+        else
+          page = String.to_integer(params["page"])
+          protocol = if page == 1, do: "gopher", else: "tel:"
+          value = if page == 1, do: "generic source value", else: "+12025550100"
+
+          fields = [
+            contact_field_json(type_name: "Shared custom", protocol: protocol, content: value)
+          ]
+
+          Req.Test.json(
+            conn,
+            contacts_page_json([contact_json(id: page, contact_fields: fields)], page, 2, 2)
+          )
+        end
+      end)
+
+      job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, %{contacts: 2, error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), job)
+
+      assert [%{contact_field_type: %{protocol: nil}}] = mapped_contact(account_id).contact_fields
+      second = Imports.find_import_record(account_id, "monica_api", "contact", "2")
+
+      second_contact =
+        Contacts.get_contact!(account_id, second.local_entity_id)
+        |> Repo.preload(contact_fields: :contact_field_type)
+
+      assert [%{contact_field_type: %{protocol: "tel"}}] = second_contact.contact_fields
+
+      {:ok, _} = Imports.update_import_status(job, "completed")
+      recovery = api_import_fixture(account_id, user.id)
+
+      assert {:ok, %{error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), recovery, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert [%{contact_field_type: %{protocol: nil}}] = mapped_contact(account_id).contact_fields
+    end
+
     test "later pages resolve distinct protocols for the same source name", %{
       user: user,
       account_id: account_id

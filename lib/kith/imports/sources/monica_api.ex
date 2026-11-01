@@ -1436,6 +1436,11 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   defp find_or_create_contact_field_types(account_id, keys) do
     Map.new(keys, fn {name, protocol} = key ->
+      # Explicitly unsupported source protocols are intentionally generic, not
+      # legacy types awaiting repair. Keep their identity separate across pages
+      # and reruns so later supported metadata cannot reclassify their fields.
+      name = if protocol == :generic, do: "#{name} (Monica generic)", else: name
+
       types =
         Repo.all(
           from(t in Contacts.ContactFieldType,
@@ -1459,7 +1464,8 @@ defmodule Kith.Imports.Sources.MonicaApi do
     legacy =
       Enum.find(
         types,
-        &(&1.account_id == account_id and is_nil(&1.protocol) and monica_only_type?(&1))
+        &(&1.account_id == account_id and is_nil(&1.protocol) and
+            not String.contains?(&1.name, " (Monica generic)") and monica_only_type?(&1))
       )
 
     if legacy do

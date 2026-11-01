@@ -84,3 +84,8 @@ contact-details link, and downloads a vCard containing
 `test/playwright/fixtures/regressions/README.md`. The legacy live-host scenarios
 in that spec require the separate explicit `KITH_LIVE_MONICA_TESTS=1` gate; the
 local scenario never reads their private key or export.
+
+Explicitly unsupported source protocols use a separate type named with a
+`(Monica generic)` suffix. This keeps them generic if a later page or rerun
+supplies the same source name with a supported protocol. Types containing that
+reserved marker are conservatively excluded from legacy protocol repair.
