@@ -1,10 +1,10 @@
 [
   {
-    "line": 113,
+    "line": 120,
     "type": "Traversal.FileModule: Directory Traversal in `File.read`",
     "file": "lib/kith_web/controllers/api/contact_import_controller.ex",
     "variable": "path",
-    "source_sha256": "dcaf4008effd2841fb169fc45d5e2f00344a4f7f80a71186b91239729120bccc",
+    "source_sha256": "c92acfd65dfcf655d41198b281d5dd07876230f542ec7170419276c62b61daae",
     "reason": "Only %Plug.Upload{} reaches read_upload; Plug owns the multipart temporary path. Forged JSON path maps return 422 before stat/read.",
     "evidence": "test/kith_web/controllers/api/contact_import_boundary_test.exs",
     "owner": "kith-crm maintainers",
@@ -26,7 +26,7 @@
     "type": "Config.CSP: Missing Content-Security-Policy",
     "file": "lib/kith_web/router.ex",
     "pipeline": "browser",
-    "source_sha256": "d35d90291c77e83a55103fd87b34238edc20fc8f47ce939b16abec6edaf74aff",
+    "source_sha256": "95e0147d8393f7ba08440046f42fc5237e4e1995f2a14dfa5d432239bee7d2ad",
     "reason": "Both browser pipelines invoke KithWeb.Plugs.CSP which emits a nonce-bearing CSP; static scanner does not recognize the custom plug.",
     "evidence": "test/kith_web/plugs/csp_test.exs; test/kith_web/controllers/webauthn_controller_test.exs",
     "owner": "kith-crm maintainers",
@@ -37,7 +37,7 @@
     "type": "Config.CSP: Missing Content-Security-Policy",
     "file": "lib/kith_web/router.ex",
     "pipeline": "browser_json",
-    "source_sha256": "d35d90291c77e83a55103fd87b34238edc20fc8f47ce939b16abec6edaf74aff",
+    "source_sha256": "95e0147d8393f7ba08440046f42fc5237e4e1995f2a14dfa5d432239bee7d2ad",
     "reason": "Both browser pipelines invoke KithWeb.Plugs.CSP which emits a nonce-bearing CSP; static scanner does not recognize the custom plug.",
     "evidence": "test/kith_web/plugs/csp_test.exs; test/kith_web/controllers/webauthn_controller_test.exs",
     "owner": "kith-crm maintainers",
@@ -48,7 +48,7 @@
     "type": "XSS.ContentType: XSS in `put_resp_content_type`",
     "file": "lib/kith_web/plugs/rate_limiter.ex",
     "variable": "content_type",
-    "source_sha256": "22b5ea0d872540fd70ff0584a1d5973499be54da5fd8d6737b17ada4482f7229",
+    "source_sha256": "17cefa6aa86258b61761bf44723198fbff7d47572efb34691d876fe7fd7c8e8d",
     "reason": "MIME is one of two literals; HTML is static and JSON encoded from constants plus integer retry duration. Request text never reaches the body.",
     "evidence": "test/kith_web/plugs/rate_limiter_test.exs",
     "owner": "kith-crm maintainers",
@@ -59,7 +59,7 @@
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith_web/plugs/rate_limiter.ex",
     "variable": "error_body",
-    "source_sha256": "22b5ea0d872540fd70ff0584a1d5973499be54da5fd8d6737b17ada4482f7229",
+    "source_sha256": "17cefa6aa86258b61761bf44723198fbff7d47572efb34691d876fe7fd7c8e8d",
     "reason": "MIME is one of two literals; HTML is static and JSON encoded from constants plus integer retry duration. Request text never reaches the body.",
     "evidence": "test/kith_web/plugs/rate_limiter_test.exs",
     "owner": "kith-crm maintainers",
@@ -70,7 +70,7 @@
     "type": "Traversal.FileModule: Directory Traversal in `File.read`",
     "file": "lib/kith_web/live/settings_live/import.ex",
     "variable": "path",
-    "source_sha256": "9061889b1c9d0471bc1abfffc3863b8f01f77a3f34c31cc2e89be59a84610ab0",
+    "source_sha256": "10f6f3a2575e4fa8dc606810df06fd1c9ed4541384ee3de22d2ec5f946348ce2",
     "reason": "Path comes exclusively from consume_uploaded_entries Phoenix temporary-file metadata, not JSON or form path parameters.",
     "evidence": "lib/kith_web/live/settings_live/import.ex: consume_uploaded_entries boundary; test/kith_web/live/import_wizard_live_test.exs",
     "owner": "kith-crm maintainers",
@@ -242,22 +242,22 @@
     "review_by": "2026-11-29"
   },
   {
-    "line": 434,
+    "line": 811,
     "type": "XSS.ContentType: XSS in `put_resp_content_type`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "content_type",
-    "source_sha256": "806a7c18953428df86562e559e49397a4b4d070d4fd515497c54f91612e2b09b",
+    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
     "reason": "Serialized vCard with one of two fixed text/vcard MIME literals and nosniff, never HTML or an arbitrary requested content type.",
     "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29"
   },
   {
-    "line": 437,
+    "line": 818,
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "vcard",
-    "source_sha256": "806a7c18953428df86562e559e49397a4b4d070d4fd515497c54f91612e2b09b",
+    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
     "reason": "Serialized vCard with one of two fixed text/vcard MIME literals and nosniff, never HTML or an arbitrary requested content type.",
     "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs",
     "owner": "kith-crm maintainers",
@@ -286,27 +286,27 @@
     "review_by": "2026-11-29"
   },
   {
-    "line": 718,
+    "line": 1271,
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "xml",
-    "source_sha256": "806a7c18953428df86562e559e49397a4b4d070d4fd515497c54f91612e2b09b",
-    "reason": "Owned XMLBuilder output only: text, hrefs, descriptions, validators and tokens are XML-escaped; vCards use CDATA with terminators split. Structure and properties are restricted by XMLParser known-property atoms. Fixed application/xml MIME; parsed malicious-content tests create no script elements.",
+    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
+    "reason": "Owned XMLBuilder output only: text, hrefs, descriptions, validators and tokens are XML-escaped; vCards use CDATA with terminators split. Element names are fixed literals or local names from namespace-aware XML parsing. Fixed application/xml MIME; parsed malicious-content tests create no script elements.",
     "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29",
     "reviewed_sources": [
       {
         "file": "lib/kith/dav/xml_builder.ex",
-        "source_sha256": "09269d932e7e80bb2f7bf9f83f2584cc0d8d6d9df29ba3b1077356706a0982fe"
+        "source_sha256": "ee9c530903ea9cc58b90eb27196f2a37151235e42d72028de580b5f019a91954"
       },
       {
         "file": "lib/kith/dav/xml_parser.ex",
-        "source_sha256": "1ed2d8afaab575e3485e81a7482aae55d3407504895c50e3883802f4c8df05e5"
+        "source_sha256": "236a28eeb15615b2cef9d064e7634adaa915b566342ab076606bca124aa6b3c7"
       },
       {
         "file": "mix.lock",
-        "source_sha256": "68702c297165b2c40e2496aee5f9da66112bd7213b15ced51a8b87824769ccf5"
+        "source_sha256": "daab95c6307647f277224b7c8fb028ec1d8781d51491acdc61c3d486630c3463"
       }
     ]
   },
@@ -327,8 +327,80 @@
       },
       {
         "file": "mix.lock",
-        "source_sha256": "68702c297165b2c40e2496aee5f9da66112bd7213b15ced51a8b87824769ccf5"
+        "source_sha256": "daab95c6307647f277224b7c8fb028ec1d8781d51491acdc61c3d486630c3463"
       }
     ]
+  },
+  {
+    "line": 203,
+    "type": "XSS.SendResp: XSS in `send_resp`",
+    "file": "lib/kith/dav/address_object.ex",
+    "variable": "body",
+    "source_sha256": "3b6d6775e2a8c2da4c0939e50e8e6e23ee7b8e1b6399e83436893739a18efec2",
+    "reason": "Owned XMLBuilder output only: text, hrefs, descriptions, validators and tokens are XML-escaped; vCards use CDATA with terminators split. Element names are fixed literals or local names from namespace-aware XML parsing. Fixed application/xml MIME; parsed malicious-content tests create no script elements.",
+    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs; test/kith_web/dav/propfind_test.exs",
+    "owner": "kith-crm maintainers",
+    "review_by": "2026-11-29",
+    "reviewed_sources": [
+      {
+        "file": "lib/kith/dav/xml_builder.ex",
+        "source_sha256": "ee9c530903ea9cc58b90eb27196f2a37151235e42d72028de580b5f019a91954"
+      },
+      {
+        "file": "lib/kith/dav/xml_parser.ex",
+        "source_sha256": "236a28eeb15615b2cef9d064e7634adaa915b566342ab076606bca124aa6b3c7"
+      },
+      {
+        "file": "mix.lock",
+        "source_sha256": "daab95c6307647f277224b7c8fb028ec1d8781d51491acdc61c3d486630c3463"
+      }
+    ]
+  },
+  {
+    "line": 602,
+    "type": "XSS.SendResp: XSS in `send_resp`",
+    "file": "lib/kith/dav/carddav_plug.ex",
+    "variable": "Elixir.XMLBuilder",
+    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
+    "reason": "Owned XMLBuilder output only: text, hrefs, descriptions, validators and tokens are XML-escaped; vCards use CDATA with terminators split. Element names are fixed literals or local names from namespace-aware XML parsing. Fixed application/xml MIME; parsed malicious-content tests create no script elements.",
+    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs; test/kith_web/dav/propfind_test.exs",
+    "owner": "kith-crm maintainers",
+    "review_by": "2026-11-29",
+    "reviewed_sources": [
+      {
+        "file": "lib/kith/dav/xml_builder.ex",
+        "source_sha256": "ee9c530903ea9cc58b90eb27196f2a37151235e42d72028de580b5f019a91954"
+      },
+      {
+        "file": "lib/kith/dav/xml_parser.ex",
+        "source_sha256": "236a28eeb15615b2cef9d064e7634adaa915b566342ab076606bca124aa6b3c7"
+      },
+      {
+        "file": "mix.lock",
+        "source_sha256": "daab95c6307647f277224b7c8fb028ec1d8781d51491acdc61c3d486630c3463"
+      }
+    ]
+  },
+  {
+    "line": 51,
+    "type": "XSS.ContentType: XSS in `put_resp_content_type`",
+    "file": "lib/kith_web/plugs/rate_limiter.ex",
+    "variable": "content_type",
+    "source_sha256": "17cefa6aa86258b61761bf44723198fbff7d47572efb34691d876fe7fd7c8e8d",
+    "reason": "MIME is one of two literals; HTML is static and JSON encoded from constants plus integer retry duration. Request text never reaches the body.",
+    "evidence": "test/kith_web/plugs/rate_limiter_test.exs",
+    "owner": "kith-crm maintainers",
+    "review_by": "2026-11-29"
+  },
+  {
+    "line": 53,
+    "type": "XSS.SendResp: XSS in `send_resp`",
+    "file": "lib/kith_web/plugs/rate_limiter.ex",
+    "variable": "error_body",
+    "source_sha256": "17cefa6aa86258b61761bf44723198fbff7d47572efb34691d876fe7fd7c8e8d",
+    "reason": "MIME is one of two literals; HTML is static and JSON encoded from constants plus integer retry duration. Request text never reaches the body.",
+    "evidence": "test/kith_web/plugs/rate_limiter_test.exs",
+    "owner": "kith-crm maintainers",
+    "review_by": "2026-11-29"
   }
 ]

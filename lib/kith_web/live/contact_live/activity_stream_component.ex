@@ -11,7 +11,6 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   alias Kith.Contacts.ActivityStream
   alias Kith.Conversations
   alias Kith.Gifts
-  alias Kith.Storage
   alias Kith.Tasks
   alias KithWeb.ContactLive.PhotoThumbComponent
 

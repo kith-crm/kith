@@ -140,7 +140,7 @@ defmodule Kith.Contacts.AvatarCommitTest do
                      })
 
                    # Deliberately repopulate stale cache to prove enforcement bypasses it.
-                   Cachex.put(:kith_cache, {:storage_usage, account}, 0)
+                   Kith.Cache.put({:storage_usage, account}, 0)
 
                    case Contacts.set_avatar(contact, photo) do
                      {:ok, updated} -> updated

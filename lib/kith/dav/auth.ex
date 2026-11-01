@@ -50,20 +50,12 @@ defmodule Kith.DAV.Auth do
   end
 
   defp require_auth(conn, key) do
-    case Hammer.check_rate(key, @failure_window_ms, @max_failures) do
-      {:deny, _limit} -> RateLimiter.deny(conn, retry_after(key))
-      {:allow, _count} -> check_credentials(conn, key)
-      {:error, _reason} -> check_credentials(conn, nil)
-    end
-  end
+    case Kith.RateLimiter.hit(key, @failure_window_ms, @max_failures) do
+      {:deny, retry_after_ms} ->
+        RateLimiter.deny(conn, Kith.RateLimiter.retry_after_seconds(retry_after_ms))
 
-  defp retry_after(key) do
-    case Hammer.inspect_bucket(key, @failure_window_ms, @max_failures) do
-      {:ok, {_count, _remaining, ms_to_next, _created, _updated}} ->
-        max(div(ms_to_next + 999, 1000), 1)
-
-      {:error, _reason} ->
-        div(@failure_window_ms, 1000)
+      {:allow, _count} ->
+        check_credentials(conn, key)
     end
   end
 
@@ -72,7 +64,7 @@ defmodule Kith.DAV.Auth do
   defp check_credentials(conn, key) do
     case authenticate(conn) do
       {:ok, user} ->
-        if key, do: Hammer.delete_buckets(key)
+        if key, do: Kith.RateLimiter.reset(key, @failure_window_ms)
         assign(conn, :current_scope, Accounts.Scope.for_user(user))
 
       {:error, _} ->

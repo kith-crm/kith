@@ -47,6 +47,14 @@ defmodule Kith.RateLimiter do
     end
   end
 
+  @doc "Clears the current fixed-window count after successful authentication."
+  def reset(key, scale_ms) do
+    case backend() do
+      :ets -> ETS.reset(key)
+      :redis -> Redis.set(key, scale_ms, 0)
+    end
+  end
+
   @doc "Rounds a retry duration up for the HTTP Retry-After header."
   def retry_after_seconds(milliseconds) when is_integer(milliseconds) and milliseconds >= 0 do
     max(1, div(milliseconds + 999, 1000))

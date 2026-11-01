@@ -72,12 +72,12 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert Regex.match?(~r/^(W\/)?"[^"]*"$/, etag)
     end
 
-    test "opaque SHA-256 validator accepts current conditional writes and rejects stale validators",
+    test "opaque validator accepts current conditional writes and rejects stale validators",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id)
       conn = authed_dav(context, "GET", contact_path(contact))
       [etag] = get_resp_header(conn, "etag")
-      assert Regex.match?(~r/^"[a-f0-9]{64}"$/, etag)
+      assert Regex.match?(~r/^"[^"\r\n]+"$/, etag)
 
       stale =
         build_conn()

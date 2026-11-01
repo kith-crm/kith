@@ -88,11 +88,11 @@ defmodule Kith.Accounts do
     :persistent_term.put({__MODULE__, :verified_password_key}, :crypto.strong_rand_bytes(32))
   end
 
-  defp verified_password_cached?(key), do: match?({:ok, true}, Cachex.get(:kith_cache, key))
+  defp verified_password_cached?(key), do: match?({:ok, true}, Kith.Cache.get(key))
 
   defp verify_and_remember(user, password, key) do
     if User.valid_password?(user, password) do
-      Cachex.put(:kith_cache, key, true, ttl: @verified_password_ttl)
+      Kith.Cache.put(key, true, ttl: @verified_password_ttl)
       user
     end
   end

@@ -410,6 +410,7 @@ defmodule Kith.Contacts do
 
   defp hard_delete_locked(contact) do
     Store.record_hard_delete(contact.account_id)
+
     from(c in Contact,
       where: c.id == ^contact.id and c.account_id == ^contact.account_id,
       lock: "FOR UPDATE"

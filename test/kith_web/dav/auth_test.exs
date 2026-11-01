@@ -125,7 +125,7 @@ defmodule KithWeb.DAV.AuthTest do
 
       assert propfind_as(user.email, wrong).status == 401
       assert propfind_as(user.email, wrong).status == 401
-      assert Cachex.get(:kith_cache, key) == {:ok, nil}
+      assert Kith.Cache.get(key) == :miss
     end
 
     test "a changed password invalidates the cached login", %{user: user} do
@@ -148,13 +148,20 @@ defmodule KithWeb.DAV.AuthTest do
       user = slow_hash_user(user)
       assert {_, 207} = timed_propfind(user.email, dav_password())
 
-      {:ok, keys} = Cachex.keys(:kith_cache)
+      key =
+        {:verified_password,
+         :crypto.mac(
+           :hmac,
+           :sha256,
+           :persistent_term.get({Kith.Accounts, :verified_password_key}),
+           [user.hashed_password, 0, dav_password()]
+         )}
 
       plain =
         {:verified_password, :crypto.hash(:sha256, [user.hashed_password, 0, dav_password()])}
 
-      assert Enum.any?(keys, &match?({:verified_password, _}, &1)), "login was not cached"
-      refute plain in keys
+      assert Kith.Cache.get(key) == {:ok, true}
+      assert Kith.Cache.get(plain) == :miss
     end
 
     test "deleting the user stops a cached login", %{user: user} do

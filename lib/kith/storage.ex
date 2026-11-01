@@ -109,7 +109,7 @@ defmodule Kith.Storage do
   end
 
   defp invalidate_usage_cache(account_id) do
-    Kith.Cache.delete( {:storage_usage, account_id})
+    Kith.Cache.delete({:storage_usage, account_id})
   end
 
   @doc "Returns the configured max upload size in bytes."
