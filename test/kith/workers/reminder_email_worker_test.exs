@@ -25,6 +25,11 @@ defmodule Kith.Workers.ReminderEmailWorkerTest do
       assert email.cc == []
       assert email.bcc == []
       assert email.subject == "Reminder: Call Mona"
+      assert email.html_body =~ "Call Mona"
+      assert email.html_body =~ "REMINDER"
+      assert email.text_body =~ "Call Mona"
+      assert email.html_body =~ KithWeb.Endpoint.url() <> "/contacts/#{ctx.instance.contact_id}"
+      assert length(email.attachments) == 1
     end)
 
     refute_email_sent()
@@ -71,7 +76,9 @@ defmodule Kith.Workers.ReminderEmailWorkerTest do
       assert_email_sent(fn email ->
         assert email.to == [{ctx.user.email, ctx.user.email}]
         assert email.subject == unquote(subject)
-        assert email.text_body == unquote(subject) <> "\n\nContact: Mona Vale"
+        assert email.text_body =~ unquote(subject) <> "\n\nContact: Mona Vale"
+        assert email.text_body =~ "October 29, 2026"
+        assert email.text_body =~ "/contacts/#{ctx.contact.id}"
       end)
 
       refute_email_sent()

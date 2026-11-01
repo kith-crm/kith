@@ -1,113 +1,57 @@
 defmodule Kith.Accounts.UserNotifier do
-  import Swoosh.Email
+  import Swoosh.Email, only: [put_to: 2, subject: 2]
 
-  alias Kith.Mailer
+  alias Kith.{Emails, Mailer}
 
-  defp deliver(recipient, subject, body) do
-    mail_from = Application.get_env(:kith, Kith.Mailer)[:from] || "noreply@localhost"
-
-    email =
-      new()
-      |> to(recipient)
-      |> from({"Kith", mail_from})
-      |> subject(subject)
-      |> text_body(body)
-
-    with {:ok, _metadata} <- Mailer.deliver(email) do
-      {:ok, email}
-    end
-  end
-
-  @doc """
-  Deliver instructions to confirm a new account.
-  """
+  @doc "Deliver instructions to confirm a new account."
   def deliver_confirmation_instructions(user, url) do
-    deliver(user.email, "Confirm your Kith account", """
-
-    ==============================
-
-    Hi #{user.email},
-
-    You can confirm your account by visiting the URL below:
-
-    #{url}
-
-    If you didn't create an account with us, please ignore this.
-
-    ==============================
-    """)
+    user
+    |> Emails.email_verification(url)
+    |> put_to(user.email)
+    |> subject("Confirm your Kith account")
+    |> deliver()
   end
 
-  @doc """
-  Deliver instructions to reset a user password.
-  """
+  @doc "Deliver instructions to reset a user password."
   def deliver_reset_password_instructions(user, url) do
-    deliver(user.email, "Reset your Kith password", """
-
-    ==============================
-
-    Hi #{user.email},
-
-    You can reset your password by visiting the URL below:
-
-    #{url}
-
-    If you didn't request this change, please ignore this.
-
-    ==============================
-    """)
+    user
+    |> Emails.password_reset(url)
+    |> put_to(user.email)
+    |> subject("Reset your Kith password")
+    |> deliver()
   end
 
-  @doc """
-  Deliver instructions to update a user email.
-  """
+  @doc "Deliver instructions to update a user email."
   def deliver_update_email_instructions(user, url) do
-    deliver(user.email, "Update email instructions", """
-
-    ==============================
-
-    Hi #{user.email},
-
-    You can change your email by visiting the URL below:
-
-    #{url}
-
-    If you didn't request this change, please ignore this.
-
-    ==============================
-    """)
+    user
+    |> Emails.email_change(url)
+    |> put_to(user.email)
+    |> subject("Update email instructions")
+    |> deliver()
   end
 
-  @doc """
-  Deliver an invitation to join an account.
-  """
+  @doc "Deliver an invitation to join an account."
   def deliver_invitation(email, %{
         account_name: account_name,
         invited_by_name: invited_by_name,
         role: role,
         url: url
       }) do
-    deliver(email, "You've been invited to join #{account_name} on Kith", """
-
-    ==============================
-
-    Hi,
-
-    #{invited_by_name} has invited you to join "#{account_name}" on Kith
-    as #{a_or_an(role)} #{role}.
-
-    You can accept the invitation by visiting the URL below:
-
-    #{url}
-
-    This invitation expires in 7 days.
-
-    If you weren't expecting this invitation, you can ignore this email.
-
-    ==============================
-    """)
+    email
+    |> Emails.invitation(%{
+      account_name: account_name,
+      inviter_name: invited_by_name,
+      role: role,
+      accept_url: url
+    })
+    |> put_to(email)
+    |> subject("You've been invited to join #{account_name} on Kith")
+    |> deliver()
   end
 
-  defp a_or_an(word) when word in ["admin", "editor"], do: "an"
-  defp a_or_an(_word), do: "a"
+  defp deliver(email) do
+    with {:ok, _metadata} <- Mailer.deliver(email) do
+      {:ok, email}
+    end
+  end
 end
