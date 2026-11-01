@@ -23,6 +23,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
      |> assign(:entries, [])
      |> assign(:active_filters, MapSet.new())
      |> assign(:all_types, ActivityStream.all_types())
+     |> assign(:selected_photo, nil)
      |> assign(:modal_type, nil)
      |> assign(:modal_entry_id, nil)
      |> assign(:modal_record, nil)
@@ -36,6 +37,12 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
 
   @impl true
   def update(assigns, socket) do
+    socket =
+      if socket.assigns[:contact_id] != assigns.contact_id or
+           socket.assigns[:account_id] != assigns.account_id,
+         do: assign(socket, :selected_photo, nil),
+         else: socket
+
     socket = assign(socket, assigns)
     {:ok, load_entries(socket)}
   end
@@ -57,6 +64,15 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
 
   def handle_event("filter-clear", _params, socket) do
     {:noreply, socket |> assign(:active_filters, MapSet.new()) |> load_entries()}
+  end
+
+  def handle_event("open-photo", %{"id" => id}, socket) do
+    photo = scoped_photo(socket.assigns, id)
+    {:noreply, assign(socket, :selected_photo, photo)}
+  end
+
+  def handle_event("close-photo", _params, socket) do
+    {:noreply, assign(socket, :selected_photo, nil)}
   end
 
   # --- Modal events ---
@@ -357,12 +373,20 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
     MapSet.size(filters) == 1 and MapSet.member?(filters, :photo)
   end
 
+  defp scoped_photo(assigns, id) do
+    photo = Contacts.get_photo!(assigns.account_id, id)
+    if photo.contact_id == assigns.contact_id, do: photo
+  rescue
+    Ecto.NoResultsError -> nil
+    Ecto.Query.CastError -> nil
+  end
+
   # --- Render ---
 
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
+    <div id="activity-stream">
       <p :if={@flash["error"]} role="alert">{@flash["error"]}</p>
       <%!-- Stream Header --%>
       <div class="bg-[var(--color-surface-elevated)] rounded-xl p-3.5 shadow-[var(--shadow-card)] border border-[var(--color-border-subtle)] mb-3.5">
@@ -451,13 +475,39 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
         />
       </.modal>
 
+      <.modal
+        :if={@selected_photo}
+        id="photo-modal"
+        title="Photo"
+        trap_focus
+        show
+        on_cancel={JS.push("close-photo", target: @myself)}
+        on_remove={JS.focus(to: "#photo-button-#{@selected_photo.id}")}
+      >
+        <.live_component
+          module={PhotoThumbComponent}
+          id={"full-photo-#{@selected_photo.id}"}
+          variant={:full}
+          storage_key={@selected_photo.storage_key}
+          alt="Photo"
+          pending_sync={Contacts.Photo.pending_sync?(@selected_photo)}
+        />
+      </.modal>
+
       <%!-- Photos Gallery Mode --%>
       <div
         :if={photos_only?(@active_filters) && length(@entries) > 0}
+        id="activity-photo-gallery"
         class="grid grid-cols-3 sm:grid-cols-4 gap-2"
       >
-        <div
+        <button
           :for={entry <- @entries}
+          id={"photo-button-#{entry.id}"}
+          type="button"
+          aria-label="View photo"
+          phx-click="open-photo"
+          phx-value-id={entry.id}
+          phx-target={@myself}
           class="aspect-square rounded-lg bg-[var(--color-surface)] border border-[var(--color-border-subtle)] overflow-hidden"
         >
           <.live_component
@@ -468,11 +518,15 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             alt={entry.title}
             pending_sync={Contacts.Photo.pending_sync?(entry.record)}
           />
-        </div>
+        </button>
       </div>
 
       <%!-- Timeline Mode --%>
-      <div :if={!photos_only?(@active_filters) || length(@entries) == 0} class="relative ps-[22px]">
+      <div
+        :if={!photos_only?(@active_filters) || length(@entries) == 0}
+        id="activity-timeline"
+        class="relative ps-[22px]"
+      >
         <div class="absolute start-2 top-0 bottom-0 w-0.5 bg-[var(--color-border)] rounded-full" />
 
         <div :if={length(@entries) == 0} class="py-12 text-center">
@@ -485,6 +539,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
 
         <div
           :for={entry <- @entries}
+          id={"activity-#{entry.type}-#{entry.id}"}
           class="bg-[var(--color-surface-elevated)] rounded-xl p-4 mb-3 shadow-[var(--shadow-card)] border border-[var(--color-border-subtle)] relative"
         >
           <.timeline_dot type={entry.type} />
@@ -549,7 +604,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
           </div>
 
           <div
-            :if={entry.type != :note}
+            :if={entry.type not in [:note, :photo]}
             class="font-semibold text-[13px] text-[var(--color-text-primary)] mb-1"
           >
             <span
@@ -572,15 +627,25 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
 
           <.note_body :if={entry.type == :note && entry.body} body={entry.body} />
 
-          <.live_component
+          <button
             :if={entry.type == :photo}
-            module={PhotoThumbComponent}
-            id={"photo-#{entry.id}"}
-            variant={:timeline}
-            storage_key={entry.record.storage_key}
-            alt={entry.title}
-            pending_sync={Contacts.Photo.pending_sync?(entry.record)}
-          />
+            id={"photo-button-#{entry.id}"}
+            type="button"
+            aria-label="View photo"
+            phx-click="open-photo"
+            phx-value-id={entry.id}
+            phx-target={@myself}
+            class="block cursor-pointer"
+          >
+            <.live_component
+              module={PhotoThumbComponent}
+              id={"photo-#{entry.id}"}
+              variant={:timeline}
+              storage_key={entry.record.storage_key}
+              alt={entry.title}
+              pending_sync={Contacts.Photo.pending_sync?(entry.record)}
+            />
+          </button>
         </div>
       </div>
     </div>

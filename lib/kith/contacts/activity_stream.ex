@@ -203,7 +203,7 @@ defmodule Kith.Contacts.ActivityStream do
     %{
       id: photo.id,
       type: :photo,
-      title: photo.file_name || "Photo",
+      title: "Photo",
       body: nil,
       occurred_at: photo.inserted_at,
       record: photo

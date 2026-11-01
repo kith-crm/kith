@@ -327,6 +327,53 @@ defmodule KithWeb.ContactLive.ShowTest do
     end
   end
 
+  describe "timeline photo viewer" do
+    test "storage backed thumbnails open one viewer in either layout", %{
+      conn: conn,
+      contact: contact
+    } do
+      filename = "MqkbdPlbb5ChW49ifnLKWcchWDhOSQEGwSbIfKvb.jpeg"
+      photo = photo_fixture(contact, %{"file_name" => filename})
+      {:ok, view, html} = live(conn, ~p"/contacts/#{contact.id}")
+      refute html =~ filename
+
+      assert has_element?(
+               view,
+               ~s(button[aria-label="View photo"] img[src="#{Kith.Storage.url(photo.storage_key)}"])
+             )
+
+      view |> element(~s(button[aria-label="View photo"])) |> render_click()
+      assert has_element?(view, "#photo-modal img[src='#{Kith.Storage.url(photo.storage_key)}']")
+      view |> with_target("#activity-stream") |> render_hook("close-photo", %{})
+      refute has_element?(view, "#photo-modal")
+
+      view
+      |> element(~s(button[phx-click="filter-toggle"][phx-value-type="photo"]))
+      |> render_click()
+
+      assert has_element?(view, ~s(button[aria-label="View photo"] img))
+      view |> element(~s(button[aria-label="View photo"])) |> render_click()
+      assert has_element?(view, "#photo-modal")
+      assert Kith.Contacts.get_photo!(contact.account_id, photo.id).file_name == filename
+    end
+
+    test "rejects foreign account and contact photo identifiers", %{conn: conn, contact: contact} do
+      other_contact = contact_fixture(contact.account_id)
+      foreign_user = Kith.AccountsFixtures.user_fixture()
+      foreign_contact = contact_fixture(foreign_user.account_id)
+      photos = [photo_fixture(other_contact), photo_fixture(foreign_contact)]
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+
+      for photo <- photos do
+        view
+        |> with_target("#activity-stream")
+        |> render_hook("open-photo", %{"id" => to_string(photo.id)})
+
+        refute has_element?(view, "#photo-modal")
+      end
+    end
+  end
+
   describe "photo upload from timeline" do
     test "photo modal shows upload form instead of redirect", %{conn: conn, contact: contact} do
       {:ok, view, _html} = live(conn, ~p"/contacts/#{contact.id}")

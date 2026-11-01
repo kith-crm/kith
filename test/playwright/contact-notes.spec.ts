@@ -145,6 +145,10 @@ test("delayed invalid submit preserves newer corrections", async ({page}) => {
   await edit.locator("..").locator("..").locator(":scope > button").click();
   await edit.click();
   await expect(editor).toContainText("Original saved body");
+  // Click waits for the opening modal to settle before keyboard selection.
+  await editor.click();
+  await editor.focus();
+  await expect(editor).toBeFocused();
   await editor.press("ControlOrMeta+A");
   await editor.press("Backspace");
   await expect(page.locator('input[name="entry[body]"]')).toHaveValue("");

@@ -110,13 +110,13 @@ defmodule Kith.Contacts.ActivityStreamTest do
     end
 
     test "returns photos in the stream", ctx do
-      photo_fixture(ctx.contact)
+      photo_fixture(ctx.contact, %{"file_name" => "MqkbdPlbb5ChW49ifnLKWcchWDhOSQEGwSbIfKvb.jpeg"})
 
       entries =
         ActivityStream.list_activity(ctx.account_id, ctx.contact.id, current_user_id: ctx.user.id)
 
       assert length(entries) == 1
-      assert [%{type: :photo}] = entries
+      assert [%{type: :photo, title: "Photo"}] = entries
     end
 
     test "merges multiple types sorted by date descending", ctx do

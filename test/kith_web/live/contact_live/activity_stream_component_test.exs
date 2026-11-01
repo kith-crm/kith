@@ -21,7 +21,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
       {:ok, _view, html} = live(conn, ~p"/contacts/#{contact.id}")
 
       assert html =~ ~s(src="/uploads/#{photo.storage_key}")
-      assert html =~ ~s(alt="beach.jpg")
+      assert html =~ ~s(alt="Photo")
     end
 
     test "photos gallery mode renders an <img> for the tile", %{conn: conn, contact: contact} do
