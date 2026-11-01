@@ -13,10 +13,10 @@ defmodule Kith.MixProject do
       dialyzer: dialyzer(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       test_ignore_filters: [
-        ~r"^test/fixtures/tls_pr44/transport_probe\.ex$",
+        ~r"^test/fixtures/tls/transport_probe\.ex$",
         ~r"^test/fixtures/rate_limiter_redis/probe\.ex$",
         ~r"^test/playwright/seed\.exs$",
-        ~r"^test/playwright/fixtures/pr44/(?:boot|control|server)\.exs$",
+        ~r"^test/playwright/fixtures/regressions/(?:boot|control|server)\.exs$",
         ~r"^test/playwright/fixtures/s3/seed\.exs$"
       ],
       listeners: [Phoenix.CodeReloader]

@@ -4,7 +4,7 @@ defmodule Kith.IpGeolocationUpgradeTest do
 
   alias Kith.IpGeolocation
 
-  @fixture Path.expand("../fixtures/geoip_pr44/GeoIP2-City-Test.mmdb", __DIR__)
+  @fixture Path.expand("../fixtures/geoip/GeoIP2-City-Test.mmdb", __DIR__)
   @addresses ["81.2.69.160", "2001:218::", "203.0.113.1", "invalid-ip"]
 
   setup do
@@ -65,7 +65,10 @@ defmodule Kith.IpGeolocationUpgradeTest do
 
   test "configured missing and corrupt local databases return not_found without crashing" do
     directory =
-      Path.join(System.tmp_dir!(), "pr44-geoip-#{System.unique_integer([:positive, :monotonic])}")
+      Path.join(
+        System.tmp_dir!(),
+        "regression-geoip-#{System.unique_integer([:positive, :monotonic])}"
+      )
 
     File.mkdir_p!(directory)
     on_exit(fn -> File.rm_rf!(directory) end)

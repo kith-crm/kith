@@ -54,7 +54,7 @@ erl_crash.dump
 # Generated reports
 /docs/playwright-report/
 /docs/screenshots/
-/tmp/pr44-browser/
+/tmp/browser-regressions/
 /tmp/security/
 
 # Git worktrees

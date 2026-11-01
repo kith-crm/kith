@@ -68,8 +68,8 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(data)
 
     def do_GET(self):
-        if urlparse(self.path).path == "/__pr44_fixture__":
-            body = json.dumps({"run": os.environ.get("PR44_FIXTURE_TOKEN")}).encode()
+        if urlparse(self.path).path == "/__kith_fixture__":
+            body = json.dumps({"run": os.environ.get("KITH_TEST_FIXTURE_TOKEN")}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))

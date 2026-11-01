@@ -139,7 +139,7 @@ See `.env.example` for all env vars. Key ones:
 
 - MIME types: `.vcf` registered as `text/vcard` in config.exs (needed for LiveView uploads)
 - `mix format` uses `Phoenix.LiveView.HTMLFormatter` plugin for `.heex` files
-- Browser tests use Playwright; `npm run test:pr44` starts the isolated regression fixtures
+- Browser tests use Playwright; `npm run test:regressions` starts the isolated regression fixtures
 - Playwright tests run outside Elixir test harness — they hit the running server over HTTP
 - Soft-deleted contacts: always check `deleted_at IS NULL` in custom queries
 - The Scope struct must have `account` preloaded — `Scope.for_user/1` extracts it from user

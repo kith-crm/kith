@@ -1,5 +1,5 @@
 # Run against a real Redis >= 7 instance:
-# PR44_REDIS_URL=redis://127.0.0.1:6384 MIX_ENV=test mix run --no-start test/fixtures/rate_limiter_redis/probe.ex
+# KITH_TEST_REDIS_URL=redis://127.0.0.1:6384 MIX_ENV=test mix run --no-start test/fixtures/rate_limiter_redis/probe.ex
 ExUnit.start()
 {:ok, _} = Application.ensure_all_started(:hammer_backend_redis)
 
@@ -10,7 +10,7 @@ defmodule Kith.RedisRateLimiterProbe do
 
   setup do
     previous = Application.get_env(:kith, RateLimiter)
-    url = System.fetch_env!("PR44_REDIS_URL")
+    url = System.fetch_env!("KITH_TEST_REDIS_URL")
     Application.put_env(:kith, RateLimiter, backend: :redis, redis_url: url)
     {:ok, pid} = RateLimiter.start_link([])
 

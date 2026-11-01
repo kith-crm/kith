@@ -5,24 +5,24 @@ import { createHmac } from "node:crypto";
 import { passwordLogin } from "./helpers/password-login";
 
 // This suite needs the explicit local harness, never a production server.
-test.skip(process.env.PR44_E2E !== "1", "Run with the local PR44 harness documented in fixtures/pr44/README.md");
+test.skip(process.env.KITH_E2E !== "1", "Run with the local regression harness documented in fixtures/regressions/README.md");
 test.describe.configure({ mode: "serial" });
 test.setTimeout(180_000);
 
-const fixtureURL = process.env.PR44_MONICA_URL ?? "http://127.0.0.1:8094";
+const fixtureURL = process.env.KITH_TEST_MONICA_URL ?? "http://127.0.0.1:8094";
 const mailpitURL = process.env.MAILPIT_URL ?? "http://127.0.0.1:8025";
-const controlScript = path.resolve("test/playwright/fixtures/pr44/control.exs");
+const controlScript = path.resolve("test/playwright/fixtures/regressions/control.exs");
 
 type Account = { email: string; token: string; account_id: number; user_id: number; [key: string]: any };
 
 function control(action: string, payload: object = {}): any {
   const output = execFileSync("mix", ["run", "--no-start", "--no-compile", controlScript, action, JSON.stringify(payload)], {
-    env: { ...process.env, MIX_ENV: "test", PR44_E2E: "1", PR44_SERVER: "0" },
+    env: { ...process.env, MIX_ENV: "test", KITH_E2E: "1", KITH_TEST_SERVER: "0" },
     encoding: "utf8", timeout: 120_000, maxBuffer: 4 * 1024 * 1024,
   });
-  const line = output.split(/\r?\n/).findLast((value) => value.startsWith("PR44_RESULT="));
+  const line = output.split(/\r?\n/).findLast((value) => value.startsWith("KITH_TEST_RESULT="));
   if (!line) throw new Error(`Control did not return JSON: ${output}`);
-  return JSON.parse(line.slice("PR44_RESULT=".length));
+  return JSON.parse(line.slice("KITH_TEST_RESULT=".length));
 }
 
 async function connected(page: Page) {
@@ -46,7 +46,7 @@ async function startImport(page: Page, account: Account) {
   await page.getByRole("radio", { name: /Monica CRM \(API\)/ }).check();
   await page.getByPlaceholder("https://your-monica-instance.com").fill(fixtureURL);
   await page.getByPlaceholder("https://your-monica-instance.com").blur();
-  await page.getByPlaceholder("Your Monica API key").fill("pr44-fixture-token");
+  await page.getByPlaceholder("Your Monica API key").fill("kith-fixture-token");
   await page.getByPlaceholder("Your Monica API key").blur();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByText("Review import settings")).toBeVisible();
@@ -151,7 +151,7 @@ test("native entry animations preserve selection and flash motion and dismissal"
   // Observe the real CSS animations when LiveView inserts each component. Sampling
   // their timeline avoids racing a 200ms animation against browser automation.
   await page.evaluate(() => {
-    (window as any).pr44EntryMotions = {};
+    (window as any).regressionEntryMotions = {};
     document.addEventListener("animationstart", (event) => {
       if (!["kith-flash-in", "kith-selection-in"].includes(event.animationName)) return;
       const element = event.target as HTMLElement;
@@ -176,7 +176,7 @@ test("native entry animations preserve selection and flash motion and dismissal"
       const start = sample(0);
       const middle = sample(duration / 2);
       const end = sample(duration);
-      (window as any).pr44EntryMotions[event.animationName] = {
+      (window as any).regressionEntryMotions[event.animationName] = {
         duration, timing, transitionDuration, rem, start, middle, end,
       };
       animation.currentTime = 0;
@@ -187,16 +187,16 @@ test("native entry animations preserve selection and flash motion and dismissal"
   await page.locator("tbody tr input[type='checkbox']").first().check();
   await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() =>
-    !!(window as any).pr44EntryMotions["kith-selection-in"],
+    !!(window as any).regressionEntryMotions["kith-selection-in"],
   )).toBe(true);
   await page.locator("button[phx-click='bulk-favorite']").click();
   const flash = page.locator("#flash-info");
   await expect(flash).toContainText("1 contact(s) favorited.");
   await expect.poll(() => page.evaluate(() =>
-    !!(window as any).pr44EntryMotions["kith-flash-in"],
+    !!(window as any).regressionEntryMotions["kith-flash-in"],
   )).toBe(true);
 
-  const motions = await page.evaluate(() => (window as any).pr44EntryMotions);
+  const motions = await page.evaluate(() => (window as any).regressionEntryMotions);
   for (const [name, duration, distance] of [
     ["kith-selection-in", 200, 1],
     ["kith-flash-in", 300, -0.5],
@@ -268,11 +268,11 @@ test("permanent deletion cleans mappings and re-import restores all ten notes", 
   await login(page, account);
   const first = await startImport(page, account);
   expect(first.contacts).toHaveLength(1);
-  expect(first.notes).toEqual(Array.from({ length: 10 }, (_, n) => `PR44 note ${String(n + 1).padStart(2, "0")}`));
+  expect(first.notes).toEqual(Array.from({ length: 10 }, (_, n) => `Regression note ${String(n + 1).padStart(2, "0")}`));
   const firstId = first.contacts[0].id;
   await page.goto(`/contacts/${firstId}`);
   await connected(page);
-  await expect(page.getByText("PR44 note 01", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Regression note 01", { exact: true }).first()).toBeVisible();
 
   await contactAction(page, firstId, "delete");
   await expect(page).toHaveURL(/\/contacts$/);
@@ -293,8 +293,8 @@ test("permanent deletion cleans mappings and re-import restores all ten notes", 
   expect(second.notes).toEqual(first.notes);
   await page.goto(`/contacts/${second.contacts[0].id}`);
   await connected(page);
-  await expect(page.getByText("PR44 note 01", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("PR44 note 10", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Regression note 01", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Regression note 10", { exact: true }).first()).toBeVisible();
 });
 
 test("a disabled reminder discards its queued email without sending mail", async ({ page, request }) => {

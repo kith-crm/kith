@@ -1,5 +1,5 @@
 # Local regression harness only: jobs run when the test explicitly drains them.
-if System.get_env("PR44_E2E") != "1", do: raise("Set PR44_E2E=1 for this local test harness")
+if System.get_env("KITH_E2E") != "1", do: raise("Set KITH_E2E=1 for this local test harness")
 
 Application.put_env(
   :kith,
@@ -17,7 +17,7 @@ Application.put_env(
   KithWeb.Endpoint,
   Application.get_env(:kith, KithWeb.Endpoint, [])
   |> Keyword.merge(
-    server: System.get_env("PR44_SERVER") == "1",
+    server: System.get_env("KITH_TEST_SERVER") == "1",
     check_origin: false,
     code_reloader: false,
     watchers: [],
@@ -33,7 +33,7 @@ Application.put_env(:kith, Kith.Mailer,
   ssl: false,
   tls: :never,
   auth: :never,
-  from: "noreply@pr44.local"
+  from: "noreply@regression.local"
 )
 
 Logger.configure(level: :warning)

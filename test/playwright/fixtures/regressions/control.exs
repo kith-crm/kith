@@ -1,13 +1,13 @@
 Code.require_file("boot.exs", __DIR__)
 
-defmodule PR44Control do
+defmodule Kith.RegressionControl do
   import Ecto.Query
   alias Kith.{Accounts, Contacts, Imports, Reminders, Repo}
   alias Kith.Contacts.{Contact, DuplicateCandidate, Note}
   alias Kith.Reminders.{Dispatcher, ReminderInstance}
 
   def run("prepare", args) do
-    email = "pr44-#{System.system_time(:microsecond)}@test.local"
+    email = "regression-#{System.system_time(:microsecond)}@test.local"
     {:ok, user} = Accounts.register_user(%{"email" => email, "password" => "ValidP@ssword123!"})
     {token, _} = Accounts.generate_api_token(user)
     base = %{email: email, token: token, account_id: user.account_id, user_id: user.id}
@@ -272,5 +272,5 @@ defmodule PR44Control do
 end
 
 [action, payload] = System.argv()
-result = PR44Control.run(action, Jason.decode!(payload))
-IO.puts("PR44_RESULT=" <> Jason.encode!(result))
+result = Kith.RegressionControl.run(action, Jason.decode!(payload))
+IO.puts("KITH_TEST_RESULT=" <> Jason.encode!(result))

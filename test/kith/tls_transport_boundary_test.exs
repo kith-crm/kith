@@ -22,7 +22,7 @@ defmodule Kith.TLSTransportBoundaryTest do
 
       arguments =
         Enum.flat_map(:code.get_path(), fn path -> ["-pa", List.to_string(path)] end) ++
-          ["test/fixtures/tls_pr44/transport_probe.ex", @client, Path.expand(tmp_dir)]
+          ["test/fixtures/tls/transport_probe.ex", @client, Path.expand(tmp_dir)]
 
       {output, status} =
         System.cmd(System.find_executable("elixir"), arguments,

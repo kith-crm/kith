@@ -43,6 +43,25 @@ bash scripts/security/proxy_smoke.sh kith:review
 
 Both runners accept an optional second argument for the report directory. Their defaults are `tmp/security/release` and `tmp/security/proxy`. They create disposable local services and remove them on exit; generated reports and logs belong under ignored `tmp/security/`. The release check verifies ordinary production migrations, runtime modes, encrypted credential interoperability, cache behavior, metrics and security budgets. The proxy check uses the actual Caddy configuration and Chromium to verify transported client identity, signup/login/API budgets and log redaction.
 
+The maintained browser regressions require PostgreSQL, Mailpit, the installed
+Mix/npm dependencies and Playwright Chromium. Run the isolated local harness:
+
+```bash
+npm run test:regressions
+```
+
+It starts Phoenix and deterministic Monica/S3 fixtures, uses a unique test
+database partition by default, and writes logs under `tmp/browser-regressions/`.
+See the [harness instructions](../test/playwright/fixtures/regressions/README.md)
+for setup, port overrides, isolation and diagnostics.
+
+The Redis rate-limiter probe requires an isolated Redis instance at version 7 or
+newer; run it separately from ordinary ExUnit tests:
+
+```bash
+KITH_TEST_REDIS_URL=redis://127.0.0.1:6384 MIX_ENV=test mix run --no-start test/fixtures/rate_limiter_redis/probe.ex
+```
+
 ## Historical evidence
 
 The removed investigations and upstream experiments are recoverable from the immutable [reviewed tree](https://github.com/kith-crm/kith/tree/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan). The [final POT/ASN validation report](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-implementation-evidence/pot-reviewed-validation.json) records the tested source snapshot; the [policy review](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/docs/plan/pr44-implementation-evidence/policy-review.json) records the revised acceptance policy.

@@ -60,7 +60,7 @@ config :kith, signup_double_optin: false
 config :kith, Kith.Storage, backend: :local, path: "priv/uploads/test"
 
 # Explicitly opt-in local browser harness; ordinary ExUnit keeps local storage.
-if System.get_env("PR44_E2E") == "1" and System.get_env("REVIEW_S3") == "1" do
+if System.get_env("KITH_E2E") == "1" and System.get_env("REVIEW_S3") == "1" do
   config :kith, Kith.Storage, backend: :s3, bucket: "kith-review"
 
   config :ex_aws,
@@ -72,7 +72,7 @@ if System.get_env("PR44_E2E") == "1" and System.get_env("REVIEW_S3") == "1" do
   config :ex_aws, :s3,
     scheme: "http://",
     host: "127.0.0.1",
-    port: String.to_integer(System.get_env("PR44_S3_PORT", "9000"))
+    port: String.to_integer(System.get_env("KITH_TEST_S3_PORT", "9000"))
 end
 
 # Print only warnings and errors during test

@@ -6,11 +6,11 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-NOTES = [{"id": n, "uuid": f"pr44-note-{n}", "body": f"PR44 note {n:02d}",
+NOTES = [{"id": n, "uuid": f"regression-note-{n}", "body": f"Regression note {n:02d}",
           "created_at": f"2020-01-{n:02d}T10:00:00Z", "updated_at": f"2020-01-{n:02d}T10:00:00Z"}
          for n in range(1, 11)]
 CONTACT = {
-    "id": 1, "uuid": "pr44-contact-1", "object": "contact", "first_name": "Mona",
+    "id": 1, "uuid": "regression-contact-1", "object": "contact", "first_name": "Mona",
     "last_name": "Fixture", "is_active": True, "is_dead": False, "is_partial": False,
     "information": {"dates": {}, "career": {}, "avatar": {"source": "default"},
                     "relationships": {}, "how_you_met": {}},
@@ -29,11 +29,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
-        if self.headers.get("Authorization") != "Bearer pr44-fixture-token":
+        if self.headers.get("Authorization") != "Bearer kith-fixture-token":
             self.send_error(401)
             return
-        if path == "/__pr44_fixture__":
-            body = {"run": os.environ.get("PR44_FIXTURE_TOKEN")}
+        if path == "/__kith_fixture__":
+            body = {"run": os.environ.get("KITH_TEST_FIXTURE_TOKEN")}
         elif path == "/api/me":
             body = {"data": {"id": 1}}
         elif path == "/api/contacts":

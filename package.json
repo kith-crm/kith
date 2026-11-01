@@ -11,7 +11,7 @@
   "scripts": {
     "test": "npm run test:js",
     "test:js": "node --test test/js/*.test.mjs",
-    "test:pr44": "bash test/playwright/fixtures/pr44/run.sh",
+    "test:regressions": "bash test/playwright/fixtures/regressions/run.sh",
     "prepare": "husky"
   },
   "keywords": [],
