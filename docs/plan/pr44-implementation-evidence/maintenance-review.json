@@ -1,0 +1,2671 @@
+{
+  "generated_at": "2026-11-01T07:51:14.947282+00:00",
+  "policy": "Latest mutually compatible stable releases; release age triggers review, not automatic replacement. Zero CVEs and actual application/release compatibility remain mandatory. Unknown maintenance is not blanket-approved.",
+  "scope": "Nine installed older Hex packages and @types/trusted-types. Read-only official GitHub REST, Hex and npm metadata plus local lock/usage inspection; no communications, application edits or dependency edits.",
+  "kith_head": "2ffa867ef9c8154588df81febadc9f7c21267ead",
+  "local_inputs": {
+    "mix.lock": "68702c297165b2c40e2496aee5f9da66112bd7213b15ced51a8b87824769ccf5",
+    "package-lock.json": "264494920d22cd0d36077b99200108b23a7fe5d70be0f4ada53b0c93151bad98",
+    "assets/package-lock.json": "ddacee770642ce383ba0cb08911ab0d52ec1ba4a3fee0b7baa26ca080686317d"
+  },
+  "summary": {
+    "explicitly_archived_or_disabled": [],
+    "explicitly_deprecated_in_reviewed_sources": [],
+    "confirmed_project_maintenance_hex": [
+      "mmdb2_decoder",
+      "nimble_options",
+      "nimble_pool",
+      "telemetry_metrics_prometheus_core",
+      "websock"
+    ],
+    "confirmed_project_supported_npm": [
+      "@types/trusted-types"
+    ],
+    "upstream_maintenance_unconfirmed": [
+      "asn1_compiler",
+      "bunt",
+      "fuse",
+      "pot"
+    ],
+    "maintenance_review_not_fully_closed": true,
+    "new_cve_or_compatibility_failure_established_by_this_review": false,
+    "remaining_real_concerns": [
+      "Current upstream maintenance for four packages is unconfirmed. They are not automatically abandoned; they also cannot be described as confirmed maintained.",
+      "telemetry_metrics_prometheus_core has accepted project work but release lag; do not imply the installed release contains main-branch fixes.",
+      "No age-only forced replacement or infrastructure/authentication migration is justified by this review. Existing strict audits and actual compatibility tests remain independent mandatory gates."
+    ]
+  },
+  "method_limits": [
+    "No conclusion is based on GitHub stars, a recent parent alone, pushed_at alone, or absence of the archived flag.",
+    "Commit samples are at most ten latest default-branch commits, or package-path commits for DefinitelyTyped. Issue/workflow samples are bounded; this is not a prediction of future maintainer responsiveness.",
+    "Repository-root and .github security/support paths were checked. Organization-wide inherited default policies were not exhaustively searched; missing files do not imply no security process.",
+    "GitHub CI sample conclusions are reported literally, including cancelled, startup_failure and action_required. Passing unrelated repository runs are not package-specific test evidence.",
+    "An empty installed-release security_advisories field is a point-in-time registry fact, not a substitute for the coordinators complete unfiltered Hex/npm audits. This investigation did not rerun those audits or Kith tests.",
+    "Public license metadata/README declarations are recorded with provenance; automatic GitHub license detection can be null or NOASSERTION despite a declared license."
+  ],
+  "packages": [
+    {
+      "package": "asn1_compiler",
+      "maintenance_classification": "upstream_maintenance_unconfirmed",
+      "qualifies_as_confirmed_maintained_under_revised_policy": false,
+      "retained_role": "Wax 0.7.0 build-time ASN.1 compiler; not a runtime release application.",
+      "assessment_facts": [
+        "Default-branch last commit is 2017-11-17; repository is not archived or disabled.",
+        "README documents build-only use but contains no current support commitment or maintenance status.",
+        "Current issues/PRs include 2025 fixes for missing ASN.1 application declaration and newer-Elixir test setup. The fetched compatibility-issue responses are from a contributor and another user, not verified maintainer responses."
+      ],
+      "recommendation": "Do not certify current upstream maintenance. Keep the existing compatible build path and optional upstream cleanup work visible; the revised age rule alone does not mandate replacement. Maintenance verification remains open.",
+      "repository": {
+        "full_name": "omt-tech/asn1_compiler",
+        "url": "https://github.com/omt-tech/asn1_compiler",
+        "api_url": "https://api.github.com/repos/omt-tech/asn1_compiler",
+        "retrieved_at": "2026-11-01T07:45:34.319627+00:00",
+        "default_branch": "master",
+        "archived": false,
+        "disabled": false,
+        "pushed_at": "2017-11-17T10:07:23Z",
+        "license_detector": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        }
+      },
+      "default_branch_or_package_path_commits": [
+        {
+          "sha": "560ca324674e5fedd29ab66b1c15a2aed27e0cfb",
+          "url": "https://github.com/omt-tech/asn1_compiler/commit/560ca324674e5fedd29ab66b1c15a2aed27e0cfb",
+          "committed_at": "2017-11-17T10:07:05Z",
+          "subject": "Typo"
+        },
+        {
+          "sha": "d491f70b8bcb5b969baf74d42797f8811839017a",
+          "url": "https://github.com/omt-tech/asn1_compiler/commit/d491f70b8bcb5b969baf74d42797f8811839017a",
+          "committed_at": "2017-11-17T09:57:44Z",
+          "subject": "typo"
+        },
+        {
+          "sha": "a78aef81b25081e2d73a533a02f7c8a8c6f220bf",
+          "url": "https://github.com/omt-tech/asn1_compiler/commit/a78aef81b25081e2d73a533a02f7c8a8c6f220bf",
+          "committed_at": "2017-11-17T09:57:15Z",
+          "subject": "Correct docs"
+        },
+        {
+          "sha": "f76b366235aab257a89c2b7df76dd06d0e5d80e8",
+          "url": "https://github.com/omt-tech/asn1_compiler/commit/f76b366235aab257a89c2b7df76dd06d0e5d80e8",
+          "committed_at": "2017-11-17T09:55:21Z",
+          "subject": "Add LICENSE"
+        },
+        {
+          "sha": "b45b8615a025e3f177dfb75eb4a9e1128aedb0f9",
+          "url": "https://github.com/omt-tech/asn1_compiler/commit/b45b8615a025e3f177dfb75eb4a9e1128aedb0f9",
+          "committed_at": "2017-11-17T09:54:45Z",
+          "subject": "Correct links"
+        }
+      ],
+      "readme": {
+        "url": "https://github.com/omt-tech/asn1_compiler/blob/master/README.md",
+        "retrieved_at": "2026-11-01T07:45:34.320946+00:00",
+        "sha256": "b2873ded2c48f65371ae3e76b31e59db91922d491b68e1ead5512a732c87d4f8"
+      },
+      "license": {
+        "api_retrieved": true,
+        "url": "https://github.com/omt-tech/asn1_compiler/blob/master/LICENSE",
+        "declared": "MIT",
+        "basis": "README/license/npm metadata; GitHub automatic detector retained separately"
+      },
+      "explicit_deprecation_found": false,
+      "deprecation_check_scope": "Fetched official README plus installed Hex release retirement/security metadata, or installed npm version deprecation metadata. Not an exhaustive claim about every issue or branch.",
+      "support": {
+        "channel": "https://github.com/omt-tech/asn1_compiler/issues",
+        "recent_responsiveness_promised": false,
+        "reviewed_issue_sample": [
+          {
+            "number": 3,
+            "url": "https://github.com/omt-tech/asn1_compiler/pull/3",
+            "state": "open",
+            "updated_at": "2025-11-30T19:41:43Z",
+            "title": "Fix test setup on newer Elixir versions",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 1,
+            "url": "https://github.com/omt-tech/asn1_compiler/issues/1",
+            "state": "open",
+            "updated_at": "2025-11-30T16:59:50Z",
+            "title": "warning: :asn1ct.compile/2 is undefined (module :asn1ct is not available or is yet to be defined)",
+            "author_association": "NONE",
+            "comments": 2
+          },
+          {
+            "number": 2,
+            "url": "https://github.com/omt-tech/asn1_compiler/pull/2",
+            "state": "open",
+            "updated_at": "2025-08-28T09:04:29Z",
+            "title": "Add missing dependency on asn1 application",
+            "author_association": "CONTRIBUTOR",
+            "comments": 0
+          }
+        ]
+      },
+      "workflow_sample": [],
+      "security_support_files": {
+        "security_root": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.567330+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.783182+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:24.579081+00:00",
+          "found": false,
+          "html_url": null
+        }
+      },
+      "source_inventory": {
+        "repository": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler",
+          "retrieved_at": "2026-11-01T07:45:34.319627+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "6ff3355c902072fd683c4418f505f9dd563e5dd68cdfff5470d5126ef3380fa4"
+        },
+        "commits": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/commits?per_page=10",
+          "retrieved_at": "2026-11-01T07:45:34.319850+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "95e8d9d7d999385dff6783327a2f41d3ec1775dc3aded42f5b2b6f5644327849"
+        },
+        "readme": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/readme",
+          "retrieved_at": "2026-11-01T07:45:34.320946+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "f9803da766b6af46c5fca39b58035b26c34d2685cc2ce70a80c93a54c2a08fbb"
+        },
+        "license": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/license",
+          "retrieved_at": "2026-11-01T07:45:34.322882+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "f22bff2926e91690556b80d84674fb9b2616c538fe8f491541400fa3aceba143"
+        },
+        "root_contents": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/contents",
+          "retrieved_at": "2026-11-01T07:45:34.323032+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "10bde6c8871a76b715dcc81b965c592e76987c813ba11ed644bd7e159ca2a11d"
+        },
+        "issues": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/issues?state=all&sort=updated&direction=desc&per_page=8",
+          "retrieved_at": "2026-11-01T07:45:34.323147+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "261d015cd417b24c877ebab6088c8871f095cb82582e2fe1c0778514690630ca"
+        },
+        "workflow_runs": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/actions/runs?per_page=3",
+          "retrieved_at": "2026-11-01T07:45:34.326083+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "a2790a384d7d281e7395679000c35d27768d89dbd7052f725b8f4688beb59915"
+        },
+        "security_root": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.567330+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.783182+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:24.579081+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "compatibility_issue_comments": {
+          "url": "https://api.github.com/repos/omt-tech/asn1_compiler/issues/1/comments",
+          "retrieved_at": "2026-11-01T07:47:24.624349+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "e791d0f4315af07400e2c0fe41720fb09d9860846848ab9570ce7216863f80ec"
+        }
+      },
+      "installed": {
+        "version": "0.1.1",
+        "requirements": [],
+        "build_tools": [
+          "mix"
+        ],
+        "installed_parents": [
+          {
+            "name": "wax_",
+            "version": "0.7.0",
+            "matches": true,
+            "requirement": "~> 0.1.0",
+            "optional": false
+          }
+        ],
+        "local_source": "mix.lock"
+      },
+      "registry": {
+        "url": "https://hex.pm/api/packages/asn1_compiler/releases/0.1.1",
+        "retrieved_at": "2026-11-01T07:47:44.613182+00:00",
+        "version": "0.1.1",
+        "published_at": "2017-11-17T10:07:35.095271Z",
+        "retirement": null,
+        "security_advisories": []
+      },
+      "compatibility_issue_comments": [
+        {
+          "url": "https://github.com/omt-tech/asn1_compiler/issues/1#issuecomment-3232615628",
+          "created_at": "2025-08-28T09:04:53Z",
+          "author_association": "CONTRIBUTOR",
+          "author": "michalmuskala",
+          "body": "I think this might resolve the issue https://github.com/omt-tech/asn1_compiler/pull/2. Could you see if that fixes the problem?"
+        },
+        {
+          "url": "https://github.com/omt-tech/asn1_compiler/issues/1#issuecomment-3592841155",
+          "created_at": "2025-11-30T16:59:50Z",
+          "author_association": "NONE",
+          "author": "trarbr",
+          "body": "@michalmuskala I can confirm that #2 solves the issue. With the patch from #2, the `warning: :asn1ct.compile/2 is undefined` no longer appears. "
+        }
+      ]
+    },
+    {
+      "package": "bunt",
+      "maintenance_classification": "upstream_maintenance_unconfirmed",
+      "qualifies_as_confirmed_maintained_under_revised_policy": false,
+      "retained_role": "Credo 1.7.19 ANSI formatter in development/test tooling.",
+      "assessment_facts": [
+        "Default-branch latest merge is 2023-12-06; README documents a small ANSI formatter adapted from IO.ANSI and contribution instructions.",
+        "Repository owner is rrrene; installed Credo source identifies rrrene/credo and explicitly depends on Bunt. This is stronger shared-ownership/integration context than an unrelated parent dependency, but is not proof of recent Bunt support.",
+        "No explicit archived/deprecated declaration was found in the checked README/release metadata. Recent Bunt maintenance or a support promise was not established."
+      ],
+      "recommendation": "Preserve the shared-maintainer and limited-scope context, but leave Bunt maintenance unconfirmed rather than automatically abandoned or certified maintained. Do not remove Credo analysis checks merely to remove its formatter.",
+      "repository": {
+        "full_name": "rrrene/bunt",
+        "url": "https://github.com/rrrene/bunt",
+        "api_url": "https://api.github.com/repos/rrrene/bunt",
+        "retrieved_at": "2026-11-01T07:45:34.330699+00:00",
+        "default_branch": "master",
+        "archived": false,
+        "disabled": false,
+        "pushed_at": "2023-12-06T11:00:54Z",
+        "license_detector": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        }
+      },
+      "default_branch_or_package_path_commits": [
+        {
+          "sha": "4f843d433a98c18c7bddfd263d9f52c12fa010e2",
+          "url": "https://github.com/rrrene/bunt/commit/4f843d433a98c18c7bddfd263d9f52c12fa010e2",
+          "committed_at": "2023-12-06T11:00:54Z",
+          "subject": "Merge pull request #13 from Raphexion/nijo/move-logger-to-extra-applications"
+        },
+        {
+          "sha": "853fafd4e3362df997c2179159a538db35d886e9",
+          "url": "https://github.com/rrrene/bunt/commit/853fafd4e3362df997c2179159a538db35d886e9",
+          "committed_at": "2023-12-05T20:26:32Z",
+          "subject": "Update deps"
+        },
+        {
+          "sha": "b063705c80a5fd2d4f1c81328cd0f637c94ff562",
+          "url": "https://github.com/rrrene/bunt/commit/b063705c80a5fd2d4f1c81328cd0f637c94ff562",
+          "committed_at": "2023-12-05T20:21:32Z",
+          "subject": "Bump version to 1.0.0"
+        },
+        {
+          "sha": "04cc50697e6e94da0f575be359ae2c2863cb25ab",
+          "url": "https://github.com/rrrene/bunt/commit/04cc50697e6e94da0f575be359ae2c2863cb25ab",
+          "committed_at": "2023-12-05T20:21:16Z",
+          "subject": "Update README and config"
+        },
+        {
+          "sha": "77428c9a0a942f48938b47444c59e27b4e6ff45d",
+          "url": "https://github.com/rrrene/bunt/commit/77428c9a0a942f48938b47444c59e27b4e6ff45d",
+          "committed_at": "2023-12-05T20:17:58Z",
+          "subject": "Merge pull request #14 from VitorTrin/master"
+        }
+      ],
+      "readme": {
+        "url": "https://github.com/rrrene/bunt/blob/master/README.md",
+        "retrieved_at": "2026-11-01T07:45:35.027505+00:00",
+        "sha256": "adac7a3b942a68324699be425cb0cfcb89aca2e3dc7d653d8b71d6087b7a35fe"
+      },
+      "license": {
+        "api_retrieved": true,
+        "url": "https://github.com/rrrene/bunt/blob/master/LICENSE",
+        "declared": "MIT with documented Elixir-derived Apache-2.0 portions",
+        "basis": "README/license/npm metadata; GitHub automatic detector retained separately"
+      },
+      "explicit_deprecation_found": false,
+      "deprecation_check_scope": "Fetched official README plus installed Hex release retirement/security metadata, or installed npm version deprecation metadata. Not an exhaustive claim about every issue or branch.",
+      "support": {
+        "channel": "https://github.com/rrrene/bunt/issues",
+        "recent_responsiveness_promised": false,
+        "reviewed_issue_sample": [
+          {
+            "number": 16,
+            "url": "https://github.com/rrrene/bunt/pull/16",
+            "state": "open",
+            "updated_at": "2025-02-12T14:27:54Z",
+            "title": "Fix script/colors.exs color tuple display",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 15,
+            "url": "https://github.com/rrrene/bunt/issues/15",
+            "state": "closed",
+            "updated_at": "2024-01-01T15:26:38Z",
+            "title": "Name query!",
+            "author_association": "NONE",
+            "comments": 1
+          },
+          {
+            "number": 14,
+            "url": "https://github.com/rrrene/bunt/pull/14",
+            "state": "closed",
+            "updated_at": "2023-12-07T20:54:15Z",
+            "title": "Import Config instead of using Mix.Config",
+            "author_association": "CONTRIBUTOR",
+            "comments": 1
+          },
+          {
+            "number": 13,
+            "url": "https://github.com/rrrene/bunt/pull/13",
+            "state": "closed",
+            "updated_at": "2023-12-06T11:00:55Z",
+            "title": "Move :logger to extra_applications",
+            "author_association": "CONTRIBUTOR",
+            "comments": 0
+          },
+          {
+            "number": 7,
+            "url": "https://github.com/rrrene/bunt/issues/7",
+            "state": "closed",
+            "updated_at": "2023-02-04T21:00:26Z",
+            "title": "Release documentation at hexdocs.pm",
+            "author_association": "NONE",
+            "comments": 1
+          }
+        ]
+      },
+      "workflow_sample": [],
+      "security_support_files": {
+        "security_root": {
+          "url": "https://api.github.com/repos/rrrene/bunt/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.544226+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/rrrene/bunt/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.560304+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/rrrene/bunt/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:24.561726+00:00",
+          "found": false,
+          "html_url": null
+        }
+      },
+      "source_inventory": {
+        "repository": {
+          "url": "https://api.github.com/repos/rrrene/bunt",
+          "retrieved_at": "2026-11-01T07:45:34.330699+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "9669b53ad9a90b168e00688e7f682441e5ba89edd2ede1c94e175c5b24cb6967"
+        },
+        "commits": {
+          "url": "https://api.github.com/repos/rrrene/bunt/commits?per_page=10",
+          "retrieved_at": "2026-11-01T07:45:35.015273+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "4452ad38a71d7df18169e2765493caf9bb6e45112ec13a9d53e5f5f21044a70f"
+        },
+        "readme": {
+          "url": "https://api.github.com/repos/rrrene/bunt/readme",
+          "retrieved_at": "2026-11-01T07:45:35.027505+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "f883a01ce25dac2b7c6f976ed974fb3c179636f00de86ad8bccc0b0143b91f9e"
+        },
+        "license": {
+          "url": "https://api.github.com/repos/rrrene/bunt/license",
+          "retrieved_at": "2026-11-01T07:45:35.058130+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "c0b66cb5b838ae791401b63aae5c5dc2532342a2744cf49e4661efcbc6ae3997"
+        },
+        "root_contents": {
+          "url": "https://api.github.com/repos/rrrene/bunt/contents",
+          "retrieved_at": "2026-11-01T07:45:35.085117+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "54088542a70a9c28867cb9c814f11bad5de916195e88503e1185b42a87d93023"
+        },
+        "issues": {
+          "url": "https://api.github.com/repos/rrrene/bunt/issues?state=all&sort=updated&direction=desc&per_page=8",
+          "retrieved_at": "2026-11-01T07:45:35.130007+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "7be0749b78e9821651004d7aed67ec1f414faf6138de7d139a8d8f4e621716a1"
+        },
+        "workflow_runs": {
+          "url": "https://api.github.com/repos/rrrene/bunt/actions/runs?per_page=3",
+          "retrieved_at": "2026-11-01T07:45:35.139706+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "a2790a384d7d281e7395679000c35d27768d89dbd7052f725b8f4688beb59915"
+        },
+        "security_root": {
+          "url": "https://api.github.com/repos/rrrene/bunt/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.544226+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/rrrene/bunt/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.560304+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/rrrene/bunt/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:24.561726+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        }
+      },
+      "installed": {
+        "version": "1.0.0",
+        "requirements": [],
+        "build_tools": [
+          "mix"
+        ],
+        "installed_parents": [
+          {
+            "name": "credo",
+            "version": "1.7.19",
+            "matches": true,
+            "requirement": "~> 0.2.1 or ~> 1.0",
+            "optional": false
+          }
+        ],
+        "local_source": "mix.lock"
+      },
+      "registry": {
+        "url": "https://hex.pm/api/packages/bunt/releases/1.0.0",
+        "retrieved_at": "2026-11-01T07:47:44.594216+00:00",
+        "version": "1.0.0",
+        "published_at": "2023-12-05T20:32:11.999329Z",
+        "retirement": null,
+        "security_advisories": []
+      },
+      "shared_parent_ownership_evidence": {
+        "child_repository_owner": "rrrene",
+        "installed_parent_source": "deps/credo/mix.exs",
+        "parent_source_url": "https://github.com/rrrene/credo",
+        "parent_declared_maintainer": "René Föhring",
+        "parent_declared_dependency": "{:bunt, \"~> 0.2.1 or ~> 1.0\"}",
+        "conclusion": "Common upstream identity and continuing integration, not sufficient by itself to certify current child maintenance."
+      }
+    },
+    {
+      "package": "fuse",
+      "maintenance_classification": "upstream_maintenance_unconfirmed",
+      "qualifies_as_confirmed_maintained_under_revised_policy": false,
+      "retained_role": "Direct circuit breakers for LocationIQ geocoding and OpenWeather requests; cached fallback remains application-owned.",
+      "assessment_facts": [
+        "Official README explicitly describes production use and stable code backed by QuickCheck testing.",
+        "Default-branch last commit is 2021-07-01; repository pushed_at is 2022-02-15. These are different facts; pushed_at is not evidence of a current source change.",
+        "README invites issues/patches and documents a stable API, but the bounded sample did not establish current maintainer responsiveness."
+      ],
+      "recommendation": "The project documents stable low-churn code, not a current support guarantee. Retention avoids an unapproved Envoy architecture rewrite, but upstream maintenance remains unconfirmed under the maintained-package policy.",
+      "repository": {
+        "full_name": "jlouis/fuse",
+        "url": "https://github.com/jlouis/fuse",
+        "api_url": "https://api.github.com/repos/jlouis/fuse",
+        "retrieved_at": "2026-11-01T07:45:35.188047+00:00",
+        "default_branch": "master",
+        "archived": false,
+        "disabled": false,
+        "pushed_at": "2022-02-15T13:42:42Z",
+        "license_detector": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        }
+      },
+      "default_branch_or_package_path_commits": [
+        {
+          "sha": "79d0817d5a2f97e9951fd736f1ba6a08c7b52b03",
+          "url": "https://github.com/jlouis/fuse/commit/79d0817d5a2f97e9951fd736f1ba6a08c7b52b03",
+          "committed_at": "2021-07-01T14:37:54Z",
+          "subject": "Balance feature coverage"
+        },
+        {
+          "sha": "671a4f25822268c734564bfd353941f2bac1e126",
+          "url": "https://github.com/jlouis/fuse/commit/671a4f25822268c734564bfd353941f2bac1e126",
+          "committed_at": "2021-07-01T14:32:37Z",
+          "subject": "Remove a generator we don't use."
+        },
+        {
+          "sha": "2187bb52b4d7f5af78ec1ce73a0683403d8a46db",
+          "url": "https://github.com/jlouis/fuse/commit/2187bb52b4d7f5af78ec1ce73a0683403d8a46db",
+          "committed_at": "2021-07-01T14:16:30Z",
+          "subject": "v2.5.0"
+        },
+        {
+          "sha": "aaf20d4bac7860556067b047075df5058bc83258",
+          "url": "https://github.com/jlouis/fuse/commit/aaf20d4bac7860556067b047075df5058bc83258",
+          "committed_at": "2021-07-01T14:16:16Z",
+          "subject": "Prepare for 2.5.0"
+        },
+        {
+          "sha": "c0a8e2ffb5da67af7bc5ea1c07c1c841e6e3fd3c",
+          "url": "https://github.com/jlouis/fuse/commit/c0a8e2ffb5da67af7bc5ea1c07c1c841e6e3fd3c",
+          "committed_at": "2021-07-01T12:07:13Z",
+          "subject": "Merge branch 'master' of https://github.com/danilagamma/fuse into danilagamma-master"
+        }
+      ],
+      "readme": {
+        "url": "https://github.com/jlouis/fuse/blob/master/README.md",
+        "retrieved_at": "2026-11-01T07:45:35.548589+00:00",
+        "sha256": "60e91ac52a7a01301c5b716756d2ce34181f6f14db3428516d5778f8e447d070"
+      },
+      "license": {
+        "api_retrieved": true,
+        "url": "https://github.com/jlouis/fuse/blob/master/LICENSE",
+        "declared": "MIT",
+        "basis": "README/license/npm metadata; GitHub automatic detector retained separately"
+      },
+      "explicit_deprecation_found": false,
+      "deprecation_check_scope": "Fetched official README plus installed Hex release retirement/security metadata, or installed npm version deprecation metadata. Not an exhaustive claim about every issue or branch.",
+      "support": {
+        "channel": "https://github.com/jlouis/fuse/issues",
+        "recent_responsiveness_promised": false,
+        "reviewed_issue_sample": [
+          {
+            "number": 42,
+            "url": "https://github.com/jlouis/fuse/issues/42",
+            "state": "open",
+            "updated_at": "2024-11-21T01:45:14Z",
+            "title": "How to use the prometheus plugin?",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 5,
+            "url": "https://github.com/jlouis/fuse/issues/5",
+            "state": "open",
+            "updated_at": "2024-11-20T22:48:30Z",
+            "title": "Please include a fully working example",
+            "author_association": "NONE",
+            "comments": 3
+          },
+          {
+            "number": 41,
+            "url": "https://github.com/jlouis/fuse/pull/41",
+            "state": "open",
+            "updated_at": "2024-11-06T16:31:28Z",
+            "title": "Update readme to make units for `MaxT` more clear",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 38,
+            "url": "https://github.com/jlouis/fuse/issues/38",
+            "state": "open",
+            "updated_at": "2024-09-12T14:35:29Z",
+            "title": "Broken spec for the name of a fuse",
+            "author_association": "NONE",
+            "comments": 1
+          },
+          {
+            "number": 40,
+            "url": "https://github.com/jlouis/fuse/issues/40",
+            "state": "open",
+            "updated_at": "2023-06-12T14:56:30Z",
+            "title": "telemetry implementation of fuse_stats_plugin?",
+            "author_association": "NONE",
+            "comments": 1
+          }
+        ]
+      },
+      "workflow_sample": [],
+      "security_support_files": {
+        "security_root": {
+          "url": "https://api.github.com/repos/jlouis/fuse/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.575636+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/jlouis/fuse/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.580443+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/jlouis/fuse/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.013032+00:00",
+          "found": false,
+          "html_url": null
+        }
+      },
+      "source_inventory": {
+        "repository": {
+          "url": "https://api.github.com/repos/jlouis/fuse",
+          "retrieved_at": "2026-11-01T07:45:35.188047+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "92d924b9258529520d9a02011d8b2322a38526f37f95923d2efd6911652ad81b"
+        },
+        "commits": {
+          "url": "https://api.github.com/repos/jlouis/fuse/commits?per_page=10",
+          "retrieved_at": "2026-11-01T07:45:35.247541+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "7fd387996efa2cab173d98a18c3f0776a3089f0b8991fd2a5432e8d3bbff8aa7"
+        },
+        "readme": {
+          "url": "https://api.github.com/repos/jlouis/fuse/readme",
+          "retrieved_at": "2026-11-01T07:45:35.548589+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "02e81eb300a48be843246eb43679aa42e612c9619347cfad15ffa6605af39303"
+        },
+        "license": {
+          "url": "https://api.github.com/repos/jlouis/fuse/license",
+          "retrieved_at": "2026-11-01T07:45:35.625564+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "6f6838dcd8153d613bc7862c6286d0e92810d6391a1062bfd70ceac931fb804e"
+        },
+        "root_contents": {
+          "url": "https://api.github.com/repos/jlouis/fuse/contents",
+          "retrieved_at": "2026-11-01T07:45:35.638335+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "850d54db6bcbeb34ff8666eee4ad5c10331200fb504fda4565e2ae70882c2047"
+        },
+        "issues": {
+          "url": "https://api.github.com/repos/jlouis/fuse/issues?state=all&sort=updated&direction=desc&per_page=8",
+          "retrieved_at": "2026-11-01T07:45:35.638553+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "f4b077fe268f4da91ea012955934e5fa2da75dcd00560e0a370a97453e91ed48"
+        },
+        "workflow_runs": {
+          "url": "https://api.github.com/repos/jlouis/fuse/actions/runs?per_page=3",
+          "retrieved_at": "2026-11-01T07:45:35.674643+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "a2790a384d7d281e7395679000c35d27768d89dbd7052f725b8f4688beb59915"
+        },
+        "workflows": {
+          "url": "https://api.github.com/repos/jlouis/fuse/contents/.github/workflows",
+          "retrieved_at": "2026-11-01T07:47:24.600095+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "4cfe38a084a057da660b31dc3a01cda237a26fba70ac93900d06fddce9afbe94"
+        },
+        "security_root": {
+          "url": "https://api.github.com/repos/jlouis/fuse/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.575636+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/jlouis/fuse/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:24.580443+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/jlouis/fuse/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.013032+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        }
+      },
+      "installed": {
+        "version": "2.5.0",
+        "requirements": [],
+        "build_tools": [
+          "rebar3"
+        ],
+        "installed_parents": [],
+        "local_source": "mix.lock"
+      },
+      "registry": {
+        "url": "https://hex.pm/api/packages/fuse/releases/2.5.0",
+        "retrieved_at": "2026-11-01T07:47:44.594376+00:00",
+        "version": "2.5.0",
+        "published_at": "2021-07-01T14:16:44.229117Z",
+        "retirement": null,
+        "security_advisories": []
+      },
+      "stable_status_source": {
+        "url": "https://github.com/jlouis/fuse/blob/master/README.md",
+        "excerpt": "Fuse has seen use in various production systems, and the code should be quite stable."
+      }
+    },
+    {
+      "package": "mmdb2_decoder",
+      "maintenance_classification": "active_project_maintenance",
+      "qualifies_as_confirmed_maintained_under_revised_policy": true,
+      "retained_role": "Geolix.Adapter.MMDB2 0.7.0 decoder for configured local MaxMind databases.",
+      "assessment_facts": [
+        "Default branch includes 2026 dependency, Elixir-version and GitHub Actions maintenance commits despite its 2022 latest release.",
+        "Three fetched default-branch push workflows in August/October 2026 completed successfully.",
+        "No explicit deprecation or archive declaration was found in the inspected official metadata/README."
+      ],
+      "recommendation": "Qualifies as an older maintained package on direct project-maintenance evidence; retain latest stable 3.0.1 subject to Kith local-DB compatibility checks. No age-driven Locus replacement is required.",
+      "repository": {
+        "full_name": "elixir-geolix/mmdb2_decoder",
+        "url": "https://github.com/elixir-geolix/mmdb2_decoder",
+        "api_url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder",
+        "retrieved_at": "2026-11-01T07:45:35.744183+00:00",
+        "default_branch": "master",
+        "archived": false,
+        "disabled": false,
+        "pushed_at": "2026-10-03T08:20:28Z",
+        "license_detector": {
+          "key": "apache-2.0",
+          "name": "Apache License 2.0",
+          "spdx_id": "Apache-2.0",
+          "url": "https://api.github.com/licenses/apache-2.0",
+          "node_id": "MDc6TGljZW5zZTI="
+        }
+      },
+      "default_branch_or_package_path_commits": [
+        {
+          "sha": "9a87ea00fc461d19c2b0c803cc6fa9e5daea3458",
+          "url": "https://github.com/elixir-geolix/mmdb2_decoder/commit/9a87ea00fc461d19c2b0c803cc6fa9e5daea3458",
+          "committed_at": "2026-10-03T08:20:21Z",
+          "subject": "Update dependencies"
+        },
+        {
+          "sha": "e065da92fc3a5526d26503b44a9d317ad7fa35a9",
+          "url": "https://github.com/elixir-geolix/mmdb2_decoder/commit/e065da92fc3a5526d26503b44a9d317ad7fa35a9",
+          "committed_at": "2026-10-01T12:10:23Z",
+          "subject": "Bump GitHub Elixir releases"
+        },
+        {
+          "sha": "db7ed79db736dfaca46ff882a0d7e0c015ec591c",
+          "url": "https://github.com/elixir-geolix/mmdb2_decoder/commit/db7ed79db736dfaca46ff882a0d7e0c015ec591c",
+          "committed_at": "2026-08-19T14:25:02Z",
+          "subject": "Bump GitHub Elixir 1.20.x release"
+        },
+        {
+          "sha": "dc784f12cd561eab39dc7ccd076ccb96b98ab444",
+          "url": "https://github.com/elixir-geolix/mmdb2_decoder/commit/dc784f12cd561eab39dc7ccd076ccb96b98ab444",
+          "committed_at": "2026-08-19T14:24:57Z",
+          "subject": "Update dependencies"
+        },
+        {
+          "sha": "d21842534f9a2642e2d726f97356695275795061",
+          "url": "https://github.com/elixir-geolix/mmdb2_decoder/commit/d21842534f9a2642e2d726f97356695275795061",
+          "committed_at": "2026-08-06T10:29:58Z",
+          "subject": "Update GitHub actions"
+        }
+      ],
+      "readme": {
+        "url": "https://github.com/elixir-geolix/mmdb2_decoder/blob/master/README.md",
+        "retrieved_at": "2026-11-01T07:45:35.807014+00:00",
+        "sha256": "f76278fd92a22eb87f26d152f530450ebdb93beb7cbe2aea19bebb63703084b7"
+      },
+      "license": {
+        "api_retrieved": true,
+        "url": "https://github.com/elixir-geolix/mmdb2_decoder/blob/master/LICENSE",
+        "declared": "Apache-2.0",
+        "basis": "README/license/npm metadata; GitHub automatic detector retained separately"
+      },
+      "explicit_deprecation_found": false,
+      "deprecation_check_scope": "Fetched official README plus installed Hex release retirement/security metadata, or installed npm version deprecation metadata. Not an exhaustive claim about every issue or branch.",
+      "support": {
+        "channel": "https://github.com/elixir-geolix/mmdb2_decoder/issues",
+        "recent_responsiveness_promised": false,
+        "reviewed_issue_sample": [
+          {
+            "number": 1,
+            "url": "https://github.com/elixir-geolix/mmdb2_decoder/pull/1",
+            "state": "closed",
+            "updated_at": "2022-06-30T04:40:26Z",
+            "title": "Misc doc changes",
+            "author_association": "CONTRIBUTOR",
+            "comments": 4
+          }
+        ]
+      },
+      "workflow_sample": [
+        {
+          "url": "https://github.com/elixir-geolix/mmdb2_decoder/actions/runs/37109371693",
+          "event": "push",
+          "branch": "master",
+          "created_at": "2026-10-03T08:20:30Z",
+          "conclusion": "success"
+        },
+        {
+          "url": "https://github.com/elixir-geolix/mmdb2_decoder/actions/runs/32263892321",
+          "event": "push",
+          "branch": "master",
+          "created_at": "2026-08-19T14:25:10Z",
+          "conclusion": "success"
+        },
+        {
+          "url": "https://github.com/elixir-geolix/mmdb2_decoder/actions/runs/31093492742",
+          "event": "push",
+          "branch": "master",
+          "created_at": "2026-08-06T10:30:03Z",
+          "conclusion": "success"
+        }
+      ],
+      "security_support_files": {
+        "security_root": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.091030+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.057189+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.234286+00:00",
+          "found": false,
+          "html_url": null
+        }
+      },
+      "source_inventory": {
+        "repository": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder",
+          "retrieved_at": "2026-11-01T07:45:35.744183+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "d70b96be9eb1512607466afce319deb4b9953ecaa375f7e23f13dd61946aec12"
+        },
+        "commits": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/commits?per_page=10",
+          "retrieved_at": "2026-11-01T07:45:35.794296+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "33e29beeee5777e84eb05e1fa63138b71d0519738f5dcdb0d3ff053808047634"
+        },
+        "readme": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/readme",
+          "retrieved_at": "2026-11-01T07:45:35.807014+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "bc5dfcafd76aa559bcaf03fd9e25a1d55f96cfb98b205bf295cba78fce6c7d67"
+        },
+        "license": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/license",
+          "retrieved_at": "2026-11-01T07:45:36.155376+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "28af9a0340b6af2cb3003e36a9d20a4478e77b208aac7bf9cafe59082b87dca9"
+        },
+        "root_contents": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/contents",
+          "retrieved_at": "2026-11-01T07:45:36.167692+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "4f682c82b073ccc90ec97470ea51f3a804cd769b2687f62f99415f7d1bea27a8"
+        },
+        "issues": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/issues?state=all&sort=updated&direction=desc&per_page=8",
+          "retrieved_at": "2026-11-01T07:45:36.173844+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "e57326e4c01cff4ea130212b2788d5293eda1cbe8fc15893ae6c1175c7c2d5ce"
+        },
+        "workflow_runs": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/actions/runs?per_page=3",
+          "retrieved_at": "2026-11-01T07:45:36.194141+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "23ef70b53d98e2d3bda2e3c0cc0a84c2f61cd865b4d72ddbfe6620d0e49d7a03"
+        },
+        "workflows": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/contents/.github/workflows",
+          "retrieved_at": "2026-11-01T07:47:25.053680+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "b27afcd22dca18e124bd3e63eaf43b75e19a46c448d7f56fcf5182b7c7d9fafa"
+        },
+        "security_root": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.091030+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.057189+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/elixir-geolix/mmdb2_decoder/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.234286+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        }
+      },
+      "installed": {
+        "version": "3.0.1",
+        "requirements": [],
+        "build_tools": [
+          "mix"
+        ],
+        "installed_parents": [
+          {
+            "name": "geolix_adapter_mmdb2",
+            "version": "0.7.0",
+            "matches": true,
+            "requirement": "~> 3.0",
+            "optional": false
+          }
+        ],
+        "local_source": "mix.lock"
+      },
+      "registry": {
+        "url": "https://hex.pm/api/packages/mmdb2_decoder/releases/3.0.1",
+        "retrieved_at": "2026-11-01T07:47:44.623926+00:00",
+        "version": "3.0.1",
+        "published_at": "2022-06-20T16:10:57.650343Z",
+        "retirement": null,
+        "security_advisories": []
+      }
+    },
+    {
+      "package": "nimble_options",
+      "maintenance_classification": "active_project_maintenance",
+      "qualifies_as_confirmed_maintained_under_revised_policy": true,
+      "retained_role": "Shared option validation used by installed HTTP, caching, pagination, logging and rate-limit parents.",
+      "assessment_facts": [
+        "Default branch has 2026 functional validation fixes, type fixes, dependency work and an Elixir/Erlang CI update.",
+        "Fetched August 2026 default-branch workflows completed successfully.",
+        "These unreleased commits establish project activity; they are not represented as fixes already present in installed 1.1.1."
+      ],
+      "recommendation": "Qualifies as an older maintained package. Retain the latest compatible stable release; do not force coordinated parent rewrites or invent a release-date reset.",
+      "repository": {
+        "full_name": "dashbitco/nimble_options",
+        "url": "https://github.com/dashbitco/nimble_options",
+        "api_url": "https://api.github.com/repos/dashbitco/nimble_options",
+        "retrieved_at": "2026-11-01T07:45:36.333560+00:00",
+        "default_branch": "main",
+        "archived": false,
+        "disabled": false,
+        "pushed_at": "2026-08-25T15:06:34Z",
+        "license_detector": {
+          "key": "apache-2.0",
+          "name": "Apache License 2.0",
+          "spdx_id": "Apache-2.0",
+          "url": "https://api.github.com/licenses/apache-2.0",
+          "node_id": "MDc6TGljZW5zZTI="
+        }
+      },
+      "default_branch_or_package_path_commits": [
+        {
+          "sha": "825c05837f236c612c6ac2855735ec6cf7f2be69",
+          "url": "https://github.com/dashbitco/nimble_options/commit/825c05837f236c612c6ac2855735ec6cf7f2be69",
+          "committed_at": "2026-08-25T15:06:27Z",
+          "subject": "Update local deps"
+        },
+        {
+          "sha": "eb6643b80fb9d8f1651cb3996d530ee983cc673d",
+          "url": "https://github.com/dashbitco/nimble_options/commit/eb6643b80fb9d8f1651cb3996d530ee983cc673d",
+          "committed_at": "2026-08-01T08:04:38Z",
+          "subject": "Update Elixir/Erlang versions in CI (#152)"
+        },
+        {
+          "sha": "7f0f259b5d96c490735dd0b43faaba0da7a38ed4",
+          "url": "https://github.com/dashbitco/nimble_options/commit/7f0f259b5d96c490735dd0b43faaba0da7a38ed4",
+          "committed_at": "2026-08-01T07:47:08Z",
+          "subject": "Fix invalid MFA validation if value is nil (#149)"
+        },
+        {
+          "sha": "b2d36bae0c685eb288accb4499f48ba05b2a84ed",
+          "url": "https://github.com/dashbitco/nimble_options/commit/b2d36bae0c685eb288accb4499f48ba05b2a84ed",
+          "committed_at": "2026-05-27T09:48:20Z",
+          "subject": "Widen ValidationError :key type to allow lists (#151)"
+        },
+        {
+          "sha": "f16af25ba00eb199f76718dcd6968acd3533ed19",
+          "url": "https://github.com/dashbitco/nimble_options/commit/f16af25ba00eb199f76718dcd6968acd3533ed19",
+          "committed_at": "2026-03-12T07:48:27Z",
+          "subject": "Fix inspect exception with ANSI enabled (#148)"
+        }
+      ],
+      "readme": {
+        "url": "https://github.com/dashbitco/nimble_options/blob/main/README.md",
+        "retrieved_at": "2026-11-01T07:45:36.466966+00:00",
+        "sha256": "bb25cc832b7d77cb142310bb1ea31d85f38e3ddb2106b08a565c08061161533a"
+      },
+      "license": {
+        "api_retrieved": true,
+        "url": "https://github.com/dashbitco/nimble_options/blob/main/LICENSE.md",
+        "declared": "Apache-2.0",
+        "basis": "README/license/npm metadata; GitHub automatic detector retained separately"
+      },
+      "explicit_deprecation_found": false,
+      "deprecation_check_scope": "Fetched official README plus installed Hex release retirement/security metadata, or installed npm version deprecation metadata. Not an exhaustive claim about every issue or branch.",
+      "support": {
+        "channel": "https://github.com/dashbitco/nimble_options/issues",
+        "recent_responsiveness_promised": false,
+        "reviewed_issue_sample": [
+          {
+            "number": 153,
+            "url": "https://github.com/dashbitco/nimble_options/pull/153",
+            "state": "closed",
+            "updated_at": "2026-08-25T15:08:22Z",
+            "title": "Enable Markdown documentation with ExDoc 0.40.3",
+            "author_association": "NONE",
+            "comments": 1
+          },
+          {
+            "number": 152,
+            "url": "https://github.com/dashbitco/nimble_options/pull/152",
+            "state": "closed",
+            "updated_at": "2026-08-01T08:04:47Z",
+            "title": "Update Elixir/Erlang versions in CI",
+            "author_association": "COLLABORATOR",
+            "comments": 0
+          },
+          {
+            "number": 149,
+            "url": "https://github.com/dashbitco/nimble_options/pull/149",
+            "state": "closed",
+            "updated_at": "2026-08-01T07:47:08Z",
+            "title": "Fix invalid mfa validation if value was `nil`",
+            "author_association": "CONTRIBUTOR",
+            "comments": 3
+          },
+          {
+            "number": 151,
+            "url": "https://github.com/dashbitco/nimble_options/pull/151",
+            "state": "closed",
+            "updated_at": "2026-05-27T09:49:16Z",
+            "title": "Widen ValidationError :key type to allow lists",
+            "author_association": "CONTRIBUTOR",
+            "comments": 2
+          },
+          {
+            "number": 148,
+            "url": "https://github.com/dashbitco/nimble_options/pull/148",
+            "state": "closed",
+            "updated_at": "2026-03-12T07:48:27Z",
+            "title": "Fix inspect exception with ANSI enabled",
+            "author_association": "CONTRIBUTOR",
+            "comments": 0
+          }
+        ]
+      },
+      "workflow_sample": [
+        {
+          "url": "https://github.com/dashbitco/nimble_options/actions/runs/32863736073",
+          "event": "push",
+          "branch": "main",
+          "created_at": "2026-08-25T15:06:40Z",
+          "conclusion": "success"
+        },
+        {
+          "url": "https://github.com/dashbitco/nimble_options/actions/runs/30691026100",
+          "event": "push",
+          "branch": "main",
+          "created_at": "2026-08-01T08:04:40Z",
+          "conclusion": "success"
+        },
+        {
+          "url": "https://github.com/dashbitco/nimble_options/actions/runs/30690986087",
+          "event": "pull_request",
+          "branch": "al/ci",
+          "created_at": "2026-08-01T08:03:30Z",
+          "conclusion": "success"
+        }
+      ],
+      "security_support_files": {
+        "security_root": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.071778+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.075630+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.088666+00:00",
+          "found": false,
+          "html_url": null
+        }
+      },
+      "source_inventory": {
+        "repository": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options",
+          "retrieved_at": "2026-11-01T07:45:36.333560+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "5e72e1470d0212fc783eb60447dc7b7a21a01cac1c8a46b967f6af7f8a194409"
+        },
+        "commits": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/commits?per_page=10",
+          "retrieved_at": "2026-11-01T07:45:36.333836+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "57098ab8a0bc59d3d4808cb2f7546e89574f2134532cd9410c9ddf9662660d2b"
+        },
+        "readme": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/readme",
+          "retrieved_at": "2026-11-01T07:45:36.466966+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "d5b55a889adcc67dfc0bdc5365aaadfe4a57db137f3da6578bf220bdbaf52477"
+        },
+        "license": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/license",
+          "retrieved_at": "2026-11-01T07:45:36.532177+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "4f284d236c6750a89203c028d3f02042a46494283aeea3a1703a420ff40e7dcf"
+        },
+        "root_contents": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/contents",
+          "retrieved_at": "2026-11-01T07:45:36.685338+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "d34603fa77cf98ef9c2d2547e2c6fc70036c1566daaf32890fb66b92ec08e1d0"
+        },
+        "issues": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/issues?state=all&sort=updated&direction=desc&per_page=8",
+          "retrieved_at": "2026-11-01T07:45:36.711183+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "ed7354f8afd4a60a1091a5edb19f210144c648d27e8d7607129877db46b516cd"
+        },
+        "workflow_runs": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/actions/runs?per_page=3",
+          "retrieved_at": "2026-11-01T07:45:36.778132+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "f45ec7e175061e733c384b920c8051e41fd848d5dadf45d4287278df845ed00f"
+        },
+        "workflows": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/contents/.github/workflows",
+          "retrieved_at": "2026-11-01T07:47:25.073953+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "60a08526ee186cfee1a6f4def2e9c202906cdf59d22b703d76f6de2a56ef8518"
+        },
+        "security_root": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.071778+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.075630+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_options/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.088666+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        }
+      },
+      "installed": {
+        "version": "1.1.1",
+        "requirements": [],
+        "build_tools": [
+          "mix"
+        ],
+        "installed_parents": [
+          {
+            "name": "sentry",
+            "version": "14.0.1",
+            "matches": true,
+            "requirement": "~> 1.0",
+            "optional": false
+          },
+          {
+            "name": "nebulex",
+            "version": "3.1.0",
+            "matches": true,
+            "requirement": "~> 0.5 or ~> 1.0",
+            "optional": false
+          },
+          {
+            "name": "flop",
+            "version": "0.29.1",
+            "matches": true,
+            "requirement": "~> 1.0",
+            "optional": false
+          },
+          {
+            "name": "nebulex_local",
+            "version": "3.1.0",
+            "matches": true,
+            "requirement": "~> 0.5 or ~> 1.0",
+            "optional": false
+          },
+          {
+            "name": "finch",
+            "version": "0.24.0",
+            "matches": true,
+            "requirement": "~> 0.4 or ~> 1.0",
+            "optional": false
+          },
+          {
+            "name": "redix",
+            "version": "1.10.0",
+            "matches": true,
+            "requirement": "~> 0.5.0 or ~> 1.0",
+            "optional": false
+          },
+          {
+            "name": "peep",
+            "version": "4.4.0",
+            "matches": true,
+            "requirement": "~> 1.1",
+            "optional": false
+          }
+        ],
+        "local_source": "mix.lock"
+      },
+      "registry": {
+        "url": "https://hex.pm/api/packages/nimble_options/releases/1.1.1",
+        "retrieved_at": "2026-11-01T07:47:44.595961+00:00",
+        "version": "1.1.1",
+        "published_at": "2024-05-25T10:51:15.797968Z",
+        "retirement": null,
+        "security_advisories": []
+      }
+    },
+    {
+      "package": "nimble_pool",
+      "maintenance_classification": "active_project_maintenance",
+      "qualifies_as_confirmed_maintained_under_revised_policy": true,
+      "retained_role": "Finch-owned connection/resource pooling beneath HTTP clients; removing only the direct Finch declaration would not remove it.",
+      "assessment_facts": [
+        "Default branch merged a queued-caller cancellation fix on 2026-09-07 and contains 2026 CI/docs maintenance.",
+        "The three fetched workflow runs are cancelled, not passing. Maintenance assessment rests on accepted source/CI work rather than a fabricated green result.",
+        "GitHub license detection is null, but the official README explicitly declares Apache License 2.0. A null detector result is not a no-license conclusion.",
+        "The queued-caller fix on main is not claimed to be part of installed 1.1.0."
+      ],
+      "recommendation": "Qualifies as an older maintained project, with current installed-version compatibility still required. No age-driven Finch transport migration is required.",
+      "repository": {
+        "full_name": "dashbitco/nimble_pool",
+        "url": "https://github.com/dashbitco/nimble_pool",
+        "api_url": "https://api.github.com/repos/dashbitco/nimble_pool",
+        "retrieved_at": "2026-11-01T07:45:36.818016+00:00",
+        "default_branch": "main",
+        "archived": false,
+        "disabled": false,
+        "pushed_at": "2026-09-07T16:30:33Z",
+        "license_detector": null
+      },
+      "default_branch_or_package_path_commits": [
+        {
+          "sha": "23326be3b9742d22ad11774a408b830e4b882a43",
+          "url": "https://github.com/dashbitco/nimble_pool/commit/23326be3b9742d22ad11774a408b830e4b882a43",
+          "committed_at": "2026-09-07T16:30:32Z",
+          "subject": "Wake queued callers after cancelling a pool holder (#54)"
+        },
+        {
+          "sha": "3e458942413b2a286e6ec35668f96aab5dc7022a",
+          "url": "https://github.com/dashbitco/nimble_pool/commit/3e458942413b2a286e6ec35668f96aab5dc7022a",
+          "committed_at": "2026-08-25T08:43:43Z",
+          "subject": "Fix CI warnings"
+        },
+        {
+          "sha": "7cd2b0c3390a03870fb79cdf66c3339d1bd772fa",
+          "url": "https://github.com/dashbitco/nimble_pool/commit/7cd2b0c3390a03870fb79cdf66c3339d1bd772fa",
+          "committed_at": "2026-08-25T08:41:52Z",
+          "subject": "Simplicy CI"
+        },
+        {
+          "sha": "6174f4db48a2a7c656f0c72244e5353c815458e4",
+          "url": "https://github.com/dashbitco/nimble_pool/commit/6174f4db48a2a7c656f0c72244e5353c815458e4",
+          "committed_at": "2026-08-25T08:40:11Z",
+          "subject": "Update ExDoc"
+        },
+        {
+          "sha": "4182b1870728a104efc1a3b93a13f136df25f3e8",
+          "url": "https://github.com/dashbitco/nimble_pool/commit/4182b1870728a104efc1a3b93a13f136df25f3e8",
+          "committed_at": "2026-07-28T10:35:37Z",
+          "subject": "Fix \"argmument\" -> \"argument\" typo (#52)"
+        }
+      ],
+      "readme": {
+        "url": "https://github.com/dashbitco/nimble_pool/blob/main/README.md",
+        "retrieved_at": "2026-11-01T07:45:37.015295+00:00",
+        "sha256": "49108539cc6bafe05b114dee30b1cfedf5970845bc5f2e03ea4a71fd810b981a"
+      },
+      "license": {
+        "api_retrieved": false,
+        "url": null,
+        "declared": "Apache-2.0",
+        "basis": "README/license/npm metadata; GitHub automatic detector retained separately"
+      },
+      "explicit_deprecation_found": false,
+      "deprecation_check_scope": "Fetched official README plus installed Hex release retirement/security metadata, or installed npm version deprecation metadata. Not an exhaustive claim about every issue or branch.",
+      "support": {
+        "channel": "https://github.com/dashbitco/nimble_pool/issues",
+        "recent_responsiveness_promised": false,
+        "reviewed_issue_sample": [
+          {
+            "number": 54,
+            "url": "https://github.com/dashbitco/nimble_pool/pull/54",
+            "state": "closed",
+            "updated_at": "2026-09-07T16:30:35Z",
+            "title": "Wake queued callers after cancelling a pool holder",
+            "author_association": "CONTRIBUTOR",
+            "comments": 1
+          },
+          {
+            "number": 53,
+            "url": "https://github.com/dashbitco/nimble_pool/pull/53",
+            "state": "closed",
+            "updated_at": "2026-08-25T08:43:57Z",
+            "title": "Generate Markdown documentation with ExDoc 0.40.3",
+            "author_association": "NONE",
+            "comments": 1
+          },
+          {
+            "number": 52,
+            "url": "https://github.com/dashbitco/nimble_pool/pull/52",
+            "state": "closed",
+            "updated_at": "2026-07-28T10:35:38Z",
+            "title": "Fix \"argmument\" typo",
+            "author_association": "CONTRIBUTOR",
+            "comments": 0
+          },
+          {
+            "number": 51,
+            "url": "https://github.com/dashbitco/nimble_pool/pull/51",
+            "state": "closed",
+            "updated_at": "2026-03-22T07:59:15Z",
+            "title": "Change return type of terminate_pool callback to term()",
+            "author_association": "CONTRIBUTOR",
+            "comments": 1
+          },
+          {
+            "number": 50,
+            "url": "https://github.com/dashbitco/nimble_pool/pull/50",
+            "state": "closed",
+            "updated_at": "2025-09-05T05:59:59Z",
+            "title": "Add NimbleOwnership library reference to README",
+            "author_association": "CONTRIBUTOR",
+            "comments": 1
+          }
+        ]
+      },
+      "workflow_sample": [
+        {
+          "url": "https://github.com/dashbitco/nimble_pool/actions/runs/34143595725",
+          "event": "push",
+          "branch": "main",
+          "created_at": "2026-09-07T16:30:35Z",
+          "conclusion": "cancelled"
+        },
+        {
+          "url": "https://github.com/dashbitco/nimble_pool/actions/runs/34137649032",
+          "event": "pull_request",
+          "branch": "feature/wake-cancelled-pool-waiters",
+          "created_at": "2026-09-07T15:18:44Z",
+          "conclusion": "cancelled"
+        },
+        {
+          "url": "https://github.com/dashbitco/nimble_pool/actions/runs/32828126969",
+          "event": "push",
+          "branch": "main",
+          "created_at": "2026-08-25T08:43:48Z",
+          "conclusion": "cancelled"
+        }
+      ],
+      "security_support_files": {
+        "security_root": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.486872+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.532546+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.702284+00:00",
+          "found": false,
+          "html_url": null
+        }
+      },
+      "source_inventory": {
+        "repository": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool",
+          "retrieved_at": "2026-11-01T07:45:36.818016+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "afdf90d036ee70d9998c343a3c73ba83ed82e0d552476f5cb425be2d8da1218d"
+        },
+        "commits": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/commits?per_page=10",
+          "retrieved_at": "2026-11-01T07:45:36.939856+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "f7c9dc1f426029c8c5939bf08e67db98b79d6bdf59a6cf2063e2052b0ad64e11"
+        },
+        "readme": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/readme",
+          "retrieved_at": "2026-11-01T07:45:37.015295+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "e318ce46c5d8b1c754389886fbebca5d8af0d7b2bb31433df4f9dd8eea07e958"
+        },
+        "license": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/license",
+          "retrieved_at": "2026-11-01T07:45:37.063925+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "0645263155b22875aed0c4c2105afcb7db1a02316cb5e06d88f1700952430f4e"
+        },
+        "root_contents": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/contents",
+          "retrieved_at": "2026-11-01T07:45:37.175002+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "1610eea73062d4185d08a6fd84713bc3797fbd24ae2c913ded08ca71af93d93d"
+        },
+        "issues": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/issues?state=all&sort=updated&direction=desc&per_page=8",
+          "retrieved_at": "2026-11-01T07:45:37.253223+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "46d8de8aaaf9456ce69a8f53aae672e0c34b0130540ad4ed400d05ab7eff0ac8"
+        },
+        "workflow_runs": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/actions/runs?per_page=3",
+          "retrieved_at": "2026-11-01T07:45:37.366774+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "f5aeb7257d418ccf977913e4b79090610e7adb83801dae62e67b128c736b8c58"
+        },
+        "workflows": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/contents/.github/workflows",
+          "retrieved_at": "2026-11-01T07:47:25.279327+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "c7d1a2d9c5db0a6a67f8174054b93d6f86a4f7fb2981aa8194c100c2c915f440"
+        },
+        "security_root": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.486872+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.532546+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/dashbitco/nimble_pool/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.702284+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        }
+      },
+      "installed": {
+        "version": "1.1.0",
+        "requirements": [],
+        "build_tools": [
+          "mix"
+        ],
+        "installed_parents": [
+          {
+            "name": "finch",
+            "version": "0.24.0",
+            "matches": true,
+            "requirement": "~> 1.1",
+            "optional": false
+          }
+        ],
+        "local_source": "mix.lock"
+      },
+      "registry": {
+        "url": "https://hex.pm/api/packages/nimble_pool/releases/1.1.0",
+        "retrieved_at": "2026-11-01T07:47:44.591357+00:00",
+        "version": "1.1.0",
+        "published_at": "2024-03-25T22:09:16.413698Z",
+        "retirement": null,
+        "security_advisories": []
+      }
+    },
+    {
+      "package": "pot",
+      "maintenance_classification": "upstream_maintenance_unconfirmed",
+      "qualifies_as_confirmed_maintained_under_revised_policy": false,
+      "retained_role": "Direct RFC 4226/6238 TOTP verification in Kith.Accounts; current configured window behavior must remain explicit.",
+      "assessment_facts": [
+        "README names Nicholas Lundgaard as maintainer from 2020 onward and describes RFC-based HOTP/TOTP behavior.",
+        "Latest default-branch change is a README update on 2023-12-08; latest release/code change in the reviewed sample is 2021.",
+        "Recent 2026 community PRs do not prove maintainer activity. Fetched PR workflow runs have startup_failure; no maintainer response was established by this bounded review."
+      ],
+      "recommendation": "Named ownership is documented, but present support is unconfirmed. Keep that uncertainty explicit; do not label POT abandoned from age alone or introduce OpenBao solely to reduce dependency age.",
+      "repository": {
+        "full_name": "yuce/pot",
+        "url": "https://github.com/yuce/pot",
+        "api_url": "https://api.github.com/repos/yuce/pot",
+        "retrieved_at": "2026-11-01T07:45:37.373602+00:00",
+        "default_branch": "master",
+        "archived": false,
+        "disabled": false,
+        "pushed_at": "2023-12-08T04:57:57Z",
+        "license_detector": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        }
+      },
+      "default_branch_or_package_path_commits": [
+        {
+          "sha": "b17943137ca543d8471d32730218b84582031197",
+          "url": "https://github.com/yuce/pot/commit/b17943137ca543d8471d32730218b84582031197",
+          "committed_at": "2023-12-08T04:57:57Z",
+          "subject": "Updated README with newer elixir dependency (#37)"
+        },
+        {
+          "sha": "a983a0fe92f2ce82befbd27af9d7eb6e25f4df45",
+          "url": "https://github.com/yuce/pot/commit/a983a0fe92f2ce82befbd27af9d7eb6e25f4df45",
+          "committed_at": "2021-08-07T17:56:50Z",
+          "subject": "Updated README, CONTRIBUTORS; bumped version to 1.0.2 (#35)"
+        },
+        {
+          "sha": "e3168909a41aaec2c1ad0a389f8c1b31ef6a92f3",
+          "url": "https://github.com/yuce/pot/commit/e3168909a41aaec2c1ad0a389f8c1b31ef6a92f3",
+          "committed_at": "2021-08-07T17:18:10Z",
+          "subject": "Merge pull request #33 from KrzysiekJ/fix-specs"
+        },
+        {
+          "sha": "115d52e0f8f68d75ef044a9c24e6cdd09746fcb5",
+          "url": "https://github.com/yuce/pot/commit/115d52e0f8f68d75ef044a9c24e6cdd09746fcb5",
+          "committed_at": "2021-07-21T17:12:03Z",
+          "subject": "Added OTP 24.0 to CI (#34)"
+        },
+        {
+          "sha": "359779a068b478e48ee9e958f3ebb076ac3476d2",
+          "url": "https://github.com/yuce/pot/commit/359779a068b478e48ee9e958f3ebb076ac3476d2",
+          "committed_at": "2021-06-01T10:16:26Z",
+          "subject": "Fix type specs"
+        }
+      ],
+      "readme": {
+        "url": "https://github.com/yuce/pot/blob/master/README.md",
+        "retrieved_at": "2026-11-01T07:45:37.564835+00:00",
+        "sha256": "3b34e4b2883d216dd4e04dcaf030609b4b01ea2198875876c9b068662e509e36"
+      },
+      "license": {
+        "api_retrieved": true,
+        "url": "https://github.com/yuce/pot/blob/master/LICENSE.txt",
+        "declared": "MIT",
+        "basis": "README/license/npm metadata; GitHub automatic detector retained separately"
+      },
+      "explicit_deprecation_found": false,
+      "deprecation_check_scope": "Fetched official README plus installed Hex release retirement/security metadata, or installed npm version deprecation metadata. Not an exhaustive claim about every issue or branch.",
+      "support": {
+        "channel": "https://github.com/yuce/pot/issues",
+        "recent_responsiveness_promised": false,
+        "reviewed_issue_sample": [
+          {
+            "number": 43,
+            "url": "https://github.com/yuce/pot/pull/43",
+            "state": "open",
+            "updated_at": "2026-08-19T10:31:40Z",
+            "title": "Valid totp return interval and fix interval matching",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 42,
+            "url": "https://github.com/yuce/pot/pull/42",
+            "state": "open",
+            "updated_at": "2026-08-19T10:28:37Z",
+            "title": "Add raw secret encoding option for TOTP/HOTP",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 41,
+            "url": "https://github.com/yuce/pot/pull/41",
+            "state": "open",
+            "updated_at": "2026-08-19T10:26:39Z",
+            "title": "Harden Base32 decoding validation",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 40,
+            "url": "https://github.com/yuce/pot/pull/40",
+            "state": "open",
+            "updated_at": "2026-08-19T10:25:30Z",
+            "title": "Add Unix time option for TOTP generation and validation",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 39,
+            "url": "https://github.com/yuce/pot/pull/39",
+            "state": "open",
+            "updated_at": "2026-08-19T10:24:40Z",
+            "title": "Totp conformance tests",
+            "author_association": "NONE",
+            "comments": 0
+          }
+        ]
+      },
+      "workflow_sample": [
+        {
+          "url": "https://github.com/yuce/pot/actions/runs/32243119072",
+          "event": "pull_request",
+          "branch": "valid-totp-return-interval",
+          "created_at": "2026-08-19T10:31:45Z",
+          "conclusion": "startup_failure"
+        },
+        {
+          "url": "https://github.com/yuce/pot/actions/runs/32242865024",
+          "event": "pull_request",
+          "branch": "raw_secret_support",
+          "created_at": "2026-08-19T10:28:41Z",
+          "conclusion": "startup_failure"
+        },
+        {
+          "url": "https://github.com/yuce/pot/actions/runs/32242708644",
+          "event": "pull_request",
+          "branch": "base32-decode-padding",
+          "created_at": "2026-08-19T10:26:44Z",
+          "conclusion": "startup_failure"
+        }
+      ],
+      "security_support_files": {
+        "security_root": {
+          "url": "https://api.github.com/repos/yuce/pot/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.738912+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/yuce/pot/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.533953+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/yuce/pot/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.575842+00:00",
+          "found": false,
+          "html_url": null
+        }
+      },
+      "source_inventory": {
+        "repository": {
+          "url": "https://api.github.com/repos/yuce/pot",
+          "retrieved_at": "2026-11-01T07:45:37.373602+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "dbecfa9751caf5e7c3d603c36c0b3db5442fe20718799a928411eb45b5739a97"
+        },
+        "commits": {
+          "url": "https://api.github.com/repos/yuce/pot/commits?per_page=10",
+          "retrieved_at": "2026-11-01T07:45:37.434721+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "aab7d4ff2857b7d2759056f32178f402ff4fd7f143dd1f4ec0a81f755fb313c7"
+        },
+        "readme": {
+          "url": "https://api.github.com/repos/yuce/pot/readme",
+          "retrieved_at": "2026-11-01T07:45:37.564835+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "5d97830981984a5c7ef7279975a72d10e7ed6385d482b2f5307169fbb8e6ca41"
+        },
+        "license": {
+          "url": "https://api.github.com/repos/yuce/pot/license",
+          "retrieved_at": "2026-11-01T07:45:37.607242+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "5447d4de582d5b3ed9b086b67785c150e0cbdd5b506b8412616009a0ef853263"
+        },
+        "root_contents": {
+          "url": "https://api.github.com/repos/yuce/pot/contents",
+          "retrieved_at": "2026-11-01T07:45:37.611553+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "89cd33f04fa55bdefc3ceb6a3bcd187504bac5abfa357cc6bc7dec37f772a5e0"
+        },
+        "issues": {
+          "url": "https://api.github.com/repos/yuce/pot/issues?state=all&sort=updated&direction=desc&per_page=8",
+          "retrieved_at": "2026-11-01T07:45:37.701799+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "4ca8c4347ff80a403ff3e277186355b290fbe197c5af289e97da2b3c5ed7c553"
+        },
+        "workflow_runs": {
+          "url": "https://api.github.com/repos/yuce/pot/actions/runs?per_page=3",
+          "retrieved_at": "2026-11-01T07:45:37.868595+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "ca3af991b58ab51cfca9bbd9b07697aee7baadb88fd70feadbe7d1ebdd91910a"
+        },
+        "workflows": {
+          "url": "https://api.github.com/repos/yuce/pot/contents/.github/workflows",
+          "retrieved_at": "2026-11-01T07:47:25.575732+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "9805c7e96f07bf86c71fdd337d024afc1bda2fd397740017b4c1350bb24521cb"
+        },
+        "security_root": {
+          "url": "https://api.github.com/repos/yuce/pot/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.738912+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/yuce/pot/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.533953+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/yuce/pot/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.575842+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        }
+      },
+      "installed": {
+        "version": "1.0.2",
+        "requirements": [],
+        "build_tools": [
+          "rebar3"
+        ],
+        "installed_parents": [],
+        "local_source": "mix.lock"
+      },
+      "registry": {
+        "url": "https://hex.pm/api/packages/pot/releases/1.0.2",
+        "retrieved_at": "2026-11-01T07:47:44.594958+00:00",
+        "version": "1.0.2",
+        "published_at": "2021-08-07T17:57:27.545387Z",
+        "retirement": null,
+        "security_advisories": []
+      },
+      "named_maintainer_source": {
+        "url": "https://github.com/yuce/pot/blob/master/README.md",
+        "maintainer": "Nicholas Lundgaard",
+        "stated_period": "2020 onward; present responsiveness not verified"
+      }
+    },
+    {
+      "package": "telemetry_metrics_prometheus_core",
+      "maintenance_classification": "project_maintenance_with_release_lag",
+      "qualifies_as_confirmed_maintained_under_revised_policy": true,
+      "retained_role": "Required PromEx 1.12.0 metrics dependency even when another storage adapter is selected; its Telemetry/Telemetry.Metrics edges remain installed.",
+      "assessment_facts": [
+        "Default branch merged registry.ex maintenance on 2025-08-22; CODEOWNERS names @bryannaegele.",
+        "The April 2026 release-request discussion identifies an unreleased fix needed to clean up Elixir 1.18+ build output. Its fetched follow-up is from a community user, not a maintainer commitment.",
+        "The fetched recent PR workflows require approval (action_required); this is not a passing CI claim."
+      ],
+      "recommendation": "Qualifies as project-maintained on the accepted 2025 code fix and explicit ownership; keep release lag and current-runtime warnings on the watchlist. Retain the latest compatible released closure without a forced exporter rewrite.",
+      "repository": {
+        "full_name": "beam-telemetry/telemetry_metrics_prometheus_core",
+        "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core",
+        "api_url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core",
+        "retrieved_at": "2026-11-01T07:45:37.900102+00:00",
+        "default_branch": "main",
+        "archived": false,
+        "disabled": false,
+        "pushed_at": "2025-08-22T02:51:02Z",
+        "license_detector": {
+          "key": "apache-2.0",
+          "name": "Apache License 2.0",
+          "spdx_id": "Apache-2.0",
+          "url": "https://api.github.com/licenses/apache-2.0",
+          "node_id": "MDc6TGljZW5zZTI="
+        }
+      },
+      "default_branch_or_package_path_commits": [
+        {
+          "sha": "fe82cc5457fb7a769e195ddd3586c492e72072ff",
+          "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/commit/fe82cc5457fb7a769e195ddd3586c492e72072ff",
+          "committed_at": "2025-08-22T02:51:01Z",
+          "subject": "Update registry.ex (#74)"
+        },
+        {
+          "sha": "3acbcc7bf778b3fdf65564d4e4d36aaaa90d3ede",
+          "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/commit/3acbcc7bf778b3fdf65564d4e4d36aaaa90d3ede",
+          "committed_at": "2024-03-24T20:53:57Z",
+          "subject": "v1.2.1 (#65)"
+        },
+        {
+          "sha": "451d18a617b15d028b78880e25f80f41a993cbcf",
+          "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/commit/451d18a617b15d028b78880e25f80f41a993cbcf",
+          "committed_at": "2024-03-24T20:47:06Z",
+          "subject": "update telemetry_metrics version (#63)"
+        },
+        {
+          "sha": "b99600bd322527e53208b2d1da3305c2f6277f57",
+          "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/commit/b99600bd322527e53208b2d1da3305c2f6277f57",
+          "committed_at": "2024-01-17T04:57:31Z",
+          "subject": "Update supported elixir/otp versions (#61)"
+        },
+        {
+          "sha": "9e8f3be707345e2af1a68e93bbcdf34c3a9e8edd",
+          "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/commit/9e8f3be707345e2af1a68e93bbcdf34c3a9e8edd",
+          "committed_at": "2024-01-17T04:06:34Z",
+          "subject": "chore: removed deprecated use of Logger.warn (#57)"
+        }
+      ],
+      "readme": {
+        "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/blob/main/README.md",
+        "retrieved_at": "2026-11-01T07:45:38.053181+00:00",
+        "sha256": "409d2db99627d4ed04937610e8ca89237229f0b236c4126d5863b6e903e58f20"
+      },
+      "license": {
+        "api_retrieved": true,
+        "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/blob/main/LICENSE",
+        "declared": "Apache-2.0",
+        "basis": "README/license/npm metadata; GitHub automatic detector retained separately"
+      },
+      "explicit_deprecation_found": false,
+      "deprecation_check_scope": "Fetched official README plus installed Hex release retirement/security metadata, or installed npm version deprecation metadata. Not an exhaustive claim about every issue or branch.",
+      "support": {
+        "channel": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/issues",
+        "recent_responsiveness_promised": false,
+        "reviewed_issue_sample": [
+          {
+            "number": 79,
+            "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/pull/79",
+            "state": "open",
+            "updated_at": "2026-10-18T20:48:30Z",
+            "title": "Fix parse_measurement/1 spec to include measurement_parse_error",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 78,
+            "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/pull/78",
+            "state": "open",
+            "updated_at": "2026-10-15T13:34:15Z",
+            "title": "Remove unused require Logger",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 77,
+            "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/pull/77",
+            "state": "open",
+            "updated_at": "2026-06-30T12:58:59Z",
+            "title": "Bound distribution sample buffer with automatic aggregation (fixes #41, #52)",
+            "author_association": "NONE",
+            "comments": 2
+          },
+          {
+            "number": 76,
+            "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/pull/76",
+            "state": "open",
+            "updated_at": "2026-05-22T20:46:11Z",
+            "title": "Add missing :start_async to prometheus_option typespec",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 75,
+            "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/issues/75",
+            "state": "open",
+            "updated_at": "2026-04-21T20:09:38Z",
+            "title": "Request: New Hex release for Elixir 1.18+ compatibility",
+            "author_association": "NONE",
+            "comments": 1
+          }
+        ]
+      },
+      "workflow_sample": [
+        {
+          "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/actions/runs/39164996135",
+          "event": "pull_request",
+          "branch": "fix-parse-measurement-spec",
+          "created_at": "2026-10-18T20:48:32Z",
+          "conclusion": "action_required"
+        },
+        {
+          "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/actions/runs/38743828369",
+          "event": "pull_request",
+          "branch": "remove-unused-logger-require",
+          "created_at": "2026-10-15T13:34:19Z",
+          "conclusion": "action_required"
+        }
+      ],
+      "security_support_files": {
+        "security_root": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.695678+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.760215+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.984342+00:00",
+          "found": false,
+          "html_url": null
+        }
+      },
+      "source_inventory": {
+        "repository": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core",
+          "retrieved_at": "2026-11-01T07:45:37.900102+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "237df6f3e38acc1330d85c0a958a33261153abe1d04ceb0650ce546076be564f"
+        },
+        "commits": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/commits?per_page=10",
+          "retrieved_at": "2026-11-01T07:45:37.969637+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "4fe284973e14941fa261bef3bd59a3a4ba82188d243305083e43f665b0294f8c"
+        },
+        "readme": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/readme",
+          "retrieved_at": "2026-11-01T07:45:38.053181+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "6e52953074909ff4a823b2f0310cfb3e446cd4a7a51a74799423bb8d5f6ba05b"
+        },
+        "license": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/license",
+          "retrieved_at": "2026-11-01T07:45:38.077400+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "247fdbbab62e93d6677d22e8b8f1b4d026d550d6de42098516ed1d3719686a76"
+        },
+        "root_contents": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/contents",
+          "retrieved_at": "2026-11-01T07:45:38.097284+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "fe86ba112d592338147782b09514982cf76309e1fb148c99911087449650a9c4"
+        },
+        "issues": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/issues?state=all&sort=updated&direction=desc&per_page=8",
+          "retrieved_at": "2026-11-01T07:45:38.159495+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "1e62a8a1d9e2650e9294980e301aff2a27b1cfa448f4e13ea294912582358184"
+        },
+        "workflow_runs": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/actions/runs?per_page=3",
+          "retrieved_at": "2026-11-01T07:45:38.355593+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "7502dde9ba6595645119a5d148e438a8a06a1b3bc6fa5980ec55b6ed935a291b"
+        },
+        "workflows": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/contents/.github/workflows",
+          "retrieved_at": "2026-11-01T07:47:25.559359+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "dbe9735d93b51870af3a0c1787b01e4a326cae92b2472fb792682070c020434b"
+        },
+        "security_root": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.695678+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:25.760215+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:25.984342+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "owners": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/contents/CODEOWNERS",
+          "retrieved_at": "2026-11-01T07:47:26.005202+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "4ac78fa1e383dda7e60c9c5aefd26d0aa8591e4e8a23881c5bf264204198890f"
+        },
+        "release_request_comments": {
+          "url": "https://api.github.com/repos/beam-telemetry/telemetry_metrics_prometheus_core/issues/75/comments",
+          "retrieved_at": "2026-11-01T07:47:26.054620+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "66dc5c951f991d622f8326160af8b5057a9d6cdbdfbcf5625af46e24e8812659"
+        }
+      },
+      "installed": {
+        "version": "1.2.1",
+        "requirements": [
+          {
+            "child": "telemetry",
+            "requirement": "~> 0.4 or ~> 1.0",
+            "optional": false,
+            "installed": true
+          },
+          {
+            "child": "telemetry_metrics",
+            "requirement": "~> 0.6 or ~> 1.0",
+            "optional": false,
+            "installed": true
+          }
+        ],
+        "build_tools": [
+          "mix"
+        ],
+        "installed_parents": [
+          {
+            "name": "prom_ex",
+            "version": "1.12.0",
+            "matches": true,
+            "requirement": "~> 1.2",
+            "optional": false
+          }
+        ],
+        "local_source": "mix.lock"
+      },
+      "registry": {
+        "url": "https://hex.pm/api/packages/telemetry_metrics_prometheus_core/releases/1.2.1",
+        "retrieved_at": "2026-11-01T07:47:44.595303+00:00",
+        "version": "1.2.1",
+        "published_at": "2024-03-24T20:54:30.056293Z",
+        "retirement": null,
+        "security_advisories": []
+      },
+      "release_request_comments": [
+        {
+          "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/issues/75#issuecomment-4291461742",
+          "created_at": "2026-04-21T20:09:38Z",
+          "author_association": "NONE",
+          "author": "dl-alexandre",
+          "body": "@bryannaegele Friendly ping on this — the community has been waiting since Aug 2024 (see PR #71) and again since Aug 2025 (when #74 merged). The fix is already in main, we just need a release to clean up everyone's build output on Elixir 1.18+. Thanks for maintaining this! 🙏"
+        }
+      ],
+      "codeowners": {
+        "url": "https://github.com/beam-telemetry/telemetry_metrics_prometheus_core/blob/main/CODEOWNERS",
+        "content": "*       @bryannaegele\n"
+      }
+    },
+    {
+      "package": "websock",
+      "maintenance_classification": "active_project_maintenance",
+      "qualifies_as_confirmed_maintained_under_revised_policy": true,
+      "retained_role": "Behaviour interface jointly required by Bandit and WebSockAdapter for Phoenix/LiveView WebSockets.",
+      "assessment_facts": [
+        "Default branch includes 2026 docs/tooling/dependency maintenance without changing the stable published interface release.",
+        "Fetched October 2026 push/scheduled workflows completed successfully.",
+        "Maintenance evidence is from the WebSock project itself, in addition to its active framework parents."
+      ],
+      "recommendation": "Qualifies as an older maintained stable interface. Keep the framework-supported release and validate WebSocket/LiveView behavior rather than replacing this interface independently.",
+      "repository": {
+        "full_name": "phoenixframework/websock",
+        "url": "https://github.com/phoenixframework/websock",
+        "api_url": "https://api.github.com/repos/phoenixframework/websock",
+        "retrieved_at": "2026-11-01T07:45:38.443048+00:00",
+        "default_branch": "main",
+        "archived": false,
+        "disabled": false,
+        "pushed_at": "2026-10-27T19:59:15Z",
+        "license_detector": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        }
+      },
+      "default_branch_or_package_path_commits": [
+        {
+          "sha": "486c80936175590320e7031a3acc32c9ed4a10ab",
+          "url": "https://github.com/phoenixframework/websock/commit/486c80936175590320e7031a3acc32c9ed4a10ab",
+          "committed_at": "2026-10-27T19:59:11Z",
+          "subject": "Mix deps version bump"
+        },
+        {
+          "sha": "1211bcc68739f284870c2afced76c81ecb64d911",
+          "url": "https://github.com/phoenixframework/websock/commit/1211bcc68739f284870c2afced76c81ecb64d911",
+          "committed_at": "2026-06-03T23:56:19Z",
+          "subject": "Repoint hexdocs links"
+        },
+        {
+          "sha": "edaaca2243d718b39ac2614e41bef2f3f9efb2fe",
+          "url": "https://github.com/phoenixframework/websock/commit/edaaca2243d718b39ac2614e41bef2f3f9efb2fe",
+          "committed_at": "2026-02-22T18:28:16Z",
+          "subject": "Update credo"
+        },
+        {
+          "sha": "9efd890c7c0c222b00bf4a47f83d00c255a99bac",
+          "url": "https://github.com/phoenixframework/websock/commit/9efd890c7c0c222b00bf4a47f83d00c255a99bac",
+          "committed_at": "2026-02-22T18:10:18Z",
+          "subject": "Grant actions:write permission to lint job for PLT cache eviction"
+        },
+        {
+          "sha": "d9f51ac0f09df48dd594968474b1751285577492",
+          "url": "https://github.com/phoenixframework/websock/commit/d9f51ac0f09df48dd594968474b1751285577492",
+          "committed_at": "2023-12-30T16:53:53Z",
+          "subject": "Improve file packaging"
+        }
+      ],
+      "readme": {
+        "url": "https://github.com/phoenixframework/websock/blob/main/README.md",
+        "retrieved_at": "2026-11-01T07:45:38.587553+00:00",
+        "sha256": "ef45fe1ffccc6f9612ef1eac52641cacf2e21164284110255c9880cee6962230"
+      },
+      "license": {
+        "api_retrieved": true,
+        "url": "https://github.com/phoenixframework/websock/blob/main/LICENSE",
+        "declared": "MIT",
+        "basis": "README/license/npm metadata; GitHub automatic detector retained separately"
+      },
+      "explicit_deprecation_found": false,
+      "deprecation_check_scope": "Fetched official README plus installed Hex release retirement/security metadata, or installed npm version deprecation metadata. Not an exhaustive claim about every issue or branch.",
+      "support": {
+        "channel": "https://github.com/phoenixframework/websock/issues",
+        "recent_responsiveness_promised": false,
+        "reviewed_issue_sample": [
+          {
+            "number": 14,
+            "url": "https://github.com/phoenixframework/websock/pull/14",
+            "state": "closed",
+            "updated_at": "2026-10-27T19:59:57Z",
+            "title": "Publish Markdown and llms.txt docs with ExDoc 0.40.3",
+            "author_association": "NONE",
+            "comments": 1
+          },
+          {
+            "number": 13,
+            "url": "https://github.com/phoenixframework/websock/issues/13",
+            "state": "closed",
+            "updated_at": "2023-08-21T15:47:57Z",
+            "title": "Issue setting a specific header response when using  WebSockAdapter.upgrade",
+            "author_association": "NONE",
+            "comments": 1
+          },
+          {
+            "number": 11,
+            "url": "https://github.com/phoenixframework/websock/issues/11",
+            "state": "closed",
+            "updated_at": "2023-08-15T19:26:12Z",
+            "title": "Suggestion: allow messages to be sent before closing the socket",
+            "author_association": "NONE",
+            "comments": 7
+          },
+          {
+            "number": 12,
+            "url": "https://github.com/phoenixframework/websock/pull/12",
+            "state": "closed",
+            "updated_at": "2023-08-15T19:15:39Z",
+            "title": "Allow sending messages prior to closing the connection",
+            "author_association": "MEMBER",
+            "comments": 2
+          },
+          {
+            "number": 10,
+            "url": "https://github.com/phoenixframework/websock/pull/10",
+            "state": "closed",
+            "updated_at": "2023-07-07T13:23:47Z",
+            "title": "improve docs maintainability",
+            "author_association": "CONTRIBUTOR",
+            "comments": 3
+          }
+        ]
+      },
+      "workflow_sample": [
+        {
+          "url": "https://github.com/phoenixframework/websock/actions/runs/40573985971",
+          "event": "push",
+          "branch": "main",
+          "created_at": "2026-10-27T19:59:18Z",
+          "conclusion": "success"
+        },
+        {
+          "url": "https://github.com/phoenixframework/websock/actions/runs/40329645894",
+          "event": "dynamic",
+          "branch": "main",
+          "created_at": "2026-10-26T13:19:54Z",
+          "conclusion": "success"
+        },
+        {
+          "url": "https://github.com/phoenixframework/websock/actions/runs/39259489586",
+          "event": "dynamic",
+          "branch": "main",
+          "created_at": "2026-10-19T13:21:43Z",
+          "conclusion": "success"
+        }
+      ],
+      "security_support_files": {
+        "security_root": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:26.239433+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:26.024858+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:26.210361+00:00",
+          "found": false,
+          "html_url": null
+        }
+      },
+      "source_inventory": {
+        "repository": {
+          "url": "https://api.github.com/repos/phoenixframework/websock",
+          "retrieved_at": "2026-11-01T07:45:38.443048+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "e8f4553142c5d37cf01aad8c445d7f16134874433ebf655f6040b244289be753"
+        },
+        "commits": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/commits?per_page=10",
+          "retrieved_at": "2026-11-01T07:45:38.495994+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "981a4e6450a2611f2ac6743563c6bf07d390c1c8fd5762e31f623f9e0b0d0874"
+        },
+        "readme": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/readme",
+          "retrieved_at": "2026-11-01T07:45:38.587553+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "9e81e794f0363b80d0e73f1a41a8d613692c33a99f7ae62489a20cfbbafd258e"
+        },
+        "license": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/license",
+          "retrieved_at": "2026-11-01T07:45:38.603801+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "38b8fa4cfdc07adf36d1066f4f4bb42066dd76e7f4dcda1405be27888cec7848"
+        },
+        "root_contents": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/contents",
+          "retrieved_at": "2026-11-01T07:45:38.633048+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "bdb2cea6d27e6ebefa3e6a9a10677e3994322f5204b091425f52c81acd5adb95"
+        },
+        "issues": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/issues?state=all&sort=updated&direction=desc&per_page=8",
+          "retrieved_at": "2026-11-01T07:45:38.655904+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "6c583995882996e183eea52e30e2f6c175c7d2e86207a5289edcbdd65b251a81"
+        },
+        "workflow_runs": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/actions/runs?per_page=3",
+          "retrieved_at": "2026-11-01T07:45:38.800253+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "ef0a3892f3230b4e54f8694182994561eb361b5c9085c8af6b0fba7064a802ba"
+        },
+        "workflows": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/contents/.github/workflows",
+          "retrieved_at": "2026-11-01T07:47:26.028125+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "0f86e6aa7701ffc065db612a14e3e7504592036eb683e53fdc488482790faa17"
+        },
+        "security_root": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:26.239433+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:26.024858+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/phoenixframework/websock/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:26.210361+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        }
+      },
+      "installed": {
+        "version": "0.5.3",
+        "requirements": [],
+        "build_tools": [
+          "mix"
+        ],
+        "installed_parents": [
+          {
+            "name": "websock_adapter",
+            "version": "0.7.0",
+            "matches": true,
+            "requirement": "~> 0.5",
+            "optional": false
+          },
+          {
+            "name": "bandit",
+            "version": "1.14.1",
+            "matches": true,
+            "requirement": "~> 0.5",
+            "optional": false
+          }
+        ],
+        "local_source": "mix.lock"
+      },
+      "registry": {
+        "url": "https://hex.pm/api/packages/websock/releases/0.5.3",
+        "retrieved_at": "2026-11-01T07:47:44.866342+00:00",
+        "version": "0.5.3",
+        "published_at": "2023-08-15T19:18:22.779315Z",
+        "retirement": null,
+        "security_advisories": []
+      }
+    },
+    {
+      "package": "@types/trusted-types",
+      "maintenance_classification": "project_supported_declaration_package",
+      "qualifies_as_confirmed_maintained_under_revised_policy": true,
+      "retained_role": "DOMPurify 3.4.17 optional type dependency in both root and assets npm locks; no executable JavaScript in its published archive.",
+      "assessment_facts": [
+        "Package-path latest commit is 2024-02-07; broad DefinitelyTyped repository activity is not substituted for package-specific source activity.",
+        "Current types/trusted-types/package.json lists five definition owners. DefinitelyTyped documents owner/team review and publishing support, and its SECURITY.md explicitly limits security updates to the latest release on a volunteer best-effort basis.",
+        "Installed 2.0.7 is the npm latest tag and is not marked deprecated in the fetched version metadata.",
+        "The exact published tarball integrity matches the lock metadata and contains only declarations, README, package metadata and license; no .js/.cjs/.mjs files."
+      ],
+      "recommendation": "Qualifies as a project-supported stable declaration package, with package-specific low churn explicitly recorded. Retain the latest compatible definitions; do not misclassify these types as an abandoned runtime sanitizer.",
+      "repository": {
+        "full_name": "DefinitelyTyped/DefinitelyTyped",
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped",
+        "api_url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped",
+        "retrieved_at": "2026-11-01T07:45:39.026415+00:00",
+        "default_branch": "master",
+        "archived": false,
+        "disabled": false,
+        "pushed_at": "2026-10-31T18:56:19Z",
+        "license_detector": {
+          "key": "other",
+          "name": "Other",
+          "spdx_id": "NOASSERTION",
+          "url": null,
+          "node_id": "MDc6TGljZW5zZTA="
+        }
+      },
+      "default_branch_or_package_path_commits": [
+        {
+          "sha": "05766ab10a4987e93fdee7627f9fe9e7bc6d1a65",
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/commit/05766ab10a4987e93fdee7627f9fe9e7bc6d1a65",
+          "committed_at": "2024-02-07T21:32:44Z",
+          "subject": "Switch all packages which compile with module=node16 to node16 (#68529)"
+        },
+        {
+          "sha": "04ad8e43125f6b8f57ec7e9d9a2527d7b21a9831",
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/commit/04ad8e43125f6b8f57ec7e9d9a2527d7b21a9831",
+          "committed_at": "2023-12-14T19:58:53Z",
+          "subject": "Remove tslint.json (#67890)"
+        },
+        {
+          "sha": "c76c419153bf70858ab82843483657ae1bf11f17",
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/commit/c76c419153bf70858ab82843483657ae1bf11f17",
+          "committed_at": "2023-11-20T23:16:46Z",
+          "subject": "Port builtin tslint rules (#67455)"
+        },
+        {
+          "sha": "fbc33dd3590c31aa653079082d22500c9a191e65",
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/commit/fbc33dd3590c31aa653079082d22500c9a191e65",
+          "committed_at": "2023-11-06T21:54:35Z",
+          "subject": "Transition packages over to a fixed declaration file glob, npmignore, removing OTHER_FILES (#67332)"
+        },
+        {
+          "sha": "451dc8fc19383bc12af59522020e571957f1684e",
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/commit/451dc8fc19383bc12af59522020e571957f1684e",
+          "committed_at": "2023-10-17T20:54:18Z",
+          "subject": "Convert the repo into a pnpm monorepo (#67085)"
+        }
+      ],
+      "readme": {
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/README.md",
+        "retrieved_at": "2026-11-01T07:45:39.116907+00:00",
+        "sha256": "0e8b5e031cb492f8e9b8c0e45df35ba415ffe50eb5efc07125f43671eb689706"
+      },
+      "license": {
+        "api_retrieved": true,
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/LICENSE",
+        "declared": "MIT",
+        "basis": "README/license/npm metadata; GitHub automatic detector retained separately"
+      },
+      "explicit_deprecation_found": false,
+      "deprecation_check_scope": "Fetched official README plus installed Hex release retirement/security metadata, or installed npm version deprecation metadata. Not an exhaustive claim about every issue or branch.",
+      "support": {
+        "channel": "https://github.com/DefinitelyTyped/DefinitelyTyped/issues",
+        "recent_responsiveness_promised": false,
+        "reviewed_issue_sample": [
+          {
+            "number": 75778,
+            "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/pull/75778",
+            "state": "open",
+            "updated_at": "2026-11-01T06:43:05Z",
+            "title": "Add `readonly` property to `Expression`, `Table` and `Note`",
+            "author_association": "NONE",
+            "comments": 3
+          },
+          {
+            "number": 75794,
+            "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/pull/75794",
+            "state": "open",
+            "updated_at": "2026-11-01T06:43:03Z",
+            "title": "[aws-lambda]: new async handler",
+            "author_association": "NONE",
+            "comments": 6
+          },
+          {
+            "number": 75899,
+            "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/issues/75899",
+            "state": "open",
+            "updated_at": "2026-11-01T06:40:45Z",
+            "title": "MOHAN",
+            "author_association": "NONE",
+            "comments": 0
+          },
+          {
+            "number": 75898,
+            "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/pull/75898",
+            "state": "open",
+            "updated_at": "2026-11-01T04:29:38Z",
+            "title": "feat(scrivito): remove types",
+            "author_association": "CONTRIBUTOR",
+            "comments": 2
+          },
+          {
+            "number": 75897,
+            "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/pull/75897",
+            "state": "open",
+            "updated_at": "2026-11-01T04:22:41Z",
+            "title": "feat(ellipsize): remove types",
+            "author_association": "CONTRIBUTOR",
+            "comments": 2
+          }
+        ]
+      },
+      "workflow_sample": [
+        {
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/actions/runs/41272556962",
+          "event": "pull_request",
+          "branch": "scrivito-removal",
+          "created_at": "2026-11-01T04:18:08Z",
+          "conclusion": "success"
+        },
+        {
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/actions/runs/41272135397",
+          "event": "pull_request",
+          "branch": "ellipsize-removal",
+          "created_at": "2026-11-01T04:11:55Z",
+          "conclusion": "success"
+        },
+        {
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/actions/runs/41259660487",
+          "event": "schedule",
+          "branch": "master",
+          "created_at": "2026-11-01T01:06:35Z",
+          "conclusion": "success"
+        }
+      ],
+      "security_support_files": {
+        "security_root": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:26.172611+00:00",
+          "found": true,
+          "html_url": "https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/SECURITY.md"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:26.219854+00:00",
+          "found": false,
+          "html_url": null
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:26.603178+00:00",
+          "found": false,
+          "html_url": null
+        }
+      },
+      "source_inventory": {
+        "repository": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped",
+          "retrieved_at": "2026-11-01T07:45:39.026415+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "d53c722af2e23f0b57d92208c46809310eac64af7c232cace3b763e582f72ee6"
+        },
+        "commits": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/commits?path=types%2Ftrusted-types&per_page=10",
+          "retrieved_at": "2026-11-01T07:45:39.091848+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "c03d7ffc4b8f8de7747e991489073ffb9a68df234e23bf7fae8d4dace91277e7"
+        },
+        "readme": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/readme",
+          "retrieved_at": "2026-11-01T07:45:39.116907+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "dec769ca1678624aabd1a9f76171788677728686ebbb181e3676b31e49d14e81"
+        },
+        "license": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/license",
+          "retrieved_at": "2026-11-01T07:45:39.157354+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "185ed91da745a8738aa1cff35e10febcdd9fc44e80973dcef53b7fe07853282e"
+        },
+        "root_contents": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents",
+          "retrieved_at": "2026-11-01T07:45:39.161821+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "a338d74fc3916a9a78f42fa948e7d04d979b1c10c9cb05f7a442279261a9a15a"
+        },
+        "issues": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/issues?state=all&sort=updated&direction=desc&per_page=8",
+          "retrieved_at": "2026-11-01T07:45:39.173079+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "706d5e8c57037c3521a03310b52f36252e88769aafd39029c5591e5da006bdd5"
+        },
+        "workflow_runs": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/actions/runs?per_page=3",
+          "retrieved_at": "2026-11-01T07:45:39.306776+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "0bbb4a22222e11312af374ab751eacaba9c055532a1b483160b21acf91d24dd3"
+        },
+        "package.json": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents/types/trusted-types/package.json",
+          "retrieved_at": "2026-11-01T07:45:39.429326+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "98c422f3ab28fa3da1d97e91a5ed1902eff0b350d8417bd37e04401fd08802ee"
+        },
+        "index.d.ts": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents/types/trusted-types/index.d.ts",
+          "retrieved_at": "2026-11-01T07:45:39.620060+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "8f18a545aff27803bd5ca77839ebeddd7e2ea73644c31af3be9c3ff5620fd9b4"
+        },
+        "tsconfig.json": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents/types/trusted-types/tsconfig.json",
+          "retrieved_at": "2026-11-01T07:45:39.696026+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "d9fbc8ae3c191a698e97c397d472a92b1913daae4ecb62560465f75dc23fb090"
+        },
+        "workflows": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents/.github/workflows",
+          "retrieved_at": "2026-11-01T07:47:26.180634+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "6ff1349fe3c64423a991cd8e8a888b74478555f7525008bad0cef796e22a8567"
+        },
+        "security_root": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:26.172611+00:00",
+          "request_succeeded": true,
+          "payload_sha256": "f7ca6a823860e92942d9c17b529ef6f84379d65d75efb593614cb46788b3b193"
+        },
+        "security_github": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents/.github/SECURITY.md",
+          "retrieved_at": "2026-11-01T07:47:26.219854+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        },
+        "support_github": {
+          "url": "https://api.github.com/repos/DefinitelyTyped/DefinitelyTyped/contents/.github/SUPPORT.md",
+          "retrieved_at": "2026-11-01T07:47:26.603178+00:00",
+          "request_succeeded": false,
+          "payload_sha256": "5edc6e18953d5db5551ee308d07a35ec84212a67718d328f86d29b88d1f7cef6"
+        }
+      },
+      "installed": {
+        "version": "2.0.7",
+        "lockfiles": [
+          "package-lock.json",
+          "assets/package-lock.json"
+        ],
+        "parents": [
+          {
+            "name": "dompurify",
+            "version": "3.4.17",
+            "kind": "optionalDependencies",
+            "requirement": "^2.0.7"
+          }
+        ],
+        "dependency_requirements": {},
+        "types": "index.d.ts"
+      },
+      "registry": {
+        "url": "https://registry.npmjs.org/@types%2ftrusted-types/2.0.7",
+        "retrieved_at": "2026-11-01T07:47:45.160443+00:00",
+        "latest": "2.0.7",
+        "published_at": "2023-11-21T01:13:25.434Z",
+        "deprecated": null,
+        "license": "MIT"
+      },
+      "definition_owners": [
+        "vrana",
+        "engelsdamien",
+        "siegrift",
+        "bjarkler",
+        "eps1lon"
+      ],
+      "published_archive": {
+        "url": "https://registry.npmjs.org/@types/trusted-types/-/trusted-types-2.0.7.tgz",
+        "retrieved_at": "2026-11-01T07:48:38.971960+00:00",
+        "sha256": "28521d6d9bcb45f9527cf45b9346e9e2142e81b17c6518229973df04044941d3",
+        "sha512_integrity_matches": true,
+        "files": [
+          "trusted-types",
+          "trusted-types/LICENSE",
+          "trusted-types/README.md",
+          "trusted-types/index.d.ts",
+          "trusted-types/lib",
+          "trusted-types/package.json",
+          "trusted-types/lib/index.d.ts"
+        ],
+        "javascript_files": []
+      },
+      "security_policy": {
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/SECURITY.md",
+        "supported_release_scope": "latest release only",
+        "service_commitment": "volunteer reasonable/best effort, not a guaranteed response SLA"
+      }
+    }
+  ]
+}

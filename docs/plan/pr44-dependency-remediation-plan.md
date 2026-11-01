@@ -1,6 +1,6 @@
 # PR44 dependency remediation implementation plan
 
-> Implementation update (1 November 2026): the zero-CVE application is verified; full latest/maintenance compliance remains blocked. The original research below is historical. See [implementation results](#implementation-and-verification-1-november-2026) and [measured evidence](pr44-implementation-evidence/validation.json).
+> Current policy: the user permits latest compatible releases and maintained older packages. See the [policy revision](#policy-revision-latest-compatible-and-maintained-older-packages). Original strict-policy blockers and research below are historical; the verified application and audit requirements remain unchanged.
 
 Research date: 1 November 2026. Source head: `3ac2faba0012b461b573f03c739d4abeac097511`. This plan addresses the [security review](pr44-security-upgrade-review.md). The accompanying [research evidence](pr44-remediation-research.json) records both Kith usage and resolved dependency edges.
 
@@ -233,3 +233,27 @@ Concrete unreleased work is retained in [pr44-upstream](pr44-upstream/): Calenda
 MMDB2/POT/Fuse replacement selection or architecture gates remain unmet. Locus and Totally do not establish the required popularity/adopter case; NimbleTOTP and ConCache fail release age; Fuse wrappers retain Fuse. OpenBao and Envoy remain unapproved service migrations with the original adoption gates. POT's current/future-window behavior was not changed. No authentication or infrastructure rewrite was introduced to reduce package count.
 
 A clean audit, successful resolver, candidate patch or green local build does **not** close those blockers. Full plan completion requires genuine compatible maintained releases or qualifying implemented replacements and their complete application/release verification.
+
+## Policy revision: latest compatible and maintained older packages
+
+The user subsequently selected **“Allow latest compatible releases and older maintained packages without forcing replacements.”** This replaces the original absolute-latest and two-year replacement requirements. Original research, release dates, probe failures and strict-policy assessments above remain historical evidence; they are not rewritten as successful absolute-latest upgrades.
+
+The current requirements are:
+
+- No CVE or retirement exception, inherited advisory suppression, incompatible constraint override, or weakened audit failure handling.
+- Use the latest compatible stable dependency graph, preserving current parent releases when a newer child requires an incompatible manifest. Calendars **2.4.4 + DigitalToken 1.0.0** and PromEx **1.12.0 + Peep 4.4.0** therefore satisfy this requirement. The corresponding all-latest conflicts remain recorded facts, but no longer block acceptance. No fork or parent downgrade is needed.
+- A release older than two years triggers a maintenance review, not mandatory replacement. Review actual support/repository status, package scope and source, current parent integration and tested compatibility. Release age alone establishes neither abandonment nor maintenance. Explicit archival/deprecation, unknown support and limited activity must be reported accurately; a parent retaining a package alone does not prove its upstream is maintained.
+- Retain the existing verified application where those reviews support retention. New infrastructure, unpublished forks, authentication changes and replacements selected only to satisfy age/popularity are unnecessary under this policy. Existing replacement/adoption criteria still govern any replacement that is actually proposed.
+- Keep compatible-version and maintenance decisions separate from advisory handling. The strict gate remains unchanged, with both Hex ignore variables explicitly empty for the audit subprocess and both npm audits blocking.
+
+Current package-by-package maintenance evidence is recorded in [maintenance-review.json](pr44-implementation-evidence/maintenance-review.json); the policy decision and fresh audit/graph references are recorded in [policy-review.json](pr44-implementation-evidence/policy-review.json). The earlier `validation.json` and test logs continue to describe the same application/lock snapshot. Documentation-only policy changes do not constitute a new application test run or upstream release.
+
+Unreleased Calendars/PromEx/Wax/Credo candidate patches remain available for optional future contributions. They are not adopted or required merely to satisfy the revised policy; no upstream communications, push, merge or deployment are authorized by this policy change.
+
+### Results under the revised policy
+
+Both latest-compatible selections are accepted. Maintenance evidence supports retaining **mmdb2_decoder, NimbleOptions, NimblePool, telemetry_metrics_prometheus_core, WebSock and @types/trusted-types**. Prometheus Core remains on a release/support responsiveness watchlist; its merged code fix and project ownership provide maintenance evidence despite the old release date.
+
+**ASN1 Compiler, Bunt, Fuse and POT remain maintenance followups.** Their upstream maintenance support is unconfirmed by the reviewed evidence. They are not asserted abandoned, vulnerable or incompatible, and release age alone does not force their replacement. Conversely, absence of archival/deprecation does not justify calling them confirmed maintained. Full maintenance-policy closure is not claimed while these four statuses remain unresolved.
+
+Fresh strict Hex/root-npm/assets-npm audits pass and the graph remains **98 Hex packages / 197 installed edges**, with zero installed-constraint or runtime-floor failures. Application code, dependency manifests/locks, audit gate, build configuration and tests exactly match the earlier verified source fingerprints. The full application/release suites were not needlessly rerun for this documentation-only policy revision. No dependency override, fork or infrastructure/authentication migration was introduced.

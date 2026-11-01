@@ -4851,5 +4851,48 @@
     ],
     "evidence": "pr44-implementation-evidence/validation.json",
     "preserved_research_document_sha256_before_update": "883f1987a07fff3f19698f9bb28a4f631fbcdd26249aa7b496c3172a4123c5bc"
+  },
+  "policy_revision": {
+    "reviewed_at": "2026-11-01T07:51:45.604776+00:00",
+    "policy": "latest compatible stable releases and older maintained packages; no forced replacement based on release age alone",
+    "authorization": "User explicitly selected: Allow latest compatible releases and older maintained packages without forcing replacements",
+    "status": "Latest-compatible requirement satisfied; six older-package retentions supported; four upstream maintenance statuses remain unconfirmed",
+    "security_policy_unchanged": true,
+    "dependency_constraints_unchanged": true,
+    "application_source_and_lock_unchanged": true,
+    "compatible_selections": [
+      {
+        "parent": "ex_cldr_calendars",
+        "parent_version": "2.4.4",
+        "child": "digital_token",
+        "child_version": "1.0.0",
+        "requirement": "~>1.0",
+        "status": "accepted latest-compatible; no parent downgrade/fork/override"
+      },
+      {
+        "parent": "prom_ex",
+        "parent_version": "1.12.0",
+        "child": "peep",
+        "child_version": "4.4.0",
+        "requirement": "~>3.0 or~>4.0",
+        "status": "accepted latest-compatible; no fork/override"
+      }
+    ],
+    "maintenance_supported_retention": [
+      "mmdb2_decoder",
+      "nimble_options",
+      "nimble_pool",
+      "telemetry_metrics_prometheus_core",
+      "websock",
+      "@types/trusted-types"
+    ],
+    "maintenance_followups": [
+      "asn1_compiler",
+      "bunt",
+      "fuse",
+      "pot"
+    ],
+    "followup_meaning": "Upstream maintenance is not established by available evidence. These are not known CVE/compatibility failures or assertions of abandonment; do not label them confirmed maintained.",
+    "evidence": "pr44-implementation-evidence/policy-review.json"
   }
 }
