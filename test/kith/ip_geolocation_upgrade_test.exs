@@ -48,7 +48,7 @@ defmodule Kith.IpGeolocationUpgradeTest do
     assert {:error, :invalid_ip} = IpGeolocation.lookup("invalid-ip")
 
     # Verify the existing one-hour cache contract without sleeping for an hour.
-    assert {:ok, ttl} = Cachex.ttl(:kith_cache, {:geoip, "81.2.69.160"})
+    assert {:ok, ttl} = Kith.Cache.ttl({:geoip, "81.2.69.160"})
     assert ttl > :timer.minutes(59) and ttl <= :timer.hours(1)
   end
 
@@ -104,6 +104,6 @@ defmodule Kith.IpGeolocationUpgradeTest do
   end
 
   defp clear_cache do
-    for address <- @addresses, do: Cachex.del(:kith_cache, {:geoip, address})
+    for address <- @addresses, do: Kith.Cache.delete({:geoip, address})
   end
 end

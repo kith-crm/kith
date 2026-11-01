@@ -34,7 +34,17 @@ defmodule KithWeb.ConnCase do
 
   setup tags do
     Kith.DataCase.setup_sandbox(tags)
-    {:ok, conn: Phoenix.ConnTest.build_conn()}
+    # Rate limits remain enabled in tests. Give each test a distinct actual
+    # transport peer, keeping HTTP and LiveView connect_info identities aligned.
+    number = System.unique_integer([:positive, :monotonic])
+    peer = {198, 18, rem(div(number, 256), 256), rem(number, 256)}
+
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Map.put(:remote_ip, peer)
+      |> Plug.Test.put_peer_data(%{address: peer, port: 12_345, ssl_cert: nil})
+
+    {:ok, conn: conn}
   end
 
   @doc """

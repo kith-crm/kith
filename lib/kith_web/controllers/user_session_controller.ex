@@ -7,15 +7,32 @@ defmodule KithWeb.UserSessionController do
   @totp_token_max_age 300
 
   def create(conn, %{"_action" => "confirmed"} = params) do
-    create(conn, params, "User confirmed successfully.")
+    throttled_create(conn, params, "User confirmed successfully.")
   end
 
   def create(conn, %{"_action" => "registered"} = params) do
-    create(conn, params, "Account created successfully!")
+    throttled_create(conn, params, "Account created successfully!")
   end
 
   def create(conn, params) do
-    create(conn, params, "Welcome back!")
+    throttled_create(conn, params, "Welcome back!")
+  end
+
+  defp throttled_create(conn, params, info) do
+    case Kith.RateLimiter.check_login(conn.remote_ip) do
+      :ok ->
+        create(conn, params, info)
+
+      {:error, :rate_limited, retry_after_ms} ->
+        conn
+        |> put_resp_header(
+          "retry-after",
+          to_string(Kith.RateLimiter.retry_after_seconds(retry_after_ms))
+        )
+        |> put_resp_content_type("text/plain")
+        |> send_resp(:too_many_requests, "Too many login attempts. Please try again later.")
+        |> halt()
+    end
   end
 
   # email + password login

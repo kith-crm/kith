@@ -1,9 +1,9 @@
 defmodule Kith.Geocoding do
   @moduledoc """
-  Geocoding via LocationIQ API with Cachex caching and fuse circuit breaker.
+  Geocoding via LocationIQ API with local caching and fuse circuit breaker.
 
   Only enabled when both `ENABLE_GEOLOCATION=true` and `LOCATION_IQ_API_KEY` are set.
-  Results are cached in Cachex with 24-hour TTL.
+  Results are cached locally with 24-hour TTL.
   """
 
   require Logger
@@ -34,26 +34,16 @@ defmodule Kith.Geocoding do
   end
 
   defp geocode_with_cache(cache_key, normalized) do
-    case Cachex.get(:kith_cache, cache_key) do
-      {:ok, nil} -> geocode_with_circuit(cache_key, normalized)
-      {:ok, cached} -> {:ok, cached}
-    end
+    Kith.Cache.fetch(cache_key, fn -> geocode_with_circuit(normalized) end, ttl: @cache_ttl)
   end
 
-  defp geocode_with_circuit(cache_key, normalized) do
+  defp geocode_with_circuit(normalized) do
     with :ok <- check_circuit() do
       result = do_geocode(normalized)
       handle_circuit_result(result)
-      maybe_cache_result(cache_key, result)
+      result
     end
   end
-
-  defp maybe_cache_result(cache_key, {:ok, coords}) do
-    Cachex.put(:kith_cache, cache_key, coords, ttl: @cache_ttl)
-    {:ok, coords}
-  end
-
-  defp maybe_cache_result(_cache_key, error), do: error
 
   @doc "Installs the fuse circuit breaker. Call from Application.start/2."
   def install_fuse do

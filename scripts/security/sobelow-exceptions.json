@@ -231,11 +231,11 @@
     "review_by": "2026-11-29"
   },
   {
-    "line": 746,
+    "line": 752,
     "type": "SQL.Query: SQL injection",
     "file": "lib/kith/duplicate_detection.ex",
     "variable": "query",
-    "source_sha256": "df9544061a1cc41ecd76167263596380355896ab0ddbdfd567fdf30fabb47052",
+    "source_sha256": "bd666e3d050770b3f1392157f5e6c1c3c80d322b4a752585f4fd98b4c18e1ea5",
     "reason": "The query is a static SQL literal; account_id is bound as $1 via Repo.query(query,[account_id]). No user text interpolation.",
     "evidence": "test/kith/duplicate_detection_test.exs; test/kith/duplicate_merge_scenarios_test.exs",
     "owner": "kith-crm maintainers",
@@ -306,7 +306,7 @@
       },
       {
         "file": "mix.lock",
-        "source_sha256": "c95c20a68d3b6200850bf9962197d64066062494013c1dbc49c3105268cb8e2c"
+        "source_sha256": "68702c297165b2c40e2496aee5f9da66112bd7213b15ced51a8b87824769ccf5"
       }
     ]
   },
@@ -327,7 +327,7 @@
       },
       {
         "file": "mix.lock",
-        "source_sha256": "c95c20a68d3b6200850bf9962197d64066062494013c1dbc49c3105268cb8e2c"
+        "source_sha256": "68702c297165b2c40e2496aee5f9da66112bd7213b15ced51a8b87824769ccf5"
       }
     ]
   }

@@ -1,7 +1,7 @@
 defmodule Kith.LoggerJSONUpgradeTest do
   use ExUnit.Case, async: true
 
-  @metadata [:request_id, :user_id, :account_id, :reason, :import_id, :worker]
+  @metadata [:request_id, :client_ip, :user_id, :account_id, :reason, :import_id, :worker]
   test "runtime Basic.new formatter preserves fields, Decimal and nested credential redaction" do
     {formatter, configuration} =
       LoggerJSON.Formatters.Basic.new(
@@ -15,6 +15,7 @@ defmodule Kith.LoggerJSONUpgradeTest do
       meta: %{
         time: 1_798_761_600_123_456,
         request_id: "request-123",
+        client_ip: "2001:db8::42",
         user_id: 12,
         account_id: 34,
         import_id: 56,

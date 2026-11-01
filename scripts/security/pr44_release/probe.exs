@@ -4,7 +4,7 @@ defmodule PR44ReleaseSmoke do
   require Logger
 
   alias Kith.Accounts.{Account, User}
-  alias Kith.{Imports, Repo, Vault}
+  alias Kith.{Cache, Contacts, Imports, Repo, Storage, Vault}
   alias Kith.Imports.JobCancellation
   alias Kith.Workers.{MonicaApiKeyReleaseWorker, MonicaDocumentImportWorker}
 
@@ -74,6 +74,7 @@ defmodule PR44ReleaseSmoke do
     true = is_pid(Process.whereis(Kith.PubSub))
     true = is_pid(Process.whereis(Kith.TaskSupervisor))
     true = is_pid(Oban.whereis(Oban))
+    cache_smoke(mode)
 
     if mode == "worker" do
       nil = Process.whereis(KithWeb.Endpoint)
@@ -99,6 +100,155 @@ defmodule PR44ReleaseSmoke do
 
     marker("boot", %{mode: mode, sentry: actual_dsn})
   end
+
+  def run("cache_cluster") do
+    :kith@app = node()
+    peer = :kith@worker
+    true = peer in Node.list()
+    ^peer = remote(peer, :erlang, :node, [])
+    true = node() in remote(peer, Node, :list, [])
+
+    key = {:pr44_release_cache, System.unique_integer([:positive, :monotonic])}
+
+    try do
+      :ok = Cache.put(key, :web, ttl: 60_000)
+      {:ok, :web} = Cache.get(key)
+      :miss = remote(peer, Cache, :get, [key])
+      :ok = remote(peer, Cache, :put, [key, :worker, [ttl: 60_000]])
+      {:ok, :worker} = remote(peer, Cache, :get, [key])
+      :ok = Cache.delete(key)
+      :miss = Cache.get(key)
+      :miss = remote(peer, Cache, :get, [key])
+
+      :ok = Cache.put(key, :web, ttl: 60_000)
+      :ok = remote(peer, Cache, :put, [key, :worker, [ttl: 60_000]])
+      :ok = remote(peer, Cache, :delete, [key])
+      :miss = Cache.get(key)
+      :miss = remote(peer, Cache, :get, [key])
+      clustered_database_invalidation(peer)
+    after
+      Cache.delete(key)
+    end
+
+    marker("connected_cache", %{
+      nodes: [node(), peer],
+      local_stores: 2,
+      symmetric_delete: true,
+      worker_media_writes: 2,
+      worker_duplicate_dismissal: true,
+      disconnected_peer_consistency: "not tested; disconnected entries rely on bounded TTL"
+    })
+  end
+
+  defp cache_smoke(mode) do
+    {:ok, %{cache_pid: pid}} = Cache.Store.info(:server)
+    true = is_pid(pid) and Process.alive?(pid)
+    key = {:pr44_release_cache_boot, mode, System.unique_integer([:positive, :monotonic])}
+
+    try do
+      :ok = Cache.put(key, :present, ttl: 60_000)
+      {:ok, :present} = Cache.get(key)
+      {:ok, ttl_before} = Cache.ttl(key)
+      true = ttl_before > 50_000 and ttl_before <= 60_000
+      {:ok, :present} = Cache.get(key)
+      {:ok, ttl_after} = Cache.ttl(key)
+      true = ttl_after <= ttl_before
+      :ok = Cache.delete(key)
+      :miss = Cache.get(key)
+    after
+      Cache.delete(key)
+    end
+  end
+
+  defp clustered_database_invalidation(peer) do
+    account = Repo.insert!(%Account{name: "PR44 connected cache fixture"})
+    usage_key = {:storage_usage, account.id}
+    duplicate_key = {:duplicate_cluster_count, account.id}
+
+    try do
+      {:ok, contact} = Contacts.create_contact(account.id, %{first_name: "Release cache one"})
+      {:ok, second} = Contacts.create_contact(account.id, %{first_name: "Release cache two"})
+      {:ok, 0} = Storage.usage(account.id)
+      {:ok, 0} = remote(peer, Storage, :usage, [account.id])
+      {:ok, 0} = Cache.get(usage_key)
+      {:ok, ttl} = Cache.ttl(usage_key)
+      true = ttl > 290_000 and ttl <= 300_000
+
+      {:ok, photo} =
+        remote(peer, Contacts, :create_photo, [
+          contact,
+          %{
+            file_name: "pr44.jpg",
+            storage_key: "#{account.id}/photos/pr44.jpg",
+            file_size: 11,
+            content_type: "image/jpeg"
+          }
+        ])
+
+      assert_usage_invalidated(peer, usage_key)
+      {:ok, 11} = Storage.usage(account.id)
+      {:ok, 11} = remote(peer, Storage, :usage, [account.id])
+
+      {:ok, document} =
+        remote(peer, Contacts, :create_document, [
+          contact,
+          %{
+            file_name: "pr44.txt",
+            storage_key: "#{account.id}/documents/pr44.txt",
+            file_size: 17,
+            content_type: "text/plain"
+          }
+        ])
+
+      assert_usage_invalidated(peer, usage_key)
+      {:ok, 28} = Storage.usage(account.id)
+      {:ok, 28} = remote(peer, Storage, :usage, [account.id])
+      {:ok, _} = remote(peer, Contacts, :delete_photo, [photo])
+      assert_usage_invalidated(peer, usage_key)
+      {:ok, 17} = Storage.usage(account.id)
+      {:ok, 17} = remote(peer, Storage, :usage, [account.id])
+      {:ok, _} = remote(peer, Contacts, :delete_document, [document])
+      assert_usage_invalidated(peer, usage_key)
+      {:ok, 0} = Storage.usage(account.id)
+
+      candidate =
+        Repo.insert!(%Kith.Contacts.DuplicateCandidate{
+          account_id: account.id,
+          contact_id: contact.id,
+          duplicate_contact_id: second.id,
+          score: 0.99,
+          detected_at: DateTime.utc_now() |> DateTime.truncate(:second)
+        })
+
+      1 = Kith.DuplicateDetection.cluster_count(account.id)
+      1 = remote(peer, Kith.DuplicateDetection, :cluster_count, [account.id])
+      {:ok, _} = remote(peer, Kith.DuplicateDetection, :dismiss_candidate, [candidate])
+      :miss = Cache.get(duplicate_key)
+      :miss = remote(peer, Cache, :get, [duplicate_key])
+      0 = Kith.DuplicateDetection.cluster_count(account.id)
+    after
+      for schema <- [
+            Kith.Contacts.DuplicateCandidate,
+            Kith.Contacts.Photo,
+            Kith.Contacts.Document,
+            Kith.Contacts.Contact
+          ] do
+        Repo.delete_all(from(row in schema, where: row.account_id == ^account.id))
+      end
+
+      Repo.delete!(account)
+      Cache.delete(usage_key)
+      Cache.delete(duplicate_key)
+    end
+  end
+
+  defp assert_usage_invalidated(peer, key) do
+    :miss = Cache.get(key)
+    :miss = remote(peer, Cache, :get, [key])
+  end
+
+  defp remote(peer, module, function, arguments),
+    do: :rpc.call(peer, module, function, arguments, 5_000)
 
   defp credentials do
     account = Repo.insert!(%Account{name: "PR44 synthetic release account"})

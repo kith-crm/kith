@@ -2,7 +2,6 @@ defmodule Kith.Application do
   @moduledoc false
 
   use Application
-  import Cachex.Spec
 
   require Logger
 
@@ -48,8 +47,8 @@ defmodule Kith.Application do
       Kith.Repo,
       {Finch, name: Swoosh.Finch, pools: %{:default => [size: 10]}},
       Kith.RateLimiter,
+      Kith.Cache.Store,
       {Oban, Application.fetch_env!(:kith, Oban)},
-      {Cachex, name: :kith_cache, expiration: expiration(default: :timer.hours(24))},
       {Task.Supervisor, name: Kith.TaskSupervisor},
       # PubSub lives here (not in mode_children) so worker mode also starts
       # it. Required for cross-container progress broadcasts in the

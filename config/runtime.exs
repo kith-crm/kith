@@ -11,6 +11,8 @@ end
 
 config :kith, KithWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+config :kith, :trusted_proxies, Kith.TrustedProxies.parse!(System.get_env("TRUSTED_PROXIES", ""))
+
 # Outbound request budget for the Monica API importer, per minute. Set it a
 # call or two below Monica's own RATE_LIMIT_PER_MINUTE_API. Unset keeps the
 # config.exs default (55), so test.exs is preserved.
@@ -342,14 +344,6 @@ if config_env() == :prod do
       ]
   end
 
-  # Trusted proxies for real IP extraction
-  trusted_proxies =
-    System.get_env("TRUSTED_PROXIES", "127.0.0.1/8")
-    |> String.split(",", trim: true)
-    |> Enum.map(&String.trim/1)
-
-  config :remote_ip, headers: ~w[x-forwarded-for], proxies: trusted_proxies
-
   # Metrics endpoint authentication
   metrics_token =
     System.get_env("METRICS_TOKEN") ||
@@ -373,7 +367,7 @@ if config_env() == :prod do
   config :logger, :default_handler,
     formatter:
       LoggerJSON.Formatters.Basic.new(
-        metadata: [:request_id, :user_id, :account_id, :reason, :import_id, :worker],
+        metadata: [:request_id, :client_ip, :user_id, :account_id, :reason, :import_id, :worker],
         redactors: [Kith.LogRedactor.new()]
       )
 end

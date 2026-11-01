@@ -6,6 +6,7 @@ defmodule Kith.Contacts do
 
   import Ecto.Query, warn: false
   import Kith.Scope
+  alias Kith.Cache.Invalidation
   alias Kith.Repo
 
   alias Kith.Contacts.{
@@ -332,12 +333,14 @@ defmodule Kith.Contacts do
     contact
     |> Contact.soft_delete_changeset()
     |> Repo.update()
+    |> Invalidation.after_commit({:duplicate_cluster_count, contact.account_id})
   end
 
   def restore_contact(%Contact{} = contact) do
     contact
     |> Contact.restore_changeset()
     |> Repo.update()
+    |> Invalidation.after_commit({:duplicate_cluster_count, contact.account_id})
   end
 
   def archive_contact(%Contact{} = contact) do
@@ -369,6 +372,10 @@ defmodule Kith.Contacts do
         {:error, reason} -> Repo.rollback(reason)
       end
     end)
+    |> Invalidation.after_commit([
+      {:storage_usage, contact.account_id},
+      {:duplicate_cluster_count, contact.account_id}
+    ])
   end
 
   @doc """
@@ -396,6 +403,10 @@ defmodule Kith.Contacts do
 
       count
     end)
+    |> Invalidation.after_commit([
+      {:storage_usage, account_id},
+      {:duplicate_cluster_count, account_id}
+    ])
   end
 
   ## Addresses
@@ -700,14 +711,19 @@ defmodule Kith.Contacts do
     Document |> scope_to_account(account_id) |> Repo.get!(id)
   end
 
+  # Media mutations normally commit here. A caller adding an enclosing
+  # transaction must invalidate {:storage_usage, account_id} after its own commit
+  # via Invalidation.after_commit/2; nested deletes are not commit hooks.
   def create_document(%Contact{} = contact, attrs) do
     %Document{contact_id: contact.id, account_id: contact.account_id}
     |> Document.changeset(attrs)
     |> Repo.insert()
+    |> Invalidation.after_commit({:storage_usage, contact.account_id})
   end
 
   def delete_document(%Document{} = document) do
     Repo.delete(document)
+    |> Invalidation.after_commit({:storage_usage, document.account_id})
   end
 
   ## Photos
@@ -725,6 +741,7 @@ defmodule Kith.Contacts do
     %Photo{contact_id: contact.id, account_id: contact.account_id}
     |> Photo.changeset(attrs)
     |> Repo.insert()
+    |> Invalidation.after_commit({:storage_usage, contact.account_id})
   end
 
   def photo_exists_by_hash?(contact_id, content_hash) when is_binary(content_hash) do
@@ -736,14 +753,24 @@ defmodule Kith.Contacts do
   def photo_exists_by_hash?(_contact_id, _content_hash), do: false
 
   def delete_photo(%Photo{} = photo) do
-    contact = Repo.get!(Contact, photo.contact_id)
+    Repo.transaction(fn ->
+      contact = Repo.get!(Contact, photo.contact_id)
 
-    with {:ok, _} <- Repo.delete(photo) do
-      if contact.avatar == photo.storage_key do
-        contact |> Ecto.Changeset.change(avatar: nil) |> Repo.update!()
+      case Repo.delete(photo) do
+        {:ok, _} ->
+          clear_deleted_photo_avatar(contact, photo)
+          photo
+
+        {:error, reason} ->
+          Repo.rollback(reason)
       end
+    end)
+    |> Invalidation.after_commit({:storage_usage, photo.account_id})
+  end
 
-      {:ok, photo}
+  defp clear_deleted_photo_avatar(contact, photo) do
+    if contact.avatar == photo.storage_key do
+      contact |> Ecto.Changeset.change(avatar: nil) |> Repo.update!()
     end
   end
 
@@ -1558,6 +1585,9 @@ defmodule Kith.Contacts do
 
       :ok
     end)
+    # CardDAV photo import calls create_photo inside this transaction. The outer
+    # owner must invalidate after its commit, when the inserted bytes are visible.
+    |> Invalidation.after_commit({:storage_usage, account_id})
   end
 
   defp insert_address!(addr, contact_id, account_id) do
@@ -1800,8 +1830,20 @@ defmodule Kith.Contacts do
   `:no_losers`, `{:unknown_value, field}`, `{:unknown_field, field}`,
   `{:not_clearable, field}`, `{:unknown_drop, key}`, or `{:invalid_fields, changeset}`.
   """
+  # Merge.run owns the production outer transaction. A future caller wrapping
+  # this in another transaction owns post-commit invalidation of both keys too.
+  # DuplicateAutomerge's existing dry-run outer transaction always rolls back.
   def merge_cluster(scope, survivor_id, loser_ids, resolution) do
-    Merge.run(scope, survivor_id, loser_ids, resolution)
+    case Merge.run(scope, survivor_id, loser_ids, resolution) do
+      {:ok, contact} = result ->
+        Invalidation.after_commit(result, [
+          {:storage_usage, contact.account_id},
+          {:duplicate_cluster_count, contact.account_id}
+        ])
+
+      error ->
+        error
+    end
   end
 
   @doc """

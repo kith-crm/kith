@@ -18,22 +18,7 @@ defmodule Kith.IpGeolocation do
   def lookup(ip_string) when is_binary(ip_string) do
     cache_key = {:geoip, ip_string}
 
-    case Cachex.get(:kith_cache, cache_key) do
-      {:ok, nil} ->
-        result = do_lookup(ip_string)
-
-        case result do
-          {:ok, data} ->
-            Cachex.put(:kith_cache, cache_key, data, expire: @cache_ttl)
-            {:ok, data}
-
-          error ->
-            error
-        end
-
-      {:ok, cached} ->
-        {:ok, cached}
-    end
+    Kith.Cache.fetch(cache_key, fn -> do_lookup(ip_string) end, ttl: @cache_ttl)
   end
 
   @doc """

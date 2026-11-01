@@ -81,6 +81,7 @@ defmodule Kith.MixProject do
       {:ecto_sql, "~> 3.14"},
       {:postgrex, ">= 0.0.0"},
       {:phoenix_html, "~> 4.4"},
+      {:plug, "~> 1.20.3"},
       {:phoenix_live_view, "~> 1.2.13"},
       {:phoenix_live_dashboard, "~> 0.9.1"},
       {:telemetry_metrics, "~> 1.0"},
@@ -127,7 +128,8 @@ defmodule Kith.MixProject do
       {:redix, "~> 1.10", optional: true},
 
       # Cache
-      {:cachex, "~> 4.0"},
+      {:nebulex, "~> 3.1"},
+      {:nebulex_local, "~> 3.1"},
 
       # i18n / CLDR / Timezone
       {:tz, "~> 0.28.4"},
@@ -150,9 +152,6 @@ defmodule Kith.MixProject do
       # IP Geolocation
       {:geolix, "~> 2.1"},
       {:geolix_adapter_mmdb2, "~> 0.7"},
-
-      # Security
-      {:remote_ip, "~> 1.2"},
 
       # HTML Sanitization (rich text from Trix editor)
       {:html_sanitize_ex, "~> 1.4"},

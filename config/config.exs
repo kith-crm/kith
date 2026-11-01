@@ -79,6 +79,9 @@ config :kith, Oban,
 # Rate limiting (ETS default, Redis optional via RATE_LIMIT_BACKEND env)
 config :kith, Kith.RateLimiter, backend: :ets
 
+config :kith, Kith.Cache.Store, backend: :ets, gc_interval: :timer.hours(24)
+config :kith, :trusted_proxies, []
+
 # Timezone database
 config :elixir, :time_zone_database, Tz.TimeZoneDatabase
 
@@ -143,6 +146,7 @@ config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
   metadata: [
     :request_id,
+    :client_ip,
     :user_id,
     :account_id,
     :reason,

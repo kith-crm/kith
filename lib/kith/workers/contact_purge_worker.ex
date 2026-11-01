@@ -15,6 +15,7 @@ defmodule Kith.Workers.ContactPurgeWorker do
 
   require Logger
 
+  alias Kith.Cache.Invalidation
   alias Kith.Contacts.Contact
   alias Kith.Repo
 
@@ -77,5 +78,9 @@ defmodule Kith.Workers.ContactPurgeWorker do
       {:ok, deleted} = Kith.Contacts.hard_delete_contact(contact)
       deleted
     end)
+    |> Invalidation.after_commit([
+      {:storage_usage, contact.account_id},
+      {:duplicate_cluster_count, contact.account_id}
+    ])
   end
 end

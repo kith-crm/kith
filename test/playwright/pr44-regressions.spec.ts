@@ -1,6 +1,7 @@
 import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { passwordLogin } from "./helpers/password-login";
 
 // This suite needs the explicit local harness, never a production server.
 test.skip(process.env.PR44_E2E !== "1", "Run with the local PR44 harness documented in fixtures/pr44/README.md");
@@ -28,14 +29,7 @@ async function connected(page: Page) {
 }
 
 async function login(page: Page, account: Account) {
-  await page.goto("/users/log-in");
-  await connected(page);
-  await page.getByRole("textbox", { name: /email/i }).fill(account.email);
-  await page.locator('input[type="password"]').fill("ValidP@ssword123!");
-  await expect(page.getByRole("textbox", { name: /email/i })).toHaveValue(account.email);
-  await expect(page.locator('input[type="password"]')).toHaveValue("ValidP@ssword123!");
-  await page.getByRole("button", { name: /log in/i }).click();
-  await expect(page).toHaveURL(/\/(dashboard|contacts)$/);
+  await passwordLogin(page, account.email, "ValidP@ssword123!");
 }
 
 async function contactAction(page: Page, id: number, action: "delete" | "archive" | "unarchive") {
