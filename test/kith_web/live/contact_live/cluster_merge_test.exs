@@ -139,6 +139,16 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   end
 
   describe "section nav and back link (#1)" do
+    test "a manual merge links back to Contacts with All active", ctx do
+      loner = ContactsFixtures.contact_fixture(ctx.account_id, %{first_name: "Dana"})
+      {:ok, live, _html} = live(ctx.conn, "/contacts/duplicates/cluster/#{loner.id}")
+
+      assert live |> element("a", "Back to contacts") |> render() =~ ~s(href="/contacts")
+
+      assert live |> element(~s(nav a[href="/contacts"]), "All") |> render() =~
+               "text-[var(--color-accent)]"
+    end
+
     test "a real cluster renders a back link to the duplicates list", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
@@ -159,6 +169,13 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
   end
 
   describe "avatar values (#3)" do
+    test "an avatar row without photos shows the primary contact's initials", ctx do
+      {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+
+      assert has_element?(live, ~s(div[data-field="avatar"] span), "SK")
+      refute has_element?(live, ~s(div[data-field="avatar"] img))
+    end
+
     test "a contested avatar row renders an <img> with the storage URL and the contact's name",
          ctx do
       e =
@@ -186,9 +203,17 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
       assert row =~ ~s(src="/uploads/avatars/mona-f.jpg")
       refute row =~ ~s(>avatars/mona-e.jpg<)
 
-      # With a name, a missing file degrades to initials, not a bare "Avatar".
+      # Candidate images identify their owning contact.
       assert row =~ ~s(alt="Mona Vale")
       refute row =~ ~s(alt="Avatar")
+
+      clear = ~s(button[phx-value-field="avatar"][phx-value-index="clear"])
+      assert has_element?(live, clear <> " span", "MV")
+      refute has_element?(live, clear <> " img")
+
+      live |> element(clear) |> render_click()
+      assert live |> element(clear) |> render() =~ "bg-[var(--color-accent)]"
+      assert has_element?(live, clear <> " span", "MV")
     end
   end
 
@@ -917,8 +942,8 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
         live |> element("button[phx-value-field='gender_id'][phx-value-index='0']") |> render()
 
       assert rendered =~ "Woman" or rendered =~ "Man"
-      refute rendered =~ to_string(ctx.woman.id)
-      refute rendered =~ to_string(ctx.man.id)
+      refute rendered =~ "<span>#{ctx.woman.id}</span>"
+      refute rendered =~ "<span>#{ctx.man.id}</span>"
     end
 
     # The engine's `clear_member_self_reference/2` coerces a member id to

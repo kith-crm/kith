@@ -15,7 +15,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   alias Kith.DuplicateDetection
   alias Kith.Policy
   alias Kith.Storage
-  alias KithWeb.ContactLive.SectionNav
+  alias KithWeb.ContactLive.MergeHeader
 
   # The value sections, keyed on the identifier the drop payload and the
   # summary both use. The display label is a rendering detail hanging off that
@@ -763,7 +763,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
   end
 
   # A contested value is held by one or more members; label its avatar with the
-  # first holder's display name for alt text and the initials fallback.
+  # first holder's display name for descriptive alt text.
   defp candidate_name(members, [member_id | _]) do
     Enum.find_value(members, fn member ->
       member.id == member_id && member.display_name
@@ -905,30 +905,10 @@ defmodule KithWeb.ContactLive.ClusterMerge do
       current_path={@current_path}
       pending_duplicates_count={@pending_duplicates_count}
     >
-      <%!--
-        Section header + sub-nav. The wizard is its own LiveView, so it does not
-        inherit the Contacts tab bar from `ContactLive.Index`; render the shared
-        one here and give the user a way back to where they came from. A
-        synthetic merge (manual / `?with=`) was not reached from the duplicates
-        list, so it points back at the contacts index instead.
-      --%>
-      <div class="max-w-4xl mx-auto space-y-4 mb-4">
-        <.link
-          navigate={if @synthetic?, do: ~p"/contacts", else: ~p"/contacts/duplicates"}
-          class="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-        >
-          <.icon name="hero-arrow-left" class="size-4" />
-          {if @synthetic?, do: "Back to contacts", else: "Back to duplicates"}
-        </.link>
-        <h1 class="text-2xl font-semibold text-[var(--color-text-primary)] tracking-tight">
-          Merge duplicates
-        </h1>
-        <SectionNav.section_nav
-          active={if @synthetic?, do: :index, else: :duplicates}
-          pending_duplicates_count={@pending_duplicates_count}
-          link_mode={:navigate}
-        />
-      </div>
+      <MergeHeader.merge_header
+        synthetic?={@synthetic?}
+        pending_duplicates_count={@pending_duplicates_count}
+      />
 
       <div class="max-w-4xl mx-auto space-y-4">
         <div
@@ -1092,8 +1072,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                 <%!--
                   `avatar` holds a storage key, not a label, and `candidate.value`
                   is always a present key (blanks are dropped upstream). Pass the
-                  owning contact's name so `KithUI.avatar` has alt text and can
-                  show initials if the image itself fails to load.
+                  owning contact's name for descriptive alt text.
                 --%>
                 <KithUI.avatar
                   :if={field == :avatar}
@@ -1119,7 +1098,11 @@ defmodule KithWeb.ContactLive.ClusterMerge do
                   )
                 ]}
               >
-                Leave empty
+                <KithUI.avatar
+                  :if={field == :avatar}
+                  name={member_name(assigns, @primary_id)}
+                  size={:md}
+                /> Leave empty
               </button>
               <span class="text-xs text-[var(--color-text-tertiary)]">
                 {attribution_text(assigns, field)}
@@ -1130,6 +1113,11 @@ defmodule KithWeb.ContactLive.ClusterMerge do
               :if={candidates(assigns, field) == []}
               class="flex items-center gap-3 text-sm"
             >
+              <KithUI.avatar
+                :if={field == :avatar}
+                name={member_name(assigns, @primary_id)}
+                size={:md}
+              />
               <span class="italic text-[var(--color-text-disabled)]">
                 Not set on any contact
               </span>
