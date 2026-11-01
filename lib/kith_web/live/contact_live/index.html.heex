@@ -130,7 +130,7 @@
 
       <%!-- Bulk action bar (Linear-style floating) --%>
       <%= if MapSet.size(@selected_ids) > 0 and can?(assigns, :update, :contact) do %>
-        <div class="sticky bottom-4 z-30 mx-auto max-w-fit animate-kith-selection-in duration-200">
+        <div class="sticky bottom-4 z-30 mx-auto max-w-fit motion-safe:animate-kith-selection-in duration-200">
           <div class="flex items-center gap-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-overlay)] shadow-[var(--shadow-dropdown)] px-4 py-2.5">
             <span class="text-sm font-medium text-[var(--color-text-primary)]">
               {MapSet.size(@selected_ids)} selected
