@@ -108,3 +108,53 @@ test("toolbar formatting persists with visible markers, history, and modal lifec
   await expect(editor).toContainText("bold text");
   await expect(editor).not.toContainText("Second separate note");
 });
+
+test("delayed invalid submit preserves newer corrections", async ({page}) => {
+  let holdReply = false;
+  let pendingRef: string | undefined;
+  let releaseReply: (() => void) | undefined;
+  await page.routeWebSocket("**/live/websocket*", socket => {
+    const server = socket.connectToServer();
+    socket.onMessage(message => {
+      const frame = JSON.parse(message.toString());
+      if (holdReply && frame[3] === "event" && frame[4]?.event === "save-entry") {
+        pendingRef = frame[1];
+      }
+      server.send(message);
+    });
+    server.onMessage(message => {
+      const frame = JSON.parse(message.toString());
+      if (pendingRef && frame[1] === pendingRef && frame[3] === "phx_reply") {
+        pendingRef = undefined;
+        holdReply = false;
+        releaseReply = () => socket.send(message);
+      } else {
+        socket.send(message);
+      }
+    });
+  });
+  await passwordLogin(page, fixture.email, "ValidP@ssword123!");
+  await page.goto(`/contacts/${fixture.contact_id}`);
+  await open(page);
+  const editor = page.locator("trix-editor");
+  await editor.pressSequentially("Original saved body");
+  await page.getByRole("button", {name: "Save", exact: true}).click();
+  const body = page.locator(".note-body").filter({hasText: "Original saved body"});
+  await expect(body).toBeVisible();
+  const edit = body.locator("xpath=..").locator('[phx-click="edit-entry"][phx-value-type="note"]');
+  await edit.locator("..").locator("..").locator(":scope > button").click();
+  await edit.click();
+  await expect(editor).toContainText("Original saved body");
+  await editor.press("ControlOrMeta+A");
+  await editor.press("Backspace");
+  await expect(page.locator('input[name="entry[body]"]')).toHaveValue("");
+  holdReply = true;
+  await page.getByRole("button", {name: "Save", exact: true}).click();
+  await expect.poll(() => !!releaseReply).toBe(true);
+  await editor.pressSequentially("Correction typed while waiting");
+  releaseReply!();
+  await expect(page.getByText("body: can't be blank", {exact: true})).toBeVisible();
+  await expect(editor).toContainText("Correction typed while waiting");
+  await page.getByRole("button", {name: "Save", exact: true}).click();
+  await expect(page.locator(".note-body").filter({hasText: "Correction typed while waiting"})).toBeVisible();
+});

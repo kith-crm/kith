@@ -6,7 +6,27 @@ defmodule Kith.Contacts.NoteTest do
     html =
       ~s|<div><strong>bold</strong><em>italic</em><del>strike</del><pre>code</pre><h1>heading</h1><h2>two</h2><h3>three</h3><h4>four</h4><h5>five</h5><h6>six</h6><blockquote>quote</blockquote><ul><li>bullet</li></ul><ol><li>number</li></ol><a href="https://example.com">link</a><br>line</div>|
 
-    assert Note.render_body(html) == Kith.RichText.sanitize(html)
+    rendered = Note.render_body(html)
+
+    for expected <- [
+          "<strong>bold</strong>",
+          "<em>italic</em>",
+          "<del>strike</del>",
+          "<pre>code</pre>",
+          "<h1>heading</h1>",
+          "<h2>two</h2>",
+          "<h3>three</h3>",
+          "<h4>four</h4>",
+          "<h5>five</h5>",
+          "<h6>six</h6>",
+          "<blockquote>quote</blockquote>",
+          "<ul><li>bullet</li></ul>",
+          "<ol><li>number</li></ol>",
+          ~s|<a href="https://example.com">link</a>|,
+          "<br />line"
+        ] do
+      assert rendered =~ expected
+    end
   end
 
   test "legacy text preserves literal characters and blank lines" do

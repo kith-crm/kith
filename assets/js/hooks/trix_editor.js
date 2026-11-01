@@ -1,4 +1,5 @@
 import "trix/trix"
+import { serializeToContentType } from "trix/core/serialization"
 
 // Decode entities only into a text node; escaped imported HTML never becomes markup.
 function loadStoredContent(editor, content) {
@@ -20,8 +21,10 @@ const TrixEditor = {
     this.serverValue = this.el.dataset.value || ""
     this.changeHandler = () => {
       if (this.loading || !this.editor.editor) return
-      this.hiddenInput.value = this.editor.editor.getDocument().toString().trim()
-        ? this.editor.value : ""
+      const document = this.editor.editor.getDocument()
+      // Trix's element.value aliases the input that LiveView may have patched.
+      this.hiddenInput.value = document.toString().trim()
+        ? serializeToContentType(document, "text/html") : ""
       this.hiddenInput.dispatchEvent(new Event("input", { bubbles: true }))
     }
     this.fileHandler = event => event.preventDefault()
@@ -34,6 +37,11 @@ const TrixEditor = {
     this.editor.addEventListener("trix-change", this.changeHandler)
     this.editor.addEventListener("trix-file-accept", this.fileHandler)
     this.editor.addEventListener("trix-initialize", this.initialize)
+    this.form = this.el.closest("form")
+    this.submitHandler = () => {
+      this.submission = { value: this.hiddenInput.value, document: this.editor.editor.getDocument() }
+    }
+    this.form?.addEventListener("submit", this.submitHandler, true)
     if (this.editor.editor) this.initialize()
   },
 
@@ -42,17 +50,22 @@ const TrixEditor = {
     const value = this.el.dataset.value || ""
     // Compare server versions, not the document: unrelated patches must not reset typing.
     if (value !== this.serverValue) {
+      const newerCorrection = this.submission && value === this.submission.value &&
+        !this.editor.editor.getDocument().isEqualTo(this.submission.document)
       this.serverValue = value
-      if (this.editor.editor) this.initialize()
+      if (newerCorrection) this.changeHandler()
+      else if (this.editor.editor) this.initialize()
     } else {
       this.changeHandler()
     }
+    if (this.submission?.value === value) this.submission = null
   },
 
   destroyed() {
     this.editor.removeEventListener("trix-change", this.changeHandler)
     this.editor.removeEventListener("trix-file-accept", this.fileHandler)
     this.editor.removeEventListener("trix-initialize", this.initialize)
+    this.form?.removeEventListener("submit", this.submitHandler, true)
   }
 }
 
