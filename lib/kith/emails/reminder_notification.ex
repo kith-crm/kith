@@ -1,11 +1,12 @@
 defmodule Kith.Emails.ReminderNotification do
   @moduledoc """
   Contact-focused reminder emails. Requires the instance's account and
-  reminder/contact associations to be preloaded; rendering performs no queries.
+  reminder/contact associations to be preloaded. Registered avatars are loaded
+  best-effort; unavailable images retain initials.
   """
 
   alias Kith.Emails
-  alias Kith.Emails.Template
+  alias Kith.Emails.{ContactAvatar, Template}
   alias Kith.TimeHelper
 
   @doc "Builds a reminder email using its occurrence date and the account's local day."
@@ -21,10 +22,12 @@ defmodule Kith.Emails.ReminderNotification do
     url = Emails.absolute_url("/contacts/#{reminder.contact.id}")
     subject = subject(reminder.type, instance.kind, instance.days_before, name, reminder.title)
     note = nonblank(reminder.description)
+    avatar = ContactAvatar.load(user, instance)
 
     content =
       content(%{
         name: name,
+        avatar: avatar,
         event: event,
         date: date,
         weekday: weekday,
@@ -46,10 +49,13 @@ defmodule Kith.Emails.ReminderNotification do
     #{url}
     """
 
-    Emails.compose(user, subject, content, text,
-      preheader: "#{name} · #{event} · #{date} · #{relative}.",
-      footer: "You set this reminder in Kith."
-    )
+    email =
+      Emails.compose(user, subject, content, text,
+        preheader: "#{name} · #{event} · #{date} · #{relative}.",
+        footer: "You set this reminder in Kith."
+      )
+
+    if avatar, do: Swoosh.Email.attachment(email, avatar), else: email
   end
 
   defp content(assigns) do
@@ -65,7 +71,7 @@ defmodule Kith.Emails.ReminderNotification do
           <td width="46" height="46" align="center" style="background:#{colors.accent_subtle};
             border:1px solid #{colors.subtle_border};border-radius:23px;
             color:#{colors.accent};font-size:14px;font-weight:700;">
-            #{Template.escape(initials(assigns.name))}
+            #{avatar_html(assigns.avatar, assigns.name)}
           </td>
         </tr></table>
       </td>
@@ -100,6 +106,12 @@ defmodule Kith.Emails.ReminderNotification do
     #{html_note(assigns.note, colors)}
     #{Template.button("View #{assigns.name}’s profile", assigns.url)}
     """
+  end
+
+  defp avatar_html(nil, name), do: Template.escape(initials(name))
+
+  defp avatar_html(avatar, name) do
+    ~s(<img src="cid:#{avatar.cid}" alt="#{Template.escape(initials(name))}" width="46" height="46" style="display:block;border:0;border-radius:23px;">)
   end
 
   defp html_note(nil, _colors), do: ""

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Fix CardDAV copying/sync, missing Monica contact fields, note editing/rendering, and timeline photo viewing in one PR against `release/0.5.0`.
+**Goal:** Fix CardDAV copying/sync, missing Monica contact fields, note editing/rendering, timeline photo viewing, and registered processed contact avatars in email in one PR against `release/0.5.0`.
 
 **Architecture:** Repair existing import and DAV paths, then share a sanitized note renderer and a LiveView-safe Trix editor across contact note surfaces. Render photos through the existing storage abstraction and the app's modal primitives. Keep these as independent testable tasks within one release PR; do not refactor unrelated contact features.
 
@@ -107,6 +107,18 @@
 - [ ] Add PUT cases: recognized same-account v4 UIDs map to existing contacts; malformed/foreign/self UIDs do not create links; v3 name-only values roundtrip without deleting UID-backed links; duplicate display names do not guess a target. A PUT omitting relationship properties preserves links, and an explicit supported empty relationship value clears them. Pin these compatibility semantics in parser and endpoint tests.
 - [ ] Run the targeted DAV/vCard tests; verify new failures, then implement safe relationship merging/replacement and account-bound UID resolution. Reuse current bidirectional-label logic, adapting it for serialization rather than duplicating raw forward rows. Do not introduce name-based relationship creation or a new relationship model.
 - [ ] Rerun targeted tests and `mix test`; commit `fix: repair existing CardDAV relationship sync`.
+
+### Task 7: Include verified processed avatars in contact email
+
+**Authority:** Latest user correction confirms the condition is met for registered processed renditions only; legacy/unregistered values retain initials. No introduced attachment budgets or resizing.
+
+- [ ] Inspect existing avatar creation/upload/import paths, processed variants and stored legacy values. Establish whether processing already guarantees reliably small/downscaled images; incorporate parent's read-only findings.
+- [ ] If avatars are unresized originals or heterogeneous with no reliable small variant, leave emails unchanged and report the finding. Do not add new downsizing, attachment size caps, or an avatar email feature contrary to this condition.
+- [ ] Only if existing processing establishes the condition, include existing safe avatars through current inline CID patterns; keep initials for missing/unreadable/unsupported images, fixed small display dimensions, account scope, unchanged text bodies and robust delivery. No new image-processing dependency or processing path.
+- [ ] Test condition/scoping/fallback and CID resolution if implementing. Record pipeline evidence and measured existing footprint; run targeted and full mix test before any implementation commit. Obtain independent Task 7 review either for the evidence-backed deferral or conditional implementation.
+
+
+Task 7 accepted evidence from parent (independently verify): existing AvatarProcessor bounds dimensions to 512 without upscaling, outputs metadata-stripped JPEG quality 85 with quality reduction under its existing 512 KiB limit. Avatar.set registers account-owned AvatarAsset (storage_key, byte_size, content_hash). UI, Monica and DAV use Contacts.set_avatar; direct raw changes rejected. Legacy values may be unprocessed. Include only registered processed renditions whose account/storage-key metadata matches; missing/legacy/unprocessed stays initials. No new size caps/resizing/dependency or production backfill. Record actual existing processing policy and measured footprint.
 
 ## Final verification and PR
 
