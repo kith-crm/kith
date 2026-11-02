@@ -131,7 +131,7 @@ defmodule Kith.Emails.ReminderAvatarTest do
       {:ok, _} = Storage.upload_binary(bytes, ctx.contact.avatar)
       assert_initials(build(ctx))
 
-      asset
+      Repo.reload!(asset)
       |> Ecto.Changeset.change(byte_size: byte_size(bytes), content_hash: Avatar.hash(bytes))
       |> Repo.update!()
 
@@ -140,7 +140,22 @@ defmodule Kith.Emails.ReminderAvatarTest do
 
     {:ok, _} = Storage.upload_binary(ctx.bytes, ctx.contact.avatar)
 
-    asset
+    Repo.reload!(asset)
+    |> Ecto.Changeset.change(
+      byte_size: byte_size(ctx.bytes),
+      content_hash: Avatar.hash(ctx.bytes)
+    )
+    |> Repo.update!()
+
+    assert length(build(ctx).attachments) == 2
+
+    Repo.reload!(asset)
+    |> Ecto.Changeset.change(content_hash: String.duplicate("0", 64))
+    |> Repo.update!()
+
+    assert_initials(build(ctx))
+
+    Repo.reload!(asset)
     |> Ecto.Changeset.change(
       byte_size: byte_size(ctx.bytes) + 1,
       content_hash: Avatar.hash(ctx.bytes)
