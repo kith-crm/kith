@@ -36,8 +36,9 @@ async function login(page: Page, account: Account) {
 async function contactAction(page: Page, id: number, action: "delete" | "archive" | "unarchive") {
   await page.goto(`/contacts/${id}`);
   await connected(page);
-  await page.locator("button:has(.hero-ellipsis-horizontal)").first().click();
-  await page.locator(`button[phx-click='${action}']`).click();
+  const menuButton = page.locator("button:has(.hero-ellipsis-horizontal)").first();
+  await menuButton.click();
+  await menuButton.locator("..").locator(`button[phx-click='${action}']`).click();
 }
 
 async function startImport(page: Page, account: Account) {
