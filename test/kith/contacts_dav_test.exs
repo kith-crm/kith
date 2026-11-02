@@ -15,6 +15,75 @@ defmodule Kith.ContactsDAVTest do
     %{account_id: account_id, contact: contact}
   end
 
+  test "merge_tags rejects an unrelated account and foreign target without changing either book",
+       %{account_id: aid, contact: contact} do
+    other = user_fixture().account_id
+    {:ok, source} = Contacts.create_tag(aid, %{name: "Source"})
+    {:ok, target} = Contacts.create_tag(aid, %{name: "Target"})
+    {:ok, foreign} = Contacts.create_tag(other, %{name: "Foreign"})
+    Contacts.tag_contact(contact, source)
+    Kith.DAV.Store.ensure_rows(aid)
+    before = Kith.DAV.Store.sync_state(aid)
+
+    assert {:error, :cross_account_write} = Contacts.merge_tags(other, source, target)
+    assert {:error, :cross_account_write} = Contacts.merge_tags(aid, source, foreign)
+    assert Kith.DAV.Store.sync_state(aid) == before
+    assert [%{id: id}] = Kith.Repo.preload(contact, :tags, force: true).tags
+    assert id == source.id
+    assert Contacts.get_tag!(other, foreign.id)
+  end
+
+  test "tag attrs cannot create or move tags into another account", %{
+    account_id: aid,
+    contact: contact
+  } do
+    other = user_fixture().account_id
+
+    assert {:error, :cross_account_write} =
+             Contacts.create_tag(aid, %{name: "Foreign", account_id: other})
+
+    assert Contacts.list_tags(other) == []
+    {:ok, tag} = Contacts.create_tag(aid, %{name: "Owned"})
+    Contacts.tag_contact(contact, tag)
+    Kith.DAV.Store.ensure_rows(aid)
+    state = Kith.DAV.Store.sync_state(aid)
+    assert {:error, :cross_account_write} = Contacts.update_tag(tag, %{account_id: other})
+    assert Contacts.get_tag!(aid, tag.id).account_id == aid
+    assert Kith.DAV.Store.sync_state(aid) == state
+  end
+
+  test "merging a tag into itself preserves its associations", %{
+    account_id: aid,
+    contact: contact
+  } do
+    {:ok, tag} = Contacts.create_tag(aid, %{name: "Keep"})
+    Contacts.tag_contact(contact, tag)
+    Kith.DAV.Store.ensure_rows(aid)
+    before = Kith.DAV.Store.sync_state(aid)
+    assert {:ok, ^tag} = Contacts.merge_tags(aid, tag, tag)
+    assert Contacts.get_tag!(aid, tag.id)
+    assert Kith.DAV.Store.sync_state(aid) == before
+    assert [%{id: id}] = Kith.Repo.preload(contact, :tags, force: true).tags
+    assert id == tag.id
+  end
+
+  test "duplicate assignments and color-only tag updates keep DAV bytes and revisions", %{
+    account_id: aid,
+    contact: contact
+  } do
+    {:ok, tag} = Contacts.create_tag(aid, %{name: "Family"})
+    assert {1, nil} = Contacts.tag_contact(contact, tag)
+    Kith.DAV.Store.ensure_rows(aid)
+    before = Kith.DAV.VCardAdapter.contact_to_vcard(contact)
+    state = Kith.DAV.Store.sync_state(aid)
+    assert {0, nil} = Contacts.tag_contact(contact, tag)
+    assert {:ok, _} = Contacts.update_tag(tag, %{color: "#123456"})
+    assert Kith.DAV.VCardAdapter.contact_to_vcard(contact) == before
+    assert Kith.DAV.Store.sync_state(aid) == state
+    assert {1, nil} = Contacts.untag_contact(contact, tag)
+    assert {0, nil} = Contacts.untag_contact(contact, tag)
+  end
+
   describe "replace_contact_children/3" do
     test "replaces existing children with new data", %{contact: contact, account_id: aid} do
       nested = %{

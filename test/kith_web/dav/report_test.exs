@@ -686,6 +686,181 @@ defmodule KithWeb.DAV.ReportTest do
       assert conn.resp_body =~ "valid-sync-token"
     end
 
+    test "tag validators agree across GET, PROPFIND, REPORT and conditional PUT for each version",
+         context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      path = contact_path(contact)
+      {:ok, tag} = Contacts.create_tag(context.account_id, %{name: "Family"})
+      Contacts.tag_contact(contact, tag)
+      ns = ~s(xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav")
+
+      for version <- ["3.0", "4.0"] do
+        get =
+          context.conn
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("accept", "text/vcard;version=#{version}")
+          |> dav_request("GET", path)
+
+        [etag] = get_resp_header(get, "etag")
+        props = ~s(<d:prop><d:getetag/><card:address-data version="#{version}"/></d:prop>)
+
+        bodies = [
+          ~s(<card:addressbook-multiget #{ns}>#{props}<d:href>#{path}</d:href></card:addressbook-multiget>),
+          ~s(<d:sync-collection #{ns}><d:sync-token/><d:sync-level>1</d:sync-level>#{props}</d:sync-collection>)
+        ]
+
+        escaped_etag = Kith.DAV.XMLBuilder.getetag(String.trim(etag, "\""))
+
+        for body <- bodies do
+          report = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+          assert report.status == 207
+          assert report.resp_body =~ escaped_etag
+          assert report.resp_body =~ "VERSION:#{version}"
+        end
+
+        propfind =
+          context.conn
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("accept", "text/vcard;version=#{version}")
+          |> put_req_header("depth", "0")
+          |> dav_request(
+            "PROPFIND",
+            path,
+            ~s(<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>)
+          )
+
+        assert propfind.resp_body =~ escaped_etag
+
+        put =
+          context.conn
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("if-match", etag)
+          |> dav_request("PUT", path, get.resp_body)
+
+        assert put.status == 204
+        # PUT canonicalizes rich documents and intentionally omits validators.
+        assert get_resp_header(put, "etag") == []
+
+        assert get_resp_header(
+                 context.conn
+                 |> basic_auth(context.user.email, dav_password())
+                 |> put_req_header("accept", "text/vcard;version=#{version}")
+                 |> dav_request("GET", path),
+                 "etag"
+               ) == [etag]
+      end
+    end
+
+    test "every tag mutation publishes all affected contacts and leaves other members unchanged",
+         context do
+      aid = context.account_id
+
+      affected =
+        for n <- 1..2, do: ContactsFixtures.contact_fixture(aid, %{first_name: "Tagged#{n}"})
+
+      quiet = ContactsFixtures.contact_fixture(aid, %{first_name: "Quiet"})
+      {:ok, source} = Contacts.create_tag(aid, %{name: "Source"})
+      {:ok, target} = Contacts.create_tag(aid, %{name: "Target"})
+      # Exercise merge's ON CONFLICT path on one contact and its bulk insert path on the other.
+      Contacts.tag_contact(hd(affected), target)
+      Contacts.tag_contact(quiet, target)
+      quiet_before = authed_dav(context, "GET", contact_path(quiet))
+
+      ctag = fn ->
+        response =
+          context.conn
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("depth", "0")
+          |> dav_request(
+            "PROPFIND",
+            "/dav/addressbooks/default/",
+            ~s(<d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:prop><cs:getctag/></d:prop></d:propfind>)
+          )
+
+        [value] =
+          Regex.run(~r{<cs:getctag>([^<]+)</cs:getctag>}, response.resp_body,
+            capture: :all_but_first
+          )
+
+        value
+      end
+
+      fixed = ~U[2026-01-01 12:00:00Z]
+
+      mutations = [
+        {"assignment", fn -> Enum.each(affected, &Contacts.tag_contact(&1, source)) end},
+        {"removal", fn -> Enum.each(affected, &Contacts.untag_contact(&1, source)) end},
+        {"reassignment", fn -> Enum.each(affected, &Contacts.tag_contact(&1, source)) end},
+        {"rename", fn -> {:ok, _} = Contacts.rename_tag(source, "Renamed") end},
+        {"update",
+         fn ->
+           {:ok, _} = Contacts.update_tag(Contacts.get_tag!(aid, source.id), %{name: "Updated"})
+         end},
+        {"merge",
+         fn -> {:ok, _} = Contacts.merge_tags(aid, Contacts.get_tag!(aid, source.id), target) end}
+      ]
+
+      # A delete probe needs its own preexisting category, otherwise the complete
+      # transaction would be a no-op. Keep each operation's initial token explicit.
+      Enum.each(mutations, fn {label, mutate} ->
+        token = initial_token(context)
+        before_ctag = ctag.()
+
+        before =
+          Map.new(affected, fn c ->
+            {c.id, get_resp_header(authed_dav(context, "GET", contact_path(c)), "etag")}
+          end)
+
+        # Native contact timestamps are held equal across every mutation, so a
+        # timestamp-only invalidation implementation cannot satisfy this test.
+        Enum.each(affected, fn c ->
+          c |> Ecto.Changeset.change(updated_at: fixed) |> Kith.Repo.update!()
+        end)
+
+        mutate.()
+        response = sync(context, token)
+        assert sync_changes(response) == Map.new(affected, &{contact_path(&1), :present}), label
+        refute sync_token!(response) == token, label
+        refute ctag.() == before_ctag, label
+
+        Enum.each(affected, fn c ->
+          after_get = authed_dav(context, "GET", contact_path(c))
+          refute get_resp_header(after_get, "etag") == before[c.id], label
+          assert Kith.Repo.reload!(c).updated_at == fixed
+        end)
+
+        quiet_after = authed_dav(context, "GET", contact_path(quiet))
+        assert quiet_after.resp_body == quiet_before.resp_body
+        assert get_resp_header(quiet_after, "etag") == get_resp_header(quiet_before, "etag")
+      end)
+
+      for delete <- [&Contacts.delete_tag/1, &Contacts.delete_tag_with_removal/1] do
+        {:ok, tag} = Contacts.create_tag(aid, %{name: "Delete"})
+        Enum.each(affected, &Contacts.tag_contact(&1, tag))
+        token = initial_token(context)
+        before_ctag = ctag.()
+
+        before =
+          Enum.map(
+            affected,
+            &get_resp_header(authed_dav(context, "GET", contact_path(&1)), "etag")
+          )
+
+        assert {:ok, _} = delete.(tag)
+        response = sync(context, token)
+        assert sync_changes(response) == Map.new(affected, &{contact_path(&1), :present})
+        refute sync_token!(response) == token
+        refute ctag.() == before_ctag
+
+        Enum.zip(affected, before)
+        |> Enum.each(fn {c, etag} ->
+          refute get_resp_header(authed_dav(context, "GET", contact_path(c)), "etag") == etag
+        end)
+
+        assert authed_dav(context, "GET", contact_path(quiet)).resp_body == quiet_before.resp_body
+      end
+    end
+
     test "a tag rename appears in incremental sync", context do
       contact = ContactsFixtures.contact_fixture(context.account_id)
       {:ok, tag} = Contacts.create_tag(context.account_id, %{name: "Before"})
@@ -1026,6 +1201,119 @@ defmodule KithWeb.DAV.ReportTest do
         conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
         assert conn.status == 400, inspect(body)
       end
+    end
+  end
+end
+
+defmodule KithWeb.DAV.TagReportBoundaryTest do
+  use KithWeb.ConnCase, async: false
+  import Ecto.Query
+  import KithWeb.DAV.TestHelpers
+  alias Ecto.Adapters.SQL.Sandbox
+  alias Kith.{Contacts, Repo}
+
+  test "a tag edit overlapping REPORT remains visible after its returned token" do
+    {user, contact, tag} =
+      Sandbox.unboxed_run(Repo, fn ->
+        user = Kith.AccountsFixtures.user_fixture()
+        contact = Kith.ContactsFixtures.contact_fixture(user.account_id)
+        {:ok, tag} = Contacts.create_tag(user.account_id, %{name: "Before"})
+        Contacts.tag_contact(contact, tag)
+        {user, contact, tag}
+      end)
+
+    on_exit(fn ->
+      Sandbox.unboxed_run(Repo, fn ->
+        Repo.delete_all(from a in Kith.Accounts.Account, where: a.id == ^user.account_id)
+      end)
+    end)
+
+    parent = self()
+    handler = "tag-report-boundary-#{user.account_id}"
+
+    :telemetry.attach(
+      handler,
+      [:kith, :repo, :query],
+      fn _, _, metadata, _ ->
+        if Process.get(:pause_tag_report) && String.contains?(metadata.query, "SELECT GREATEST") do
+          Process.delete(:pause_tag_report)
+          send(parent, {:report_boundary, self()})
+
+          receive do
+            :continue_report -> :ok
+          after
+            10_000 -> raise "REPORT boundary coordination timed out"
+          end
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    request = fn token ->
+      Sandbox.unboxed_run(Repo, fn ->
+        build_conn()
+        |> basic_auth(user.email, dav_password())
+        |> dav_request(
+          "REPORT",
+          "/dav/addressbooks/default/",
+          String.replace(
+            sync_collection_body(),
+            "<d:sync-token/>",
+            "<d:sync-token>#{token}</d:sync-token>"
+          )
+        )
+      end)
+    end
+
+    reader =
+      Task.async(fn ->
+        Process.put(:pause_tag_report, true)
+        request.("")
+      end)
+
+    assert_receive {:report_boundary, reader_pid}, 5_000
+
+    writer =
+      Task.async(fn ->
+        Sandbox.unboxed_run(Repo, fn ->
+          %{rows: [[backend]]} = Repo.query!("SELECT pg_backend_pid()")
+          send(parent, {:tag_writer, backend})
+          Contacts.rename_tag(tag, "After")
+        end)
+      end)
+
+    assert_receive {:tag_writer, backend}, 5_000
+    Sandbox.unboxed_run(Repo, fn -> assert_tag_writer_blocked(backend, 1_000) end)
+    send(reader_pid, :continue_report)
+    initial = Task.await(reader, 15_000)
+    assert initial.status == 207
+    assert initial.resp_body =~ "Before"
+    refute initial.resp_body =~ "CATEGORIES:After"
+    assert {:ok, _} = Task.await(writer, 15_000)
+
+    [token] =
+      Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, initial.resp_body,
+        capture: :all_but_first
+      )
+
+    incremental = request.(token)
+    assert incremental.status == 207
+    assert count_responses(incremental.resp_body) == 1
+    path = Sandbox.unboxed_run(Repo, fn -> contact_path(contact) end)
+    assert incremental.resp_body =~ path
+    assert incremental.resp_body =~ "CATEGORIES:After"
+  end
+
+  defp assert_tag_writer_blocked(backend, attempts) do
+    %{rows: rows} =
+      Repo.query!("SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1", [backend])
+
+    cond do
+      rows == [["Lock"]] -> :ok
+      attempts == 0 -> flunk("tag writer never reached the REPORT snapshot lock")
+      true -> assert_tag_writer_blocked(backend, attempts - 1)
     end
   end
 end

@@ -631,9 +631,11 @@ defmodule Kith.Contacts do
   end
 
   def create_tag(account_id, attrs) do
-    %Tag{account_id: account_id}
-    |> Tag.changeset(attrs)
-    |> Repo.insert()
+    changeset = Tag.changeset(%Tag{account_id: account_id}, attrs)
+
+    if Ecto.Changeset.get_field(changeset, :account_id) == account_id,
+      do: Repo.insert(changeset),
+      else: {:error, :cross_account_write}
   end
 
   def update_tag(%Tag{} = tag, attrs) do
@@ -1399,6 +1401,12 @@ defmodule Kith.Contacts do
   source to target, then deletes source. Handles duplicates via ON CONFLICT.
   Uses Ecto.Multi for atomicity.
   """
+  def merge_tags(account_id, %Tag{} = source, %Tag{} = target)
+      when source.account_id != account_id or target.account_id != account_id,
+      do: {:error, :cross_account_write}
+
+  def merge_tags(_account_id, %Tag{id: id} = tag, %Tag{id: id}), do: {:ok, tag}
+
   def merge_tags(_account_id, %Tag{} = source, %Tag{} = target) do
     Write.run(source.account_id, [], fn ->
       Write.prepare(source.account_id, Repo.all(tag_contact_ids(source.id)))
@@ -1797,7 +1805,7 @@ defmodule Kith.Contacts do
   # ── Tag sync (CATEGORIES) ──────────────────────────────────────────
 
   defp replace_contact_tags(contact, account_id, category_names) do
-    incoming = Enum.reject(category_names, &(&1 == ""))
+    incoming = category_names |> Enum.reject(&(String.trim(&1) == "")) |> Enum.uniq()
 
     existing =
       Repo.all(

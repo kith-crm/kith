@@ -818,6 +818,79 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert conn_get.resp_body =~ "VIP"
     end
 
+    test "full replacement clears tags when CATEGORIES is empty or omitted", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      path = contact_path(contact)
+
+      for replacement <- [[], nil] do
+        assert authed_dav(
+                 context,
+                 "PUT",
+                 path,
+                 build_vcard("Jane", "Doe", categories: ["Family", "VIP"])
+               ).status == 204
+
+        assert authed_dav(context, "GET", path).resp_body =~ "Family"
+
+        assert authed_dav(
+                 context,
+                 "PUT",
+                 path,
+                 build_vcard("Jane", "Doe", categories: replacement)
+               ).status == 204
+
+        {:ok, [parsed]} = Kith.VCard.Parser.parse(authed_dav(context, "GET", path).resp_body)
+        assert parsed.categories in [[], [""]]
+        assert Kith.Repo.preload(contact, :tags, force: true).tags == []
+      end
+    end
+
+    test "categories deduplicate escaped values and never reuse another account's tags",
+         context do
+      other = Kith.AccountsFixtures.user_fixture().account_id
+      {:ok, foreign} = Contacts.create_tag(other, %{name: "Family"})
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      path = contact_path(contact)
+      categories = ["Family", "VIP", "Music,Art", "Semi;colon", "Back\\slash", "أصدقاء"]
+      escaped = Enum.map(categories, &Kith.VCard.Serializer.escape/1)
+      vcard = build_vcard("Jane", "Doe", categories: escaped ++ ["Family", "", "   "])
+      assert authed_dav(context, "PUT", path, vcard).status == 204
+      get = authed_dav(context, "GET", path)
+      assert {:ok, document} = Kith.VCard.Document.parse(get.resp_body)
+
+      names =
+        document
+        |> Kith.VCard.Document.properties("CATEGORIES")
+        |> Enum.flat_map(&Kith.DAV.Document.category_values(&1.value))
+
+      assert names |> Enum.reject(&(String.trim(&1) == "")) |> Enum.uniq() |> Enum.sort() ==
+               Enum.sort(categories)
+
+      tags = Kith.Repo.preload(contact, :tags, force: true).tags
+      assert length(tags) == length(categories)
+      assert Enum.all?(tags, &(&1.account_id == context.account_id and &1.id != foreign.id))
+      assert Contacts.get_tag!(other, foreign.id).name == "Family"
+    end
+
+    test "invalid category rolls back native fields, tags, DAV bytes and revision", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      path = contact_path(contact)
+
+      assert authed_dav(context, "PUT", path, build_vcard("Jane", "Doe", categories: ["Family"])).status ==
+               204
+
+      before = authed_dav(context, "GET", path)
+      state = Kith.DAV.Store.sync_state(context.account_id)
+      invalid = build_vcard("Changed", "Name", categories: ["VIP", String.duplicate("x", 256)])
+      assert authed_dav(context, "PUT", path, invalid).status == 403
+      after_write = authed_dav(context, "GET", path)
+      assert after_write.resp_body == before.resp_body
+      assert get_resp_header(after_write, "etag") == get_resp_header(before, "etag")
+      assert Kith.DAV.Store.sync_state(context.account_id) == state
+      assert [%{name: "Family"}] = Kith.Repo.preload(contact, :tags, force: true).tags
+      refute Enum.any?(Contacts.list_tags(context.account_id), &(&1.name == "VIP"))
+    end
+
     test "PUT vCard replaces existing tags (not appends)",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id)

@@ -656,4 +656,12 @@ defmodule Kith.VCard.ParserTest do
     assert {:ok, [%{birthdate: nil, birthdate_year_unknown: false}]} =
              Parser.parse(card, legacy_bday: false)
   end
+
+  test "category escaping preserves delimiters, literal backslashes and Unicode" do
+    names = ["Family", "VIP", "Music,Art", "Semi;colon", "Ends\\", "أصدقاء"]
+    categories = Enum.map_join(names, ",", &Kith.VCard.Serializer.escape/1)
+    card = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Tags\r\nCATEGORIES:#{categories}\r\nEND:VCARD\r\n"
+    assert {:ok, [parsed]} = Parser.parse(card)
+    assert parsed.categories == names
+  end
 end

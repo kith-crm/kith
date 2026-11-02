@@ -246,9 +246,9 @@
     "type": "XSS.ContentType: XSS in `put_resp_content_type`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "content_type",
-    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
+    "source_sha256": "bb521dfe1e946234ecd638c22630202a411d4c283d6d7763cd4bffaf4d76669f",
     "reason": "Serialized vCard with one of two fixed text/vcard MIME literals and nosniff, never HTML or an arbitrary requested content type.",
-    "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs",
+    "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs; test/kith_web/dav/report_test.exs (version-specific validators and tag synchronization)",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29"
   },
@@ -257,9 +257,9 @@
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "vcard",
-    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
+    "source_sha256": "bb521dfe1e946234ecd638c22630202a411d4c283d6d7763cd4bffaf4d76669f",
     "reason": "Serialized vCard with one of two fixed text/vcard MIME literals and nosniff, never HTML or an arbitrary requested content type.",
-    "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs",
+    "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs; test/kith_web/dav/report_test.exs (version-specific validators and tag synchronization)",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29"
   },
@@ -286,13 +286,13 @@
     "review_by": "2026-11-29"
   },
   {
-    "line": 1271,
+    "line": 1269,
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "xml",
-    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
+    "source_sha256": "bb521dfe1e946234ecd638c22630202a411d4c283d6d7763cd4bffaf4d76669f",
     "reason": "Owned XMLBuilder output only: text, hrefs, descriptions, validators and tokens are XML-escaped; vCards use CDATA with terminators split. Element names are fixed literals or local names from namespace-aware XML parsing. Fixed application/xml MIME; parsed malicious-content tests create no script elements.",
-    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs",
+    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs; test/kith_web/dav/report_test.exs (version-specific validators and tag synchronization)",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29",
     "reviewed_sources": [
@@ -361,9 +361,9 @@
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "Elixir.XMLBuilder",
-    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
+    "source_sha256": "bb521dfe1e946234ecd638c22630202a411d4c283d6d7763cd4bffaf4d76669f",
     "reason": "Owned XMLBuilder output only: text, hrefs, descriptions, validators and tokens are XML-escaped; vCards use CDATA with terminators split. Element names are fixed literals or local names from namespace-aware XML parsing. Fixed application/xml MIME; parsed malicious-content tests create no script elements.",
-    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs; test/kith_web/dav/propfind_test.exs",
+    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs; test/kith_web/dav/propfind_test.exs; test/kith_web/dav/report_test.exs (version-specific validators and tag synchronization)",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29",
     "reviewed_sources": [
