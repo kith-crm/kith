@@ -111,6 +111,37 @@ defmodule KithWeb.DAV.AddressObjectTest do
     assert [%{related_contact_id: ^target_id}] = Contacts.list_relationships(owner.id)
   end
 
+  test "text-only related properties preserve native links while URI empty still clears", c do
+    owner = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Owner"})
+    target = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Duplicate"})
+    _duplicate = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Duplicate"})
+    type = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "friend")
+    edge = ContactsFixtures.relationship_fixture(owner, target, type.id)
+    path = contact_path(owner)
+
+    for builder <- [&build_vcard/2, &build_vcard_v40/2],
+        property <- ["RELATED", "X-KITH-RELATED"],
+        name <- ["Duplicate", ""] do
+      extra = "#{property};VALUE=text:#{name}\r\n"
+      body = String.replace(builder.("Owner", ""), "END:VCARD", extra <> "END:VCARD")
+      assert authed_dav(c, "PUT", path, body).status == 204
+      assert [%{id: id, related_contact_id: target_id}] = Contacts.list_relationships(owner.id)
+      assert id == edge.id
+      assert target_id == target.id
+      assert authed_dav(c, "GET", path).resp_body =~ extra
+    end
+
+    body =
+      String.replace(
+        build_vcard_v40("Owner", ""),
+        "END:VCARD",
+        "RELATED;VALUE=text:Duplicate\r\nRELATED;VALUE=uri:\r\nEND:VCARD"
+      )
+
+    assert authed_dav(c, "PUT", path, body).status == 204
+    assert Contacts.list_relationships(owner.id) == []
+  end
+
   test "PUT preserves family-only and formatted-only native names",
        %{account_id: aid} = context do
     for {name, structured, first, last} <- [
