@@ -3,6 +3,21 @@ defmodule Kith.VCard.ParserTest do
 
   alias Kith.VCard.Parser
 
+  test "distinguishes omitted, explicit empty and populated UID relationship properties" do
+    for {property, present, values} <- [
+          {"", false, []},
+          {"item1.X-ABRELATEDNAMES:Same Name\r\nitem1.X-ABLabel:Friend\r\n", false, []},
+          {"RELATED;TYPE=friend:\r\n", true, [""]},
+          {"X-KITH-RELATED;TYPE=friend:urn:uuid:opaque\r\n", true, ["urn:uuid:opaque"]}
+        ] do
+      {:ok, [parsed]} =
+        Parser.parse("BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Owner\r\n" <> property <> "END:VCARD\r\n")
+
+      assert parsed.related_present? == present
+      assert Enum.map(parsed.related, & &1.value) == values
+    end
+  end
+
   @sample_vcard_30 """
   BEGIN:VCARD
   VERSION:3.0

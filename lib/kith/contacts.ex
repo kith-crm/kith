@@ -698,14 +698,6 @@ defmodule Kith.Contacts do
         preload: [:related_contact, :relationship_type]
       )
       |> Repo.all()
-      |> Enum.map(fn r ->
-        %{relationship: r, related_contact: r.related_contact, label: r.relationship_type.name}
-      end)
-
-    # Track which contacts already appear via forward relationships so we can
-    # skip the reverse side of bidirectional pairs (e.g. Monica exports both
-    # A→B and B→A for every relationship).
-    forward_contact_ids = MapSet.new(forward, & &1.related_contact.id)
 
     reverse =
       from(r in Relationship,
@@ -713,6 +705,22 @@ defmodule Kith.Contacts do
         preload: [:contact, :relationship_type]
       )
       |> Repo.all()
+
+    relationship_views(forward, reverse)
+  end
+
+  defp relationship_views(forward, reverse) do
+    forward =
+      Enum.map(forward, fn r ->
+        %{relationship: r, related_contact: r.related_contact, label: r.relationship_type.name}
+      end)
+
+    # Monica imports may store both directions. Prefer the explicit forward
+    # label when that target is already represented.
+    forward_contact_ids = MapSet.new(forward, & &1.related_contact.id)
+
+    reverse =
+      reverse
       |> Enum.map(fn r ->
         %{
           relationship: r,
@@ -723,6 +731,51 @@ defmodule Kith.Contacts do
       |> Enum.reject(&MapSet.member?(forward_contact_ids, &1.related_contact.id))
 
     forward ++ reverse
+  end
+
+  @doc false
+  def export_relationships(%Contact{} = contact) do
+    [contact] |> export_relationships() |> Map.fetch!(contact.id)
+  end
+
+  def export_relationships([]), do: %{}
+
+  def export_relationships([%Contact{account_id: account_id} | _] = contacts) do
+    ids = for contact <- contacts, contact.account_id == account_id, do: contact.id
+
+    edges =
+      from(r in Relationship,
+        join: owner in Contact,
+        on: owner.id == r.contact_id and owner.account_id == r.account_id,
+        join: target in Contact,
+        on: target.id == r.related_contact_id and target.account_id == r.account_id,
+        join: type in RelationshipType,
+        on: type.id == r.relationship_type_id,
+        where: r.account_id == ^account_id,
+        where: r.contact_id in ^ids or r.related_contact_id in ^ids,
+        where: is_nil(owner.deleted_at) and is_nil(target.deleted_at),
+        where: is_nil(type.account_id) or type.account_id == ^account_id,
+        order_by: r.id,
+        preload: [:relationship_type, contact: :dav, related_contact: :dav]
+      )
+      |> Repo.all()
+
+    forward = Enum.group_by(edges, & &1.contact_id)
+    reverse = Enum.group_by(edges, & &1.related_contact_id)
+
+    Map.new(ids, fn id ->
+      relationships =
+        relationship_views(Map.get(forward, id, []), Map.get(reverse, id, []))
+        |> Enum.map(fn view ->
+          %{
+            id: view.relationship.id,
+            related_contact: view.related_contact,
+            relationship_type: %{name: view.label}
+          }
+        end)
+
+      {id, relationships}
+    end)
   end
 
   def list_relationships(contact_id) do

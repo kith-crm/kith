@@ -20,6 +20,7 @@ defmodule Kith.VCard.Serializer do
   Options:
     - `:version` — `:v30` (default) for vCard 3.0, `:v40` for vCard 4.0
     - `:include_uid` — emit the loaded DAV identity (default: false)
+    - `:relationships` — explicit bidirectional export projection (defaults to loaded relationships)
 
   The contact must have the following associations preloaded:
   - :dav (for UID and retained extras)
@@ -45,7 +46,10 @@ defmodule Kith.VCard.Serializer do
       note_line(contact),
       gender_line(contact, version),
       categories_line(contact),
-      related_lines(contact, version),
+      related_lines(
+        Keyword.get(opts, :relationships, Map.get(contact, :relationships, [])),
+        version
+      ),
       rev_line(contact, version),
       photo_line(contact, version),
       contact_field_lines(contact),
@@ -215,8 +219,8 @@ defmodule Kith.VCard.Serializer do
 
   # ── RELATED (version-aware) ─────────────────────────────────────────
 
-  defp related_lines(contact, version) do
-    case Map.get(contact, :relationships, []) do
+  defp related_lines(relationships, version) do
+    case relationships do
       rels when is_list(rels) and rels != [] -> do_related_lines(rels, version)
       _ -> []
     end
@@ -231,7 +235,7 @@ defmodule Kith.VCard.Serializer do
       [
         related_uid_line(rel, :v30),
         "#{group}.X-ABRELATEDNAMES:#{escape(name)}",
-        "#{group}.X-ABLabel:#{label}"
+        "#{group}.X-ABLabel:#{escape(label)}"
       ]
     end)
   end

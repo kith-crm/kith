@@ -3,6 +3,37 @@ defmodule Kith.VCard.SerializerTest do
 
   alias Kith.VCard.Serializer
 
+  test "explicit inverse export projection preserves grouped v3 labels and opaque v4 UIDs" do
+    uid = "b2000000-0000-4000-8000-000000000002"
+
+    contact = %Kith.Contacts.Contact{
+      gender: nil,
+      first_name: "Owner",
+      last_name: "",
+      display_name: "Owner",
+      addresses: [],
+      contact_fields: [],
+      tags: [],
+      relationships: []
+    }
+
+    relationships = [
+      %{
+        id: 12,
+        related_contact: %{display_name: "Target", dav: %{uid: uid}},
+        relationship_type: %{name: "Child"}
+      }
+    ]
+
+    v3 = Serializer.serialize(contact, relationships: relationships)
+    assert v3 =~ "item12.X-ABRELATEDNAMES:Target\r\nitem12.X-ABLabel:_$!<Child>!$_"
+    assert v3 =~ "X-KITH-RELATED;TYPE=child:urn:uuid:#{uid}"
+    v4 = Serializer.serialize(contact, version: :v40, relationships: relationships)
+    assert v4 =~ "RELATED;TYPE=child:urn:uuid:#{uid}"
+    refute v4 =~ "X-ABRELATEDNAMES"
+    refute Serializer.serialize(contact) =~ "RELATED"
+  end
+
   test "exports_seeded_tel_colon_protocol" do
     for {protocol, prefix} <- [
           {"tel:", "TEL"},

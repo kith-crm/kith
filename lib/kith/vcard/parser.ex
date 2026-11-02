@@ -26,6 +26,7 @@ defmodule Kith.VCard.Parser do
   - :impp (list of %{value, label})
   - :addresses (list of %{label, line1, line2, city, province, postal_code, country})
   - :related (list of %{value, type})
+  - :related_present? (whether a supported UID relationship property occurred)
   - :rev (string timestamp or nil)
   - :photo (map with :content_type/:data/:encoding or :url, or nil)
   """
@@ -127,6 +128,7 @@ defmodule Kith.VCard.Parser do
       urls: [],
       addresses: [],
       related: [],
+      related_present?: false,
       impp: [],
       rev: nil,
       photo: nil
@@ -239,7 +241,12 @@ defmodule Kith.VCard.Parser do
 
   defp apply_property(acc, "RELATED", params, value) do
     type = extract_type(params) || "contact"
-    %{acc | related: [%{value: unescape(value), type: type} | acc.related]}
+
+    %{
+      acc
+      | related: [%{value: unescape(value), type: type} | acc.related],
+        related_present?: true
+    }
   end
 
   defp apply_property(acc, "REV", _params, value),

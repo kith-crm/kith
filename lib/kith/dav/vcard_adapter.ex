@@ -56,7 +56,7 @@ defmodule Kith.DAV.VCardAdapter do
         nested
         |> Map.put(:dav_document, vcard_string)
         |> Map.put(:dav_parsed_document, document)
-        |> Map.put(:related, relationship_entries(document))
+        |> put_relationship_entries(document, parsed.related_present?)
         |> Map.put(
           :categories,
           document.properties
@@ -70,6 +70,13 @@ defmodule Kith.DAV.VCardAdapter do
       _ -> :error
     end
   end
+
+  # Omission (including name-only v3 companions) cannot express a native
+  # relationship replacement. A supported empty URI property can.
+  defp put_relationship_entries(nested, document, true),
+    do: Map.put(nested, :related, relationship_entries(document))
+
+  defp put_relationship_entries(nested, _document, false), do: nested
 
   defp relationship_entries(document) do
     document.properties
@@ -133,7 +140,6 @@ defmodule Kith.DAV.VCardAdapter do
       addresses: parsed.addresses || [],
       uid: parsed.uid,
       categories: parsed.categories || [],
-      related: parsed.related || [],
       photo: parsed.photo
     }
   end

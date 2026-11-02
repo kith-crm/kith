@@ -35,7 +35,12 @@ defmodule KithWeb.API.ContactExportController do
         })
 
       contact ->
-        vcard = Serializer.serialize(contact, include_uid: true)
+        vcard =
+          Serializer.serialize(contact,
+            include_uid: true,
+            relationships: Contacts.export_relationships(contact)
+          )
+
         filename = safe_filename(contact.display_name || "contact")
 
         conn
@@ -89,16 +94,28 @@ defmodule KithWeb.API.ContactExportController do
       end
 
     {:ok, conn} =
-      Kith.Repo.transaction(fn -> Enum.reduce_while(stream, conn, &chunk_contact/2) end)
+      Kith.Repo.transaction(fn ->
+        stream |> Stream.chunk_every(100) |> Enum.reduce_while(conn, &chunk_contacts/2)
+      end)
 
     conn
   end
 
-  defp chunk_contact(contact, conn) do
-    case chunk(conn, Serializer.serialize(contact, include_uid: true)) do
-      {:ok, conn} -> {:cont, conn}
-      {:error, _closed} -> {:halt, conn}
-    end
+  defp chunk_contacts(contacts, conn) do
+    relationships = Contacts.export_relationships(contacts)
+
+    Enum.reduce_while(contacts, {:cont, conn}, fn contact, {:cont, current} ->
+      card =
+        Serializer.serialize(contact,
+          include_uid: true,
+          relationships: Map.fetch!(relationships, contact.id)
+        )
+
+      case chunk(current, card) do
+        {:ok, updated} -> {:cont, {:cont, updated}}
+        {:error, _closed} -> {:halt, {:halt, current}}
+      end
+    end)
   end
 
   defp safe_filename(name) do

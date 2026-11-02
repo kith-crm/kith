@@ -15,6 +15,53 @@ defmodule Kith.ContactsDAVTest do
     %{account_id: account_id, contact: contact}
   end
 
+  test "export relationship batch has bounded query count", %{account_id: aid, contact: contact} do
+    type = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "friend")
+    targets = for _ <- 1..8, do: contact_fixture(aid)
+    for target <- targets, do: relationship_fixture(contact, target, type.id)
+    Kith.DAV.Store.ensure_rows(aid)
+
+    query_count = fn contacts ->
+      ref = make_ref()
+      parent = self()
+      handler = "export-queries-#{inspect(ref)}"
+
+      :telemetry.attach(
+        handler,
+        [:kith, :repo, :query],
+        fn _, _, metadata, _ ->
+          if (self() == parent or parent in Process.get(:"$callers", [])) and
+               String.starts_with?(metadata.query, "SELECT"),
+             do: send(parent, ref)
+        end,
+        nil
+      )
+
+      result = Contacts.export_relationships(contacts)
+      :telemetry.detach(handler)
+
+      count =
+        Stream.repeatedly(fn ->
+          receive do
+            ^ref -> 1
+          after
+            0 -> 0
+          end
+        end)
+        |> Enum.take_while(&(&1 == 1))
+        |> Enum.sum()
+
+      {result, count}
+    end
+
+    {single, one_count} = query_count.([contact])
+    {batch, batch_count} = query_count.([contact | targets])
+    assert length(single[contact.id]) == 8
+    assert length(Map.keys(batch)) == 9
+    assert batch_count == one_count
+    assert batch_count <= 7
+  end
+
   test "merge_tags rejects an unrelated account and foreign target without changing either book",
        %{account_id: aid, contact: contact} do
     other = user_fixture().account_id

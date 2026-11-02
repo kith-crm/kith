@@ -12,6 +12,91 @@ defmodule KithWeb.DAV.ReportTest do
 
   setup :setup_dav_user
 
+  test "relationship changes publish both wire endpoints and private type renames stay stable",
+       c do
+    owner = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Owner"})
+    target = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Target"})
+    control = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Control"})
+    paths = Enum.map([owner, target], &contact_path/1)
+    control_path = contact_path(control)
+    initial = authed_dav(c, "REPORT", "/dav/addressbooks/default/", sync_collection_body())
+    assert initial.status == 207
+    assert count_responses(initial.resp_body) == 3
+
+    token = fn response ->
+      [value] =
+        Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, response.resp_body,
+          capture: :all_but_first
+        )
+
+      value
+    end
+
+    etags = fn ->
+      Map.new(paths, fn path -> {path, authed_dav(c, "GET", path) |> get_resp_header("etag")} end)
+    end
+
+    incremental = fn previous ->
+      body =
+        String.replace(
+          sync_collection_body(),
+          "<d:sync-token/>",
+          "<d:sync-token>#{token.(previous)}</d:sync-token>"
+        )
+
+      authed_dav(c, "REPORT", "/dav/addressbooks/default/", body)
+    end
+
+    assert_changes = fn previous, before ->
+      response = incremental.(previous)
+      assert response.status == 207
+      assert count_responses(response.resp_body) == 2
+
+      for path <- paths do
+        assert response.resp_body =~ path
+        refute authed_dav(c, "GET", path) |> get_resp_header("etag") == before[path]
+      end
+
+      refute response.resp_body =~ control_path
+      %{response | resp_body: String.replace(response.resp_body, ~r/\r?\n[ \t]/, "")}
+    end
+
+    type = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "parent")
+    before = etags.()
+    edge = ContactsFixtures.relationship_fixture(owner, target, type.id)
+    created = assert_changes.(initial, before)
+    assert created.resp_body =~ "X-ABLabel:_$!<Parent>!$_"
+    assert created.resp_body =~ "X-ABLabel:_$!<Child>!$_"
+    before = etags.()
+    {:ok, target} = Contacts.update_contact(target, %{first_name: "Renamed"})
+    renamed = assert_changes.(created, before)
+    assert renamed.resp_body =~ "X-ABRELATEDNAMES:Renamed"
+    before = etags.()
+    {:ok, _} = Contacts.delete_relationship(edge)
+    removed = assert_changes.(renamed, before)
+    refute removed.resp_body =~ "X-KITH-RELATED"
+
+    {:ok, private} =
+      Contacts.create_relationship_type(c.account_id, %{
+        name: "Secret subtype",
+        reverse_name: "Secret reverse"
+      })
+
+    ContactsFixtures.relationship_fixture(owner, target, private.id)
+    current = incremental.(removed)
+    before = etags.()
+
+    {:ok, _} =
+      Contacts.update_relationship_type(private, %{
+        name: "New private subtype",
+        reverse_name: "New private reverse"
+      })
+
+    unchanged = incremental.(current)
+    assert count_responses(unchanged.resp_body) == 0
+    assert etags.() == before
+  end
+
   test "requested address-data includes the stored avatar across report types",
        %{account_id: account_id} = context do
     contact = ContactsFixtures.contact_fixture(account_id)

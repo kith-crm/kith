@@ -264,19 +264,19 @@ defmodule Kith.DAV.Relationships do
   defp resolve_entries(contact, entries) do
     {resolved, client_only, suppressed} =
       Enum.reduce(entries, {[], [], []}, fn entry, acc ->
-        append_resolution(resolve_entry(contact.account_id, entry), entry, acc)
+        append_resolution(resolve_entry(contact, entry), entry, acc)
       end)
 
     {Enum.reverse(resolved), Enum.reverse(client_only), Enum.reverse(suppressed)}
   end
 
-  defp resolve_entry(account_id, entry) do
-    case resolve_target(account_id, entry) do
+  defp resolve_entry(contact, entry) do
+    case resolve_target(contact.account_id, entry) do
       nil ->
         :client_only
 
       target ->
-        if visible?(target),
+        if visible?(target) and target.id != contact.id,
           do: {:shared, %{target: target, type: normalize_category(Map.get(entry, :type))}},
           else: :suppressed
     end

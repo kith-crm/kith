@@ -16,6 +16,101 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
   setup :setup_dav_user
 
+  test "GET projects forward and inverse labels once and excludes deleted and foreign targets",
+       c do
+    owner = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Owner"})
+    target = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Target"})
+    gone = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Deleted Secret"})
+
+    foreign =
+      ContactsFixtures.contact_fixture(Kith.AccountsFixtures.user_fixture().account_id, %{
+        first_name: "Foreign Secret"
+      })
+
+    parent = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "parent")
+    child = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "child")
+    ContactsFixtures.relationship_fixture(owner, target, parent.id)
+    ContactsFixtures.relationship_fixture(target, owner, child.id)
+    ContactsFixtures.relationship_fixture(owner, gone, parent.id)
+    Contacts.soft_delete_contact(gone)
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Kith.Repo.insert_all(Kith.Contacts.Relationship, [
+      %{
+        account_id: c.account_id,
+        contact_id: owner.id,
+        related_contact_id: foreign.id,
+        relationship_type_id: parent.id,
+        inserted_at: now,
+        updated_at: now
+      }
+    ])
+
+    for {contact, label} <- [{owner, "Parent"}, {target, "Child"}] do
+      response = authed_dav(c, "GET", contact_path(contact))
+      assert response.status == 200
+      response = %{response | resp_body: String.replace(response.resp_body, ~r/\r?\n[ \t]/, "")}
+      assert response.resp_body =~ "X-ABLabel:_$!<#{label}>!$_"
+      assert length(Regex.scan(~r/X-ABRELATEDNAMES:/, response.resp_body)) == 1
+      assert length(Regex.scan(~r/X-KITH-RELATED;/, response.resp_body)) == 1
+      refute response.resp_body =~ "Deleted Secret"
+      refute response.resp_body =~ "Foreign Secret"
+    end
+  end
+
+  test "PUT distinguishes omitted, name-only, populated and explicitly empty relationships", c do
+    owner = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Owner"})
+    target = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Duplicate"})
+    _duplicate = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Duplicate"})
+    type = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "friend")
+    edge = ContactsFixtures.relationship_fixture(owner, target, type.id)
+    path = contact_path(owner)
+
+    for extra <- ["", "item1.X-ABRELATEDNAMES:Duplicate\r\nitem1.X-ABLabel:Friend\r\n"] do
+      body = String.replace(build_vcard("Owner", ""), "END:VCARD", extra <> "END:VCARD")
+      assert authed_dav(c, "PUT", path, body).status == 204
+      assert [%{id: id}] = Contacts.list_relationships(owner.id)
+      assert id == edge.id
+      assert authed_dav(c, "GET", path).resp_body =~ "X-KITH-RELATED;TYPE=friend:"
+    end
+
+    foreign = ContactsFixtures.contact_fixture(Kith.AccountsFixtures.user_fixture().account_id)
+    hidden = ContactsFixtures.contact_fixture(c.account_id, %{is_archived: true})
+    for contact <- [owner, target, foreign, hidden], do: contact_path(contact)
+
+    uid = fn contact ->
+      Kith.DAV.UID.urn(Kith.Repo.preload(contact, :dav, force: true).dav.uid)
+    end
+
+    entries = ["not-a-uuid", uid.(foreign), uid.(owner), uid.(hidden), uid.(target), uid.(target)]
+    extra = Enum.map_join(entries, "", &("RELATED;TYPE=friend:" <> &1 <> "\r\n"))
+    body = String.replace(build_vcard_v40("Owner", ""), "END:VCARD", extra <> "END:VCARD")
+    assert authed_dav(c, "PUT", path, body).status == 204
+    assert [%{id: id, related_contact_id: target_id}] = Contacts.list_relationships(owner.id)
+    assert id == edge.id
+    assert target_id == target.id
+
+    body =
+      String.replace(
+        build_vcard_v40("Owner", ""),
+        "END:VCARD",
+        "RELATED;TYPE=friend:\r\nEND:VCARD"
+      )
+
+    assert authed_dav(c, "PUT", path, body).status == 204
+    assert Contacts.list_relationships(owner.id) == []
+
+    body =
+      String.replace(
+        build_vcard_v40("Owner", ""),
+        "END:VCARD",
+        "RELATED;TYPE=friend:#{uid.(target)}\r\nEND:VCARD"
+      )
+
+    assert authed_dav(c, "PUT", path, body).status == 204
+    assert [%{related_contact_id: ^target_id}] = Contacts.list_relationships(owner.id)
+  end
+
   test "PUT preserves family-only and formatted-only native names",
        %{account_id: aid} = context do
     for {name, structured, first, last} <- [
