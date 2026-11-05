@@ -69,7 +69,8 @@ defmodule KithWeb.ContactLive.PhotoThumbComponent do
         loading="lazy"
         class={[
           @c.box,
-          "object-cover group-data-[img-failed]:hidden group-data-[img-retrying]:invisible"
+          "group-data-[img-failed]:hidden group-data-[img-retrying]:invisible",
+          @variant != :full && "object-cover"
         ]}
       />
       <div
@@ -104,6 +105,16 @@ defmodule KithWeb.ContactLive.PhotoThumbComponent do
     url = Storage.url(socket.assigns.storage_key)
     {:reply, %{changed: url != socket.assigns.url}, assign(socket, :url, url)}
   end
+
+  defp variant_classes(:full),
+    do: %{
+      root: "w-full",
+      box: "w-full max-h-[75vh] object-contain rounded-lg min-h-24",
+      syncing: "flex",
+      gap: "gap-1",
+      icon: "size-6",
+      badge_text: "text-sm font-medium"
+    }
 
   defp variant_classes(:tile),
     do: %{

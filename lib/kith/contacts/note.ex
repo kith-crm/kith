@@ -21,13 +21,24 @@ defmodule Kith.Contacts.Note do
     |> sanitize_body()
   end
 
+  @doc "Returns sanitized note HTML, preserving legacy plain text and line breaks."
+  def render_body(body), do: body |> prepare_body() |> Kith.RichText.sanitize()
+
+  defp prepare_body(body) when is_binary(body) do
+    if Regex.match?(~r/<[a-z!\/]/i, body),
+      do: body,
+      else: body |> String.replace("<", "&lt;") |> String.replace(">", "&gt;")
+  end
+
+  defp prepare_body(nil), do: ""
+
   defp sanitize_body(changeset) do
     case get_change(changeset, :body) do
       nil ->
         changeset
 
       body ->
-        sanitized = Kith.RichText.sanitize(body)
+        sanitized = render_body(body)
         put_change(changeset, :body, sanitized)
     end
   end

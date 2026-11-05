@@ -684,7 +684,7 @@ defmodule Kith.DAV.CardDAVPlug do
 
   defp report_contact_response(contact, request, prepared_card) do
     props = [
-      getetag: XMLBuilder.getetag(compute_etag(contact)),
+      getetag: XMLBuilder.getetag(Store.etag(contact, request.version)),
       getcontenttype: XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
       getlastmodified: XMLBuilder.getlastmodified(contact.dav.representation_modified_at)
     ]
@@ -923,8 +923,6 @@ defmodule Kith.DAV.CardDAVPlug do
     |> Repo.all()
   end
 
-  defp compute_etag(contact), do: Store.etag(contact)
-
   defp parse_sync_token(nil), do: nil
   defp parse_sync_token(""), do: nil
 
@@ -1092,7 +1090,7 @@ defmodule Kith.DAV.CardDAVPlug do
           AccessControl.principal_href(conn.assigns.current_scope.user)
         ),
       resourcetype: XMLBuilder.resourcetype(""),
-      getetag: XMLBuilder.getetag(compute_etag(contact)),
+      getetag: XMLBuilder.getetag(Store.etag(contact, requested_vcard_version(conn))),
       getcontenttype: XMLBuilder.getcontenttype("text/vcard; charset=utf-8"),
       getlastmodified: XMLBuilder.getlastmodified(contact.dav.representation_modified_at)
     ]

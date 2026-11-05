@@ -38,7 +38,7 @@ defmodule KithWeb.DAV.RoundTripIntegrityTest do
       end
 
       card = VCardAdapter.contact_to_vcard(owner, version: unquote(version))
-      card = Regex.replace(~r/^(?:RELATED|X-KITH-RELATED)[^\r\n]*\r\n/m, card, "")
+      card = Regex.replace(~r/^(RELATED|X-KITH-RELATED)[^\r\n]*\r\n/m, card, "\\1:\r\n")
       assert authed_dav(c, "PUT", path, card).status == 204
       assert Enum.map(Contacts.list_relationships(owner.id), & &1.id) == [List.last(rels).id]
     end

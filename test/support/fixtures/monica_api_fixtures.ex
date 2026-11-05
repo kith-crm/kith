@@ -223,10 +223,13 @@ defmodule Kith.MonicaApiFixtures do
       "id" => overrides[:id] || System.unique_integer([:positive]),
       "uuid" => overrides[:uuid] || Ecto.UUID.generate(),
       "object" => "contactfield",
-      "content" => overrides[:content] || "test@example.com",
+      "content" => Map.get(overrides, :content, "test@example.com"),
+      "label" => overrides[:label],
       "contact_field_type" => %{
         "id" => overrides[:type_id] || 1,
-        "name" => overrides[:type_name] || "Email"
+        "name" => overrides[:type_name] || "Email",
+        "protocol" => overrides[:protocol],
+        "type" => overrides[:type]
       }
     }
   end

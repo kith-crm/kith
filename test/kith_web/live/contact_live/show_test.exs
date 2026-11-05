@@ -59,6 +59,80 @@ defmodule KithWeb.ContactLive.ShowTest do
       assert html =~ "Note"
     end
 
+    test "note editing selects saved content and privacy and only updates that note", %{
+      conn: conn,
+      contact: contact,
+      user: user
+    } do
+      first =
+        note_fixture(contact, user.id, %{
+          "body" => "<strong>First saved</strong>",
+          "is_private" => true
+        })
+
+      second = note_fixture(contact, user.id, %{"body" => "<em>Second saved</em>"})
+      {:ok, view, html} = live(conn, ~p"/contacts/#{contact.id}")
+      assert html =~ "<strong>First saved</strong>"
+      assert html =~ "<em>Second saved</em>"
+
+      view
+      |> element("button[phx-click=edit-entry][phx-value-id='#{first.id}'][phx-value-type=note]")
+      |> render_click()
+
+      assert has_element?(view, "input[name='entry[is_private]'][checked]")
+      assert has_element?(view, "input[name='entry[body]'][value='<strong>First saved</strong>']")
+
+      view
+      |> form("form[phx-submit=save-entry]")
+      |> render_submit(entry: %{body: "<del>Updated first</del>", is_private: "true"})
+
+      assert Kith.Contacts.get_note!(contact.account_id, first.id, user.id).body ==
+               "<del>Updated first</del>"
+
+      assert Kith.Contacts.get_note!(contact.account_id, second.id, user.id).body ==
+               "<em>Second saved</em>"
+
+      view
+      |> element("button[phx-click=edit-entry][phx-value-id='#{second.id}'][phx-value-type=note]")
+      |> render_click()
+
+      refute has_element?(view, "input[name='entry[is_private]'][checked]")
+      assert has_element?(view, "input[name='entry[body]'][value='<em>Second saved</em>']")
+    end
+
+    test "invalid note submissions retain submitted privacy and editor value", %{
+      conn: conn,
+      contact: contact
+    } do
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      view |> element("button[phx-click=open-entry-modal][phx-value-type=note]") |> render_click()
+
+      view
+      |> form("form[phx-submit=save-entry]")
+      |> render_submit(entry: %{body: "   ", is_private: "true"})
+
+      assert has_element?(view, "input[name='entry[body]'][value='   ']")
+      assert has_element?(view, "input[name='entry[is_private]'][checked]")
+      assert render(view) =~ "can&#39;t be blank"
+    end
+
+    test "private notes remain hidden from another account member", %{
+      conn: conn,
+      contact: contact,
+      user: user
+    } do
+      other =
+        Kith.AccountsFixtures.user_fixture()
+        |> Ecto.Changeset.change(account_id: user.account_id)
+        |> Kith.Repo.update!()
+
+      note_fixture(contact, other.id, %{"body" => "Private secret", "is_private" => true})
+      note_fixture(contact, other.id, %{"body" => "Shared note"})
+      {:ok, _view, html} = live(conn, ~p"/contacts/#{contact.id}")
+      refute html =~ "Private secret"
+      assert html =~ "Shared note"
+    end
+
     test "quick-add buttons are visible", %{conn: conn, contact: contact} do
       {:ok, _view, html} = live(conn, ~p"/contacts/#{contact.id}")
       assert html =~ "+ Note"
@@ -109,6 +183,35 @@ defmodule KithWeb.ContactLive.ShowTest do
 
       {:ok, _view, html} = live(conn, ~p"/contacts/#{contact.id}")
       assert html =~ "jane@example.com"
+    end
+  end
+
+  test "canonical contact field protocols render usable links", %{
+    conn: conn,
+    contact: contact,
+    account_id: account_id
+  } do
+    for {protocol, value, target} <- [
+          {"tel", "+12025550100", "tel:+12025550100"},
+          {"mailto", "fixture@example.test", "mailto:fixture@example.test"},
+          {"https", "example.test/profile", "https://example.test/profile"},
+          {"http", "http://example.test/profile", "http://example.test/profile"}
+        ] do
+      {:ok, type} =
+        Kith.Contacts.create_contact_field_type(account_id, %{
+          name: "Canonical #{protocol}",
+          protocol: protocol
+        })
+
+      {:ok, _} =
+        Kith.Contacts.create_contact_field(contact, %{
+          value: value,
+          label: "Work",
+          contact_field_type_id: type.id
+        })
+
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+      assert has_element?(view, "a[href='#{target}']")
     end
   end
 
@@ -221,6 +324,53 @@ defmodule KithWeb.ContactLive.ShowTest do
       assert [_] = Kith.Reminders.list_reminders(account_id, contact.id)
       {:ok, _} = Kith.Reminders.delete_reminder(reminder)
       assert [] = Kith.Reminders.list_reminders(account_id, contact.id)
+    end
+  end
+
+  describe "timeline photo viewer" do
+    test "storage backed thumbnails open one viewer in either layout", %{
+      conn: conn,
+      contact: contact
+    } do
+      filename = "MqkbdPlbb5ChW49ifnLKWcchWDhOSQEGwSbIfKvb.jpeg"
+      photo = photo_fixture(contact, %{"file_name" => filename})
+      {:ok, view, html} = live(conn, ~p"/contacts/#{contact.id}")
+      refute html =~ filename
+
+      assert has_element?(
+               view,
+               ~s(button[aria-label="View photo"] img[src="#{Kith.Storage.url(photo.storage_key)}"])
+             )
+
+      view |> element(~s(button[aria-label="View photo"])) |> render_click()
+      assert has_element?(view, "#photo-modal img[src='#{Kith.Storage.url(photo.storage_key)}']")
+      view |> with_target("#activity-stream") |> render_hook("close-photo", %{})
+      refute has_element?(view, "#photo-modal")
+
+      view
+      |> element(~s(button[phx-click="filter-toggle"][phx-value-type="photo"]))
+      |> render_click()
+
+      assert has_element?(view, ~s(button[aria-label="View photo"] img))
+      view |> element(~s(button[aria-label="View photo"])) |> render_click()
+      assert has_element?(view, "#photo-modal")
+      assert Kith.Contacts.get_photo!(contact.account_id, photo.id).file_name == filename
+    end
+
+    test "rejects foreign account and contact photo identifiers", %{conn: conn, contact: contact} do
+      other_contact = contact_fixture(contact.account_id)
+      foreign_user = Kith.AccountsFixtures.user_fixture()
+      foreign_contact = contact_fixture(foreign_user.account_id)
+      photos = [photo_fixture(other_contact), photo_fixture(foreign_contact)]
+      {:ok, view, _} = live(conn, ~p"/contacts/#{contact.id}")
+
+      for photo <- photos do
+        view
+        |> with_target("#activity-stream")
+        |> render_hook("open-photo", %{"id" => to_string(photo.id)})
+
+        refute has_element?(view, "#photo-modal")
+      end
     end
   end
 

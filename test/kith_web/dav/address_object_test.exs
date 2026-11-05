@@ -16,6 +16,132 @@ defmodule KithWeb.DAV.AddressObjectTest do
 
   setup :setup_dav_user
 
+  test "GET projects forward and inverse labels once and excludes deleted and foreign targets",
+       c do
+    owner = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Owner"})
+    target = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Target"})
+    gone = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Deleted Secret"})
+
+    foreign =
+      ContactsFixtures.contact_fixture(Kith.AccountsFixtures.user_fixture().account_id, %{
+        first_name: "Foreign Secret"
+      })
+
+    parent = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "parent")
+    child = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "child")
+    ContactsFixtures.relationship_fixture(owner, target, parent.id)
+    ContactsFixtures.relationship_fixture(target, owner, child.id)
+    ContactsFixtures.relationship_fixture(owner, gone, parent.id)
+    Contacts.soft_delete_contact(gone)
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Kith.Repo.insert_all(Kith.Contacts.Relationship, [
+      %{
+        account_id: c.account_id,
+        contact_id: owner.id,
+        related_contact_id: foreign.id,
+        relationship_type_id: parent.id,
+        inserted_at: now,
+        updated_at: now
+      }
+    ])
+
+    for {contact, label} <- [{owner, "Parent"}, {target, "Child"}] do
+      response = authed_dav(c, "GET", contact_path(contact))
+      assert response.status == 200
+      response = %{response | resp_body: String.replace(response.resp_body, ~r/\r?\n[ \t]/, "")}
+      assert response.resp_body =~ "X-ABLabel:_$!<#{label}>!$_"
+      assert length(Regex.scan(~r/X-ABRELATEDNAMES:/, response.resp_body)) == 1
+      assert length(Regex.scan(~r/X-KITH-RELATED;/, response.resp_body)) == 1
+      refute response.resp_body =~ "Deleted Secret"
+      refute response.resp_body =~ "Foreign Secret"
+    end
+  end
+
+  test "PUT distinguishes omitted, name-only, populated and explicitly empty relationships", c do
+    owner = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Owner"})
+    target = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Duplicate"})
+    _duplicate = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Duplicate"})
+    type = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "friend")
+    edge = ContactsFixtures.relationship_fixture(owner, target, type.id)
+    path = contact_path(owner)
+
+    for extra <- ["", "item1.X-ABRELATEDNAMES:Duplicate\r\nitem1.X-ABLabel:Friend\r\n"] do
+      body = String.replace(build_vcard("Owner", ""), "END:VCARD", extra <> "END:VCARD")
+      assert authed_dav(c, "PUT", path, body).status == 204
+      assert [%{id: id}] = Contacts.list_relationships(owner.id)
+      assert id == edge.id
+      assert authed_dav(c, "GET", path).resp_body =~ "X-KITH-RELATED;TYPE=friend:"
+    end
+
+    foreign = ContactsFixtures.contact_fixture(Kith.AccountsFixtures.user_fixture().account_id)
+    hidden = ContactsFixtures.contact_fixture(c.account_id, %{is_archived: true})
+    for contact <- [owner, target, foreign, hidden], do: contact_path(contact)
+
+    uid = fn contact ->
+      Kith.DAV.UID.urn(Kith.Repo.preload(contact, :dav, force: true).dav.uid)
+    end
+
+    entries = ["not-a-uuid", uid.(foreign), uid.(owner), uid.(hidden), uid.(target), uid.(target)]
+    extra = Enum.map_join(entries, "", &("RELATED;TYPE=friend:" <> &1 <> "\r\n"))
+    body = String.replace(build_vcard_v40("Owner", ""), "END:VCARD", extra <> "END:VCARD")
+    assert authed_dav(c, "PUT", path, body).status == 204
+    assert [%{id: id, related_contact_id: target_id}] = Contacts.list_relationships(owner.id)
+    assert id == edge.id
+    assert target_id == target.id
+
+    body =
+      String.replace(
+        build_vcard_v40("Owner", ""),
+        "END:VCARD",
+        "RELATED;TYPE=friend:\r\nEND:VCARD"
+      )
+
+    assert authed_dav(c, "PUT", path, body).status == 204
+    assert Contacts.list_relationships(owner.id) == []
+
+    body =
+      String.replace(
+        build_vcard_v40("Owner", ""),
+        "END:VCARD",
+        "RELATED;TYPE=friend:#{uid.(target)}\r\nEND:VCARD"
+      )
+
+    assert authed_dav(c, "PUT", path, body).status == 204
+    assert [%{related_contact_id: ^target_id}] = Contacts.list_relationships(owner.id)
+  end
+
+  test "text-only related properties preserve native links while URI empty still clears", c do
+    owner = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Owner"})
+    target = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Duplicate"})
+    _duplicate = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Duplicate"})
+    type = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "friend")
+    edge = ContactsFixtures.relationship_fixture(owner, target, type.id)
+    path = contact_path(owner)
+
+    for builder <- [&build_vcard/2, &build_vcard_v40/2],
+        property <- ["RELATED", "X-KITH-RELATED"],
+        name <- ["Duplicate", ""] do
+      extra = "#{property};VALUE=text:#{name}\r\n"
+      body = String.replace(builder.("Owner", ""), "END:VCARD", extra <> "END:VCARD")
+      assert authed_dav(c, "PUT", path, body).status == 204
+      assert [%{id: id, related_contact_id: target_id}] = Contacts.list_relationships(owner.id)
+      assert id == edge.id
+      assert target_id == target.id
+      assert authed_dav(c, "GET", path).resp_body =~ extra
+    end
+
+    body =
+      String.replace(
+        build_vcard_v40("Owner", ""),
+        "END:VCARD",
+        "RELATED;VALUE=text:Duplicate\r\nRELATED;VALUE=uri:\r\nEND:VCARD"
+      )
+
+    assert authed_dav(c, "PUT", path, body).status == 204
+    assert Contacts.list_relationships(owner.id) == []
+  end
+
   test "PUT preserves family-only and formatted-only native names",
        %{account_id: aid} = context do
     for {name, structured, first, last} <- [
@@ -816,6 +942,79 @@ defmodule KithWeb.DAV.AddressObjectTest do
       assert conn_get.resp_body =~ "CATEGORIES:"
       assert conn_get.resp_body =~ "Family"
       assert conn_get.resp_body =~ "VIP"
+    end
+
+    test "full replacement clears tags when CATEGORIES is empty or omitted", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      path = contact_path(contact)
+
+      for replacement <- [[], nil] do
+        assert authed_dav(
+                 context,
+                 "PUT",
+                 path,
+                 build_vcard("Jane", "Doe", categories: ["Family", "VIP"])
+               ).status == 204
+
+        assert authed_dav(context, "GET", path).resp_body =~ "Family"
+
+        assert authed_dav(
+                 context,
+                 "PUT",
+                 path,
+                 build_vcard("Jane", "Doe", categories: replacement)
+               ).status == 204
+
+        {:ok, [parsed]} = Kith.VCard.Parser.parse(authed_dav(context, "GET", path).resp_body)
+        assert parsed.categories in [[], [""]]
+        assert Kith.Repo.preload(contact, :tags, force: true).tags == []
+      end
+    end
+
+    test "categories deduplicate escaped values and never reuse another account's tags",
+         context do
+      other = Kith.AccountsFixtures.user_fixture().account_id
+      {:ok, foreign} = Contacts.create_tag(other, %{name: "Family"})
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      path = contact_path(contact)
+      categories = ["Family", "VIP", "Music,Art", "Semi;colon", "Back\\slash", "أصدقاء"]
+      escaped = Enum.map(categories, &Kith.VCard.Serializer.escape/1)
+      vcard = build_vcard("Jane", "Doe", categories: escaped ++ ["Family", "", "   "])
+      assert authed_dav(context, "PUT", path, vcard).status == 204
+      get = authed_dav(context, "GET", path)
+      assert {:ok, document} = Kith.VCard.Document.parse(get.resp_body)
+
+      names =
+        document
+        |> Kith.VCard.Document.properties("CATEGORIES")
+        |> Enum.flat_map(&Kith.DAV.Document.category_values(&1.value))
+
+      assert names |> Enum.reject(&(String.trim(&1) == "")) |> Enum.uniq() |> Enum.sort() ==
+               Enum.sort(categories)
+
+      tags = Kith.Repo.preload(contact, :tags, force: true).tags
+      assert length(tags) == length(categories)
+      assert Enum.all?(tags, &(&1.account_id == context.account_id and &1.id != foreign.id))
+      assert Contacts.get_tag!(other, foreign.id).name == "Family"
+    end
+
+    test "invalid category rolls back native fields, tags, DAV bytes and revision", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      path = contact_path(contact)
+
+      assert authed_dav(context, "PUT", path, build_vcard("Jane", "Doe", categories: ["Family"])).status ==
+               204
+
+      before = authed_dav(context, "GET", path)
+      state = Kith.DAV.Store.sync_state(context.account_id)
+      invalid = build_vcard("Changed", "Name", categories: ["VIP", String.duplicate("x", 256)])
+      assert authed_dav(context, "PUT", path, invalid).status == 403
+      after_write = authed_dav(context, "GET", path)
+      assert after_write.resp_body == before.resp_body
+      assert get_resp_header(after_write, "etag") == get_resp_header(before, "etag")
+      assert Kith.DAV.Store.sync_state(context.account_id) == state
+      assert [%{name: "Family"}] = Kith.Repo.preload(contact, :tags, force: true).tags
+      refute Enum.any?(Contacts.list_tags(context.account_id), &(&1.name == "VIP"))
     end
 
     test "PUT vCard replaces existing tags (not appends)",

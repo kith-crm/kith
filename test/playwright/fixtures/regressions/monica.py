@@ -14,7 +14,7 @@ CONTACT = {
     "last_name": "Fixture", "is_active": True, "is_dead": False, "is_partial": False,
     "information": {"dates": {}, "career": {}, "avatar": {"source": "default"},
                     "relationships": {}, "how_you_met": {}},
-    "addresses": [], "tags": [], "contactFields": [], "notes": NOTES[-3:],
+    "addresses": [], "tags": [], "contactFields": [{"id": 501, "uuid": "fixture-mobile-501", "content": "+1 (202) 555-0100", "label": "Work", "contact_field_type": {"name": "Fixture custom mobile", "type": "phone", "protocol": "tel:"}}], "notes": NOTES[-3:],
     "statistics": {"number_of_notes": 10, "number_of_calls": 0, "number_of_activities": 0,
                    "number_of_gifts": 0, "number_of_debts": 0, "number_of_tasks": 0,
                    "number_of_reminders": 0, "number_of_conversations": 1},

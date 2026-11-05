@@ -31,6 +31,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
   import Ecto.Query, warn: false
 
   alias Kith.Contacts
+  alias Kith.Contacts.FieldProtocol
   alias Kith.Contacts.PhoneFormatter
   alias Kith.Contacts.Write
   alias Kith.DAV.Store
@@ -542,6 +543,10 @@ defmodule Kith.Imports.Sources.MonicaApi do
          {local_id, import_id}
        ) do
     case Repo.get(Contacts.Contact, local_id) do
+      %{account_id: account_id} when account_id != ctx.account_id ->
+        {add_error(acc, "Contact #{source_id}: import mapping belongs to another account"),
+         deferred}
+
       # Purged since the earlier import: create it again as a new contact.
       nil ->
         do_create_api_contact(ctx, api_contact, source_id, ref_data, acc, deferred)
@@ -557,7 +562,15 @@ defmodule Kith.Imports.Sources.MonicaApi do
         acc = %{acc | created_contact_ids: [contact.id | acc.created_contact_ids]}
         import_api_contact_children(ctx, contact, api_contact, source_id, ref_data, acc, deferred)
 
-      _contact ->
+      contact ->
+        acc =
+          if ctx.opts["recover_contact_fields"] == true do
+            import_api_contact_fields(contact, api_contact, ref_data, ctx)
+            |> Enum.reduce(acc, &add_error(&2, &1))
+          else
+            acc
+          end
+
         Logger.info(
           "[MonicaApi] Skipping #{api_contact_display_name(api_contact)}: already imported by an earlier import"
         )
@@ -646,7 +659,9 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   defp import_api_contact_children(ctx, contact, api_contact, source_id, ref_data, acc, deferred) do
     # Contact fields (embedded with ?with=contactfields)
-    import_api_contact_fields(contact, api_contact, ref_data, ctx)
+    acc =
+      import_api_contact_fields(contact, api_contact, ref_data, ctx)
+      |> Enum.reduce(acc, &add_error(&2, &1))
 
     # Addresses (embedded directly)
     import_api_addresses(contact, api_contact, ctx.import_job)
@@ -711,50 +726,69 @@ defmodule Kith.Imports.Sources.MonicaApi do
   end
 
   defp import_api_contact_fields(contact, api_contact, ref_data, ctx) do
-    fields = api_contact["contactFields"] || []
+    case api_contact["contactFields"] do
+      fields when is_list(fields) ->
+        Enum.flat_map(fields, fn field ->
+          contact_field_errors(
+            import_single_contact_field(contact, field, ref_data, ctx),
+            api_contact["id"]
+          )
+        end)
 
-    Enum.each(fields, fn field ->
-      import_single_contact_field(contact, field, ref_data, ctx)
-    end)
-  end
-
-  defp import_single_contact_field(contact, field, ref_data, ctx) do
-    cft_name = get_in(field, ["contact_field_type", "name"])
-    cft_id = if cft_name, do: Map.get(ref_data.contact_field_types, cft_name)
-    raw_value = field["content"]
-    value = normalize_field_value(raw_value, cft_id, ref_data, ctx)
-
-    if cft_id && value && !contact_field_duplicate?(contact.id, cft_id, value) do
-      create_contact_field(contact, field, cft_id, value, ctx.import_job)
+      _ ->
+        [
+          "Contact #{api_contact["id"]}: embedded contactFields unavailable; recovery requires source evidence"
+        ]
     end
   end
 
-  # Normalize phone fields to E.164 at import time so detection and intra-contact
-  # dedup do simple equality. Other field types (email, social, etc) pass through.
+  defp contact_field_errors({:error, _}, source_id),
+    do: ["Contact #{source_id}: contact field could not be imported"]
+
+  defp contact_field_errors(_, _source_id), do: []
+
+  defp import_single_contact_field(contact, field, ref_data, ctx) do
+    cft_id = Map.get(ref_data.contact_field_types, contact_field_type_key(field))
+    value = normalize_field_value(field["content"], cft_id, ref_data, ctx)
+
+    cond do
+      value in [nil, ""] -> :ok
+      is_nil(cft_id) or not is_binary(value) -> {:error, :invalid_field}
+      true -> reconcile_contact_field(contact, field, cft_id, value, ref_data, ctx)
+    end
+  end
+
+  # Normalize once before duplicate detection; insertion bypasses normalization.
   defp normalize_field_value(nil, _cft_id, _ref_data, _ctx), do: nil
 
   defp normalize_field_value(value, cft_id, ref_data, ctx) when is_binary(value) do
     if cft_id && Map.has_key?(ref_data.phone_cft_ids, cft_id) do
       region = parse_phone_region(ctx.opts["phone_default_region"])
       {:ok, normalized} = PhoneFormatter.normalize(value, region)
-      normalized || value
+      normalized
     else
-      value
+      case String.trim(value) do
+        "" -> nil
+        _ -> value
+      end
     end
   end
+
+  defp normalize_field_value(value, _cft_id, _ref_data, _ctx), do: value
 
   defp parse_phone_region(region) when region in [nil, ""], do: nil
   defp parse_phone_region(region) when is_binary(region), do: region
 
   defp create_contact_field(contact, field, cft_id, value, import_job) do
-    attrs = %{"value" => value, "contact_field_type_id" => cft_id}
+    attrs = %{"value" => value, "label" => field["label"], "contact_field_type_id" => cft_id}
 
     case Contacts.create_contact_field(contact, attrs, normalize: false) do
       {:ok, cf} ->
         maybe_record_entity(import_job, "contact_field", field["uuid"], "contact_field", cf.id)
+        :ok
 
-      {:error, reason} ->
-        Logger.warning("[MonicaApi] Contact field for #{contact.first_name}: #{inspect(reason)}")
+      {:error, _reason} ->
+        {:error, :rejected_field}
     end
   end
 
@@ -1334,12 +1368,32 @@ defmodule Kith.Imports.Sources.MonicaApi do
   defp collect_api_contact_field_types(contacts) do
     contacts
     |> Enum.flat_map(fn c ->
-      (c["contactFields"] || [])
-      |> Enum.map(&get_in(&1, ["contact_field_type", "name"]))
+      case c["contactFields"] do
+        fields when is_list(fields) -> Enum.map(fields, &contact_field_type_key/1)
+        _ -> []
+      end
     end)
-    |> Enum.reject(&is_nil/1)
+    |> Enum.reject(fn {name, _protocol} -> is_nil(name) end)
     |> Enum.uniq()
   end
+
+  defp contact_field_type_key(field) do
+    type = field["contact_field_type"] || %{}
+    protocol = canonical_protocol(type["protocol"])
+
+    classification =
+      if non_empty_string(type["protocol"]) && is_nil(protocol), do: :generic, else: protocol
+
+    {type["name"], classification}
+  end
+
+  defp canonical_protocol(protocol) when is_binary(protocol) do
+    normalized = FieldProtocol.normalize(protocol)
+
+    if normalized in ~w(tel mailto https http), do: normalized
+  end
+
+  defp canonical_protocol(_), do: nil
 
   defp find_or_create_genders(_account_id, []), do: %{}
 
@@ -1375,18 +1429,111 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   defp find_or_create_contact_field_types(_account_id, []), do: %{}
 
-  defp find_or_create_contact_field_types(account_id, names) do
-    Map.new(names, fn name ->
-      cft =
-        Repo.one(
+  defp find_or_create_contact_field_types(account_id, keys) do
+    Map.new(keys, fn {name, protocol} = key ->
+      # Explicitly unsupported source protocols are intentionally generic, not
+      # legacy types awaiting repair. Keep their identity separate across pages
+      # and reruns so later supported metadata cannot reclassify their fields.
+      name = if protocol == :generic, do: "#{name} (Monica generic)", else: name
+
+      types =
+        Repo.all(
           from(t in Contacts.ContactFieldType,
             where: t.name == ^name and (t.account_id == ^account_id or is_nil(t.account_id)),
-            limit: 1
+            order_by: [desc_nulls_last: t.account_id, asc: t.id]
           )
-        ) || elem(Contacts.create_contact_field_type(account_id, %{name: name}), 1)
+        )
 
-      {name, cft.id}
+      matching = Enum.find(types, &matching_field_protocol?(&1.protocol, protocol))
+      target_protocol = if protocol == :generic, do: nil, else: protocol
+      cft = matching || resolve_metadata_type(account_id, name, target_protocol, types)
+      {key, cft.id}
     end)
+  end
+
+  defp matching_field_protocol?(_existing, nil), do: true
+  defp matching_field_protocol?(existing, :generic), do: is_nil(existing) or existing == ""
+  defp matching_field_protocol?(existing, protocol), do: canonical_protocol(existing) == protocol
+
+  defp resolve_metadata_type(account_id, name, protocol, types) do
+    legacy =
+      Enum.find(
+        types,
+        &(&1.account_id == account_id and is_nil(&1.protocol) and
+            not String.contains?(&1.name, " (Monica generic)") and monica_only_type?(&1))
+      )
+
+    if legacy do
+      contact_ids =
+        Repo.all(
+          from(f in Contacts.ContactField,
+            where: f.account_id == ^account_id and f.contact_field_type_id == ^legacy.id,
+            select: f.contact_id
+          )
+        )
+
+      {:ok, repaired} =
+        Write.run(account_id, contact_ids, fn ->
+          Contacts.update_contact_field_type(legacy, %{protocol: protocol})
+        end)
+
+      repaired
+    else
+      # A same-name user/global type with different semantics stays untouched.
+      local_name =
+        if Enum.any?(types, &(&1.account_id == account_id)),
+          do: "#{name} (Monica #{protocol})",
+          else: name
+
+      find_or_create_metadata_type(account_id, local_name, protocol, 0)
+    end
+  end
+
+  defp find_or_create_metadata_type(account_id, name, protocol, attempt) do
+    candidate = if attempt == 0, do: name, else: "#{name} #{attempt}"
+
+    existing =
+      Repo.one(
+        from(t in Contacts.ContactFieldType,
+          where: t.account_id == ^account_id and t.name == ^candidate
+        )
+      )
+
+    cond do
+      is_nil(existing) ->
+        {:ok, created} =
+          Contacts.create_contact_field_type(account_id, %{name: candidate, protocol: protocol})
+
+        created
+
+      canonical_protocol(existing.protocol) == protocol ->
+        existing
+
+      true ->
+        find_or_create_metadata_type(account_id, name, protocol, attempt + 1)
+    end
+  end
+
+  defp monica_only_type?(type) do
+    fields =
+      Repo.all(
+        from(f in Contacts.ContactField,
+          where: f.account_id == ^type.account_id and f.contact_field_type_id == ^type.id,
+          select: f.id
+        )
+      )
+
+    imported =
+      Repo.all(
+        from(r in Imports.ImportRecord,
+          where:
+            r.account_id == ^type.account_id and r.source == "monica_api" and
+              r.local_entity_type == "contact_field" and r.local_entity_id in ^fields,
+          select: r.local_entity_id
+        )
+      )
+
+    fields != [] and MapSet.new(fields) == MapSet.new(imported)
   end
 
   # O(1)-lookup map of phone-protocol contact_field_type IDs. A plain map
@@ -1566,19 +1713,90 @@ defmodule Kith.Imports.Sources.MonicaApi do
     Imports.record_imported_entity(import_job, type, to_string(source_id), local_type, local_id)
   end
 
-  defp contact_field_duplicate?(_contact_id, nil, _value), do: false
-  defp contact_field_duplicate?(_contact_id, _cft_id, nil), do: false
+  # A source UUID is authoritative only after checking its local target. Invalid
+  # mappings stay intact for diagnosis; never redirect them or mutate another row.
+  defp reconcile_contact_field(contact, field, cft_id, value, ref_data, ctx) do
+    Write.run(ctx.account_id, [contact.id], fn ->
+      do_reconcile_contact_field(contact, field, cft_id, value, ref_data, ctx)
+    end)
+  end
 
-  defp contact_field_duplicate?(contact_id, cft_id, value) do
-    Repo.exists?(
+  defp do_reconcile_contact_field(contact, field, cft_id, value, ref_data, ctx) do
+    case contact_field_mapping(field["uuid"], ctx.account_id) do
+      nil ->
+        if duplicate_contact_field?(contact.id, field, cft_id, value, ref_data, ctx),
+          do: :ok,
+          else: create_contact_field(contact, field, cft_id, value, ctx.import_job)
+
+      mapping ->
+        mapping
+        |> mapped_contact_field(contact.id, cft_id, ctx.account_id)
+        |> reconcile_mapped_field(field, cft_id, value, ref_data, ctx)
+    end
+  end
+
+  defp contact_field_mapping(uuid, _account_id) when uuid in [nil, ""], do: nil
+
+  defp contact_field_mapping(uuid, account_id) do
+    Imports.find_import_record(account_id, "monica_api", "contact_field", to_string(uuid))
+  end
+
+  defp mapped_contact_field(
+         %{local_entity_type: "contact_field"} = mapping,
+         contact_id,
+         cft_id,
+         account_id
+       ) do
+    Repo.one(
       from(cf in Contacts.ContactField,
         where:
-          cf.contact_id == ^contact_id and
-            cf.contact_field_type_id == ^cft_id and
-            fragment("lower(?)", cf.value) == fragment("lower(?)", ^value)
+          cf.id == ^mapping.local_entity_id and cf.account_id == ^account_id and
+            cf.contact_id == ^contact_id and cf.contact_field_type_id == ^cft_id
       )
     )
   end
+
+  defp mapped_contact_field(_mapping, _contact_id, _cft_id, _account_id), do: nil
+
+  defp reconcile_mapped_field(nil, _field, _cft_id, _value, _ref_data, _ctx),
+    do: {:error, :invalid_field_mapping}
+
+  defp reconcile_mapped_field(existing, field, cft_id, value, ref_data, ctx) do
+    cond do
+      not matching_field_value?(existing.value, value, cft_id, ref_data, ctx) ->
+        {:error, :changed_field_mapping}
+
+      ctx.opts["recover_contact_fields"] == true and blank_field_label?(existing.label) and
+          not blank_field_label?(field["label"]) ->
+        Contacts.update_contact_field(existing, %{label: field["label"]})
+
+      true ->
+        :ok
+    end
+  end
+
+  defp duplicate_contact_field?(contact_id, field, cft_id, value, ref_data, ctx) do
+    from(cf in Contacts.ContactField,
+      where:
+        cf.account_id == ^ctx.account_id and cf.contact_id == ^contact_id and
+          cf.contact_field_type_id == ^cft_id
+    )
+    |> Repo.all()
+    |> Enum.any?(fn existing ->
+      matching_field_value?(existing.value, value, cft_id, ref_data, ctx) and
+        normalized_field_label(existing.label) == normalized_field_label(field["label"])
+    end)
+  end
+
+  defp matching_field_value?(existing, value, cft_id, ref_data, ctx) do
+    normalized = normalize_field_value(existing, cft_id, ref_data, ctx)
+    is_binary(normalized) and String.downcase(normalized) == String.downcase(value)
+  end
+
+  defp normalized_field_label(nil), do: ""
+  defp normalized_field_label(label) when is_binary(label), do: String.trim(label)
+  defp normalized_field_label(label), do: label
+  defp blank_field_label?(label), do: normalized_field_label(label) == ""
 
   defp address_duplicate?(contact_id, line1, city, country) do
     Repo.exists?(

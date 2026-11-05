@@ -13,6 +13,61 @@ defmodule KithWeb.API.ContactExportControllerTest do
     %{conn: put_req_header(conn, "authorization", "Bearer #{raw_token}"), user: user}
   end
 
+  test "single and bulk exports include inverse labels and collapse imported pairs", %{
+    conn: conn,
+    user: user
+  } do
+    owner = contact_fixture(user.account_id, %{first_name: "Export Owner"})
+    target = contact_fixture(user.account_id, %{first_name: "Export Target"})
+    deleted = contact_fixture(user.account_id, %{first_name: "Deleted Target"})
+
+    foreign =
+      contact_fixture(Kith.AccountsFixtures.user_fixture().account_id, %{
+        first_name: "Foreign Target"
+      })
+
+    {:ok, type} =
+      Kith.Contacts.create_relationship_type(user.account_id, %{
+        name: "Mentor",
+        reverse_name: "Mentee"
+      })
+
+    relationship_fixture(target, owner, type.id)
+    relationship_fixture(deleted, owner, type.id)
+    Kith.Contacts.soft_delete_contact(deleted)
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    Kith.Repo.insert_all(Kith.Contacts.Relationship, [
+      %{
+        account_id: user.account_id,
+        contact_id: owner.id,
+        related_contact_id: foreign.id,
+        relationship_type_id: type.id,
+        inserted_at: now,
+        updated_at: now
+      }
+    ])
+
+    for path <- [~p"/api/contacts/#{owner.id}/export.vcf", ~p"/api/contacts/export.vcf"] do
+      response = get(recycle(conn), path)
+      assert response.status == 200
+      cards = String.split(response.resp_body, "BEGIN:VCARD")
+      card = Enum.find(cards, &String.contains?(&1, "FN:Export Owner"))
+      assert card =~ "X-ABRELATEDNAMES:Export Target"
+      assert card =~ "X-ABLabel:Mentee"
+      refute card =~ "Deleted Target"
+      refute card =~ "Foreign Target"
+      assert length(Regex.scan(~r/X-ABRELATEDNAMES:/, card)) == 1
+    end
+
+    relationship_fixture(owner, target, type.id)
+    response = get(recycle(conn), ~p"/api/contacts/#{owner.id}/export.vcf")
+    assert length(Regex.scan(~r/X-ABRELATEDNAMES:Export Target/, response.resp_body)) == 1
+    assert response.resp_body =~ "X-ABLabel:Mentor"
+    refute Kith.DAV.VCardAdapter.contact_to_vcard(owner) =~ "Mentor"
+    refute Kith.DAV.VCardAdapter.contact_to_vcard(owner) =~ "Mentee"
+  end
+
   test "GET /api/contacts/export.vcf exports every active contact", %{conn: conn, user: user} do
     for i <- 1..105, do: contact_fixture(user.account_id, %{first_name: "Export #{i}"})
     other = user_fixture()

@@ -2,6 +2,8 @@ import { test, expect } from "@playwright/test";
 import { registerUser, ensureOnDashboard } from "./helpers/auth";
 import * as path from "path";
 import * as fs from "fs";
+import { execFileSync } from "node:child_process";
+import { passwordLogin } from "./helpers/password-login";
 
 // ─────────────────────────────────────────────────
 // Test data paths
@@ -95,6 +97,7 @@ async function pushLiveViewEvents(
 // ─────────────────────────────────────────────────
 
 test.describe("Monica CRM Import", () => {
+  test.skip(process.env.KITH_LIVE_MONICA_TESTS !== "1", "Requires explicit KITH_LIVE_MONICA_TESTS=1; reads private export/key and contacts the live Monica host");
   // The full import of ~305 contacts can take a while
   test.setTimeout(600_000);
 
@@ -422,4 +425,45 @@ test.describe("Monica Import - Database Verification", () => {
     const hasNewContactLink = content.includes("New Contact") || content.includes("new contact");
     expect(hasNewContactLink).toBe(true);
   });
+});
+
+// Deterministic local coverage never reads the legacy private files above.
+test("Monica custom phone metadata appears in contact details and vCard export", async ({ page }) => {
+  test.skip(process.env.KITH_E2E !== "1", "Requires the local regression harness");
+  test.setTimeout(180_000);
+  const control = (action: string, payload: object) => {
+    const output = execFileSync("mix", ["run", "--no-start", "--no-compile", path.resolve("test/playwright/fixtures/regressions/control.exs"), action, JSON.stringify(payload)], {
+      env: { ...process.env, MIX_ENV: "test", KITH_E2E: "1", KITH_TEST_SERVER: "0" },
+      encoding: "utf8", timeout: 120_000,
+    });
+    const line = output.split(/\r?\n/).findLast((value) => value.startsWith("KITH_TEST_RESULT="));
+    if (!line) throw new Error("Missing local regression control result");
+    return JSON.parse(line.slice("KITH_TEST_RESULT=".length));
+  };
+  const account = control("prepare", { scenario: "import" });
+  await passwordLogin(page, account.email, "ValidP@ssword123!");
+  await page.goto("/settings/import");
+  await expect(page.locator("[data-phx-main].phx-connected")).toBeVisible();
+  await page.getByRole("radio", { name: /Monica CRM \(API\)/ }).check();
+  const source = page.getByPlaceholder("https://your-monica-instance.com");
+  await source.fill(process.env.KITH_TEST_MONICA_URL ?? "http://127.0.0.1:8094");
+  await source.blur();
+  const key = page.getByPlaceholder("Your Monica API key");
+  await key.fill("kith-fixture-token");
+  await key.blur();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByText("Review import settings")).toBeVisible();
+  await page.getByRole("button", { name: "Start import", exact: true }).click();
+  await expect(page.getByText(/Import in progress/)).toBeVisible();
+  const imported = control("drain_import", account);
+  expect(imported.import_status).toBe("completed");
+  expect(imported.contacts).toHaveLength(1);
+  const id = imported.contacts[0].id;
+  await page.goto(`/contacts/${id}`);
+  await expect(page.locator("[data-phx-main].phx-connected")).toBeVisible();
+  await expect(page.locator('a[href="tel:+12025550100"]')).toBeVisible();
+  await expect(page.getByText("Work", { exact: true }).first()).toBeVisible();
+  const response = await page.request.get(`/api/contacts/${id}/export.vcf`, { headers: { Authorization: `Bearer ${account.token}` } });
+  expect(response.ok()).toBeTruthy();
+  expect(await response.text()).toContain("TEL;TYPE=WORK:+12025550100");
 });

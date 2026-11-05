@@ -176,7 +176,7 @@ test("(a) timeline and tile variants render syncing, loaded and unavailable", as
   await expectThreeStates(page);
 });
 
-test("(b) hook-set failed state survives a LiveView patch of the component (updated())", async ({ page }) => {
+test("(b) failed state and generic photo labels survive metadata and timeline patches", async ({ page }) => {
   await login(page);
   await page.goto(`/contacts/${seed.patch_contact}`);
   await page.waitForSelector("[data-phx-main].phx-connected");
@@ -184,10 +184,14 @@ test("(b) hook-set failed state survives a LiveView patch of the component (upda
   await expect(root).toHaveAttribute("data-img-failed", "", { timeout: 10_000 });
   await page.evaluate((id) => { (window as any).__root = document.getElementById(`photo-${id}`); }, seed.patch_photo);
 
-  // Change the alt text (file_name) so the re-render genuinely patches the component.
-  setPhoto(seed.patch_photo, 'file_name: "patch-after.png"');
+  // A visible date change proves the parent patch arrived. Filenames are no
+  // longer image labels; changing one must leave the generic label and cached
+  // failed thumbnail intact. Hook updated() is covered by the JS suite.
+  setPhoto(seed.patch_photo, 'file_name: "patch-after.png", inserted_at: ~U[2020-01-02 12:00:00Z]');
   await requery(page);
-  await expect(root.locator("img")).toHaveAttribute("alt", "patch-after.png");
+  await expect(page.getByText("Jan 02, 2020", { exact: true })).toBeVisible();
+  await expect(root.locator("img")).toHaveAttribute("alt", "Photo");
+  await expect(page.getByText("patch-after.png", { exact: true })).toHaveCount(0);
 
   expect(await page.evaluate((id) => (window as any).__root === document.getElementById(`photo-${id}`), seed.patch_photo)).toBe(true);
   await expect(root).toHaveAttribute("data-img-failed", "");

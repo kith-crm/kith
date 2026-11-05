@@ -617,6 +617,9 @@ defmodule KithWeb.UI do
   attr :id, :string, required: true
   attr :show, :boolean, default: false
   attr :on_cancel, JS, default: %JS{}
+  attr :title, :string, default: nil
+  attr :trap_focus, :boolean, default: false
+  attr :on_remove, JS, default: %JS{}
   slot :inner_block, required: true
 
   def modal(assigns) do
@@ -624,7 +627,7 @@ defmodule KithWeb.UI do
     <div
       id={@id}
       phx-mounted={@show && show_modal(@id)}
-      phx-remove={hide_modal(@id)}
+      phx-remove={hide_modal(@id) |> JS.concat(@on_remove)}
       data-cancel={JS.exec(@on_cancel, "phx-remove")}
       class="relative z-50 hidden"
     >
@@ -646,6 +649,7 @@ defmodule KithWeb.UI do
         <div class="flex min-h-full items-center justify-center p-4">
           <div
             id={"#{@id}-container"}
+            phx-hook={@trap_focus && "Phoenix.FocusWrap"}
             phx-window-keydown={JS.exec("data-cancel", to: "##{@id}")}
             phx-key="escape"
             phx-click-away={JS.exec("data-cancel", to: "##{@id}")}
@@ -654,8 +658,10 @@ defmodule KithWeb.UI do
               "transition-all duration-300"
             ]}
           >
+            <div :if={@trap_focus} id={"#{@id}-start"} tabindex="0" aria-hidden="true"></div>
             <div class="flex items-center justify-between mb-4">
               <h2 id={"#{@id}-title"} class="text-lg font-semibold text-[var(--color-text-primary)]">
+                {@title}
               </h2>
               <button
                 phx-click={JS.exec("data-cancel", to: "##{@id}")}
@@ -669,6 +675,7 @@ defmodule KithWeb.UI do
             <div id={"#{@id}-description"}>
               {render_slot(@inner_block)}
             </div>
+            <div :if={@trap_focus} id={"#{@id}-end"} tabindex="0" aria-hidden="true"></div>
           </div>
         </div>
       </div>

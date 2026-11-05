@@ -246,9 +246,9 @@
     "type": "XSS.ContentType: XSS in `put_resp_content_type`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "content_type",
-    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
+    "source_sha256": "bb521dfe1e946234ecd638c22630202a411d4c283d6d7763cd4bffaf4d76669f",
     "reason": "Serialized vCard with one of two fixed text/vcard MIME literals and nosniff, never HTML or an arbitrary requested content type.",
-    "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs",
+    "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs; test/kith_web/dav/report_test.exs (version-specific validators and tag synchronization)",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29"
   },
@@ -257,9 +257,9 @@
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "vcard",
-    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
+    "source_sha256": "bb521dfe1e946234ecd638c22630202a411d4c283d6d7763cd4bffaf4d76669f",
     "reason": "Serialized vCard with one of two fixed text/vcard MIME literals and nosniff, never HTML or an arbitrary requested content type.",
-    "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs",
+    "evidence": "test/kith_web/dav/address_object_test.exs; test/kith_web/dav/access_control_test.exs; test/kith_web/dav/report_test.exs (version-specific validators and tag synchronization)",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29"
   },
@@ -286,13 +286,13 @@
     "review_by": "2026-11-29"
   },
   {
-    "line": 1271,
+    "line": 1269,
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "xml",
-    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
+    "source_sha256": "bb521dfe1e946234ecd638c22630202a411d4c283d6d7763cd4bffaf4d76669f",
     "reason": "Owned XMLBuilder output only: text, hrefs, descriptions, validators and tokens are XML-escaped; vCards use CDATA with terminators split. Element names are fixed literals or local names from namespace-aware XML parsing. Fixed application/xml MIME; parsed malicious-content tests create no script elements.",
-    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs",
+    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs; test/kith_web/dav/report_test.exs (version-specific validators and tag synchronization)",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29",
     "reviewed_sources": [
@@ -306,7 +306,7 @@
       },
       {
         "file": "mix.lock",
-        "source_sha256": "daab95c6307647f277224b7c8fb028ec1d8781d51491acdc61c3d486630c3463"
+        "source_sha256": "79c3f96697dd5f07fd6922d401b1740bf8224bb55d09d31bdf6f51ee8e20b8a6"
       }
     ]
   },
@@ -316,18 +316,18 @@
     "file": "lib/kith/rich_text.ex",
     "variable": "sanitize",
     "source_sha256": "9c1bfd1d8443b8db2b758bc71a64b1e034c63d6d96d2dc00f524742810a33fca",
-    "reason": "All output passes HtmlSanitizeEx.Scrubber with the narrow Note.Scrubber tag/URL allowlist immediately before HTML.raw. No unsanitized fallback exists; legacy rows are sanitized again on rendering.",
-    "evidence": "test/kith/rich_text_test.exs; test/kith_web/live/rich_text_security_test.exs",
+    "reason": "All output passes HtmlSanitizeEx.Scrubber with the narrow Note.Scrubber tag/URL allowlist immediately before HTML.raw. No unsanitized fallback exists; legacy rows are sanitized again on rendering. Note.render_body only escapes literal angle brackets before calling the same scrubber; its tag and URL allowlist is unchanged. Escaped imports stay text and are never decoded into executable markup.",
+    "evidence": "test/kith/rich_text_test.exs; test/kith/contacts/note_test.exs; test/kith_web/live/rich_text_security_test.exs; test/playwright/regressions.spec.ts (shipped editor and legacy multiline); test/playwright/contact-notes.spec.ts",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29",
     "reviewed_sources": [
       {
         "file": "lib/kith/contacts/note.ex",
-        "source_sha256": "cd686cca2f0b9811db6c850deca8faa75acaf6f7992d1bf95f00973c4a15a6d6"
+        "source_sha256": "a58a455a626a263992022e7899075c68b6243f17ba461a4a803b486d813aa6c8"
       },
       {
         "file": "mix.lock",
-        "source_sha256": "daab95c6307647f277224b7c8fb028ec1d8781d51491acdc61c3d486630c3463"
+        "source_sha256": "79c3f96697dd5f07fd6922d401b1740bf8224bb55d09d31bdf6f51ee8e20b8a6"
       }
     ]
   },
@@ -352,7 +352,7 @@
       },
       {
         "file": "mix.lock",
-        "source_sha256": "daab95c6307647f277224b7c8fb028ec1d8781d51491acdc61c3d486630c3463"
+        "source_sha256": "79c3f96697dd5f07fd6922d401b1740bf8224bb55d09d31bdf6f51ee8e20b8a6"
       }
     ]
   },
@@ -361,9 +361,9 @@
     "type": "XSS.SendResp: XSS in `send_resp`",
     "file": "lib/kith/dav/carddav_plug.ex",
     "variable": "Elixir.XMLBuilder",
-    "source_sha256": "1e8ff65868b01a5f690379765c368e13505f5ce316c036d90af6b97da99c5c67",
+    "source_sha256": "bb521dfe1e946234ecd638c22630202a411d4c283d6d7763cd4bffaf4d76669f",
     "reason": "Owned XMLBuilder output only: text, hrefs, descriptions, validators and tokens are XML-escaped; vCards use CDATA with terminators split. Element names are fixed literals or local names from namespace-aware XML parsing. Fixed application/xml MIME; parsed malicious-content tests create no script elements.",
-    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs; test/kith_web/dav/propfind_test.exs",
+    "evidence": "test/kith/dav/xml_builder_test.exs; test/kith_web/dav/address_object_test.exs; test/kith_web/dav/propfind_test.exs; test/kith_web/dav/report_test.exs (version-specific validators and tag synchronization)",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29",
     "reviewed_sources": [
@@ -377,7 +377,7 @@
       },
       {
         "file": "mix.lock",
-        "source_sha256": "daab95c6307647f277224b7c8fb028ec1d8781d51491acdc61c3d486630c3463"
+        "source_sha256": "79c3f96697dd5f07fd6922d401b1740bf8224bb55d09d31bdf6f51ee8e20b8a6"
       }
     ]
   },
