@@ -157,6 +157,8 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
     } do
       for {payload, errors} <- [
             {Map.delete(contact_json(id: 1), "contactFields"), 1},
+            {Map.put(contact_json(id: 1), "contactFields", nil), 1},
+            {Map.put(contact_json(id: 1), "contactFields", %{}), 1},
             {contact_json(id: 1), 0}
           ] do
         Req.Test.stub(@stub_name, fn conn ->
@@ -2984,7 +2986,10 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   end
 
   describe "coverage_check_and_backfill" do
-    test "closes a single-ID gap via direct fetch", %{user: user, account_id: account_id} do
+    test "backfills a missing listing contact with embedded phone fields", %{
+      user: user,
+      account_id: account_id
+    } do
       import_job = api_import_fixture(account_id, user.id)
 
       Req.Test.stub(@stub_name, fn conn ->
@@ -3012,6 +3017,8 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
             })
 
           {"GET", "/api/contacts/4"} ->
+            assert conn.query_params["with"] == "contactfields"
+
             Req.Test.json(conn, %{
               "data" => %{
                 "id" => 4,
@@ -3019,7 +3026,13 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                 "last_name" => "X",
                 "is_active" => true,
                 "is_partial" => false,
-                "contactFields" => []
+                "contactFields" => [
+                  contact_field_json(
+                    content: "+12025550100",
+                    type_name: "Phone",
+                    protocol: "tel:"
+                  )
+                ]
               }
             })
 
@@ -3040,9 +3053,15 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert summary.coverage_backfill.skipped_inactive == 0
       assert summary.coverage_backfill.unresolved_gap == 0
       assert summary.imported == 5
+      assert summary.error_count == 0
 
       record = Imports.find_import_record(account_id, "monica_api", "contact", "4")
       refute is_nil(record)
+
+      contact =
+        Contacts.get_contact!(account_id, record.local_entity_id) |> Repo.preload(:contact_fields)
+
+      assert Enum.any?(contact.contact_fields, &(&1.value == "+12025550100"))
     end
 
     @tag :capture_log
