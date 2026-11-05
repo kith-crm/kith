@@ -92,6 +92,7 @@ defmodule Kith.Workers.MonicaHTTPCallersTest do
     assert Imports.count_import_records_by_type(ctx.import_job.id, "document") == 1
   end
 
+  @tag capture_log: true
   test "source connection retries and redirects consume exactly one slot each", ctx do
     destination = "redirect-#{ctx.host}"
 
@@ -124,6 +125,7 @@ defmodule Kith.Workers.MonicaHTTPCallersTest do
     assert hits(destination) == 1
   end
 
+  @tag capture_log: true
   test "misc cancellation after a 429 prevents a retry from being dispatched", ctx do
     contact = contact_fixture(ctx.user.account_id)
     observer = self()
