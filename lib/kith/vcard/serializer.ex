@@ -10,6 +10,7 @@ defmodule Kith.VCard.Serializer do
   - Special characters (semicolons, commas, backslashes, newlines) must be escaped
   """
 
+  alias Kith.Contacts.FieldProtocol
   alias Kith.DAV.UID
 
   @crlf "\r\n"
@@ -323,7 +324,7 @@ defmodule Kith.VCard.Serializer do
     vcard_label = field.contact_field_type.vcard_label
     type_param = type_param_from_label(field.label)
 
-    case normalize_protocol(protocol) do
+    case FieldProtocol.normalize(protocol) do
       "tel" ->
         "TEL#{type_param}:#{escape(field.value)}"
 
@@ -348,16 +349,6 @@ defmodule Kith.VCard.Serializer do
   end
 
   defp contact_field_line(_), do: nil
-
-  defp normalize_protocol(nil), do: ""
-
-  defp normalize_protocol(protocol),
-    do:
-      protocol
-      |> String.trim()
-      |> String.downcase()
-      |> String.trim_trailing("://")
-      |> String.trim_trailing(":")
 
   defp type_param_from_label(nil), do: ""
   defp type_param_from_label(""), do: ""

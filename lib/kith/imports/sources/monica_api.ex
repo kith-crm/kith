@@ -31,6 +31,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
   import Ecto.Query, warn: false
 
   alias Kith.Contacts
+  alias Kith.Contacts.FieldProtocol
   alias Kith.Contacts.PhoneFormatter
   alias Kith.Contacts.Write
   alias Kith.DAV.Store
@@ -1387,18 +1388,11 @@ defmodule Kith.Imports.Sources.MonicaApi do
     {type["name"], classification}
   end
 
-  defp canonical_protocol(protocol) when is_binary(protocol) do
-    normalized =
-      protocol
-      |> String.trim()
-      |> String.downcase()
-      |> String.trim_trailing("://")
-      |> String.trim_trailing(":")
+  defp canonical_protocol(protocol) do
+    normalized = FieldProtocol.normalize(protocol)
 
     if normalized in ~w(tel mailto https http), do: normalized
   end
-
-  defp canonical_protocol(_), do: nil
 
   defp find_or_create_genders(_account_id, []), do: %{}
 
