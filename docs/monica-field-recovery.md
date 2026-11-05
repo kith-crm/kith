@@ -59,10 +59,19 @@ Verify stored values, contact details, and downloaded vCards before considering
 recovery complete. Missing embedded payload diagnostics require source evidence,
 not another blind rerun.
 
-For already mapped live contacts, recovery adds missing fields only and preserves
-unrelated local children, contact attributes, and the original contact mapping.
+For already mapped live contacts, recovery adds missing fields and fills blank
+labels only when a source field UUID maps to the same account, contact, type, and
+normalized value. Nonblank local labels, values, types, unrelated local children,
+contact attributes, and original identity mappings are preserved. An unrelated
+local unlabeled field is never adopted for metadata updates. Stale or mismatched
+field mappings are preserved and reported through redacted import errors.
 It follows merge-survivor mappings, skips soft-deleted contacts, and deduplicates
-normalized values on repeated runs. It does not recreate soft-deleted contacts. The
+normalized values, types, and labels on repeated runs. Distinct nonblank labels
+(such as Work and Home) remain separate fields even when their values match.
+A verified source identity remains represented if its label was locally edited.
+Without a source UUID, matching labels can prevent duplicate inserts, but a blank
+label cannot safely be repaired. Recovery cannot reconstruct metadata absent
+from the source payload. It does not recreate soft-deleted contacts. The
 usual crawler still imports previously unseen contacts and performs its normal
 coverage scan; this is not a source-ID allowlist or an offline backfill tool.
 

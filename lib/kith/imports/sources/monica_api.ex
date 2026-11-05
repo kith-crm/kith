@@ -754,8 +754,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
     cond do
       value in [nil, ""] -> :ok
       is_nil(cft_id) or not is_binary(value) -> {:error, :invalid_field}
-      contact_field_duplicate?(contact.id, cft_id, value, ref_data, ctx) -> :ok
-      true -> create_contact_field(contact, field, cft_id, value, ctx.import_job)
+      true -> reconcile_contact_field(contact, field, cft_id, value, ref_data, ctx)
     end
   end
 
@@ -1714,19 +1713,79 @@ defmodule Kith.Imports.Sources.MonicaApi do
     Imports.record_imported_entity(import_job, type, to_string(source_id), local_type, local_id)
   end
 
-  defp contact_field_duplicate?(contact_id, cft_id, value, ref_data, ctx) do
-    from(cf in Contacts.ContactField,
-      where:
-        cf.account_id == ^ctx.account_id and cf.contact_id == ^contact_id and
-          cf.contact_field_type_id == ^cft_id,
-      select: cf.value
-    )
-    |> Repo.all()
-    |> Enum.any?(fn existing ->
-      normalized = normalize_field_value(existing, cft_id, ref_data, ctx)
-      is_binary(normalized) and String.downcase(normalized) == String.downcase(value)
+  # A source UUID is authoritative only after checking its local target. Invalid
+  # mappings stay intact for diagnosis; never redirect them or mutate another row.
+  defp reconcile_contact_field(contact, field, cft_id, value, ref_data, ctx) do
+    Write.run(ctx.account_id, [contact.id], fn ->
+      do_reconcile_contact_field(contact, field, cft_id, value, ref_data, ctx)
     end)
   end
+
+  defp do_reconcile_contact_field(contact, field, cft_id, value, ref_data, ctx) do
+    mapping =
+      if field["uuid"] not in [nil, ""] do
+        Imports.find_import_record(
+          ctx.account_id,
+          "monica_api",
+          "contact_field",
+          to_string(field["uuid"])
+        )
+      end
+
+    if mapping do
+      existing =
+        if mapping.local_entity_type == "contact_field" do
+          Repo.one(
+            from(cf in Contacts.ContactField,
+              where:
+                cf.id == ^mapping.local_entity_id and cf.account_id == ^ctx.account_id and
+                  cf.contact_id == ^contact.id and cf.contact_field_type_id == ^cft_id
+            )
+          )
+        end
+
+      cond do
+        is_nil(existing) ->
+          {:error, :invalid_field_mapping}
+
+        not matching_field_value?(existing.value, value, cft_id, ref_data, ctx) ->
+          {:error, :changed_field_mapping}
+
+        ctx.opts["recover_contact_fields"] == true and blank_field_label?(existing.label) and
+            not blank_field_label?(field["label"]) ->
+          Contacts.update_contact_field(existing, %{label: field["label"]})
+
+        true ->
+          :ok
+      end
+    else
+      duplicate? =
+        from(cf in Contacts.ContactField,
+          where:
+            cf.account_id == ^ctx.account_id and cf.contact_id == ^contact.id and
+              cf.contact_field_type_id == ^cft_id
+        )
+        |> Repo.all()
+        |> Enum.any?(fn existing ->
+          matching_field_value?(existing.value, value, cft_id, ref_data, ctx) and
+            normalized_field_label(existing.label) == normalized_field_label(field["label"])
+        end)
+
+      if duplicate?,
+        do: :ok,
+        else: create_contact_field(contact, field, cft_id, value, ctx.import_job)
+    end
+  end
+
+  defp matching_field_value?(existing, value, cft_id, ref_data, ctx) do
+    normalized = normalize_field_value(existing, cft_id, ref_data, ctx)
+    is_binary(normalized) and String.downcase(normalized) == String.downcase(value)
+  end
+
+  defp normalized_field_label(nil), do: ""
+  defp normalized_field_label(label) when is_binary(label), do: String.trim(label)
+  defp normalized_field_label(label), do: label
+  defp blank_field_label?(label), do: normalized_field_label(label) == ""
 
   defp address_duplicate?(contact_id, line1, city, country) do
     Repo.exists?(
