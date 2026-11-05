@@ -2,7 +2,7 @@ Code.require_file("boot.exs", __DIR__)
 
 defmodule Kith.RegressionControl do
   import Ecto.Query
-  alias Kith.{Accounts, Contacts, Imports, Reminders, Repo}
+  alias Kith.{Accounts, Contacts, Imports, RegressionClock, Reminders, Repo}
   alias Kith.Contacts.{Contact, DuplicateCandidate, Note}
   alias Kith.Reminders.{Dispatcher, ReminderInstance}
 
@@ -38,6 +38,7 @@ defmodule Kith.RegressionControl do
         Map.merge(base, %{a: a.id, b: b.id, c: c.id})
 
       "reminder" ->
+        dispatch_at = RegressionClock.capture(Reminders.account_today(user.account_id))
         contact = contact!(user, "Mona Reminder", %{deceased: args["deceased"] == true})
         title = if contact.deceased, do: "Visit grave", else: "Queued reminder"
 
@@ -46,10 +47,15 @@ defmodule Kith.RegressionControl do
             type: "one_time",
             title: title,
             contact_id: contact.id,
-            anchor_date: Reminders.account_today(user.account_id)
+            anchor_date: DateTime.to_date(dispatch_at)
           })
 
-        Map.merge(base, %{contact_id: contact.id, reminder_id: reminder.id, title: title})
+        Map.merge(base, %{
+          contact_id: contact.id,
+          reminder_id: reminder.id,
+          title: title,
+          dispatch_at: dispatch_at
+        })
 
       "editor" ->
         contact = contact!(user, "Editor Security")
@@ -126,8 +132,7 @@ defmodule Kith.RegressionControl do
   end
 
   def run("dispatch", args) do
-    today = Reminders.account_today(args["account_id"])
-    :ok = Dispatcher.run(DateTime.new!(today, ~T[23:00:00], "Etc/UTC"))
+    :ok = Dispatcher.run(RegressionClock.now(args))
     reminder_snapshot(args["reminder_id"])
   end
 
@@ -166,7 +171,7 @@ defmodule Kith.RegressionControl do
     "snoozed" = instance.status
 
     instance
-    |> Ecto.Changeset.change(snoozed_until: DateTime.add(DateTime.utc_now(:second), -60))
+    |> Ecto.Changeset.change(snoozed_until: RegressionClock.expired_snooze_at(args))
     |> Repo.update!()
 
     reminder_snapshot(args["reminder_id"])
