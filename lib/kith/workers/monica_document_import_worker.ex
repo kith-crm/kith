@@ -13,6 +13,7 @@ defmodule Kith.Workers.MonicaDocumentImportWorker do
 
   alias Kith.Contacts
   alias Kith.Imports
+  alias Kith.Imports.Sources.MonicaApi.HTTP
   alias Kith.Repo
   alias Kith.Storage
 
@@ -97,7 +98,7 @@ defmodule Kith.Workers.MonicaDocumentImportWorker do
 
     options = [auth: {:bearer, credential.api_key}, headers: headers] ++ credential.req_options
 
-    case Kith.BoundedHTTP.get(url, options) do
+    case HTTP.get(url, options) do
       {:ok, %Req.Response{status: 200, body: body} = resp} ->
         # Req returns header values as lists.
         content_type =

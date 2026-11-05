@@ -4,6 +4,11 @@ defmodule Kith.BoundedHTTP do
   @max_body_bytes 20 * 1024 * 1024
 
   def get(url, options) do
+    url |> new(options) |> Req.get()
+  end
+
+  @doc "Builds the bounded request so consumers can add request steps before dispatch."
+  def new(url, options) do
     # Compression and archive decoders are deliberately disabled even when a
     # configured server sends a content-encoding header without negotiation.
     options =
@@ -13,7 +18,7 @@ defmodule Kith.BoundedHTTP do
         into: &receive_chunk/2
       )
 
-    Req.get(url, options)
+    Req.new(url, options)
   end
 
   defp receive_chunk({:data, chunk}, {request, response}) do

@@ -335,7 +335,8 @@ test("a real UI snooze stays snoozed while archived and wakes only once after un
   expect(control("reminder_snapshot", account).status).toBe("snoozed");
   await contactAction(page, account.contact_id, "archive");
   await expect(page.getByText(/Mona Reminder archived\./)).toBeVisible();
-  control("expire_snooze", account);
+  const expired = control("expire_snooze", account);
+  expect(Date.parse(expired.snoozed_until)).toBeLessThan(Date.parse(account.dispatch_at));
   const sleeping = control("dispatch", account);
   expect(sleeping.status).toBe("snoozed");
   expect(sleeping.email_jobs).toBe(queued.email_jobs);

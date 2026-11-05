@@ -17,12 +17,11 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
 
   alias Kith.Contacts
   alias Kith.Imports
+  alias Kith.Imports.Sources.MonicaApi.HTTP
   alias Kith.Repo
   alias Kith.Storage
 
   @page_limit 100
-  @max_rate_limit_retries 3
-  @rate_limit_sleep_ms :timer.seconds(65)
   @max_photos_in_summary 500
   @log_prefix "[MonicaPhotoSync]"
 
@@ -328,25 +327,13 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
     {System.monotonic_time(:millisecond) - started, result}
   end
 
-  defp api_get_json(credential, url, params),
-    do: api_get_json_with_retry(credential, url, params, 0)
-
-  defp api_get_json_with_retry(_credential, _url, _params, retries)
-       when retries >= @max_rate_limit_retries,
-       do: {:error, :rate_limited}
-
-  defp api_get_json_with_retry(credential, url, params, retries) do
+  defp api_get_json(credential, url, params) do
     case api_get(credential, url, params) do
       {:ok, %{status: 200, body: body}} when is_map(body) ->
         {:ok, body}
 
       {:ok, %{status: 429}} ->
-        Logger.warning(
-          "#{@log_prefix} rate limited, sleeping #{@rate_limit_sleep_ms}ms (retry #{retries + 1})"
-        )
-
-        Process.sleep(@rate_limit_sleep_ms)
-        api_get_json_with_retry(credential, url, params, retries + 1)
+        {:error, :rate_limited}
 
       {:ok, %{status: status}} ->
         {:error, "Unexpected status: #{status}"}
@@ -363,9 +350,9 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
     ]
 
     options =
-      [auth: {:bearer, credential.api_key}, headers: headers, params: params] ++
+      [auth: {:bearer, credential.api_key}, headers: headers, params: params, max_retries: 3] ++
         Map.get(credential, :req_options, [])
 
-    Kith.BoundedHTTP.get(url, options)
+    HTTP.get(url, options)
   end
 end

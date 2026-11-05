@@ -13,6 +13,11 @@ duplicate rejection, import submission, deletion, snoozing, and archival use the
 actual UI. Reminder state and imported message contents are checked through the
 authenticated REST API.
 
+Reminder scenarios capture a single `dispatch_at` timestamp when prepared and
+carry it through each CLI call. Dispatch and forced snooze expiry use that same
+clock, including runs after 23:00 UTC or across midnight. Keep real wall-clock
+time out of forced expiry operations.
+
 ## Prerequisites
 
 - Elixir/OTP from `.tool-versions`, `mix deps.get`, and root `npm ci`.

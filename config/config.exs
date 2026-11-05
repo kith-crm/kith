@@ -14,8 +14,8 @@ config :mime, :types, %{"text/vcard" => ["vcf"], "application/json" => ["json"]}
 # locale-aware territory data without an explicit per-call backend argument.
 config :ex_cldr, default_backend: Kith.Cldr
 
-# Outbound rate limit for Monica API calls. One below the documented
-# default of 60 req/min leaves a one-call safety margin.
+# Outbound Monica HTTP attempts per host per minute. The fallback of 55
+# leaves five requests below Monica's usual 60/min default.
 # Override with the MONICA_RATE_LIMIT_PER_MINUTE env var (config/runtime.exs).
 config :kith, :monica_rate_limit, 55
 
