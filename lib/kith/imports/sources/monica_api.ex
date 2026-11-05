@@ -1388,11 +1388,13 @@ defmodule Kith.Imports.Sources.MonicaApi do
     {type["name"], classification}
   end
 
-  defp canonical_protocol(protocol) do
+  defp canonical_protocol(protocol) when is_binary(protocol) do
     normalized = FieldProtocol.normalize(protocol)
 
     if normalized in ~w(tel mailto https http), do: normalized
   end
+
+  defp canonical_protocol(_), do: nil
 
   defp find_or_create_genders(_account_id, []), do: %{}
 

@@ -331,6 +331,26 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert [%{contact_field_type: %{protocol: nil}}] = mapped_contact(account_id).contact_fields
     end
 
+    test "malformed source protocols remain generic", %{user: user, account_id: account_id} do
+      stub_fields([
+        contact_field_json(type_name: "Numeric custom", protocol: 42, content: "numeric value"),
+        contact_field_json(
+          type_name: "Map custom",
+          protocol: %{"scheme" => "tel"},
+          content: "map value"
+        )
+      ])
+
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, %{error_count: 0}} = MonicaApi.crawl(account_id, user.id, credential(), job)
+
+      assert Enum.sort(
+               Enum.map(mapped_contact(account_id).contact_fields, fn field ->
+                 {field.value, field.contact_field_type.protocol}
+               end)
+             ) == [{"map value", nil}, {"numeric value", nil}]
+    end
+
     test "later pages resolve distinct protocols for the same source name", %{
       user: user,
       account_id: account_id
