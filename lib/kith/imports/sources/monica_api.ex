@@ -1605,7 +1605,8 @@ defmodule Kith.Imports.Sources.MonicaApi do
   defp fetch_single_contact(credential, monica_id) do
     url = "#{credential.url}/api/contacts/#{monica_id}"
 
-    case api_get(credential, url, []) do
+    # Backfilled contacts need the same embedded fields as listing contacts.
+    case api_get(credential, url, with: "contactfields") do
       {:ok, %{status: 200, body: %{"data" => contact}}} when is_map(contact) ->
         {:ok, contact}
 

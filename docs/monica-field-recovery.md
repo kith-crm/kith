@@ -7,16 +7,21 @@ Unknown metadata remains a generic field. Phone parsing retains malformed
 nonblank text; bare local numbers need an explicitly selected country to become
 international numbers.
 
+Both the paginated listing and coverage backfill detail requests include
+`with=contactfields`. Monica can omit `contactFields` entirely from
+`GET /api/contacts/{id}` without that parameter, even when the contact has phone
+fields. After deploying this fix, already imported contacts still require the
+opt-in recovery below; ordinary reruns skip their existing mappings.
+
 Missing or null `contactFields` is different from an explicit empty list. The
 former adds an import diagnostic; the latter means no embedded fields. A healthy
 embedded response makes no per-contact field requests. No alternate envelope or
-extra field-fetch endpoint is assumed. The real missing-phone response is still
-needed before adding source-specific fallback behavior: supply a redacted
-listing request (including query), the affected contact object, source type
-metadata, and any demonstrated detail response. Preserve keys, nulls, protocol,
-labels, pagination, and relationship IDs; replace personal values and secrets.
-The deterministic test payloads demonstrate importer behavior, not the shape of
-an unprovided production omission.
+extra field-fetch endpoint is assumed. If fields remain unavailable with
+`with=contactfields`, supply a redacted listing request (including query), the
+affected contact object, source type metadata, and any demonstrated detail
+response before adding source-specific fallback behavior. Preserve keys, nulls,
+protocol, labels, pagination, and relationship IDs; replace personal values and
+secrets.
 
 ## Supported opt-in recovery
 
