@@ -16,14 +16,12 @@ defmodule Kith.Workers.MonicaDocumentImportWorkerTest do
   setup do
     user = user_fixture()
 
-    Application.put_env(
+    Kith.TestEnv.put_env_restoring(
       :kith,
       :monica_req_options,
       plug: {Req.Test, @stub_name},
       retry: false
     )
-
-    on_exit(fn -> Application.delete_env(:kith, :monica_req_options) end)
 
     import_job =
       import_fixture(user.account_id, user.id, %{

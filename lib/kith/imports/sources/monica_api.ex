@@ -39,7 +39,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
   alias Kith.Imports.DuplicateAutomerge
   alias Kith.Imports.Monica.NoteTimestamps
   alias Kith.Imports.Monica.ReminderMapper
-  alias Kith.Imports.Sources.MonicaApi.RateLimiter
+  alias Kith.Imports.Sources.MonicaApi.HTTP
   alias Kith.Reminders
   alias Kith.Repo
   alias Kith.Workers.MonicaDocumentImportWorker
@@ -1574,8 +1574,6 @@ defmodule Kith.Imports.Sources.MonicaApi do
   # ── HTTP helpers ─────────────────────────────────────────────────────
 
   defp api_get(credential, url, params \\ []) do
-    RateLimiter.wait!(credential.url)
-
     headers = [{"Authorization", "Bearer #{credential.api_key}"}, {"Accept", "application/json"}]
     req_options = Map.get(credential, :req_options, [])
 
@@ -1590,7 +1588,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
         retry_log_level: :warning
       ] ++ req_options
 
-    Kith.BoundedHTTP.get(url, options)
+    HTTP.get(url, options)
   end
 
   defp api_get_json(credential, url, params) do

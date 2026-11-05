@@ -2,9 +2,9 @@ defmodule Kith.Imports.Sources.MonicaApi.RateLimiter do
   @moduledoc """
   Per-host fixed-window request budget for outbound Monica API calls.
 
-  Configured at one token below Monica's documented default of 60 requests
-  per minute, leaving a one-call safety margin so a small clock-skew or
-  burst on Monica's side does not push us into the 429 window.
+  The fallback is 55 attempts per minute, five below Monica's usual 60/min
+  default. Set the budget below the server's actual configured limit, allowing
+  headroom for other clients. Retries and redirect hops also consume slots.
 
   Configurable via:
 
@@ -14,9 +14,10 @@ defmodule Kith.Imports.Sources.MonicaApi.RateLimiter do
   Per-test overrides go through `Application.put_env/3`.
 
   The shared supervised Hammer backend supplies the fixed-window counter; we use a
-  bucket key per Monica host so independent Monica instances do not share
-  a quota. Calls block the caller process via `Process.sleep/1` until a
-  token is available, then return `:ok`.
+  bucket key per actual request host (scheme, port, account and API key do not
+  create separate quotas). ETS counters are node-local; Redis counters are
+  shared by nodes using the same Redis backend. Calls block via
+  `Process.sleep/1` until a token is available, then return `:ok`.
   """
 
   @default_scale_ms 60_000

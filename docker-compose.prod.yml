@@ -119,6 +119,7 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       # Rate limiting
+      MONICA_RATE_LIMIT_PER_MINUTE: ${MONICA_RATE_LIMIT_PER_MINUTE:-55}
       RATE_LIMIT_BACKEND: ${RATE_LIMIT_BACKEND:-ets}
       REDIS_URL: ${REDIS_URL:-}
       # Network

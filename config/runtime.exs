@@ -13,9 +13,10 @@ config :kith, KithWeb.Endpoint, http: [port: String.to_integer(System.get_env("P
 
 config :kith, :trusted_proxies, Kith.TrustedProxies.parse!(System.get_env("TRUSTED_PROXIES", ""))
 
-# Outbound request budget for the Monica API importer, per minute. Set it a
-# call or two below Monica's own RATE_LIMIT_PER_MINUTE_API. Unset keeps the
-# config.exs default (55), so test.exs is preserved.
+# Outbound Monica HTTP attempt budget per host per minute, including retries,
+# redirects, photos and document downloads. Leave headroom below the server's
+# actual RATE_LIMIT_PER_MINUTE_API. Unset preserves the environment default
+# (55 in config.exs); changing this environment variable requires a restart.
 if monica_limit = System.get_env("MONICA_RATE_LIMIT_PER_MINUTE") do
   case Integer.parse(monica_limit) do
     {n, ""} when n > 0 ->

@@ -64,6 +64,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   alias Kith.Imports
   alias Kith.Imports.Monica.NoteTimestamps
   alias Kith.Imports.Monica.ReminderMapper
+  alias Kith.Imports.Sources.MonicaApi.HTTP
   alias Kith.Imports.Sources.MonicaApi.RateLimiter
   alias Kith.Reminders
   alias Kith.Repo
@@ -443,17 +444,15 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   defp api_get_json(credential, url, params) do
     ensure_import_active!(credential.import_id)
-    {wait_ms, :ok} = timed(fn -> RateLimiter.wait!(credential.url) end)
-    ensure_import_active!(credential.import_id)
+    Process.put(:misc_request_wait_ms, 0)
 
     headers = [
       {"Authorization", "Bearer #{credential.api_key}"},
       {"Accept", "application/json"}
     ]
 
-    # Bounded on purpose: each attempt gets `@request_timeout_ms`, and Req's
-    # backoff between the (at most 3) retries adds a few seconds, so one request
-    # can't hold the job for more than about two and a half minutes.
+    # Each attempt retains its timeout and the finite Req retry limit. Limiter
+    # waits and a server's Retry-After can extend the total request duration.
     options =
       [
         auth: {:bearer, credential.api_key},
@@ -470,8 +469,22 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       "[MonicaMiscData] -> GET #{URI.parse(url).path} (request ##{Process.get(:misc_requests, 0) + 1})"
     )
 
-    {request_ms, result} = timed(fn -> Kith.BoundedHTTP.get(url, options) end)
-    track_request(url, wait_ms, request_ms, result)
+    # The shared boundary checks every retry/redirect, including cancellation
+    # while waiting for a slot. Set this after injected transport options so
+    # those options cannot replace the worker's cancellation checks.
+    options =
+      Keyword.put(options, :on_rate_limit, fn
+        :before_wait, _ ->
+          ensure_import_active!(credential.import_id)
+
+        :after_wait, elapsed_ms ->
+          Process.put(:misc_request_wait_ms, Process.get(:misc_request_wait_ms, 0) + elapsed_ms)
+          ensure_import_active!(credential.import_id)
+      end)
+
+    {total_ms, result} = timed(fn -> HTTP.get(url, options) end)
+    wait_ms = Process.get(:misc_request_wait_ms, 0)
+    track_request(url, wait_ms, max(total_ms - wait_ms, 0), result)
     ensure_import_active!(credential.import_id)
 
     case result do

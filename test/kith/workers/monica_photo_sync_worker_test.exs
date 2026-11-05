@@ -26,14 +26,12 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
     user = user_fixture()
     seed_reference_data!()
 
-    Application.put_env(
+    Kith.TestEnv.put_env_restoring(
       :kith,
       :monica_req_options,
       plug: {Req.Test, @stub_name},
       retry: false
     )
-
-    on_exit(fn -> Application.delete_env(:kith, :monica_req_options) end)
 
     %{user: user, account_id: user.account_id}
   end

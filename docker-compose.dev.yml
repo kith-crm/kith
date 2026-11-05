@@ -69,6 +69,7 @@ services:
       DB_PORT: "5432"
       SMTP_HOST: mailpit
       PHX_IP: "0.0.0.0"
+      MONICA_RATE_LIMIT_PER_MINUTE: ${MONICA_RATE_LIMIT_PER_MINUTE:-55}
     volumes:
       - .:/app
       - deps:/app/deps
