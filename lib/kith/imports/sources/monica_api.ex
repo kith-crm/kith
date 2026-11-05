@@ -1722,59 +1722,70 @@ defmodule Kith.Imports.Sources.MonicaApi do
   end
 
   defp do_reconcile_contact_field(contact, field, cft_id, value, ref_data, ctx) do
-    mapping =
-      if field["uuid"] not in [nil, ""] do
-        Imports.find_import_record(
-          ctx.account_id,
-          "monica_api",
-          "contact_field",
-          to_string(field["uuid"])
-        )
-      end
+    case contact_field_mapping(field["uuid"], ctx.account_id) do
+      nil ->
+        if duplicate_contact_field?(contact.id, field, cft_id, value, ref_data, ctx),
+          do: :ok,
+          else: create_contact_field(contact, field, cft_id, value, ctx.import_job)
 
-    if mapping do
-      existing =
-        if mapping.local_entity_type == "contact_field" do
-          Repo.one(
-            from(cf in Contacts.ContactField,
-              where:
-                cf.id == ^mapping.local_entity_id and cf.account_id == ^ctx.account_id and
-                  cf.contact_id == ^contact.id and cf.contact_field_type_id == ^cft_id
-            )
-          )
-        end
-
-      cond do
-        is_nil(existing) ->
-          {:error, :invalid_field_mapping}
-
-        not matching_field_value?(existing.value, value, cft_id, ref_data, ctx) ->
-          {:error, :changed_field_mapping}
-
-        ctx.opts["recover_contact_fields"] == true and blank_field_label?(existing.label) and
-            not blank_field_label?(field["label"]) ->
-          Contacts.update_contact_field(existing, %{label: field["label"]})
-
-        true ->
-          :ok
-      end
-    else
-      duplicate? =
-        from(cf in Contacts.ContactField,
-          where:
-            cf.account_id == ^ctx.account_id and cf.contact_id == ^contact.id and
-              cf.contact_field_type_id == ^cft_id
-        )
-        |> Repo.all()
-        |> Enum.any?(fn existing ->
-          matching_field_value?(existing.value, value, cft_id, ref_data, ctx) and
-            normalized_field_label(existing.label) == normalized_field_label(field["label"])
-        end)
-
-      if duplicate?,
-        do: :ok,
-        else: create_contact_field(contact, field, cft_id, value, ctx.import_job)
+      mapping ->
+        mapping
+        |> mapped_contact_field(contact.id, cft_id, ctx.account_id)
+        |> reconcile_mapped_field(field, cft_id, value, ref_data, ctx)
     end
+  end
+
+  defp contact_field_mapping(uuid, _account_id) when uuid in [nil, ""], do: nil
+
+  defp contact_field_mapping(uuid, account_id) do
+    Imports.find_import_record(account_id, "monica_api", "contact_field", to_string(uuid))
+  end
+
+  defp mapped_contact_field(
+         %{local_entity_type: "contact_field"} = mapping,
+         contact_id,
+         cft_id,
+         account_id
+       ) do
+    Repo.one(
+      from(cf in Contacts.ContactField,
+        where:
+          cf.id == ^mapping.local_entity_id and cf.account_id == ^account_id and
+            cf.contact_id == ^contact_id and cf.contact_field_type_id == ^cft_id
+      )
+    )
+  end
+
+  defp mapped_contact_field(_mapping, _contact_id, _cft_id, _account_id), do: nil
+
+  defp reconcile_mapped_field(nil, _field, _cft_id, _value, _ref_data, _ctx),
+    do: {:error, :invalid_field_mapping}
+
+  defp reconcile_mapped_field(existing, field, cft_id, value, ref_data, ctx) do
+    cond do
+      not matching_field_value?(existing.value, value, cft_id, ref_data, ctx) ->
+        {:error, :changed_field_mapping}
+
+      ctx.opts["recover_contact_fields"] == true and blank_field_label?(existing.label) and
+          not blank_field_label?(field["label"]) ->
+        Contacts.update_contact_field(existing, %{label: field["label"]})
+
+      true ->
+        :ok
+    end
+  end
+
+  defp duplicate_contact_field?(contact_id, field, cft_id, value, ref_data, ctx) do
+    from(cf in Contacts.ContactField,
+      where:
+        cf.account_id == ^ctx.account_id and cf.contact_id == ^contact_id and
+          cf.contact_field_type_id == ^cft_id
+    )
+    |> Repo.all()
+    |> Enum.any?(fn existing ->
+      matching_field_value?(existing.value, value, cft_id, ref_data, ctx) and
+        normalized_field_label(existing.label) == normalized_field_label(field["label"])
+    end)
   end
 
   defp matching_field_value?(existing, value, cft_id, ref_data, ctx) do
