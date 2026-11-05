@@ -1,7 +1,14 @@
 defmodule Kith.Imports.Sources.MonicaApi.HTTPTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias Kith.Imports.Sources.MonicaApi.HTTP
+
+  # This scale exceeds the Unix millisecond clock, keeping admission tests in
+  # window zero. Resetting the real ETS bucket advances their budget under test
+  # control, independent of scheduler pauses. No request waits for expiry.
+  @controlled_scale_ms 1_000_000_000_000_000
 
   setup do
     keys = [:monica_rate_limit, :monica_rate_limit_scale_ms, :monica_rate_limit_retry_sleep_ms]
@@ -59,12 +66,18 @@ defmodule Kith.Imports.Sources.MonicaApi.HTTPTest do
     end
 
     # A function adapter exercises existing callers' transport injection too.
-    {result, _deprecation_warning} =
-      ExUnit.CaptureIO.with_io(:stderr, fn ->
-        HTTP.get("https://#{host}", adapter: adapter, retry_delay: 0)
+    logs =
+      capture_log(fn ->
+        {result, _deprecation_warning} =
+          ExUnit.CaptureIO.with_io(:stderr, fn ->
+            HTTP.get("https://#{host}", adapter: adapter, retry_delay: 0)
+          end)
+
+        assert {:ok, %{body: "done"}} = result
       end)
 
-    assert {:ok, %{body: "done"}} = result
+    assert logs =~ "socket closed"
+    assert logs =~ "status 429"
 
     assert hits(host) == 3
   end
@@ -104,33 +117,25 @@ defmodule Kith.Imports.Sources.MonicaApi.HTTPTest do
              HTTP.get("https://#{origin}/start", auth: {:bearer, "fixture-key"}, plug: plug)
   end
 
-  test "concurrent callers on the same host share the configured short-window budget" do
-    configure(2, 200)
+  test "concurrent callers share the configured budget until the bucket is reset" do
+    configure(2, @controlled_scale_ms)
     host = unique_host()
-    observer = self()
+    tasks = start_requests(host, 7)
 
-    plug = fn conn ->
-      send(observer, {:dispatch, div(Hammer.ETS.now(), 200)})
-      Req.Test.json(conn, %{})
+    for _ <- 1..3 do
+      receive_dispatches(2)
+      wait_for_denial(host)
+      refute_received {:dispatch, _}
+      reset_host(host)
     end
 
-    tasks = for _ <- 1..7, do: Task.async(fn -> HTTP.get("https://#{host}", plug: plug) end)
-    Enum.each(tasks, fn task -> assert {:ok, _} = Task.await(task, 5000) end)
-
-    windows =
-      for _ <- tasks,
-          do:
-            (
-              assert_receive {:dispatch, window}
-              window
-            )
-
-    assert Enum.sum(Map.values(Enum.frequencies(windows))) == 7
-    assert Enum.all?(Enum.frequencies(windows), fn {_window, count} -> count <= 2 end)
+    receive_dispatches(1)
+    Enum.each(tasks, fn task -> assert {:ok, _} = Task.await(task) end)
+    refute_received {:dispatch, _}
   end
 
   test "a saturated host does not block a different host" do
-    configure(1, 60_000)
+    configure(1, @controlled_scale_ms)
     saturated = unique_host()
     independent = unique_host()
     observer = self()
@@ -151,54 +156,35 @@ defmodule Kith.Imports.Sources.MonicaApi.HTTPTest do
     Task.shutdown(blocked, :brutal_kill)
   end
 
-  test "a configured budget above 55 admits the entire budget without fallback throttling" do
-    configure(70, 1000)
+  test "a configured budget above 55 admits exactly 70 requests before blocking" do
+    configure(70, @controlled_scale_ms)
     host = unique_host()
-    observer = self()
+    tasks = start_requests(host, 71)
 
-    plug = fn conn ->
-      send(observer, {:dispatch, div(Hammer.ETS.now(), 1000)})
-      Req.Test.json(conn, %{})
-    end
+    receive_dispatches(70)
+    wait_for_denial(host)
+    refute_received {:dispatch, _}
 
-    # Start with most of the short window available; avoid a wall-clock timing assertion.
-    start_of_window(1000)
-
-    task =
-      Task.async(fn ->
-        for _ <- 1..70, do: HTTP.get("https://#{host}", plug: plug)
-      end)
-
-    assert Enum.all?(Task.await(task, 5000), &match?({:ok, _}, &1))
-
-    windows =
-      for _ <- 1..70,
-          do:
-            (
-              assert_receive {:dispatch, window}
-              window
-            )
-
-    assert Enum.max(Map.values(Enum.frequencies(windows))) == 70
-    assert hits(host) == 70
+    reset_host(host)
+    receive_dispatches(1)
+    Enum.each(tasks, fn task -> assert {:ok, _} = Task.await(task) end)
+    refute_received {:dispatch, _}
   end
 
   test "55 is the fallback when the configured budget is absent" do
+    configure(55, @controlled_scale_ms)
     Application.delete_env(:kith, :monica_rate_limit)
     host = unique_host()
-    observer = self()
+    tasks = start_requests(host, 56)
 
-    plug = fn conn ->
-      send(observer, :dispatch)
-      Req.Test.json(conn, %{})
-    end
-
-    for _ <- 1..55, do: assert({:ok, _} = HTTP.get("https://#{host}", plug: plug))
-    for _ <- 1..55, do: assert_receive(:dispatch)
-    blocked = Task.async(fn -> HTTP.get("https://#{host}", plug: plug) end)
+    receive_dispatches(55)
     wait_for_denial(host)
-    refute_received :dispatch
-    Task.shutdown(blocked, :brutal_kill)
+    refute_received {:dispatch, _}
+
+    reset_host(host)
+    receive_dispatches(1)
+    Enum.each(tasks, fn task -> assert {:ok, _} = Task.await(task) end)
+    refute_received {:dispatch, _}
   end
 
   test "rate-limit callback surrounds every attempt and cannot skip acquisition" do
@@ -215,12 +201,17 @@ defmodule Kith.Imports.Sources.MonicaApi.HTTPTest do
       Plug.Conn.send_resp(conn, if(hits(host) == 1, do: 503, else: 200), "")
     end
 
-    assert {:ok, %{status: 200}} =
-             HTTP.get("https://#{host}",
-               plug: plug,
-               retry_delay: 0,
-               on_rate_limit: callback
-             )
+    logs =
+      capture_log(fn ->
+        assert {:ok, %{status: 200}} =
+                 HTTP.get("https://#{host}",
+                   plug: plug,
+                   retry_delay: 0,
+                   on_rate_limit: callback
+                 )
+      end)
+
+    assert logs =~ "status 503"
 
     assert_receive {:before_wait, 0, 0}
     assert_receive {:after_wait, first_wait, 1}
@@ -315,8 +306,14 @@ defmodule Kith.Imports.Sources.MonicaApi.HTTPTest do
     server = start_supervised!({Bandit, plug: plug, port: 0})
     {:ok, {_address, port}} = ThousandIsland.listener_info(server)
 
-    assert {:ok, %{body: %{"done" => true}}} =
-             HTTP.get("http://127.0.0.1:#{port}/start", auth: {:bearer, "fixture-key"})
+    logs =
+      capture_log(fn ->
+        assert {:ok, %{body: %{"done" => true}}} =
+                 HTTP.get("http://127.0.0.1:#{port}/start", auth: {:bearer, "fixture-key"})
+      end)
+
+    assert logs =~ "status 429"
+    assert logs =~ "retry in 1000ms"
 
     assert_receive {:real_dispatch, "127.0.0.1", 1, first}
     assert_receive {:real_dispatch, "127.0.0.1", 2, second}
@@ -343,8 +340,15 @@ defmodule Kith.Imports.Sources.MonicaApi.HTTPTest do
         end
       end)
 
-    assert {:error, %Req.TransportError{reason: :closed}} =
-             HTTP.get("http://127.0.0.1:#{port}", max_retries: 2, retry_delay: 0)
+    logs =
+      capture_log(fn ->
+        assert {:error, %Req.TransportError{reason: :closed}} =
+                 HTTP.get("http://127.0.0.1:#{port}", max_retries: 2, retry_delay: 0)
+      end)
+
+    assert logs =~ "socket closed"
+    assert logs =~ "2 attempts left"
+    assert logs =~ "1 attempt left"
 
     Task.await(server)
     assert_receive {:closed_connection, 1}
@@ -381,8 +385,43 @@ defmodule Kith.Imports.Sources.MonicaApi.HTTPTest do
     end
   end
 
-  defp start_of_window(scale) do
-    remaining = scale - rem(Hammer.ETS.now(), scale)
-    if remaining < div(scale, 2), do: Process.sleep(remaining + 1)
+  defp start_requests(host, count) do
+    observer = self()
+
+    plug = fn conn ->
+      send(observer, {:dispatch, self()})
+      Req.Test.json(conn, %{})
+    end
+
+    callback = fn
+      :before_wait, _ ->
+        send(observer, {:ready, self()})
+
+        receive do
+          :dispatch_request -> :ok
+        after
+          5000 -> flunk("request was never released from its start barrier")
+        end
+
+      :after_wait, _ ->
+        :ok
+    end
+
+    tasks =
+      for _ <- 1..count do
+        Task.async(fn ->
+          HTTP.get("https://#{host}", plug: plug, on_rate_limit: callback)
+        end)
+      end
+
+    Enum.each(tasks, fn %{pid: pid} -> assert_receive {:ready, ^pid}, 1000 end)
+    Enum.each(tasks, fn %{pid: pid} -> send(pid, :dispatch_request) end)
+    tasks
+  end
+
+  defp receive_dispatches(count) do
+    for _ <- 1..count do
+      assert_receive {:dispatch, _pid}, 1000
+    end
   end
 end
