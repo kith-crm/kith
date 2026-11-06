@@ -125,7 +125,13 @@ defmodule KithWeb.ContactLive.RelationshipsComponent do
 
       <%= if @show_form do %>
         <div class="mb-4">
-          <.form for={%{}} phx-submit="save" phx-change="validate" phx-target={@myself}>
+          <.form
+            id={"#{@id}-relationship-form"}
+            for={%{}}
+            phx-submit="save"
+            phx-change="validate"
+            phx-target={@myself}
+          >
             <div class="space-y-2">
               <div>
                 <label class="block mb-1">

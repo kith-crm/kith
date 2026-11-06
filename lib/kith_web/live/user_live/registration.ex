@@ -124,13 +124,45 @@ defmodule KithWeb.UserLive.Registration do
     else
       changeset = Accounts.change_user_registration(%User{})
 
-      {:ok, assign(socket, form: to_form(changeset, as: "user"), trigger_submit: false),
-       temporary_assigns: [form: nil]}
+      {:ok,
+       assign(socket,
+         form: to_form(changeset, as: "user"),
+         trigger_submit: false,
+         signup_peer: signup_peer(socket)
+       ), temporary_assigns: [form: nil]}
     end
   end
 
   @impl true
   def handle_event("save", %{"user" => user_params}, socket) do
+    case check_signup(socket.assigns.signup_peer) do
+      :ok ->
+        register_user(socket, user_params)
+
+      {:error, :rate_limited, retry_after_ms} ->
+        seconds = Kith.RateLimiter.retry_after_seconds(retry_after_ms)
+
+        {:noreply,
+         socket
+         |> assign(trigger_submit: false)
+         |> assign_form(Accounts.change_user_registration(%User{}, user_params))
+         |> put_flash(:error, "Too many signup attempts. Please try again in #{seconds} seconds.")}
+
+      {:error, :missing_peer} ->
+        {:noreply,
+         socket
+         |> assign(trigger_submit: false)
+         |> assign_form(Accounts.change_user_registration(%User{}, user_params))
+         |> put_flash(:error, "Unable to verify your connection. Please reload and try again.")}
+    end
+  end
+
+  def handle_event("validate", %{"user" => user_params}, socket) do
+    changeset = Accounts.change_user_registration(%User{}, user_params)
+    {:noreply, assign_form(socket, Map.put(changeset, :action, :validate))}
+  end
+
+  defp register_user(socket, user_params) do
     case Accounts.register_user(user_params) do
       {:ok, user} ->
         Accounts.deliver_user_confirmation_instructions(
@@ -150,10 +182,21 @@ defmodule KithWeb.UserLive.Registration do
     end
   end
 
-  def handle_event("validate", %{"user" => user_params}, socket) do
-    changeset = Accounts.change_user_registration(%User{}, user_params)
-    {:noreply, assign_form(socket, Map.put(changeset, :action, :validate))}
+  # Only transport-provided connect info may identify a signup client. The
+  # canonical header is accepted by the same ingress allowlist used for HTTP.
+  # Connect params and the mutable HTTP remote_ip are never identity sources.
+  defp signup_peer(socket) do
+    case get_connect_info(socket, :peer_data) do
+      %{address: peer} when is_tuple(peer) and tuple_size(peer) in [4, 8] ->
+        Kith.TrustedProxies.resolve(peer, get_connect_info(socket, :x_headers) || [])
+
+      _ ->
+        nil
+    end
   end
+
+  defp check_signup(nil), do: {:error, :missing_peer}
+  defp check_signup(peer), do: Kith.RateLimiter.check_signup(peer)
 
   defp assign_form(socket, %Ecto.Changeset{} = changeset) do
     assign(socket, form: to_form(changeset, as: "user"))

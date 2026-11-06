@@ -405,7 +405,7 @@ Enumerate all Hex packages and npm packages needed for Kith v1. For each depende
 - `AWS_S3_BUCKET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` — optional, Phase 05
 - `STORAGE_PATH` — string, default "/app/uploads", Phase 13
 
-**Decision note (record in this task):** Rate limiting backend defaults to ETS. Redis migration path: set `RATE_LIMIT_BACKEND=redis` and configure `REDIS_URL`. ETS is sufficient for single-node deployments; Redis required for multi-node. The app MUST NOT crash if Redis is unavailable at startup — fall back to ETS with a startup warning log.
+**Decision note (record in this task):** Rate limiting backend defaults to ETS. Redis migration path: set `RATE_LIMIT_BACKEND=redis` and configure `REDIS_URL`. ETS is sufficient for single-node deployments; Redis required for multi-node. When Redis is configured, an unavailable server or a version older than Redis 7 prevents startup. Runtime Redis errors fail the rate-limited operation; never fall back to independent ETS counters or authorize requests on backend failure.
 
 **Acceptance criteria:**
 - Document exists at `docs/configuration.md`

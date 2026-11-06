@@ -17,6 +17,7 @@
           {if @editing_tag, do: "Edit Tag", else: "New Tag"}
         </h2>
         <.form
+          id="tag-settings-form"
           for={@changeset}
           phx-change="validate"
           phx-submit="save"

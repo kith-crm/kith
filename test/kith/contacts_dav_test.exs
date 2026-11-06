@@ -15,6 +15,122 @@ defmodule Kith.ContactsDAVTest do
     %{account_id: account_id, contact: contact}
   end
 
+  test "export relationship batch has bounded query count", %{account_id: aid, contact: contact} do
+    type = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "friend")
+    targets = for _ <- 1..8, do: contact_fixture(aid)
+    for target <- targets, do: relationship_fixture(contact, target, type.id)
+    Kith.DAV.Store.ensure_rows(aid)
+
+    query_count = fn contacts ->
+      ref = make_ref()
+      parent = self()
+      handler = "export-queries-#{inspect(ref)}"
+
+      :telemetry.attach(
+        handler,
+        [:kith, :repo, :query],
+        fn _, _, metadata, _ ->
+          if (self() == parent or parent in Process.get(:"$callers", [])) and
+               String.starts_with?(metadata.query, "SELECT"),
+             do: send(parent, ref)
+        end,
+        nil
+      )
+
+      result = Contacts.export_relationships(contacts)
+      :telemetry.detach(handler)
+
+      count =
+        Stream.repeatedly(fn ->
+          receive do
+            ^ref -> 1
+          after
+            0 -> 0
+          end
+        end)
+        |> Enum.take_while(&(&1 == 1))
+        |> Enum.sum()
+
+      {result, count}
+    end
+
+    {single, one_count} = query_count.([contact])
+    {batch, batch_count} = query_count.([contact | targets])
+    assert length(single[contact.id]) == 8
+    assert length(Map.keys(batch)) == 9
+    assert batch_count == one_count
+    assert batch_count <= 7
+  end
+
+  test "merge_tags rejects an unrelated account and foreign target without changing either book",
+       %{account_id: aid, contact: contact} do
+    other = user_fixture().account_id
+    {:ok, source} = Contacts.create_tag(aid, %{name: "Source"})
+    {:ok, target} = Contacts.create_tag(aid, %{name: "Target"})
+    {:ok, foreign} = Contacts.create_tag(other, %{name: "Foreign"})
+    Contacts.tag_contact(contact, source)
+    Kith.DAV.Store.ensure_rows(aid)
+    before = Kith.DAV.Store.sync_state(aid)
+
+    assert {:error, :cross_account_write} = Contacts.merge_tags(other, source, target)
+    assert {:error, :cross_account_write} = Contacts.merge_tags(aid, source, foreign)
+    assert Kith.DAV.Store.sync_state(aid) == before
+    assert [%{id: id}] = Kith.Repo.preload(contact, :tags, force: true).tags
+    assert id == source.id
+    assert Contacts.get_tag!(other, foreign.id)
+  end
+
+  test "tag attrs cannot create or move tags into another account", %{
+    account_id: aid,
+    contact: contact
+  } do
+    other = user_fixture().account_id
+
+    assert {:error, :cross_account_write} =
+             Contacts.create_tag(aid, %{name: "Foreign", account_id: other})
+
+    assert Contacts.list_tags(other) == []
+    {:ok, tag} = Contacts.create_tag(aid, %{name: "Owned"})
+    Contacts.tag_contact(contact, tag)
+    Kith.DAV.Store.ensure_rows(aid)
+    state = Kith.DAV.Store.sync_state(aid)
+    assert {:error, :cross_account_write} = Contacts.update_tag(tag, %{account_id: other})
+    assert Contacts.get_tag!(aid, tag.id).account_id == aid
+    assert Kith.DAV.Store.sync_state(aid) == state
+  end
+
+  test "merging a tag into itself preserves its associations", %{
+    account_id: aid,
+    contact: contact
+  } do
+    {:ok, tag} = Contacts.create_tag(aid, %{name: "Keep"})
+    Contacts.tag_contact(contact, tag)
+    Kith.DAV.Store.ensure_rows(aid)
+    before = Kith.DAV.Store.sync_state(aid)
+    assert {:ok, ^tag} = Contacts.merge_tags(aid, tag, tag)
+    assert Contacts.get_tag!(aid, tag.id)
+    assert Kith.DAV.Store.sync_state(aid) == before
+    assert [%{id: id}] = Kith.Repo.preload(contact, :tags, force: true).tags
+    assert id == tag.id
+  end
+
+  test "duplicate assignments and color-only tag updates keep DAV bytes and revisions", %{
+    account_id: aid,
+    contact: contact
+  } do
+    {:ok, tag} = Contacts.create_tag(aid, %{name: "Family"})
+    assert {1, nil} = Contacts.tag_contact(contact, tag)
+    Kith.DAV.Store.ensure_rows(aid)
+    before = Kith.DAV.VCardAdapter.contact_to_vcard(contact)
+    state = Kith.DAV.Store.sync_state(aid)
+    assert {0, nil} = Contacts.tag_contact(contact, tag)
+    assert {:ok, _} = Contacts.update_tag(tag, %{color: "#123456"})
+    assert Kith.DAV.VCardAdapter.contact_to_vcard(contact) == before
+    assert Kith.DAV.Store.sync_state(aid) == state
+    assert {1, nil} = Contacts.untag_contact(contact, tag)
+    assert {0, nil} = Contacts.untag_contact(contact, tag)
+  end
+
   describe "replace_contact_children/3" do
     test "replaces existing children with new data", %{contact: contact, account_id: aid} do
       nested = %{
@@ -80,42 +196,6 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
-  describe "touch_contact!/1" do
-    test "bumps updated_at", %{contact: contact} do
-      old_updated_at = contact.updated_at
-      # Ensure at least 1 second passes
-      Process.sleep(1100)
-      updated = Contacts.touch_contact!(contact)
-      assert DateTime.compare(updated.updated_at, old_updated_at) == :gt
-    end
-  end
-
-  describe "list_contacts_modified_since/2" do
-    test "returns contacts modified after the given timestamp", %{
-      account_id: aid,
-      contact: contact
-    } do
-      # Contact was just created, so its updated_at is recent
-      past = DateTime.add(contact.updated_at, -1, :second)
-      assert [found] = Contacts.list_contacts_modified_since(aid, past)
-      assert found.id == contact.id
-    end
-
-    test "excludes contacts at exactly the timestamp (strict >)", %{
-      account_id: aid,
-      contact: contact
-    } do
-      assert [] = Contacts.list_contacts_modified_since(aid, contact.updated_at)
-    end
-
-    test "excludes soft-deleted contacts", %{account_id: aid, contact: contact} do
-      Contacts.soft_delete_contact(contact)
-      past = DateTime.add(DateTime.utc_now(), -60, :second)
-      results = Contacts.list_contacts_modified_since(aid, past)
-      refute Enum.any?(results, &(&1.id == contact.id))
-    end
-  end
-
   describe "replace_contact_children/3 — tags (CATEGORIES)" do
     test "creates tags from category names", %{contact: contact, account_id: aid} do
       nested = %{
@@ -166,13 +246,15 @@ defmodule Kith.ContactsDAVTest do
   describe "replace_contact_children/3 — relationships (RELATED)" do
     test "creates relationships from related entries", %{contact: contact, account_id: aid} do
       other = contact_fixture(aid, %{first_name: "Bob"})
+      Kith.DAV.Store.ensure_rows(aid)
+      other = Kith.Repo.preload(other, :dav)
 
       nested = %{
         emails: [],
         phones: [],
         urls: [],
         addresses: [],
-        related: [%{value: "kith-contact-#{other.id}", type: "Friend"}]
+        related: [%{value: other.dav.uid, type: "Friend"}]
       }
 
       assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
@@ -196,29 +278,45 @@ defmodule Kith.ContactsDAVTest do
     end
   end
 
-  describe "list_contacts_deleted_since/2" do
-    test "returns soft-deleted contacts after the given timestamp", %{
-      account_id: aid,
-      contact: contact
-    } do
-      past = DateTime.add(DateTime.utc_now(), -1, :second)
-      Contacts.soft_delete_contact(contact)
-      assert [found] = Contacts.list_contacts_deleted_since(aid, past)
-      assert found.id == contact.id
-    end
+  test "unchanged phone keeps its row id and native type", %{contact: contact, account_id: aid} do
+    nested = %{
+      emails: [],
+      phones: [%{value: "555-1234", label: "Mobile"}],
+      urls: [],
+      addresses: []
+    }
 
-    test "excludes contacts at exactly the timestamp (strict >)", %{
-      account_id: aid,
-      contact: contact
-    } do
-      Contacts.soft_delete_contact(contact)
-      deleted = Kith.Repo.get!(Contacts.Contact, contact.id)
-      assert [] = Contacts.list_contacts_deleted_since(aid, deleted.deleted_at)
-    end
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    [before] = Contacts.list_contact_fields(contact.id)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    [after_write] = Contacts.list_contact_fields(contact.id)
+    assert after_write.id == before.id
+    assert after_write.contact_field_type_id == before.contact_field_type_id
+  end
 
-    test "excludes active (non-deleted) contacts", %{account_id: aid} do
-      past = DateTime.add(DateTime.utc_now(), -60, :second)
-      assert [] = Contacts.list_contacts_deleted_since(aid, past)
-    end
+  test "RELATED to an archived contact keeps the existing relationship", %{
+    contact: contact,
+    account_id: aid
+  } do
+    other = contact_fixture(aid)
+    Kith.DAV.Store.ensure_rows(aid)
+    other = Kith.Repo.preload(other, :dav)
+
+    nested = %{
+      emails: [],
+      phones: [],
+      urls: [],
+      addresses: [],
+      related: [%{value: other.dav.uid, type: "Friend"}]
+    }
+
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    [relationship] = Contacts.list_relationships(contact.id)
+    {:ok, _} = Contacts.archive_contact(other)
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, nested)
+    assert [%{id: id}] = Contacts.list_relationships(contact.id)
+    assert id == relationship.id
+    assert {:ok, :ok} = Contacts.replace_contact_children(contact, aid, %{nested | related: []})
+    assert [%{id: ^id}] = Contacts.list_relationships(contact.id)
   end
 end

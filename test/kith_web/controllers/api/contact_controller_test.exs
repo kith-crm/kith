@@ -1,6 +1,7 @@
 defmodule KithWeb.API.ContactControllerTest do
   use KithWeb.ConnCase
 
+  import Ecto.Query
   import Kith.AccountsFixtures
   import Kith.ContactsFixtures
 
@@ -70,6 +71,24 @@ defmodule KithWeb.API.ContactControllerTest do
   # ── Create contact (TEST-10-03) ─────────────────────────────────────
 
   describe "POST /api/contacts (TEST-10-03)" do
+    test "rejects raw avatar storage keys instead of bypassing image processing", %{conn: conn} do
+      user = user_fixture()
+
+      response =
+        conn
+        |> authed_conn(user)
+        |> post(~p"/api/contacts", %{
+          "contact" => %{
+            "first_name" => "Unprocessed",
+            "avatar" => "#{user.account_id}/photos/original.jpg"
+          }
+        })
+        |> json_response(422)
+
+      assert Map.has_key?(response["errors"], "avatar")
+      assert Kith.Contacts.count_contacts(user.account_id) == 0
+    end
+
     test "creates a contact with valid body → 201 with Location header", %{conn: conn} do
       user = user_fixture()
       conn = authed_conn(conn, user)
@@ -96,11 +115,20 @@ defmodule KithWeb.API.ContactControllerTest do
       assert location == "/api/contacts/#{data["id"]}"
     end
 
-    test "returns 422 when first_name is missing", %{conn: conn} do
+    test "accepts a family-only contact without duplicating its display name", %{conn: conn} do
+      user = user_fixture()
+      body = %{"contact" => %{"last_name" => "Family"}}
+      response = conn |> authed_conn(user) |> post(~p"/api/contacts", body) |> json_response(201)
+      assert response["data"]["first_name"] == ""
+      assert response["data"]["last_name"] == "Family"
+      assert response["data"]["display_name"] == "Family"
+    end
+
+    test "returns 422 when both names are missing", %{conn: conn} do
       user = user_fixture()
       conn = authed_conn(conn, user)
 
-      body = %{"contact" => %{"last_name" => "NoFirst"}}
+      body = %{"contact" => %{}}
       resp = conn |> post(~p"/api/contacts", body) |> json_response(422)
 
       # RFC 7807 format
@@ -115,6 +143,25 @@ defmodule KithWeb.API.ContactControllerTest do
   # ── Update contact (TEST-10-04) ─────────────────────────────────────
 
   describe "PATCH /api/contacts/:id (TEST-10-04)" do
+    test "rejects raw avatar assignment without changing the contact or DAV token", %{conn: conn} do
+      user = user_fixture()
+      contact = contact_fixture(user.account_id)
+      Kith.DAV.Store.ensure_rows(user.account_id)
+      before = Kith.DAV.Store.sync_state(user.account_id)
+
+      response =
+        conn
+        |> authed_conn(user)
+        |> patch(~p"/api/contacts/#{contact.id}", %{
+          "contact" => %{"avatar" => "#{user.account_id}/photos/original.jpg"}
+        })
+        |> json_response(422)
+
+      assert Map.has_key?(response["errors"], "avatar")
+      assert Kith.Repo.get!(Kith.Contacts.Contact, contact.id).avatar == nil
+      assert Kith.DAV.Store.sync_state(user.account_id) == before
+    end
+
     test "updates a contact field → 200", %{conn: conn} do
       user = user_fixture()
       conn = authed_conn(conn, user)
@@ -125,6 +172,17 @@ defmodule KithWeb.API.ContactControllerTest do
 
       assert resp["data"]["first_name"] == "After"
       assert resp["data"]["id"] == contact.id
+    end
+
+    test "first_met_reminder is exposed and updatable", %{conn: conn} do
+      user = user_fixture()
+      conn = authed_conn(conn, user)
+      contact = contact_fixture(user.account_id, %{})
+
+      body = %{"contact" => %{"first_met_at" => "2012-09-01", "first_met_reminder" => true}}
+      resp = conn |> patch(~p"/api/contacts/#{contact.id}", body) |> json_response(200)
+
+      assert resp["data"]["first_met_reminder"] == true
     end
   end
 
@@ -172,6 +230,44 @@ defmodule KithWeb.API.ContactControllerTest do
       # Non-survivor should be gone (soft-deleted)
       get_resp = conn |> get(~p"/api/contacts/#{non_survivor.id}") |> json_response(404)
       assert get_resp["status"] == 404
+    end
+
+    test "keeps the survivor's value when the non-survivor is newer, and fills gaps", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      conn = authed_conn(conn, user)
+
+      survivor =
+        contact_fixture(user.account_id, %{
+          first_name: "Survivor",
+          last_name: "Smith",
+          middle_name: nil
+        })
+
+      non_survivor =
+        contact_fixture(user.account_id, %{
+          first_name: "NonSurvivor",
+          last_name: "Jones",
+          middle_name: "Filled"
+        })
+
+      # The resolver breaks a 1-1 conflict by most-recently-updated, so make the
+      # non-survivor unambiguously newer: without the survivor-value protection
+      # this merge renames the survivor to "NonSurvivor".
+      Kith.Repo.update_all(
+        from(c in Kith.Contacts.Contact, where: c.id == ^non_survivor.id),
+        set: [updated_at: DateTime.add(DateTime.utc_now(:second), 3600, :second)]
+      )
+
+      body = %{"survivor_id" => survivor.id, "non_survivor_id" => non_survivor.id}
+
+      resp = conn |> post(~p"/api/contacts/merge", body) |> json_response(200)
+
+      assert resp["data"]["first_name"] == "Survivor"
+      assert resp["data"]["last_name"] == "Smith"
+      # A field the survivor had no value for is still gap-filled (design spec §6).
+      assert resp["data"]["middle_name"] == "Filled"
     end
   end
 

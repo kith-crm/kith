@@ -1,0 +1,1415 @@
+{
+  "baseline": "9838388e1e159cd8a38a0316f5b0f1794b9f3d8a",
+  "scope": "Every node in both npm lockfiles, all changed and newly introduced platform packages, direct/optional parent edges, code consumers and upstream release notes. No version changes made during this compatibility review.",
+  "trees": {
+    "package-lock.json": {
+      "root_requirements": {
+        "name": "kith",
+        "version": "1.0.0",
+        "license": "ISC",
+        "dependencies": {
+          "@alpinejs/csp": "^3.15.11",
+          "@playwright/test": "^1.58.2",
+          "alpinejs": "^3.15.11",
+          "dompurify": "3.4.17",
+          "tailwindcss-animate": "^1.0.7",
+          "trix": "2.1.19"
+        },
+        "devDependencies": {
+          "esbuild": "0.25.4",
+          "husky": "^9.1.7"
+        }
+      },
+      "nodes": [
+        {
+          "path": "node_modules/@alpinejs/csp",
+          "old": "3.15.11",
+          "new": "3.15.11",
+          "changed": false,
+          "parents": [
+            {
+              "package": "kith",
+              "requirement": "^3.15.11",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {
+            "@vue/reactivity": "~3.1.1"
+          },
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-7DTQ86/unHMztj5qsjtZ1B9YKLgZ5zxSynq8kBQ1zaMHEXomrGpD2X/rVluIu1AHRnVrjfUt9ji8ZLfXxgbqIg==",
+          "review_group": "@alpinejs/csp"
+        },
+        {
+          "path": "node_modules/@esbuild/aix-ppc64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "aix"
+          ],
+          "cpu": [
+            "ppc64"
+          ],
+          "integrity": "sha512-1VCICWypeQKhVbE9oW/sJaAmjLxhVqacdkvPLEjwlttjfwENRSClS8EjBz0KzRyFSCPDIkuXW34Je/vk7zdB7Q==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/android-arm",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "android"
+          ],
+          "cpu": [
+            "arm"
+          ],
+          "integrity": "sha512-QNdQEps7DfFwE3hXiU4BZeOV68HHzYwGd0Nthhd3uCkkEKK7/R6MTgM0P7H7FAs5pU/DIWsviMmEGxEoxIZ+ZQ==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/android-arm64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "android"
+          ],
+          "cpu": [
+            "arm64"
+          ],
+          "integrity": "sha512-bBy69pgfhMGtCnwpC/x5QhfxAz/cBgQ9enbtwjf6V9lnPI/hMyT9iWpR1arm0l3kttTr4L0KSLpKmLp/ilKS9A==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/android-x64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "android"
+          ],
+          "cpu": [
+            "x64"
+          ],
+          "integrity": "sha512-TVhdVtQIFuVpIIR282btcGC2oGQoSfZfmBdTip2anCaVYcqWlZXGcdcKIUklfX2wj0JklNYgz39OBqh2cqXvcQ==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/darwin-arm64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "darwin"
+          ],
+          "cpu": [
+            "arm64"
+          ],
+          "integrity": "sha512-Y1giCfM4nlHDWEfSckMzeWNdQS31BQGs9/rouw6Ub91tkK79aIMTH3q9xHvzH8d0wDru5Ci0kWB8b3up/nl16g==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/darwin-x64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "darwin"
+          ],
+          "cpu": [
+            "x64"
+          ],
+          "integrity": "sha512-CJsry8ZGM5VFVeyUYB3cdKpd/H69PYez4eJh1W/t38vzutdjEjtP7hB6eLKBoOdxcAlCtEYHzQ/PJ/oU9I4u0A==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/freebsd-arm64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "freebsd"
+          ],
+          "cpu": [
+            "arm64"
+          ],
+          "integrity": "sha512-yYq+39NlTRzU2XmoPW4l5Ifpl9fqSk0nAJYM/V/WUGPEFfek1epLHJIkTQM6bBs1swApjO5nWgvr843g6TjxuQ==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/freebsd-x64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "freebsd"
+          ],
+          "cpu": [
+            "x64"
+          ],
+          "integrity": "sha512-0FgvOJ6UUMflsHSPLzdfDnnBBVoCDtBTVyn/MrWloUNvq/5SFmh13l3dvgRPkDihRxb77Y17MbqbCAa2strMQQ==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/linux-arm",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "linux"
+          ],
+          "cpu": [
+            "arm"
+          ],
+          "integrity": "sha512-kro4c0P85GMfFYqW4TWOpvmF8rFShbWGnrLqlzp4X1TNWjRY3JMYUfDCtOxPKOIY8B0WC8HN51hGP4I4hz4AaQ==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/linux-arm64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "linux"
+          ],
+          "cpu": [
+            "arm64"
+          ],
+          "integrity": "sha512-+89UsQTfXdmjIvZS6nUnOOLoXnkUTB9hR5QAeLrQdzOSWZvNSAXAtcRDHWtqAUtAmv7ZM1WPOOeSxDzzzMogiQ==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/linux-ia32",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "linux"
+          ],
+          "cpu": [
+            "ia32"
+          ],
+          "integrity": "sha512-yTEjoapy8UP3rv8dB0ip3AfMpRbyhSN3+hY8mo/i4QXFeDxmiYbEKp3ZRjBKcOP862Ua4b1PDfwlvbuwY7hIGQ==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/linux-loong64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "linux"
+          ],
+          "cpu": [
+            "loong64"
+          ],
+          "integrity": "sha512-NeqqYkrcGzFwi6CGRGNMOjWGGSYOpqwCjS9fvaUlX5s3zwOtn1qwg1s2iE2svBe4Q/YOG1q6875lcAoQK/F4VA==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/linux-mips64el",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "linux"
+          ],
+          "cpu": [
+            "mips64el"
+          ],
+          "integrity": "sha512-IcvTlF9dtLrfL/M8WgNI/qJYBENP3ekgsHbYUIzEzq5XJzzVEV/fXY9WFPfEEXmu3ck2qJP8LG/p3Q8f7Zc2Xg==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/linux-ppc64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "linux"
+          ],
+          "cpu": [
+            "ppc64"
+          ],
+          "integrity": "sha512-HOy0aLTJTVtoTeGZh4HSXaO6M95qu4k5lJcH4gxv56iaycfz1S8GO/5Jh6X4Y1YiI0h7cRyLi+HixMR+88swag==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/linux-riscv64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "linux"
+          ],
+          "cpu": [
+            "riscv64"
+          ],
+          "integrity": "sha512-i8JUDAufpz9jOzo4yIShCTcXzS07vEgWzyX3NH2G7LEFVgrLEhjwL3ajFE4fZI3I4ZgiM7JH3GQ7ReObROvSUA==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/linux-s390x",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "linux"
+          ],
+          "cpu": [
+            "s390x"
+          ],
+          "integrity": "sha512-jFnu+6UbLlzIjPQpWCNh5QtrcNfMLjgIavnwPQAfoGx4q17ocOU9MsQ2QVvFxwQoWpZT8DvTLooTvmOQXkO51g==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/linux-x64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "linux"
+          ],
+          "cpu": [
+            "x64"
+          ],
+          "integrity": "sha512-6e0cvXwzOnVWJHq+mskP8DNSrKBr1bULBvnFLpc1KY+d+irZSgZ02TGse5FsafKS5jg2e4pbvK6TPXaF/A6+CA==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/netbsd-arm64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "netbsd"
+          ],
+          "cpu": [
+            "arm64"
+          ],
+          "integrity": "sha512-vUnkBYxZW4hL/ie91hSqaSNjulOnYXE1VSLusnvHg2u3jewJBz3YzB9+oCw8DABeVqZGg94t9tyZFoHma8gWZQ==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/netbsd-x64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "netbsd"
+          ],
+          "cpu": [
+            "x64"
+          ],
+          "integrity": "sha512-XAg8pIQn5CzhOB8odIcAm42QsOfa98SBeKUdo4xa8OvX8LbMZqEtgeWE9P/Wxt7MlG2QqvjGths+nq48TrUiKw==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/openbsd-arm64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "openbsd"
+          ],
+          "cpu": [
+            "arm64"
+          ],
+          "integrity": "sha512-Ct2WcFEANlFDtp1nVAXSNBPDxyU+j7+tId//iHXU2f/lN5AmO4zLyhDcpR5Cz1r08mVxzt3Jpyt4PmXQ1O6+7A==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/openbsd-x64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "openbsd"
+          ],
+          "cpu": [
+            "x64"
+          ],
+          "integrity": "sha512-xAGGhyOQ9Otm1Xu8NT1ifGLnA6M3sJxZ6ixylb+vIUVzvvd6GOALpwQrYrtlPouMqd/vSbgehz6HaVk4+7Afhw==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/sunos-x64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "sunos"
+          ],
+          "cpu": [
+            "x64"
+          ],
+          "integrity": "sha512-Mw+tzy4pp6wZEK0+Lwr76pWLjrtjmJyUB23tHKqEDP74R3q95luY/bXqXZeYl4NYlvwOqoRKlInQialgCKy67Q==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/win32-arm64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "win32"
+          ],
+          "cpu": [
+            "arm64"
+          ],
+          "integrity": "sha512-AVUP428VQTSddguz9dO9ngb+E5aScyg7nOeJDrF1HPYu555gmza3bDGMPhmVXL8svDSoqPCsCPjb265yG/kLKQ==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/win32-ia32",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "win32"
+          ],
+          "cpu": [
+            "ia32"
+          ],
+          "integrity": "sha512-i1sW+1i+oWvQzSgfRcxxG2k4I9n3O9NRqy8U+uugaT2Dy7kLO9Y7wI72haOahxceMX8hZAzgGou1FhndRldxRg==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@esbuild/win32-x64",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "node_modules/esbuild",
+              "requirement": "0.25.4",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": [
+            "win32"
+          ],
+          "cpu": [
+            "x64"
+          ],
+          "integrity": "sha512-nOT2vZNw6hJ+z43oP1SPea/G/6AbN6X+bGNhNuq8NtRHy4wsMhw765IKLNmnjek7GvjWBYQ8Q5VBoYTFg9y1UQ==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/@playwright/test",
+          "old": "1.58.2",
+          "new": "1.58.2",
+          "changed": false,
+          "parents": [
+            {
+              "package": "kith",
+              "requirement": "^1.58.2",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {
+            "playwright": "1.58.2"
+          },
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-akea+6bHYBBfA9uQqSYmlJXn61cTa+jbO87xVLCWbTqbWadRVmhxlXATaOjOgcBaWU4ePo0wB41KMFv3o35IXA==",
+          "review_group": "@playwright/test"
+        },
+        {
+          "path": "node_modules/@types/trusted-types",
+          "old": "2.0.7",
+          "new": "2.0.7",
+          "changed": false,
+          "parents": [
+            {
+              "package": "node_modules/dompurify",
+              "requirement": "^2.0.7",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==",
+          "review_group": "@types/trusted-types"
+        },
+        {
+          "path": "node_modules/@vue/reactivity",
+          "old": "3.1.5",
+          "new": "3.1.5",
+          "changed": false,
+          "parents": [
+            {
+              "package": "node_modules/@alpinejs/csp",
+              "requirement": "~3.1.1",
+              "edge": "dependencies"
+            },
+            {
+              "package": "node_modules/alpinejs",
+              "requirement": "~3.1.1",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {
+            "@vue/shared": "3.1.5"
+          },
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-1tdfLmNjWG6t/CsPldh+foumYFo3cpyCHgBYQ34ylaMsJ+SNHQ1kApMIa8jN+i593zQuaw3AdWH0nJTARzCFhg==",
+          "review_group": "@vue/reactivity"
+        },
+        {
+          "path": "node_modules/@vue/shared",
+          "old": "3.1.5",
+          "new": "3.1.5",
+          "changed": false,
+          "parents": [
+            {
+              "package": "node_modules/@vue/reactivity",
+              "requirement": "3.1.5",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-oJ4F3TnvpXaQwZJNF3ZK+kLPHKarDmJjJ6jyzVNDKH9md1dptjC7lWR//jrGuLdek/U6iltWxqAnYOu8gCiOvA==",
+          "review_group": "@vue/shared"
+        },
+        {
+          "path": "node_modules/alpinejs",
+          "old": "3.15.11",
+          "new": "3.15.11",
+          "changed": false,
+          "parents": [
+            {
+              "package": "kith",
+              "requirement": "^3.15.11",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {
+            "@vue/reactivity": "~3.1.1"
+          },
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-m26gkTg/MId8O+F4jHKK3vB3SjbFxxk/JHP+qzmw1H6aQrZuPAg4CUoAefnASzzp/eNroBjrRQe7950bNeaBJw==",
+          "review_group": "alpinejs"
+        },
+        {
+          "path": "node_modules/dompurify",
+          "old": "3.3.3",
+          "new": "3.4.17",
+          "changed": true,
+          "parents": [
+            {
+              "package": "kith",
+              "requirement": "3.4.17",
+              "edge": "dependencies"
+            },
+            {
+              "package": "node_modules/trix",
+              "requirement": "^3.2.5",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {
+            "@types/trusted-types": "^2.0.7"
+          },
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==",
+          "review_group": "dompurify"
+        },
+        {
+          "path": "node_modules/esbuild",
+          "old": null,
+          "new": "0.25.4",
+          "changed": true,
+          "parents": [
+            {
+              "package": "kith",
+              "requirement": "0.25.4",
+              "edge": "devDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {
+            "@esbuild/aix-ppc64": "0.25.4",
+            "@esbuild/android-arm": "0.25.4",
+            "@esbuild/android-arm64": "0.25.4",
+            "@esbuild/android-x64": "0.25.4",
+            "@esbuild/darwin-arm64": "0.25.4",
+            "@esbuild/darwin-x64": "0.25.4",
+            "@esbuild/freebsd-arm64": "0.25.4",
+            "@esbuild/freebsd-x64": "0.25.4",
+            "@esbuild/linux-arm": "0.25.4",
+            "@esbuild/linux-arm64": "0.25.4",
+            "@esbuild/linux-ia32": "0.25.4",
+            "@esbuild/linux-loong64": "0.25.4",
+            "@esbuild/linux-mips64el": "0.25.4",
+            "@esbuild/linux-ppc64": "0.25.4",
+            "@esbuild/linux-riscv64": "0.25.4",
+            "@esbuild/linux-s390x": "0.25.4",
+            "@esbuild/linux-x64": "0.25.4",
+            "@esbuild/netbsd-arm64": "0.25.4",
+            "@esbuild/netbsd-x64": "0.25.4",
+            "@esbuild/openbsd-arm64": "0.25.4",
+            "@esbuild/openbsd-x64": "0.25.4",
+            "@esbuild/sunos-x64": "0.25.4",
+            "@esbuild/win32-arm64": "0.25.4",
+            "@esbuild/win32-ia32": "0.25.4",
+            "@esbuild/win32-x64": "0.25.4"
+          },
+          "engines": {
+            "node": ">=18"
+          },
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-8pgjLUcUjcgDg+2Q4NYXnPbo/vncAY4UmyaCm0jZevERqCHZIaWwdJHkf8XQtu4AxSKCdvrUbT0XUr1IdZzI8Q==",
+          "review_group": "esbuild"
+        },
+        {
+          "path": "node_modules/fsevents",
+          "old": "2.3.2",
+          "new": "2.3.2",
+          "changed": false,
+          "parents": [
+            {
+              "package": "node_modules/playwright",
+              "requirement": "2.3.2",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": "^8.16.0 || ^10.6.0 || >=11.0.0"
+          },
+          "os": [
+            "darwin"
+          ],
+          "cpu": null,
+          "integrity": "sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==",
+          "review_group": "fsevents"
+        },
+        {
+          "path": "node_modules/husky",
+          "old": "9.1.7",
+          "new": "9.1.7",
+          "changed": false,
+          "parents": [
+            {
+              "package": "kith",
+              "requirement": "^9.1.7",
+              "edge": "devDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA==",
+          "review_group": "husky"
+        },
+        {
+          "path": "node_modules/playwright",
+          "old": "1.58.2",
+          "new": "1.58.2",
+          "changed": false,
+          "parents": [
+            {
+              "package": "node_modules/@playwright/test",
+              "requirement": "1.58.2",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {
+            "playwright-core": "1.58.2"
+          },
+          "optional_dependencies": {
+            "fsevents": "2.3.2"
+          },
+          "engines": {
+            "node": ">=18"
+          },
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-vA30H8Nvkq/cPBnNw4Q8TWz1EJyqgpuinBcHET0YVJVFldr8JDNiU9LaWAE1KqSkRYazuaBhTpB5ZzShOezQ6A==",
+          "review_group": "playwright"
+        },
+        {
+          "path": "node_modules/playwright-core",
+          "old": "1.58.2",
+          "new": "1.58.2",
+          "changed": false,
+          "parents": [
+            {
+              "package": "node_modules/playwright",
+              "requirement": "1.58.2",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">=18"
+          },
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-yZkEtftgwS8CsfYo7nm0KE8jsvm6i/PTgVtB8DL726wNf6H2IMsDuxCpJj59KDaxCtSnrWan2AeDqM7JBaultg==",
+          "review_group": "playwright-core"
+        },
+        {
+          "path": "node_modules/tailwindcss",
+          "old": "4.2.2",
+          "new": "4.2.2",
+          "changed": false,
+          "parents": [],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-KWBIxs1Xb6NoLdMVqhbhgwZf2PGBpPEiwOqgI4pFIYbNTfBXiKYyWoTsXgBQ9WFg/OlhnvHaY+AEpW7wSmFo2Q==",
+          "review_group": "tailwindcss"
+        },
+        {
+          "path": "node_modules/tailwindcss-animate",
+          "old": "1.0.7",
+          "new": "1.0.7",
+          "changed": false,
+          "parents": [
+            {
+              "package": "kith",
+              "requirement": "^1.0.7",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-bl6mpH3T7I3UFxuvDEXLxy/VuFxBk5bbzplh7tXI68mwMokNYd1t9qPBHlnyTwfa4JGC4zP516I1hYYtQ/vspA==",
+          "review_group": "tailwindcss-animate"
+        },
+        {
+          "path": "node_modules/trix",
+          "old": "2.1.18",
+          "new": "2.1.19",
+          "changed": true,
+          "parents": [
+            {
+              "package": "kith",
+              "requirement": "2.1.19",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {
+            "dompurify": "^3.2.5"
+          },
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">= 18"
+          },
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-E7RA3EOeUiUwNJlrF5onIOkqCA06xUU6GmHOVxXyMnGMValrDK3Ce7uaMVgiVUOvVt4mzUERAHAzD10mxoLpOg==",
+          "review_group": "trix"
+        }
+      ],
+      "unmet_dependencies": "npm ls --all completed successfully for both trees"
+    },
+    "assets/package-lock.json": {
+      "root_requirements": {
+        "name": "kith-assets",
+        "dependencies": {
+          "@alpinejs/csp": "^3.14.0",
+          "dompurify": "3.4.17",
+          "tailwindcss-animate": "^1.0.7",
+          "trix": "2.1.19"
+        }
+      },
+      "nodes": [
+        {
+          "path": "node_modules/@alpinejs/csp",
+          "old": "3.15.8",
+          "new": "3.15.8",
+          "changed": false,
+          "parents": [
+            {
+              "package": "kith-assets",
+              "requirement": "^3.14.0",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {
+            "@vue/reactivity": "~3.1.1"
+          },
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-rQAHFPpxyaicATEjSLeg2Ofedwy82Ft7qK3kRmg+vffe9dOHatR45oCBJ7VZ6Q+WzpEwVvPvx8QLJfchfPxmeA==",
+          "review_group": "@alpinejs/csp"
+        },
+        {
+          "path": "node_modules/@types/trusted-types",
+          "old": "2.0.7",
+          "new": "2.0.7",
+          "changed": false,
+          "parents": [
+            {
+              "package": "node_modules/dompurify",
+              "requirement": "^2.0.7",
+              "edge": "optionalDependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==",
+          "review_group": "@types/trusted-types"
+        },
+        {
+          "path": "node_modules/@vue/reactivity",
+          "old": "3.1.5",
+          "new": "3.1.5",
+          "changed": false,
+          "parents": [
+            {
+              "package": "node_modules/@alpinejs/csp",
+              "requirement": "~3.1.1",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {
+            "@vue/shared": "3.1.5"
+          },
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-1tdfLmNjWG6t/CsPldh+foumYFo3cpyCHgBYQ34ylaMsJ+SNHQ1kApMIa8jN+i593zQuaw3AdWH0nJTARzCFhg==",
+          "review_group": "@vue/reactivity"
+        },
+        {
+          "path": "node_modules/@vue/shared",
+          "old": "3.1.5",
+          "new": "3.1.5",
+          "changed": false,
+          "parents": [
+            {
+              "package": "node_modules/@vue/reactivity",
+              "requirement": "3.1.5",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-oJ4F3TnvpXaQwZJNF3ZK+kLPHKarDmJjJ6jyzVNDKH9md1dptjC7lWR//jrGuLdek/U6iltWxqAnYOu8gCiOvA==",
+          "review_group": "@vue/shared"
+        },
+        {
+          "path": "node_modules/dompurify",
+          "old": "3.3.3",
+          "new": "3.4.17",
+          "changed": true,
+          "parents": [
+            {
+              "package": "kith-assets",
+              "requirement": "3.4.17",
+              "edge": "dependencies"
+            },
+            {
+              "package": "node_modules/trix",
+              "requirement": "^3.2.5",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {
+            "@types/trusted-types": "^2.0.7"
+          },
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==",
+          "review_group": "dompurify"
+        },
+        {
+          "path": "node_modules/tailwindcss",
+          "old": "4.2.2",
+          "new": "4.2.2",
+          "changed": false,
+          "parents": [],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-KWBIxs1Xb6NoLdMVqhbhgwZf2PGBpPEiwOqgI4pFIYbNTfBXiKYyWoTsXgBQ9WFg/OlhnvHaY+AEpW7wSmFo2Q==",
+          "review_group": "tailwindcss"
+        },
+        {
+          "path": "node_modules/tailwindcss-animate",
+          "old": "1.0.7",
+          "new": "1.0.7",
+          "changed": false,
+          "parents": [
+            {
+              "package": "kith-assets",
+              "requirement": "^1.0.7",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {},
+          "optional_dependencies": {},
+          "engines": {},
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-bl6mpH3T7I3UFxuvDEXLxy/VuFxBk5bbzplh7tXI68mwMokNYd1t9qPBHlnyTwfa4JGC4zP516I1hYYtQ/vspA==",
+          "review_group": "tailwindcss-animate"
+        },
+        {
+          "path": "node_modules/trix",
+          "old": "2.1.17",
+          "new": "2.1.19",
+          "changed": true,
+          "parents": [
+            {
+              "package": "kith-assets",
+              "requirement": "2.1.19",
+              "edge": "dependencies"
+            }
+          ],
+          "dependencies": {
+            "dompurify": "^3.2.5"
+          },
+          "optional_dependencies": {},
+          "engines": {
+            "node": ">= 18"
+          },
+          "os": null,
+          "cpu": null,
+          "integrity": "sha512-E7RA3EOeUiUwNJlrF5onIOkqCA06xUU6GmHOVxXyMnGMValrDK3Ce7uaMVgiVUOvVt4mzUERAHAzD10mxoLpOg==",
+          "review_group": "trix"
+        }
+      ],
+      "unmet_dependencies": "npm ls --all completed successfully for both trees"
+    }
+  },
+  "reviews": [
+    {
+      "package": "trix",
+      "old": {
+        "root": "2.1.18",
+        "assets": "2.1.17"
+      },
+      "new": "2.1.19",
+      "sources": [
+        "https://github.com/basecamp/trix/releases/tag/v2.1.18",
+        "https://github.com/basecamp/trix/releases/tag/v2.1.19",
+        "https://github.com/basecamp/trix/compare/v2.1.17...v2.1.19"
+      ],
+      "changes": "2.1.18 filters dangerous URI values during JSON drag/drop deserialization;2.1.19 updates its upstream sanitizer. No new public editor API replacement declared. Published JS still embeds an older sanitizer, so distribution JS is excluded from app imports.",
+      "dependency_compatibility": "Upstream source imports DOMPurify through ordinary ESM; package allows^3.2.5, satisfied by pinned3.4.17. Node>=18 is satisfied by CI22 and local26. Both app asset aliases and focused tests use the unchanged verified source tree; CSS remains from the npm package.",
+      "code_references": [
+        "config/config.exs esbuild aliases",
+        "assets/js/hooks/trix_editor.js",
+        "assets/vendor/trix/src/trix/models/html_sanitizer.js",
+        "assets/vendor/trix/src/trix/models/string_piece.js",
+        "assets/vendor/trix/src/trix/views/attachment_view.js",
+        "assets/vendor/trix/src/trix/controllers/toolbar_controller.js"
+      ],
+      "validation": [
+        "Independent95-file upstream archive comparison",
+        "Actual app bundle sanitizer version check",
+        "Paste/drop advisory regressions",
+        "Normal formatting, paragraph and legacy multiline save/reload regressions"
+      ]
+    },
+    {
+      "package": "dompurify",
+      "old": "3.3.3 (separate npm package);3.2.7 (previous Trix distribution embedded)",
+      "new": "3.4.17",
+      "sources": [
+        "https://raw.githubusercontent.com/cure53/DOMPurify/3.4.17/README.md"
+      ],
+      "changes": "Reviewed all published releases after the previously embedded3.2.7 through3.4.17, including3.3.0\u20133.3.3 and deprecated3.4.4. Stricter sanitation can remove formerly retained unsafe markup; no intermediate vulnerable version selected.",
+      "dependency_compatibility": "Trix3.2.5-compatible requirement accepts3.4.17; optional@types/trusted-types2.0.7 remains unchanged. No jsdom/happy-dom server runtime is added. Browser DOM is the runtime. Trix uses sanitize/setConfig/addHook/isValidAttribute; config RETURN_DOM=true, SAFE_FOR_XML=false with selected SAFE_FOR_XML=true composition path, ADD_ATTR=[language]. No app IN_PLACE,SAFE_FOR_TEMPLATES,custom element allowlist or Trusted Types policy is configured. DOM input/RETURN_DOM/setConfig/hook fixes are directly relevant, even where other advisory modes are absent.",
+      "code_references": [
+        "assets/vendor/trix/src/trix/config/dompurify.js",
+        "assets/vendor/trix/src/trix/models/html_sanitizer.js",
+        "assets/vendor/trix/src/trix/models/composition.js",
+        "assets/vendor/trix/src/trix/models/string_piece.js"
+      ],
+      "release_reviews": [
+        {
+          "version": "3.3.0",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.3.0",
+          "assessment": "Introduces callback forms for ADD_ATTR/ADD_TAGS and adjusts SVG/slot allowlists; Trix uses array ADD_ATTR rather than callbacks."
+        },
+        {
+          "version": "3.3.1",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.3.1",
+          "assessment": "Extends forbidden-content defaults instead of replacing them and corrects ESM import syntax. Trix uses ordinary default ESM imports."
+        },
+        {
+          "version": "3.3.2",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.3.2",
+          "assessment": "Hardens raw-text parsing, custom-element prototype handling and attribute configuration. Browser DOM is used; no jsdom runtime added."
+        },
+        {
+          "version": "3.3.3",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.3.3",
+          "assessment": "Repairs a Node20 engine declaration issue; runtime prerequisites checked against Node22CI."
+        },
+        {
+          "version": "3.4.0",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.0",
+          "assessment": "Corrects forbidden-tag precedence, callback/config leakage, template DOM output, custom-element/profile prototype handling, URI validation and markup mutation cases. No app public API migration declared; stricter unsafe-markup removal is expected."
+        },
+        {
+          "version": "3.4.1",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.1",
+          "assessment": "Hardens reserved custom elements, XML name handling and idempotent named-property sanitation; strengthens fuzz invariants."
+        },
+        {
+          "version": "3.4.2",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.2",
+          "assessment": "Corrects URI validation for callback-added attributes and source-map paths."
+        },
+        {
+          "version": "3.4.3",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.3",
+          "assessment": "Hardens nested shadow trees and template regex performance; expands runtime coverage."
+        },
+        {
+          "version": "3.4.4",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.4",
+          "assessment": "Adds selectedcontent and command attributes and tightens cross-realm/template handling. This intermediate release is deprecated for a security regression; it is not selected."
+        },
+        {
+          "version": "3.4.5",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.5",
+          "assessment": "Repairs the selectedcontent bypass introduced in3.4.4; chosen3.4.17 includes the repair."
+        },
+        {
+          "version": "3.4.6",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.6",
+          "assessment": "Hardens in-place DOM clobbering, cross-realm and shadow-root handling."
+        },
+        {
+          "version": "3.4.7",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.7",
+          "assessment": "Hardens in-place shadow roots and prevents persistent hook contamination."
+        },
+        {
+          "version": "3.4.8",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.8",
+          "assessment": "Corrects Trusted Types policy handling and template iteration; restores published license file."
+        },
+        {
+          "version": "3.4.9",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.9",
+          "assessment": "Further hardens Trusted Types and in-place sanitation."
+        },
+        {
+          "version": "3.4.10",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.10",
+          "assessment": "Refactors sanitizer helpers/types/default handling and optimizes probes; no public API replacement declared."
+        },
+        {
+          "version": "3.4.11",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.11",
+          "assessment": "Prevents hook configuration leaking through setConfig; development tooling changes do not enter application runtime."
+        },
+        {
+          "version": "3.4.12",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.12",
+          "assessment": "Corrects custom-element hook invocation and element removal; adds selected SVG attributes and partial-update hardening."
+        },
+        {
+          "version": "3.4.13",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.13",
+          "assessment": "Hardens hook removal, cloning and ownerDocument handling during in-place sanitation."
+        },
+        {
+          "version": "3.4.14",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.14",
+          "assessment": "Hardens risky-tag exceptions and mixed document contexts; refactors attribute validation and adds SVG presentation attributes."
+        },
+        {
+          "version": "3.4.15",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.15",
+          "assessment": "Adds XML clobbering and smaller edge-case defenses."
+        },
+        {
+          "version": "3.4.16",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.16",
+          "assessment": "Repairs in-place removal/raw-text roots and ESM/CommonJS declarations; changes upstream bundler without changing our ESM import API."
+        },
+        {
+          "version": "3.4.17",
+          "source": "https://github.com/cure53/DOMPurify/releases/tag/3.4.17",
+          "assessment": "Hardens shadow-root/template/in-place handling, XHTML SMIL checks, namespaces, literal-text nodes and attribute validation."
+        }
+      ],
+      "validation": [
+        "Both npm audits zero vulnerabilities",
+        "Actual generated app contains3.4.17, excludes3.2.7/3.4.2",
+        "Focused real editor and actual app persistence tests"
+      ]
+    },
+    {
+      "package": "esbuild",
+      "old": null,
+      "new": "0.25.4",
+      "sources": [
+        "https://github.com/evanw/esbuild/blob/v0.25.4/CHANGELOG.md",
+        "https://github.com/evanw/esbuild/releases/tag/v0.25.0"
+      ],
+      "changes": "New root dev tool for focused editor regression compilation, matching existing Mix binary version0.25.4. Reviewed0.25 breaking release and0.25.1\u20130.25.4 fixes.0.25 changes dev-server CORS/host checks and serve return shape, deletes failed watch outputs and corrects CSS/source-map transforms.0.25.4 adds opt-in CORS and fixes source-map/ESM edge cases.",
+      "dependency_compatibility": "No application esbuild version upgrade: Mix profile already used0.25.4. Tests use buildSync bundle/write:false/metafile/iife, not serve/watch. App uses existing CLI bundle/es2022; heroicons CommonJS remains outside new assets/js ESM scope. All25 optional native packages are exact0.25.4 with CPU/OS selectors and Node>=18; one host binary is selected by npm, no forced override.",
+      "code_references": [
+        "test/playwright/editor-security.spec.ts",
+        "config/config.exs",
+        "assets/js/package.json",
+        "assets/vendor/heroicons.js generated CommonJS"
+      ],
+      "validation": [
+        "npm ci root/assets",
+        "19-scenario browser harness",
+        "Application assets.build/assets.deploy",
+        "14 real-hook JavaScript tests"
+      ],
+      "release_details": {
+        "0.25.1": "Fixes inline/non-file source-map paths, invalid source-map indexes and switch optimization crash; Go patch refresh.",
+        "0.25.2": "Corrects plugin regex flags and CommonJS export annotations; adds basic indexed source-map support. No custom esbuild plugins/index source maps used here.",
+        "0.25.3": "Fixes async constructor lowering, watch memory leak, host selection and CSS nesting expansion; legal comments deduplicated. Tests use es2022 and no watch/serve."
+      }
+    }
+  ]
+}

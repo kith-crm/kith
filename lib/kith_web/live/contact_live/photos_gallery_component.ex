@@ -38,53 +38,42 @@ defmodule KithWeb.ContactLive.PhotosGalleryComponent do
   def handle_event("upload", _params, socket) do
     contact = socket.assigns.contact
 
-    uploaded_photos =
+    results =
       consume_uploaded_entries(socket, :photo, fn %{path: path}, entry ->
-        key = "contacts/#{contact.id}/photos/#{entry.uuid}-#{entry.client_name}"
-        {:ok, _} = Storage.upload(path, key)
-
-        {:ok, photo} =
-          Contacts.create_photo(contact, %{
-            file_name: entry.client_name,
-            storage_key: key,
-            file_size: entry.client_size,
-            content_type: entry.client_type
-          })
-
-        {:ok, photo}
+        {:ok, KithWeb.ContactUploads.save(contact, path, entry, :photo)}
       end)
 
-    if uploaded_photos != [] do
-      photos = Contacts.list_photos(contact.id)
+    uploaded = Enum.count(results, &match?({:ok, _}, &1))
+    failed = Enum.any?(results, &match?({:error, _}, &1))
 
-      {:noreply,
-       socket
-       |> assign(:photos, photos)
-       |> put_flash(:info, "#{length(uploaded_photos)} photo(s) uploaded.")}
-    else
-      {:noreply, socket}
-    end
+    socket =
+      socket
+      |> clear_flash(:error)
+      |> assign(:photos, Contacts.list_photos(contact.id))
+
+    socket =
+      if uploaded > 0,
+        do: put_flash(socket, :info, "#{uploaded} photo(s) uploaded."),
+        else: socket
+
+    socket =
+      if failed,
+        do: put_flash(socket, :error, "Some photos could not be uploaded. Please try again."),
+        else: socket
+
+    {:noreply, socket}
   end
 
   def handle_event("set-avatar", %{"id" => id}, socket) do
     contact = socket.assigns.contact
     photo = Contacts.get_photo!(contact.account_id, String.to_integer(id))
-    {:ok, updated_contact} = Contacts.set_avatar(contact, photo)
-    photos = Contacts.list_photos(contact.id)
-
-    send(self(), {:avatar_updated, updated_contact})
-
-    {:noreply,
-     socket
-     |> assign(:contact, updated_contact)
-     |> assign(:photos, photos)
-     |> put_flash(:info, "Avatar set.")}
+    send(self(), {:crop_avatar, photo.id})
+    {:noreply, socket}
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
     contact = socket.assigns.contact
     photo = Contacts.get_photo!(contact.account_id, String.to_integer(id))
-    Storage.delete(photo.storage_key)
     {:ok, _} = Contacts.delete_photo(photo)
     photos = Contacts.list_photos(contact.id)
 
@@ -104,13 +93,14 @@ defmodule KithWeb.ContactLive.PhotosGalleryComponent do
   end
 
   defp avatar?(photo, contact) do
-    contact.avatar == photo.storage_key
+    Contacts.avatar_photo?(contact, photo)
   end
 
   @impl true
   def render(assigns) do
     ~H"""
     <div>
+      <p :if={@flash["error"]} role="alert">{@flash["error"]}</p>
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold">Photos</h2>
       </div>

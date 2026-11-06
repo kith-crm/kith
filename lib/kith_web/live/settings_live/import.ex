@@ -67,7 +67,7 @@ defmodule KithWeb.SettingsLive.Import do
 
   defp process_uploaded_vcf(path, account_id, user_id) do
     with {:ok, data} <- File.read(path),
-         {:ok, parsed_contacts} <- Parser.parse(data) do
+         {:ok, parsed_contacts} <- Parser.parse(data, per_card: true) do
       import_parsed_contacts(account_id, user_id, data, parsed_contacts)
     else
       {:error, reason} when is_binary(reason) -> {:error, reason}
@@ -77,11 +77,10 @@ defmodule KithWeb.SettingsLive.Import do
 
   defp import_parsed_contacts(account_id, user_id, data, parsed_contacts) do
     if length(parsed_contacts) > 100 do
-      %{account_id: account_id, user_id: user_id, file_data: data}
-      |> ImportWorker.new()
-      |> Oban.insert()
-
-      {:async, length(parsed_contacts)}
+      case ImportWorker.enqueue_file(account_id, user_id, data) do
+        {:ok, _job} -> {:async, length(parsed_contacts)}
+        {:error, _reason} -> {:error, "Could not queue contact import. Please try again."}
+      end
     else
       result =
         ContactImportController.import_contacts_sync(account_id, parsed_contacts)

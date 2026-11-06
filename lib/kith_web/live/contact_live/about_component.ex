@@ -92,7 +92,7 @@ defmodule KithWeb.ContactLive.AboutComponent do
   @impl true
   def render(assigns) do
     ~H"""
-    <div>
+    <div id={@id}>
       <div class="flex justify-between items-center">
         <span class="font-semibold text-xs text-[var(--color-text-primary)]">About</span>
         <button
@@ -137,6 +137,17 @@ defmodule KithWeb.ContactLive.AboutComponent do
             />
           </div>
 
+          <label class="flex items-center gap-2 text-xs text-[var(--color-text-secondary)] cursor-pointer">
+            <input type="hidden" name="contact[first_met_reminder]" value="false" />
+            <input
+              type="checkbox"
+              name="contact[first_met_reminder]"
+              value="true"
+              checked={@contact.first_met_reminder}
+              class="rounded border-[var(--color-border)]"
+            /> Remind me every year
+          </label>
+
           <div>
             <label class="block text-xs font-medium text-[var(--color-text-secondary)] mb-0.5">
               Where
@@ -156,6 +167,7 @@ defmodule KithWeb.ContactLive.AboutComponent do
             </label>
             <%= if @selected_contact_id do %>
               <.selected_contact_badge
+                id={"#{@id}-through-avatar"}
                 contact={find_selected_contact(@contact, @selected_contact_id)}
                 myself={@myself}
               />
@@ -180,6 +192,7 @@ defmodule KithWeb.ContactLive.AboutComponent do
                       class="flex items-center gap-2 w-full text-start px-2 py-1.5 text-xs hover:bg-[var(--color-surface-sunken)] cursor-pointer transition-colors"
                     >
                       <KithUI.avatar
+                        id={"#{@id}-search-avatar-#{c.id}"}
                         name={c.display_name}
                         src={KithUI.avatar_url(c)}
                         size={:sm}
@@ -279,7 +292,12 @@ defmodule KithWeb.ContactLive.AboutComponent do
     ~H"""
     <div class="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-2 py-1.5">
       <%= if @contact do %>
-        <KithUI.avatar name={@contact.display_name} src={KithUI.avatar_url(@contact)} size={:sm} />
+        <KithUI.avatar
+          id={@id}
+          name={@contact.display_name}
+          src={KithUI.avatar_url(@contact)}
+          size={:sm}
+        />
         <span class="text-xs text-[var(--color-text-primary)] flex-1 truncate">
           {@contact.display_name}
         </span>

@@ -14,8 +14,9 @@ config :mime, :types, %{"text/vcard" => ["vcf"], "application/json" => ["json"]}
 # locale-aware territory data without an explicit per-call backend argument.
 config :ex_cldr, default_backend: Kith.Cldr
 
-# Outbound rate limit for Monica API calls. One below the documented
-# default of 60 req/min leaves a one-call safety margin.
+# Outbound Monica HTTP attempts per host per minute. The fallback of 55
+# leaves five requests below Monica's usual 60/min default.
+# Override with the MONICA_RATE_LIMIT_PER_MINUTE env var (config/runtime.exs).
 config :kith, :monica_rate_limit, 55
 
 config :kith, :scopes,
@@ -51,19 +52,35 @@ config :kith, Oban,
     purge: 1
   ],
   plugins: [
-    Oban.Plugins.Pruner,
+    # Terminal `oban_jobs` retention: 7 days. `:prod` overrides this whole
+    # `plugins:` list at boot from `config/runtime.exs`, where the worker
+    # container reads `OBAN_PRUNER_MAX_AGE_DAYS`; only `:dev`/`:test` use this
+    # line, so a plain literal is enough. Keep the 7 in sync with runtime.exs.
+    {Oban.Plugins.Pruner, max_age: 7 * 24 * 60 * 60},
+    # Re-queues jobs whose process died without finishing (a container restart
+    # or deploy mid-job leaves the row `executing` forever otherwise). Must stay
+    # above the longest worker `timeout/1` (30 min) or it re-runs live jobs.
+    # `:prod` re-declares this list in config/runtime.exs, keep both in sync.
+    {Oban.Plugins.Lifeline,
+     rescue_after:
+       :timer.minutes(
+         String.to_integer(System.get_env("OBAN_LIFELINE_RESCUE_AFTER_MINUTES", "60"))
+       )},
     {Oban.Plugins.Cron,
      crontab: [
-       {"0 2 * * *", Kith.Workers.ReminderSchedulerWorker},
+       {"0 * * * *", Kith.Workers.ReminderDispatcher},
        {"0 3 * * *", Kith.Workers.ContactPurgeWorker},
        {"0 4 * * 0", Kith.Workers.DuplicateDetectionWorker},
-       {"0 5 * * 0", Kith.Workers.ImportFileCleanupWorker}
+       {"0 5 * * 0", Kith.Workers.ImportFileCleanupWorker},
+       {"15 * * * *", Kith.Workers.ImportApiKeySweepWorker}
      ]}
   ]
 
 # Rate limiting (ETS default, Redis optional via RATE_LIMIT_BACKEND env)
-config :hammer,
-  backend: {Hammer.Backend.ETS, [expiry_ms: 60_000 * 60, cleanup_interval_ms: 60_000 * 10]}
+config :kith, Kith.RateLimiter, backend: :ets
+
+config :kith, Kith.Cache.Store, backend: :ets, gc_interval: :timer.hours(24)
+config :kith, :trusted_proxies, []
 
 # Timezone database
 config :elixir, :time_zone_database, Tz.TimeZoneDatabase
@@ -81,17 +98,17 @@ config :kith, KithWeb.Endpoint,
 
 # Configure esbuild (the version is required)
 config :esbuild,
-  version: "0.25.4",
+  version: "0.28.2",
   kith: [
     args:
-      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
+      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=. --alias:trix=./vendor/trix/src/trix --alias:trix_editor_element=./vendor/trix/src/trix/elements/trix_editor_element.js --alias:trix_toolbar_element=./vendor/trix/src/trix/elements/trix_toolbar_element.js),
     cd: Path.expand("../assets", __DIR__),
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
   ]
 
 # Configure tailwind (the version is required)
 config :tailwind,
-  version: "4.1.12",
+  version: "4.3.3",
   kith: [
     args: ~w(
       --input=assets/css/app.css
@@ -106,6 +123,19 @@ config :kith, :weather_api_key, nil
 # OAuth providers — configured per-environment via env vars
 config :kith, :oauth_providers, %{}
 
+# Preserve error-only reporting across SDK upgrades. Processing categories do
+# not disable metric capture; the explicit callback drops those events.
+config :sentry,
+  telemetry_processor_categories: [:error],
+  before_send_metric: {Kith.SentryEventHandler, :before_send_metric},
+  logs: nil,
+  traces_sample_rate: nil,
+  traces_sampler: nil,
+  integrations: [
+    oban: [capture_errors: false, cron: [enabled: false]],
+    quantum: [cron: [enabled: false]]
+  ]
+
 # WebAuthn (wax_) — origin/rp_id set per-environment
 config :wax_,
   origin: "http://localhost:4000",
@@ -116,6 +146,7 @@ config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
   metadata: [
     :request_id,
+    :client_ip,
     :user_id,
     :account_id,
     :reason,
@@ -129,13 +160,8 @@ config :logger, :default_formatter,
     :import_id
   ]
 
-# Cloak encryption vault — key set per-environment
-config :kith, Kith.Vault,
-  ciphers: [
-    default:
-      {Cloak.Ciphers.AES.GCM,
-       tag: "AES.GCM.V1", key: Base.decode64!("oQaI0liBwsBX4ClJyWexY+lHhC3R3RPn1t9N8VPFdho=")}
-  ]
+# Credential vault — production overrides this development/test key via CLOAK_KEY.
+config :kith, Kith.Vault, key: Base.decode64!("oQaI0liBwsBX4ClJyWexY+lHhC3R3RPn1t9N8VPFdho=")
 
 # Flop — server-side sorting, filtering, pagination
 config :flop, repo: Kith.Repo, default_limit: 25

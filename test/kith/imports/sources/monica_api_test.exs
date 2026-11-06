@@ -6,6 +6,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   alias Kith.Contacts
   alias Kith.Repo
 
+  import Ecto.Query
   import ExUnit.CaptureLog
   import Kith.AccountsFixtures
   import Kith.ContactsFixtures
@@ -44,6 +45,690 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
     import_fixture(account_id, user_id, attrs)
   end
 
+  describe "field metadata and recovery" do
+    test "imports_custom_phone_type_with_tel_protocol", %{user: user, account_id: account_id} do
+      other = user_fixture()
+
+      {:ok, foreign} =
+        Contacts.create_contact_field_type(other.account_id, %{
+          name: "Custom mobile",
+          protocol: "https"
+        })
+
+      {:ok, legacy} = Contacts.create_contact_field_type(account_id, %{name: "Custom mobile"})
+
+      fields = [
+        contact_field_json(
+          content: "+1 (202) 555-0100",
+          type_name: "Custom mobile",
+          protocol: "tel:"
+        )
+      ]
+
+      stub_fields(fields)
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      assert summary.error_count == 0
+      contact = mapped_contact(account_id)
+      assert [%{value: "+12025550100", contact_field_type: type}] = contact.contact_fields
+      refute type.id == legacy.id
+      assert Repo.get!(Contacts.ContactFieldType, legacy.id).protocol == nil
+      assert type.protocol == "tel"
+      assert Repo.get!(Contacts.ContactFieldType, foreign.id).protocol == "https"
+      assert Kith.VCard.Serializer.serialize(contact) =~ "TEL:+12025550100"
+    end
+
+    test "preserves_phone_labels", %{user: user, account_id: account_id} do
+      stub_fields([
+        contact_field_json(
+          content: "+12025550100",
+          type_name: "Custom mobile",
+          protocol: "tel",
+          label: "Work"
+        )
+      ])
+
+      assert {:ok, _} =
+               MonicaApi.crawl(
+                 account_id,
+                 user.id,
+                 credential(),
+                 api_import_fixture(account_id, user.id)
+               )
+
+      assert [%{label: "Work"}] = mapped_contact(account_id).contact_fields
+
+      assert Kith.VCard.Serializer.serialize(mapped_contact(account_id)) =~
+               "TEL;TYPE=WORK:+12025550100"
+    end
+
+    test "rerun_recovers_missing_field_once", %{user: user, account_id: account_id} do
+      stub_fields([])
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      original = mapped_contact(account_id)
+
+      {:ok, email_type} =
+        Contacts.create_contact_field_type(account_id, %{name: "Local email", protocol: "mailto"})
+
+      {:ok, _} =
+        Contacts.create_contact_field(original, %{
+          value: "local@example.test",
+          contact_field_type_id: email_type.id
+        })
+
+      stub_fields([
+        contact_field_json(content: "+12025550100", type_name: "Custom mobile", protocol: "tel:")
+      ])
+
+      {:ok, _} = Imports.update_import_status(job, "completed")
+
+      recovery =
+        api_import_fixture(account_id, user.id, %{
+          api_options: %{"recover_contact_fields" => true}
+        })
+
+      for _ <- 1..2 do
+        assert {:ok, summary} =
+                 MonicaApi.crawl(
+                   account_id,
+                   user.id,
+                   credential(),
+                   recovery,
+                   Kith.Workers.MonicaApiCrawlWorker.build_opts(recovery)
+                 )
+
+        assert summary.error_count == 0
+        assert mapped_contact(account_id).id == original.id
+
+        assert Enum.sort(Enum.map(mapped_contact(account_id).contact_fields, & &1.value)) == [
+                 "+12025550100",
+                 "local@example.test"
+               ]
+
+        assert Imports.find_import_record(account_id, "monica_api", "contact", "1").import_id ==
+                 job.id
+      end
+    end
+
+    test "missing embedded fields are diagnosed separately from explicit empty fields", %{
+      user: user,
+      account_id: account_id
+    } do
+      for {payload, errors} <- [
+            {Map.delete(contact_json(id: 1), "contactFields"), 1},
+            {Map.put(contact_json(id: 1), "contactFields", nil), 1},
+            {Map.put(contact_json(id: 1), "contactFields", %{}), 1},
+            {contact_json(id: 1), 0}
+          ] do
+        Req.Test.stub(@stub_name, fn conn ->
+          assert conn.request_path == "/api/contacts"
+          Req.Test.json(conn, contacts_page_json([payload]))
+        end)
+
+        job = api_import_fixture(account_id, user.id)
+
+        assert {:ok, summary} =
+                 MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                   "recover_contact_fields" => true
+                 })
+
+        assert summary.error_count == errors
+        {:ok, _} = Imports.update_import_status(job, "completed")
+      end
+    end
+
+    test "blank phone fields skip and rejected nonblank fields report without values", %{
+      user: user,
+      account_id: account_id
+    } do
+      secret = String.duplicate("sensitive", 40)
+
+      stub_fields(
+        Enum.map(
+          [nil, "", "  ", " malformed phone ", secret],
+          &contact_field_json(content: &1, type_name: "Custom mobile", protocol: "tel:")
+        )
+      )
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(
+                 account_id,
+                 user.id,
+                 credential(),
+                 api_import_fixture(account_id, user.id)
+               )
+
+      assert summary.error_count == 1
+      refute inspect(summary.errors) =~ secret
+      assert [%{value: "malformed phone"}] = mapped_contact(account_id).contact_fields
+    end
+
+    test "repairs a Monica-only legacy generic type from explicit protocol metadata", %{
+      user: user,
+      account_id: account_id
+    } do
+      field = contact_field_json(content: "+12025550100", type_name: "Legacy mobile")
+      stub_fields([field])
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      [%{contact_field_type: type}] = mapped_contact(account_id).contact_fields
+      assert type.protocol == nil
+      stub_fields([put_in(field, ["contact_field_type", "protocol"], "tel:")])
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      assert summary.error_count == 0
+
+      assert [%{contact_field_type: %{id: id, protocol: "tel"}}] =
+               mapped_contact(account_id).contact_fields
+
+      assert id == type.id
+    end
+
+    test "recovery respects merge survivor and deleted contacts", %{
+      user: user,
+      account_id: account_id
+    } do
+      email = contact_field_json(content: "same@example.test", type_name: "Email")
+
+      contacts =
+        for id <- 1..2,
+            do:
+              contact_json(
+                id: id,
+                first_name: "Same",
+                last_name: "Person",
+                contact_fields: [Map.put(email, "uuid", Ecto.UUID.generate())]
+              )
+
+      Req.Test.stub(@stub_name, fn conn -> Req.Test.json(conn, contacts_page_json(contacts)) end)
+      job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, %{merged: 1}} =
+               MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      original = mapped_contact(account_id)
+
+      assert Imports.find_import_record(account_id, "monica_api", "contact", "2").local_entity_id ==
+               original.id
+
+      {:ok, _} = Imports.update_import_status(job, "completed")
+      recovery = api_import_fixture(account_id, user.id)
+
+      phone =
+        contact_field_json(
+          content: "+12025550100",
+          type_name: "Recovered mobile",
+          protocol: "tel:"
+        )
+
+      stub_fields([phone])
+
+      assert {:ok, %{error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), recovery, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert mapped_contact(account_id).id == original.id
+      assert length(mapped_contact(account_id).contact_fields) == 2
+      {:ok, _} = Contacts.soft_delete_contact(original)
+      stub_fields([%{phone | "content" => "+12025550101"}])
+
+      assert {:ok, %{skipped: 1}} =
+               MonicaApi.crawl(account_id, user.id, credential(), recovery, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert length(mapped_contact(account_id).contact_fields) == 2
+    end
+
+    test "unsupported metadata remains generic across pages and recovery", %{
+      user: user,
+      account_id: account_id
+    } do
+      Req.Test.stub(@stub_name, fn conn ->
+        params = URI.decode_query(conn.query_string)
+
+        if params["limit"] == "1" do
+          Req.Test.json(conn, contacts_page_json([], 1, 2, 2))
+        else
+          page = String.to_integer(params["page"])
+          protocol = if page == 1, do: "gopher", else: "tel:"
+          value = if page == 1, do: "generic source value", else: "+12025550100"
+
+          fields = [
+            contact_field_json(type_name: "Shared custom", protocol: protocol, content: value)
+          ]
+
+          Req.Test.json(
+            conn,
+            contacts_page_json([contact_json(id: page, contact_fields: fields)], page, 2, 2)
+          )
+        end
+      end)
+
+      job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, %{contacts: 2, error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), job)
+
+      assert [%{contact_field_type: %{protocol: nil}}] = mapped_contact(account_id).contact_fields
+      second = Imports.find_import_record(account_id, "monica_api", "contact", "2")
+
+      second_contact =
+        Contacts.get_contact!(account_id, second.local_entity_id)
+        |> Repo.preload(contact_fields: :contact_field_type)
+
+      assert [%{contact_field_type: %{protocol: "tel"}}] = second_contact.contact_fields
+
+      {:ok, _} = Imports.update_import_status(job, "completed")
+      recovery = api_import_fixture(account_id, user.id)
+
+      assert {:ok, %{error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), recovery, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert [%{contact_field_type: %{protocol: nil}}] = mapped_contact(account_id).contact_fields
+    end
+
+    test "malformed source protocols remain generic", %{user: user, account_id: account_id} do
+      stub_fields([
+        contact_field_json(type_name: "Numeric custom", protocol: 42, content: "numeric value"),
+        contact_field_json(
+          type_name: "Map custom",
+          protocol: %{"scheme" => "tel"},
+          content: "map value"
+        )
+      ])
+
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, %{error_count: 0}} = MonicaApi.crawl(account_id, user.id, credential(), job)
+
+      assert Enum.sort(
+               Enum.map(mapped_contact(account_id).contact_fields, fn field ->
+                 {field.value, field.contact_field_type.protocol}
+               end)
+             ) == [{"map value", nil}, {"numeric value", nil}]
+    end
+
+    test "later pages resolve distinct protocols for the same source name", %{
+      user: user,
+      account_id: account_id
+    } do
+      Req.Test.stub(@stub_name, fn conn ->
+        params = URI.decode_query(conn.query_string)
+
+        if params["limit"] == "1" do
+          Req.Test.json(conn, contacts_page_json([], 1, 2, 2))
+        else
+          page = String.to_integer(params["page"])
+          protocol = if page == 1, do: "mailto:", else: "tel:"
+          value = if page == 1, do: "one@example.test", else: "+12025550100"
+
+          fields = [
+            contact_field_json(type_name: "Same name", protocol: protocol, content: value)
+          ]
+
+          Req.Test.json(
+            conn,
+            contacts_page_json([contact_json(id: page, contact_fields: fields)], page, 2, 2)
+          )
+        end
+      end)
+
+      job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, %{contacts: 2, error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), job)
+
+      record = Imports.find_import_record(account_id, "monica_api", "contact", "2")
+
+      contact =
+        Repo.get!(Contacts.Contact, record.local_entity_id)
+        |> Repo.preload(contact_fields: :contact_field_type)
+
+      assert [%{value: "+12025550100", contact_field_type: %{protocol: "tel"}}] =
+               contact.contact_fields
+
+      assert [%{contact_field_type: %{protocol: "mailto"}}] =
+               mapped_contact(account_id).contact_fields
+    end
+
+    test "unknown source protocols stay generic despite seeded name collisions", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_fields([
+        contact_field_json(type_name: "Phone", protocol: "gopher:", content: "opaque value")
+      ])
+
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, %{error_count: 0}} = MonicaApi.crawl(account_id, user.id, credential(), job)
+
+      assert [
+               %{
+                 value: "opaque value",
+                 contact_field_type: %{account_id: ^account_id, protocol: nil}
+               }
+             ] = mapped_contact(account_id).contact_fields
+    end
+
+    test "recovery fills only source-mapped blank labels and keeps field identity", %{
+      user: user,
+      account_id: account_id
+    } do
+      source =
+        contact_field_json(content: "+12025550100", type_name: "Custom mobile", protocol: "tel:")
+
+      stub_fields([source])
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, %{error_count: 0}} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      original = mapped_contact(account_id)
+      [field] = original.contact_fields
+
+      mapping =
+        Imports.find_import_record(account_id, "monica_api", "contact_field", source["uuid"])
+
+      {:ok, _} = Imports.update_import_status(job, "completed")
+      stub_fields([Map.put(source, "label", "Work")])
+      recovery = api_import_fixture(account_id, user.id)
+      # Ordinary reruns still skip existing contacts, including their metadata.
+      assert {:ok, %{error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), recovery)
+
+      assert [%{label: nil}] = mapped_contact(account_id).contact_fields
+
+      for _ <- 1..2 do
+        assert {:ok, %{error_count: 0}} =
+                 MonicaApi.crawl(account_id, user.id, credential(), recovery, %{
+                   "recover_contact_fields" => true
+                 })
+
+        contact = mapped_contact(account_id)
+        assert contact.id == original.id
+        assert [%{id: field_id, label: "Work", value: "+12025550100"}] = contact.contact_fields
+        assert field_id == field.id
+
+        assert Imports.find_import_record(
+                 account_id,
+                 "monica_api",
+                 "contact_field",
+                 source["uuid"]
+               ) == mapping
+
+        assert Kith.VCard.Serializer.serialize(contact) =~ "TEL;TYPE=WORK:+12025550100"
+      end
+
+      {:ok, _} =
+        Contacts.update_contact_field(Repo.get!(Contacts.ContactField, field.id), %{
+          label: "Personal"
+        })
+
+      assert {:ok, %{error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), recovery, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert [%{id: field_id, label: "Personal"}] = mapped_contact(account_id).contact_fields
+      assert field_id == field.id
+    end
+
+    test "rejected blank-label recovery reports a redacted error and preserves the row", %{
+      user: user,
+      account_id: account_id
+    } do
+      source =
+        contact_field_json(content: "+12025550100", type_name: "Custom mobile", protocol: "tel:")
+
+      stub_fields([source])
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      [field] = mapped_contact(account_id).contact_fields
+      secret = String.duplicate("private-label", 30)
+      stub_fields([Map.put(source, "label", secret)])
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert summary.error_count == 1
+      assert summary.errors == ["Contact 1: contact field could not be imported"]
+      refute inspect(summary) =~ secret
+
+      assert [%{id: id, label: nil, value: "+12025550100"}] =
+               mapped_contact(account_id).contact_fields
+
+      assert id == field.id
+    end
+
+    test "distinct source labels survive deduplication with and without UUIDs", %{
+      user: user,
+      account_id: account_id
+    } do
+      for uuid? <- [true, false] do
+        value = if uuid?, do: "+12025550100", else: "+12025550101"
+
+        fields =
+          for label <- ["Work", "Home"] do
+            source =
+              contact_field_json(
+                content: value,
+                type_name: "Custom mobile",
+                protocol: "tel:",
+                label: label
+              )
+
+            if uuid?, do: source, else: Map.delete(source, "uuid")
+          end
+
+        stub_fields(fields)
+        job = api_import_fixture(account_id, user.id)
+
+        for _ <- 1..2 do
+          assert {:ok, %{error_count: 0}} =
+                   MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                     "recover_contact_fields" => true
+                   })
+
+          assert ["Home", "Work"] ==
+                   mapped_contact(account_id).contact_fields
+                   |> Enum.filter(&(&1.value == value))
+                   |> Enum.map(& &1.label)
+                   |> Enum.sort()
+        end
+
+        {:ok, _} = Imports.update_import_status(job, "completed")
+      end
+
+      assert length(mapped_contact(account_id).contact_fields) == 4
+    end
+
+    test "identical unlabeled fields remain deduplicated without adopting another source identity",
+         %{user: user, account_id: account_id} do
+      source =
+        contact_field_json(content: "+12025550100", type_name: "Custom mobile", protocol: "tel:")
+
+      second = Map.put(source, "uuid", Ecto.UUID.generate())
+      stub_fields([source, second, Map.delete(source, "uuid")])
+      job = api_import_fixture(account_id, user.id)
+
+      for _ <- 1..2 do
+        assert {:ok, %{error_count: 0}} =
+                 MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                   "recover_contact_fields" => true
+                 })
+
+        assert [%{value: "+12025550100", label: nil}] = mapped_contact(account_id).contact_fields
+      end
+
+      assert Imports.find_import_record(account_id, "monica_api", "contact_field", source["uuid"])
+      refute Imports.find_import_record(account_id, "monica_api", "contact_field", second["uuid"])
+    end
+
+    test "recovery never adopts an unrelated local blank field", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_fields([])
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      contact = mapped_contact(account_id)
+
+      {:ok, type} =
+        Contacts.create_contact_field_type(account_id, %{name: "Custom mobile", protocol: "tel"})
+
+      {:ok, local} =
+        Contacts.create_contact_field(contact, %{
+          value: "+12025550100",
+          contact_field_type_id: type.id
+        })
+
+      stub_fields([
+        contact_field_json(
+          content: "+12025550100",
+          type_name: "Custom mobile",
+          protocol: "tel:",
+          label: "Work"
+        )
+      ])
+
+      assert {:ok, %{error_count: 0}} =
+               MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert Repo.get!(Contacts.ContactField, local.id).label == nil
+      assert length(mapped_contact(account_id).contact_fields) == 2
+    end
+
+    test "foreign, other-contact, stale and changed mapped fields cannot be relabeled", %{
+      user: user,
+      account_id: account_id
+    } do
+      source =
+        contact_field_json(content: "+12025550100", type_name: "Custom mobile", protocol: "tel:")
+
+      stub_fields([source])
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job)
+      [original] = mapped_contact(account_id).contact_fields
+      foreign_user = user_fixture()
+      foreign_contact = contact_fixture(foreign_user.account_id)
+      other_contact = contact_fixture(account_id)
+
+      {:ok, foreign_type} =
+        Contacts.create_contact_field_type(foreign_user.account_id, %{
+          name: "Foreign mobile",
+          protocol: "tel"
+        })
+
+      {:ok, foreign} =
+        Contacts.create_contact_field(foreign_contact, %{
+          value: original.value,
+          contact_field_type_id: foreign_type.id
+        })
+
+      {:ok, other} =
+        Contacts.create_contact_field(other_contact, %{
+          value: original.value,
+          contact_field_type_id: original.contact_field_type_id
+        })
+
+      stub_fields([Map.put(source, "label", "Work")])
+
+      for target_id <- [foreign.id, other.id, -1] do
+        {:ok, mapping} =
+          Imports.record_imported_entity(
+            job,
+            "contact_field",
+            source["uuid"],
+            "contact_field",
+            target_id
+          )
+
+        assert {:ok, _} =
+                 MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                   "recover_contact_fields" => true
+                 })
+
+        assert Imports.find_import_record(
+                 account_id,
+                 "monica_api",
+                 "contact_field",
+                 source["uuid"]
+               ) == mapping
+
+        assert Repo.get!(Contacts.ContactField, original.id).label == nil
+        assert Repo.get!(Contacts.ContactField, foreign.id).label == nil
+        assert Repo.get!(Contacts.ContactField, other.id).label == nil
+        assert length(mapped_contact(account_id).contact_fields) == 1
+      end
+
+      {:ok, _} =
+        Imports.record_imported_entity(
+          job,
+          "contact_field",
+          source["uuid"],
+          "contact_field",
+          original.id
+        )
+
+      {:ok, _} = Contacts.update_contact_field(original, %{value: "+12025550199"})
+
+      assert {:ok, _} =
+               MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert [%{value: "+12025550199", label: nil}] = mapped_contact(account_id).contact_fields
+
+      {:ok, changed_type} =
+        Contacts.create_contact_field_type(account_id, %{
+          name: "Local changed type",
+          protocol: "http"
+        })
+
+      {:ok, _} =
+        Contacts.update_contact_field(Repo.get!(Contacts.ContactField, original.id), %{
+          value: original.value,
+          contact_field_type_id: changed_type.id
+        })
+
+      assert {:ok, %{error_count: 1}} =
+               MonicaApi.crawl(account_id, user.id, credential(), job, %{
+                 "recover_contact_fields" => true
+               })
+
+      assert [%{contact_field_type_id: type_id, value: "+12025550100", label: nil}] =
+               mapped_contact(account_id).contact_fields
+
+      assert type_id == changed_type.id
+    end
+
+    defp stub_fields(fields) do
+      Req.Test.stub(@stub_name, fn conn ->
+        assert conn.request_path == "/api/contacts"
+        Req.Test.json(conn, contacts_page_json([contact_json(id: 1, contact_fields: fields)]))
+      end)
+    end
+
+    defp mapped_contact(account_id) do
+      record = Imports.find_import_record(account_id, "monica_api", "contact", "1")
+
+      Repo.get!(Contacts.Contact, record.local_entity_id)
+      |> Repo.preload([
+        :addresses,
+        :gender,
+        :tags,
+        :relationships,
+        contact_fields: :contact_field_type
+      ])
+    end
+  end
+
   # ── test_connection/1 ──────────────────────────────────────────────────
 
   describe "test_connection/1" do
@@ -53,6 +738,17 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       end)
 
       assert :ok = MonicaApi.test_connection(credential())
+    end
+
+    test "stored Bearer identity is preserved for a legacy URL containing userinfo" do
+      Req.Test.stub(@stub_name, fn conn ->
+        assert conn.request_path == "/api/me"
+        assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer test-key"]
+        Req.Test.json(conn, %{"data" => %{"id" => 1}})
+      end)
+
+      assert :ok =
+               MonicaApi.test_connection(credential(url: "https://legacy:password@monica.test"))
     end
 
     test "returns error for invalid API key" do
@@ -218,6 +914,89 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
 
   # ── crawl/5 — pagination ──────────────────────────────────────────────
 
+  describe "crawl/5 — stay in touch" do
+    test "imports Monica's stay-in-touch days as a day-interval reminder, once", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(
+          id: 9,
+          first_name: "Gina",
+          stay_in_touch_frequency: 14,
+          stay_in_touch_trigger_date: "2026-10-28T19:28:39Z"
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 1))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      for _ <- 1..2 do
+        assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      end
+
+      assert [r] =
+               Repo.all(
+                 from r in Kith.Reminders.Reminder,
+                   where: r.account_id == ^account_id and r.type == "stay_in_touch"
+               )
+
+      assert %{interval_unit: "day", interval_count: 14, anchor_date: ~D[2026-10-28]} = r
+
+      assert Imports.find_import_record(account_id, "monica_api", "reminder", "stay_in_touch:9").local_entity_id ==
+               r.id
+    end
+
+    test "a failing stay-in-touch create is logged and the crawl continues", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_contacts([
+        contact_json(id: 9, first_name: "Gina", stay_in_touch_frequency: 14),
+        contact_json(id: 10, first_name: "Hank")
+      ])
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      # A nil creator makes Reminders.create_reminder fail validation.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, summary} = MonicaApi.crawl(account_id, nil, credential(), import_job, %{})
+          assert summary.contacts == 2
+        end)
+
+      assert log =~ "stay-in-touch for 9"
+
+      assert Repo.all(
+               from r in Kith.Reminders.Reminder,
+                 where: r.account_id == ^account_id and r.type == "stay_in_touch"
+             ) == []
+    end
+
+    test "is skipped when the reminders option is off", %{user: user, account_id: account_id} do
+      contacts = [contact_json(id: 9, first_name: "Gina", stay_in_touch_frequency: 14)]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 1))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, _} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "reminders" => false
+               })
+
+      assert Repo.all(
+               from r in Kith.Reminders.Reminder,
+                 where: r.account_id == ^account_id and r.type == "stay_in_touch"
+             ) == []
+    end
+  end
+
   describe "crawl/5 — pagination" do
     test "crawls multiple pages until last_page", %{user: user, account_id: account_id} do
       page1 = for i <- 1..3, do: contact_json(id: i, first_name: "Page1_#{i}")
@@ -368,6 +1147,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert eve.first_met_additional_info == "Through mutual friends at a party"
     end
 
+    @tag :capture_log
     test "skips first_met_through when referenced contact not found", %{
       user: user,
       account_id: account_id
@@ -466,6 +1246,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert Enum.any?(rels, fn r -> r.related_contact_id == bob_rec.local_entity_id end)
     end
 
+    @tag :capture_log
     test "skips relationship when related contact not imported", %{
       user: user,
       account_id: account_id
@@ -510,36 +1291,24 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   # ── crawl/5 — extra notes ─────────────────────────────────────────────
 
   describe "crawl/5 — extra notes" do
-    test "fetches extra notes for contacts with more than 3", %{
+    test "plans an extra-notes fetch for contacts with more notes than embedded", %{
       user: user,
       account_id: account_id
     } do
-      embedded_notes = for i <- 1..3, do: note_json(body: "Embedded note #{i}")
-
-      all_notes =
-        for i <- 1..7, do: note_json(body: "Note #{i}")
-
       contacts = [
         contact_json(
           id: 1,
           first_name: "Verbose",
           number_of_notes: 7,
-          notes: embedded_notes
+          notes: for(i <- 1..3, do: note_json(body: "Embedded note #{i}"))
         )
       ]
 
       {:ok, agent} = Agent.start_link(fn -> 0 end)
 
       Req.Test.stub(@stub_name, fn conn ->
-        call = Agent.get_and_update(agent, fn n -> {n + 1, n + 1} end)
-
-        if call == 1 do
-          # Contacts page
-          Req.Test.json(conn, contacts_page_json(contacts))
-        else
-          # Notes page
-          Req.Test.json(conn, notes_page_json(all_notes, 1, 1, 7))
-        end
+        Agent.update(agent, &(&1 + 1))
+        Req.Test.json(conn, contacts_page_json(contacts))
       end)
 
       import_job =
@@ -550,11 +1319,33 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                  "extra_notes" => true
                })
 
-      # 3 embedded + 4 extra = 7 total notes
-      # (first 3 skipped from the full notes list, so 4 extra imported)
-      assert summary.notes >= 3
+      # The crawl imports only the embedded notes and makes no notes request;
+      # MonicaMiscDataWorker fetches the rest.
+      assert summary.notes == 3
+      assert Agent.get(agent, & &1) == 2
 
+      assert [%{source_id: "1", embedded_notes: 3, endpoints: endpoints}] =
+               summary.misc_data_plan
+
+      assert "notes" in endpoints
       Agent.stop(agent)
+    end
+
+    test "does not plan extra notes when the wizard opts out", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [contact_json(id: 1, first_name: "Verbose", number_of_notes: 7, notes: [])]
+      Req.Test.stub(@stub_name, fn conn -> Req.Test.json(conn, contacts_page_json(contacts)) end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "extra_notes" => false
+               })
+
+      assert Enum.all?(summary.misc_data_plan, &("notes" not in &1.endpoints))
     end
 
     test "does not fetch extra notes for contacts with 3 or fewer", %{
@@ -593,7 +1384,13 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   # ── crawl/5 — rate limiting ──────────────────────────────────────────
 
   describe "crawl/5 — rate limiting" do
-    @tag :slow
+    # The shared credential/1 sets `retry: false`, so Req never retries a 429.
+    # These tests exercise the retry path with a zero backoff delay.
+    defp retrying_credential do
+      credential(req_options: [plug: {Req.Test, @stub_name}, retry_delay: 0])
+    end
+
+    @tag :capture_log
     test "retries on 429 from contacts endpoint", %{user: user, account_id: account_id} do
       contacts = [contact_json(id: 1, first_name: "Patient")]
 
@@ -610,20 +1407,26 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       end)
 
       import_job = api_import_fixture(account_id, user.id)
-      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, retrying_credential(), import_job, %{})
+
       assert summary.contacts == 1
 
       Agent.stop(agent)
     end
 
-    @tag :slow
+    @tag :capture_log
     test "fails after max retries on persistent 429", %{user: user, account_id: account_id} do
       Req.Test.stub(@stub_name, fn conn ->
         Plug.Conn.send_resp(conn, 429, "")
       end)
 
       import_job = api_import_fixture(account_id, user.id)
-      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, retrying_credential(), import_job, %{})
+
       assert summary.error_count > 0
       assert Enum.any?(summary.errors, &String.contains?(&1, "Rate limited"))
     end
@@ -653,54 +1456,192 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
 
   # ── crawl/5 — re-import / deduplication ──────────────────────────────
 
-  describe "crawl/5 — re-import / deduplication" do
-    test "updates existing contacts on re-import", %{user: user, account_id: account_id} do
-      contacts_v1 = [contact_json(id: 1, first_name: "Alice", last_name: "Old")]
+  defp stub_contacts(contacts) do
+    Req.Test.stub(@stub_name, fn conn ->
+      Req.Test.json(conn, contacts_page_json(contacts))
+    end)
+  end
 
-      Req.Test.stub(@stub_name, fn conn ->
-        Req.Test.json(conn, contacts_page_json(contacts_v1))
-      end)
-
-      import_job1 = api_import_fixture(account_id, user.id)
-      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job1, %{})
-
-      alice =
-        Repo.one(
-          from c in Contacts.Contact,
-            where: c.first_name == "Alice" and c.account_id == ^account_id
-        )
-
-      assert alice.last_name == "Old"
-
-      # Complete the first import so we can create a second
-      Imports.update_import_status(import_job1, "completed", %{completed_at: DateTime.utc_now()})
-
-      # Re-import with updated name
-      contacts_v2 = [contact_json(id: 1, first_name: "Alice", last_name: "New")]
-
-      Req.Test.stub(@stub_name, fn conn ->
-        Req.Test.json(conn, contacts_page_json(contacts_v2))
-      end)
-
-      import_job2 = api_import_fixture(account_id, user.id)
-      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job2, %{})
-
-      alice = Repo.get!(Contacts.Contact, alice.id)
-      assert alice.last_name == "New"
-
-      # Still only one contact in DB
-      count =
+  defp children_snapshot(account_id) do
+    %{
+      stay_in_touch:
         Repo.aggregate(
-          from(c in Contacts.Contact,
-            where: c.first_name == "Alice" and c.account_id == ^account_id
+          from(r in Kith.Reminders.Reminder,
+            where: r.account_id == ^account_id and r.type == "stay_in_touch"
           ),
           :count
-        )
+        ),
+      stay_in_touch_interval:
+        Repo.all(
+          from r in Kith.Reminders.Reminder,
+            where: r.account_id == ^account_id and r.type == "stay_in_touch",
+            select: {r.id, r.interval_count, r.updated_at}
+        ),
+      notes:
+        Repo.aggregate(from(n in Kith.Contacts.Note, where: n.account_id == ^account_id), :count)
+    }
+  end
 
-      assert count == 1
+  describe "crawl/5 — re-import / deduplication" do
+    # Decision 2026-10-19: re-importing previously imported contacts is not supported.
+    test "a contact from an earlier import is skipped and left untouched", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_contacts([
+        contact_json(
+          id: 1,
+          first_name: "Alice",
+          last_name: "Old",
+          stay_in_touch_frequency: 14,
+          notes: [note_json(body: "first note")]
+        )
+      ])
+
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, first} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      assert first.contacts == 1
+      Imports.update_import_status(job1, "completed", %{completed_at: DateTime.utc_now()})
+
+      alice_id =
+        Imports.find_import_record(account_id, "monica_api", "contact", "1").local_entity_id
+
+      before_children = children_snapshot(account_id)
+
+      stub_contacts([
+        contact_json(
+          id: 1,
+          first_name: "Alice",
+          last_name: "New",
+          stay_in_touch_frequency: 30,
+          notes: [note_json(body: "first note"), note_json(body: "a new note")]
+        )
+      ])
+
+      job2 = api_import_fixture(account_id, user.id)
+
+      assert {:ok, second} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+      assert second.skipped == 1
+      assert second.contacts == 0
+
+      assert Repo.get!(Contacts.Contact, alice_id).last_name == "Old"
+      assert children_snapshot(account_id) == before_children
+
+      assert Repo.aggregate(
+               from(c in Contacts.Contact, where: c.account_id == ^account_id),
+               :count
+             ) == 1
     end
 
-    test "skips soft-deleted contacts on re-import", %{user: user, account_id: account_id} do
+    test "a purged contact is re-created and its import record re-pointed", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_contacts([contact_json(id: 1, first_name: "Purged")])
+
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      Imports.update_import_status(job1, "completed", %{completed_at: DateTime.utc_now()})
+
+      old = Imports.find_import_record(account_id, "monica_api", "contact", "1")
+      Repo.delete!(Repo.get!(Contacts.Contact, old.local_entity_id))
+
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, second} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+      assert second.contacts == 1
+      assert second.skipped == 0
+
+      rec = Imports.find_import_record(account_id, "monica_api", "contact", "1")
+      refute rec.local_entity_id == old.local_entity_id
+      assert rec.import_id == job2.id
+      assert Repo.get!(Contacts.Contact, rec.local_entity_id).first_name == "Purged"
+    end
+
+    test "re-running the same import job is idempotent, children included", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_contacts([
+        contact_json(
+          id: 1,
+          first_name: "Retry",
+          stay_in_touch_frequency: 14,
+          notes: [note_json(body: "only once")]
+        )
+      ])
+
+      job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job, %{})
+      snapshot = children_snapshot(account_id)
+      assert snapshot.stay_in_touch == 1
+      assert snapshot.notes == 1
+
+      # An Oban retry re-runs the crawl with the same import job.
+      assert {:ok, again} = MonicaApi.crawl(account_id, user.id, credential(), job, %{})
+      assert again.skipped == 0
+
+      assert children_snapshot(account_id) == snapshot
+
+      assert Repo.aggregate(
+               from(c in Contacts.Contact, where: c.account_id == ^account_id),
+               :count
+             ) == 1
+    end
+
+    test "a new contact still links to a skipped, previously imported one", %{
+      user: user,
+      account_id: account_id
+    } do
+      stub_contacts([contact_json(id: 2, first_name: "Bob", last_name: "Spouse")])
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      Imports.update_import_status(job1, "completed", %{completed_at: DateTime.utc_now()})
+
+      alice =
+        contact_json(
+          id: 1,
+          first_name: "Alice",
+          relationships: %{
+            "love" => %{
+              "total" => 1,
+              "contacts" => [
+                %{
+                  "relationship" => %{
+                    "id" => 1,
+                    "uuid" => Ecto.UUID.generate(),
+                    "name" => "spouse"
+                  },
+                  "contact" => contact_short_json(2, Ecto.UUID.generate(), "Bob", "Spouse")
+                }
+              ]
+            },
+            "family" => %{"total" => 0, "contacts" => []},
+            "friend" => %{"total" => 0, "contacts" => []},
+            "work" => %{"total" => 0, "contacts" => []}
+          }
+        )
+
+      stub_contacts([alice, contact_json(id: 2, first_name: "Bob", last_name: "Spouse")])
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+      assert summary.contacts == 1
+      assert summary.skipped == 1
+
+      alice_rec = Imports.find_import_record(account_id, "monica_api", "contact", "1")
+      bob_rec = Imports.find_import_record(account_id, "monica_api", "contact", "2")
+
+      assert Repo.exists?(
+               from r in Contacts.Relationship,
+                 where:
+                   r.contact_id == ^alice_rec.local_entity_id and
+                     r.related_contact_id == ^bob_rec.local_entity_id
+             )
+    end
+
+    test "a soft-deleted contact from an earlier import stays skipped", %{
+      user: user,
+      account_id: account_id
+    } do
       contacts = [contact_json(id: 1, first_name: "Deleted")]
 
       Req.Test.stub(@stub_name, fn conn ->
@@ -734,6 +1675,29 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
   # ── crawl/5 — error handling ─────────────────────────────────────────
 
   describe "crawl/5 — error handling" do
+    @tag :capture_log
+    test "a contact that fails to create counts as an error, not as skipped", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(id: 1, first_name: "", last_name: ""),
+        contact_json(id: 2, first_name: "Fine")
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      assert summary.error_count >= 1
+      assert summary.errors != []
+      assert summary.skipped == 0
+      assert summary.contacts == 1
+    end
+
+    @tag :capture_log
     test "handles malformed API response", %{user: user, account_id: account_id} do
       Req.Test.stub(@stub_name, fn conn ->
         Req.Test.json(conn, %{"unexpected" => "format"})
@@ -1239,68 +2203,78 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       notes = Repo.all(from(n in Contacts.Note, where: n.contact_id == ^contact.id))
       assert length(notes) == 2
     end
+  end
 
-    test "skips duplicate notes in extra_notes phase", %{user: user, account_id: account_id} do
-      # Contact has 5 notes total — 3 embedded + 2 extra
-      # One extra note duplicates an embedded one
+  describe "crawl/5 — note timestamps" do
+    defp crawl_notes(user, account_id, first_name, notes) do
       contacts = [
         contact_json(
           id: 1,
-          first_name: "Extra",
-          last_name: "Notes",
-          number_of_notes: 5,
-          notes: [
-            note_json(id: 1, body: "Note A"),
-            note_json(id: 2, body: "Note B"),
-            note_json(id: 3, body: "Note C")
-          ]
+          first_name: first_name,
+          last_name: "Stamp",
+          number_of_notes: length(notes),
+          notes: notes
         )
       ]
 
-      request_count = :counters.new(1, [:atomics])
-
       Req.Test.stub(@stub_name, fn conn ->
-        :counters.add(request_count, 1, 1)
-        count = :counters.get(request_count, 1)
-
-        if count == 1 do
-          # First request: contacts page
-          Req.Test.json(conn, contacts_page_json(contacts))
-        else
-          # Notes request: includes a duplicate of "Note A" and a new "Note D"
-          Req.Test.json(
-            conn,
-            notes_page_json([
-              note_json(id: 1, body: "Note A"),
-              note_json(id: 2, body: "Note B"),
-              note_json(id: 3, body: "Note C"),
-              note_json(id: 4, body: "Note A"),
-              note_json(id: 5, body: "Note D")
-            ])
-          )
-        end
+        Req.Test.json(conn, contacts_page_json(contacts))
       end)
 
-      import_job =
-        api_import_fixture(account_id, user.id, %{
-          api_options: %{"photos" => false, "extra_notes" => true}
-        })
-
+      import_job = api_import_fixture(account_id, user.id)
       assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
 
       contact =
         Repo.one!(
           from(c in Contacts.Contact,
-            where: c.first_name == "Extra" and c.account_id == ^account_id
+            where: c.first_name == ^first_name and c.account_id == ^account_id
           )
         )
 
-      notes = Repo.all(from(n in Contacts.Note, where: n.contact_id == ^contact.id))
-      # Should have A, B, C, D — not a second A
-      assert length(notes) == 4
+      Repo.all(from(n in Contacts.Note, where: n.contact_id == ^contact.id))
+    end
 
-      bodies = Enum.map(notes, & &1.body) |> Enum.sort()
-      assert bodies == ["Note A", "Note B", "Note C", "Note D"]
+    test "embedded notes keep Monica created_at/updated_at", %{user: user, account_id: account_id} do
+      [note] =
+        crawl_notes(user, account_id, "Old", [
+          note_json(
+            body: "Old",
+            created_at: "2019-05-04T10:00:00Z",
+            updated_at: "2020-01-01T00:00:00Z"
+          )
+        ])
+
+      assert note.inserted_at == ~U[2019-05-04 10:00:00Z]
+      assert note.updated_at == ~U[2020-01-01 00:00:00Z]
+    end
+
+    test "note without created_at falls back to now", %{user: user, account_id: account_id} do
+      [note] =
+        crawl_notes(user, account_id, "Fresh", [
+          note_json(body: "New", created_at: nil, updated_at: nil)
+        ])
+
+      assert DateTime.diff(DateTime.utc_now(), note.inserted_at) < 60
+    end
+
+    test "re-import does not change timestamps of existing notes", %{
+      user: user,
+      account_id: account_id
+    } do
+      [first] =
+        crawl_notes(user, account_id, "Again", [
+          note_json(body: "Same", created_at: "2019-05-04T10:00:00Z")
+        ])
+
+      Repo.update_all(Kith.Imports.Import, set: [status: "completed"])
+
+      [second] =
+        crawl_notes(user, account_id, "Again", [
+          note_json(body: "Same", created_at: "2015-01-01T00:00:00Z")
+        ])
+
+      assert second.id == first.id
+      assert second.inserted_at == ~U[2019-05-04 10:00:00Z]
     end
   end
 
@@ -1400,7 +2374,12 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert length(active) == 2
     end
 
-    test "does not merge contacts with same name but different email/phone", %{
+    # Issue #2: the name-group pass leaves this pair alone (no shared
+    # email/phone/address), and the detector flags it only on `name_match`.
+    # A name-only match is never auto-merged — two different people routinely
+    # share an identical first+last name — so the pair stays a pending
+    # candidate for manual review.
+    test "does not auto-merge same-name contacts whose only shared signal is the name", %{
       user: user,
       account_id: account_id
     } do
@@ -1431,6 +2410,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                })
 
       assert summary.merged == 0
+      assert summary.merged_by_detection == 0
 
       active =
         Repo.all(
@@ -1442,6 +2422,293 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
         )
 
       assert length(active) == 2
+      # The detector still flags the pair — it is deliberately not auto-merged.
+      assert Kith.DuplicateDetection.cluster_count(account_id) >= 1
+    end
+
+    # Issue #2, pure divergence case (a): first/last names differ, so the
+    # name-group pass never groups them, and `display_name` collides exactly —
+    # a name-only match. It is never auto-merged and stays a pending candidate.
+    test "does not auto-merge contacts whose display_name collides but nothing else is shared", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(id: 1, first_name: "John Doe", last_name: ""),
+        contact_json(id: 2, first_name: "John", last_name: "Doe")
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert summary.merged == 0
+      assert summary.merged_by_detection == 0
+
+      active =
+        Repo.aggregate(
+          from(c in Contacts.Contact,
+            where: c.account_id == ^account_id and is_nil(c.deleted_at)
+          ),
+          :count
+        )
+
+      assert active == 2
+      # The detector still flags the pair — it is deliberately not auto-merged.
+      assert Kith.DuplicateDetection.cluster_count(account_id) >= 1
+    end
+
+    # A strong edge (identical display_name + a shared email) that the detector
+    # scores at 1.0, but whose members carry different non-empty birthdates:
+    # the second pass holds it back rather than merging. First/last names
+    # differ, so the name-group first pass never groups them.
+    test "does not merge a strong-edge pair whose members disagree on birthdate", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(
+          id: 1,
+          first_name: "Bob Smith",
+          last_name: "",
+          contact_fields: [contact_field_json(content: "bob@example.com", type_name: "Email")],
+          birthdate: %{"date" => "1985-06-15T00:00:00Z", "is_year_unknown" => false}
+        ),
+        contact_json(
+          id: 2,
+          first_name: "Bob",
+          last_name: "Smith",
+          contact_fields: [contact_field_json(content: "bob@example.com", type_name: "Email")],
+          birthdate: %{"date" => "1990-01-01T00:00:00Z", "is_year_unknown" => false}
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert summary.merged == 0
+      assert summary.automerge_skipped == 1
+
+      active =
+        Repo.all(
+          from(c in Contacts.Contact,
+            where: c.account_id == ^account_id and is_nil(c.deleted_at)
+          )
+        )
+
+      assert length(active) == 2
+    end
+
+    # Issue #2: the import option lowers the strong-edge floor for the second
+    # pass. These two share an email (~0.9) but no name_key, so nothing would
+    # merge at the default 1.0 floor (covered by the DuplicateAutomerge
+    # min_score test); with the override it does.
+    test "a same-job retry still auto-merges the duplicates attempt 1 created", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts =
+        for id <- [1, 2] do
+          contact_json(
+            id: id,
+            first_name: "Retry",
+            last_name: "Dupe",
+            contact_fields: [contact_field_json(content: "retry@example.com", type_name: "Email")]
+          )
+        end
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      # Attempt 1 created the contacts but never reached the merge phase.
+      assert {:ok, first} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+      assert first.merged == 0
+
+      assert {:ok, retry} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert retry.merged == 1
+    end
+
+    test "a same-job retry preserves a dismissed name-group match", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts =
+        for id <- [1, 2] do
+          contact_json(
+            id: id,
+            first_name: "Retry",
+            last_name: "Dupe",
+            contact_fields: [contact_field_json(content: "retry@example.com", type_name: "Email")]
+          )
+        end
+
+      stub_contacts(contacts)
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      [a, b] =
+        for source_id <- ["1", "2"],
+            do:
+              Imports.find_import_record(account_id, "monica_api", "contact", source_id).local_entity_id
+
+      :ok = Kith.DuplicateDetection.dismiss_selection(account_id, [a, b], [])
+
+      for _ <- 1..2 do
+        assert {:ok, summary} =
+                 MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                   "auto_merge_duplicates" => true
+                 })
+
+        assert summary.merged == 0
+        assert is_nil(Repo.get!(Contacts.Contact, a).deleted_at)
+        assert is_nil(Repo.get!(Contacts.Contact, b).deleted_at)
+        assert Kith.DuplicateDetection.dismissed_pair?(account_id, b, a)
+      end
+    end
+
+    test "name-group merges preserve a dismissal inherited from a merged-away contact", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts =
+        for id <- [1, 2, 3] do
+          contact_json(
+            id: id,
+            first_name: "Retry",
+            last_name: "Dupe",
+            contact_fields: [contact_field_json(content: "retry@example.com", type_name: "Email")]
+          )
+        end
+
+      stub_contacts(contacts)
+      import_job = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
+
+      [a, b, c] =
+        for source_id <- ["1", "2", "3"],
+            do:
+              Imports.find_import_record(account_id, "monica_api", "contact", source_id).local_entity_id
+
+      :ok = Kith.DuplicateDetection.dismiss_selection(account_id, [b, c], [])
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert summary.merged == 1
+      assert is_nil(Repo.get!(Contacts.Contact, a).deleted_at)
+      refute is_nil(Repo.get!(Contacts.Contact, b).deleted_at)
+      assert is_nil(Repo.get!(Contacts.Contact, c).deleted_at)
+      assert Kith.DuplicateDetection.dismissed_pair?(account_id, a, c)
+
+      assert {:ok, retry} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert retry.merged == 0
+      assert is_nil(Repo.get!(Contacts.Contact, c).deleted_at)
+    end
+
+    test "honours opts[\"auto_merge_score\"] override", %{user: user, account_id: account_id} do
+      contacts = [
+        contact_json(
+          id: 1,
+          first_name: "Sam",
+          last_name: "Bell",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        ),
+        contact_json(
+          id: 2,
+          first_name: "Sam",
+          last_name: "Bella",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true,
+                 "auto_merge_score" => 0.85
+               })
+
+      assert summary.merged == 1
+      assert summary.merged_by_detection == 1
+
+      active =
+        Repo.all(
+          from(c in Contacts.Contact,
+            where:
+              c.first_name in ["Sam"] and c.account_id == ^account_id and
+                is_nil(c.deleted_at)
+          )
+        )
+
+      assert length(active) == 1
+    end
+
+    test "coerces a string opts[\"auto_merge_score\"] from the form", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = [
+        contact_json(
+          id: 1,
+          first_name: "Sam",
+          last_name: "Bell",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        ),
+        contact_json(
+          id: 2,
+          first_name: "Sam",
+          last_name: "Bella",
+          contact_fields: [contact_field_json(content: "sb@example.com", type_name: "Email")]
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, contacts_page_json(contacts, 1, 1, 2))
+      end)
+
+      import_job = api_import_fixture(account_id, user.id)
+
+      assert {:ok, summary} =
+               MonicaApi.crawl(account_id, user.id, credential(), import_job, %{
+                 "auto_merge_duplicates" => true,
+                 "auto_merge_score" => "0.85"
+               })
+
+      assert summary.merged == 1
+      assert summary.merged_by_detection == 1
     end
 
     test "merges contacts with same name and phone", %{user: user, account_id: account_id} do
@@ -1531,10 +2798,198 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
 
       assert length(active) == 1
     end
+
+    # Issue #2 review IMP-1: the second pass must scope to contacts genuinely
+    # created this run, or it would auto-merge the whole prior corpus. (Since
+    # 2026-10-19 previously imported contacts are skipped, not updated.)
+    test "re-import does not auto-merge a pre-existing contact into a new namesake",
+         %{user: user, account_id: account_id} do
+      # First import: creates Monica contact 1 ("Nora Reed"), nothing to merge.
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(
+          conn,
+          contacts_page_json(
+            [contact_json(id: 1, first_name: "Nora", last_name: "Reed")],
+            1,
+            1,
+            1
+          )
+        )
+      end)
+
+      job1 = api_import_fixture(account_id, user.id)
+
+      assert {:ok, first} =
+               MonicaApi.crawl(account_id, user.id, credential(), job1, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      assert first.merged == 0
+      [existing] = Repo.all(from(c in Contacts.Contact, where: c.account_id == ^account_id))
+
+      Imports.update_import_status(job1, "completed", %{completed_at: DateTime.utc_now()})
+
+      # Second import: re-sends contact 1 (skipped) plus a brand-new contact 2
+      # with an identical display_name and nothing else shared.
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(
+          conn,
+          contacts_page_json(
+            [
+              contact_json(id: 1, first_name: "Nora", last_name: "Reed"),
+              contact_json(id: 2, first_name: "Nora", last_name: "Reed")
+            ],
+            1,
+            1,
+            2
+          )
+        )
+      end)
+
+      job2 = api_import_fixture(account_id, user.id)
+
+      assert {:ok, second} =
+               MonicaApi.crawl(account_id, user.id, credential(), job2, %{
+                 "auto_merge_duplicates" => true
+               })
+
+      # The pre-existing contact is left alone; only contact 2 was created.
+      assert second.merged == 0
+      assert second.merged_by_detection == 0
+
+      active =
+        Repo.all(
+          from(c in Contacts.Contact,
+            where:
+              c.first_name == "Nora" and c.last_name == "Reed" and
+                c.account_id == ^account_id and is_nil(c.deleted_at)
+          )
+        )
+
+      assert length(active) == 2
+      assert existing.id in Enum.map(active, & &1.id)
+
+      # The detector still flags the pair — it is deliberately not auto-merged.
+      assert Kith.DuplicateDetection.cluster_count(account_id) >= 1
+    end
+  end
+
+  describe "coverage backfill on a second import" do
+    # Stubs the listing with `contacts` and records every per-contact fetch.
+    defp stub_listing_recording_fetches(contacts, total) do
+      pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case conn.request_path do
+          "/api/contacts" ->
+            Req.Test.json(conn, contacts_page_json(contacts, 1, 1, total))
+
+          "/api/contacts/" <> id ->
+            send(pid, {:single_fetch, id})
+            Req.Test.json(conn, %{"data" => Enum.find(contacts, &(to_string(&1["id"]) == id))})
+        end
+      end)
+    end
+
+    defp complete(job),
+      do: Imports.update_import_status(job, "completed", %{completed_at: DateTime.utc_now()})
+
+    test "all contacts skipped: no unresolved gap, no per-contact fetches", %{
+      user: user,
+      account_id: account_id
+    } do
+      contacts = for i <- 1..3, do: contact_json(id: i, first_name: "C#{i}")
+      stub_listing_recording_fetches(contacts, 3)
+
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      complete(job1)
+      flush_fetches()
+
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+
+      assert summary.skipped == 3
+      assert summary.contacts == 0
+      assert summary.coverage_backfill.unresolved_gap == 0
+      assert summary.coverage_backfill.gap_detected == 0
+      refute_received {:single_fetch, _}
+    end
+
+    test "mixed new and skipped: skipped contacts are counted once and never re-fetched", %{
+      user: user,
+      account_id: account_id
+    } do
+      first = [contact_json(id: 1, first_name: "C1"), contact_json(id: 3, first_name: "C3")]
+      stub_listing_recording_fetches(first, 2)
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      complete(job1)
+      flush_fetches()
+
+      all = for i <- 1..3, do: contact_json(id: i, first_name: "C#{i}")
+      stub_listing_recording_fetches(all, 3)
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+
+      assert summary.contacts == 1
+      assert summary.skipped == 2
+      assert summary.coverage_backfill.gap_detected == 0
+      assert summary.coverage_backfill.imported_full == 0
+      assert summary.coverage_backfill.unresolved_gap == 0
+      refute_received {:single_fetch, _}
+    end
+
+    @tag :capture_log
+    test "a skipped contact first found by the gap scan is not counted as imported", %{
+      user: user,
+      account_id: account_id
+    } do
+      all = for i <- 1..5, do: contact_json(id: i, first_name: "C#{i}")
+      stub_listing_recording_fetches(all, 5)
+      job1 = api_import_fixture(account_id, user.id)
+      assert {:ok, _} = MonicaApi.crawl(account_id, user.id, credential(), job1, %{})
+      complete(job1)
+      flush_fetches()
+
+      # Contact 4 is absent from the listing pages but still counted in meta.total,
+      # so only the gap scan can find it; it belongs to the earlier import.
+      listed = Enum.reject(all, &(&1["id"] == 4))
+
+      Req.Test.stub(@stub_name, fn conn ->
+        case conn.request_path do
+          "/api/contacts" -> Req.Test.json(conn, contacts_page_json(listed, 1, 1, 5))
+          "/api/contacts/4" -> Req.Test.json(conn, %{"data" => Enum.at(all, 3)})
+        end
+      end)
+
+      job2 = api_import_fixture(account_id, user.id)
+      assert {:ok, summary} = MonicaApi.crawl(account_id, user.id, credential(), job2, %{})
+
+      assert summary.coverage_backfill.gap_detected == 1
+      assert summary.coverage_backfill.range_scanned == 1
+      assert summary.coverage_backfill.imported_full == 0
+      assert summary.coverage_backfill.imported_partial == 0
+      assert summary.coverage_backfill.unresolved_gap == 0
+      assert summary.contacts == 0
+      assert summary.imported == 0
+      assert summary.skipped == 5
+    end
+
+    defp flush_fetches do
+      receive do
+        {:single_fetch, _} -> flush_fetches()
+      after
+        0 -> :ok
+      end
+    end
   end
 
   describe "coverage_check_and_backfill" do
-    test "closes a single-ID gap via direct fetch", %{user: user, account_id: account_id} do
+    test "backfills a missing listing contact with embedded phone fields", %{
+      user: user,
+      account_id: account_id
+    } do
       import_job = api_import_fixture(account_id, user.id)
 
       Req.Test.stub(@stub_name, fn conn ->
@@ -1562,6 +3017,8 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
             })
 
           {"GET", "/api/contacts/4"} ->
+            assert conn.query_params["with"] == "contactfields"
+
             Req.Test.json(conn, %{
               "data" => %{
                 "id" => 4,
@@ -1569,7 +3026,13 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                 "last_name" => "X",
                 "is_active" => true,
                 "is_partial" => false,
-                "contactFields" => []
+                "contactFields" => [
+                  contact_field_json(
+                    content: "+12025550100",
+                    type_name: "Phone",
+                    protocol: "tel:"
+                  )
+                ]
               }
             })
 
@@ -1590,11 +3053,18 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert summary.coverage_backfill.skipped_inactive == 0
       assert summary.coverage_backfill.unresolved_gap == 0
       assert summary.imported == 5
+      assert summary.error_count == 0
 
       record = Imports.find_import_record(account_id, "monica_api", "contact", "4")
       refute is_nil(record)
+
+      contact =
+        Contacts.get_contact!(account_id, record.local_entity_id) |> Repo.preload(:contact_fields)
+
+      assert Enum.any?(contact.contact_fields, &(&1.value == "+12025550100"))
     end
 
+    @tag :capture_log
     test "closes a 1-of-2 gap when one direct fetch 404s",
          %{user: user, account_id: account_id} do
       import_job = api_import_fixture(account_id, user.id)
@@ -1652,6 +3122,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       assert summary.coverage_backfill.unresolved_gap == 1
     end
 
+    @tag :capture_log
     test "skips inactive contact in gap", %{user: user, account_id: account_id} do
       import_job = api_import_fixture(account_id, user.id)
 

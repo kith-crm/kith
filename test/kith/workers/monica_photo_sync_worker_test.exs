@@ -13,21 +13,25 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
   import Kith.MonicaApiFixtures
 
   @stub_name :monica_photo_sync_stub
-  @pixel_data_url "data:image/jpeg;base64,#{Base.encode64(<<0xFF, 0xD8, 0xFF, 0xE0>>)}"
-  @other_pixel_data_url "data:image/png;base64,#{Base.encode64(<<0x89, 0x50, 0x4E, 0x47>>)}"
+  defp pixel_data_url,
+    do:
+      "data:image/jpeg;base64," <> Base.encode64(Kith.AvatarFixtures.image_binary(suffix: ".jpg"))
+
+  defp other_pixel_data_url,
+    do:
+      "data:image/png;base64," <>
+        Base.encode64(Kith.AvatarFixtures.image_binary(color: [20, 150, 20]))
 
   setup do
     user = user_fixture()
     seed_reference_data!()
 
-    Application.put_env(
+    Kith.TestEnv.put_env_restoring(
       :kith,
       :monica_req_options,
       plug: {Req.Test, @stub_name},
       retry: false
     )
-
-    on_exit(fn -> Application.delete_env(:kith, :monica_req_options) end)
 
     %{user: user, account_id: user.account_id}
   end
@@ -44,8 +48,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
   defp job_args(import_job),
     do: %{
       "import_id" => import_job.id,
-      "credential_url" => "https://monica.test",
-      "credential_api_key" => "test-key"
+      "credential_url" => "https://monica.test"
     }
 
   defp register_imported_contact!(import_job, contact, monica_id) do
@@ -71,7 +74,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       photo =
         photo_json(
           id: 35,
-          data_url: @pixel_data_url,
+          data_url: pixel_data_url(),
           contact: contact_short_json(964, Ecto.UUID.generate(), "PhotoPerson", "Test")
         )
 
@@ -86,7 +89,8 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       assert photo_row.content_hash != nil
 
       reloaded_contact = Repo.get!(Contacts.Contact, contact.id)
-      assert reloaded_contact.avatar == photo_row.storage_key
+      assert reloaded_contact.avatar == photo_row.avatar_storage_key
+      assert reloaded_contact.avatar != photo_row.storage_key
 
       updated = Imports.get_import!(import_job.id)
       assert updated.sync_summary["total"] == 1
@@ -108,7 +112,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       photo =
         photo_json(
           id: 100,
-          data_url: @pixel_data_url,
+          data_url: pixel_data_url(),
           contact: contact_short_json(9999, Ecto.UUID.generate(), "Unknown", "Person")
         )
 
@@ -128,7 +132,54 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
     end
   end
 
+  describe "perform/1 — earlier-import contacts" do
+    test "does not attach photos to a contact imported by an earlier job, but does for the current job",
+         %{user: user, account_id: account_id} do
+      earlier_job = api_import_fixture(account_id, user.id)
+      old_contact = contact_fixture(account_id, %{first_name: "Old"})
+      register_imported_contact!(earlier_job, old_contact, 501)
+      {:ok, _} = Imports.update_import_status(earlier_job, "completed")
+
+      current_job = api_import_fixture(account_id, user.id)
+      new_contact = contact_fixture(account_id, %{first_name: "New"})
+      register_imported_contact!(current_job, new_contact, 502)
+
+      photos = [
+        photo_json(
+          id: 1,
+          data_url: pixel_data_url(),
+          contact: contact_short_json(501, Ecto.UUID.generate(), "Old", "Test")
+        ),
+        photo_json(
+          id: 2,
+          data_url: other_pixel_data_url(),
+          contact: contact_short_json(502, Ecto.UUID.generate(), "New", "Test")
+        )
+      ]
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, photos_page_json(photos))
+      end)
+
+      assert :ok = perform_job(MonicaPhotoSyncWorker, job_args(current_job))
+
+      assert Contacts.list_photos(old_contact.id) == []
+      assert Repo.get!(Contacts.Contact, old_contact.id).avatar == nil
+      assert [_] = Contacts.list_photos(new_contact.id)
+
+      updated = Imports.get_import!(current_job.id)
+      assert updated.sync_summary["synced"] == 1
+      assert updated.sync_summary["not_found"] == 1
+
+      assert Enum.any?(
+               updated.sync_summary["photos"],
+               &(is_binary(&1["reason"]) and &1["reason"] =~ "earlier import")
+             )
+    end
+  end
+
   describe "perform/1 — failed" do
+    @tag :capture_log
     test "marks photo as failed when dataUrl is missing", %{user: user, account_id: account_id} do
       import_job = api_import_fixture(account_id, user.id)
       contact = contact_fixture(account_id, %{first_name: "NoData"})
@@ -168,7 +219,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       photo =
         photo_json(
           id: 300,
-          data_url: @pixel_data_url,
+          data_url: pixel_data_url(),
           contact: contact_short_json(300, Ecto.UUID.generate(), "Dup", "Person")
         )
 
@@ -201,14 +252,14 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       page1_photo =
         photo_json(
           id: 401,
-          data_url: @pixel_data_url,
+          data_url: pixel_data_url(),
           contact: contact_short_json(401, Ecto.UUID.generate(), "PageA", "Test")
         )
 
       page2_photo =
         photo_json(
           id: 402,
-          data_url: @other_pixel_data_url,
+          data_url: other_pixel_data_url(),
           contact: contact_short_json(402, Ecto.UUID.generate(), "PageB", "Test")
         )
 
@@ -242,6 +293,41 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       final = Imports.get_import!(import_job.id)
       assert final.sync_summary["total"] == 2
       assert final.sync_summary["synced"] == 2
+    end
+  end
+
+  describe "perform/1 — API key" do
+    test "authenticates with the key from the Import row, not job args",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+      test_pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        send(test_pid, {:auth, Plug.Conn.get_req_header(conn, "authorization")})
+        Req.Test.json(conn, photos_page_json([]))
+      end)
+
+      assert :ok = perform_job(MonicaPhotoSyncWorker, job_args(import_job))
+      assert_received {:auth, ["Bearer test-key"]}
+    end
+
+    @tag :capture_log
+    test "cancels without calling Monica when the key has been wiped",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+      {:ok, _} = Imports.wipe_api_key(import_job)
+      test_pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        send(test_pid, {:request, conn.request_path})
+        Req.Test.json(conn, photos_page_json([]))
+      end)
+
+      assert {:cancel, :api_key_wiped} =
+               perform_job(MonicaPhotoSyncWorker, job_args(import_job))
+
+      refute_received {:request, _}
+      assert is_nil(Imports.get_import!(import_job.id).sync_summary)
     end
   end
 end

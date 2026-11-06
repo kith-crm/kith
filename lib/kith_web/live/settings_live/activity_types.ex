@@ -120,6 +120,7 @@ defmodule KithWeb.SettingsLive.ActivityTypes do
               {if @editing_activity_type, do: "Edit Activity Type", else: "New Activity Type"}
             </h2>
             <.form
+              id="activity-type-settings-form"
               for={@changeset}
               phx-change="validate"
               phx-submit="save"

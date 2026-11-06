@@ -9,6 +9,9 @@ defmodule Kith.Storage do
   All backends implement the `Kith.Storage.Backend` behaviour.
   """
 
+  alias Kith.Contacts.Write
+  alias Kith.Storage.S3
+
   require Logger
 
   @type storage_key :: String.t()
@@ -43,7 +46,9 @@ defmodule Kith.Storage do
   Returns `{:ok, binary}` or `{:error, reason}`.
   """
   def read(storage_key) do
-    backend().read(storage_key)
+    with :ok <- validate_storage_key(storage_key) do
+      backend().read(storage_key)
+    end
   end
 
   @doc """
@@ -63,25 +68,35 @@ defmodule Kith.Storage do
   For S3 backend: returns a presigned URL with 1-hour expiry.
   """
   def url(storage_key) do
-    backend().url(storage_key)
+    with :ok <- validate_storage_key(storage_key) do
+      backend().url(storage_key)
+    end
+  end
+
+  @doc """
+  Returns the origin (`scheme://host[:port]`) that `url/1` serves files from,
+  for inclusion in the CSP `img-src` directive. Empty string for the `:local`
+  backend, which serves from the app's own origin (`'self'`).
+  """
+  def csp_img_src do
+    case backend() do
+      S3 -> S3.csp_img_src()
+      _ -> ""
+    end
   end
 
   @doc """
   Returns total storage usage in bytes for an account.
   Queries the sum of file_size across photos and documents tables.
-  Results cached in Cachex with 5-minute TTL.
+  Results cached locally with 5-minute TTL.
   """
   def usage(account_id) do
-    cache_key = {:storage_usage, account_id}
-
-    case Cachex.get(:kith_cache, cache_key) do
-      {:ok, nil} ->
-        total = compute_usage(account_id)
-        Cachex.put(:kith_cache, cache_key, total, ttl: :timer.minutes(5))
-        {:ok, total}
-
-      {:ok, cached} ->
-        {:ok, cached}
+    if Kith.Repo.in_transaction?() do
+      {:ok, compute_usage(account_id)}
+    else
+      Kith.Cache.fetch({:storage_usage, account_id}, fn -> {:ok, compute_usage(account_id)} end,
+        ttl: :timer.minutes(5)
+      )
     end
   end
 
@@ -90,7 +105,11 @@ defmodule Kith.Storage do
   Call after successful upload or delete.
   """
   def bust_usage_cache(account_id) do
-    Cachex.del(:kith_cache, {:storage_usage, account_id})
+    Write.after_commit(fn -> invalidate_usage_cache(account_id) end)
+  end
+
+  defp invalidate_usage_cache(account_id) do
+    Kith.Cache.delete({:storage_usage, account_id})
   end
 
   @doc "Returns the configured max upload size in bytes."
@@ -107,13 +126,19 @@ defmodule Kith.Storage do
   Checks whether an upload of `size_bytes` would exceed the account's storage limit.
   Returns `:ok` or `{:error, :storage_limit_exceeded}`.
   """
-  def check_storage_limit(account_id, size_bytes) do
+  def check_storage_limit(account_id, size_bytes, opts \\ []) do
     max = max_storage_size_bytes()
 
     if max == 0 do
       :ok
     else
-      {:ok, current} = usage(account_id)
+      current =
+        if Keyword.get(opts, :fresh, false) do
+          compute_usage(account_id)
+        else
+          {:ok, cached} = usage(account_id)
+          cached
+        end
 
       if current + size_bytes > max do
         {:error, :storage_limit_exceeded}
@@ -125,8 +150,11 @@ defmodule Kith.Storage do
 
   @doc "Generates a UUID-based storage key for an upload."
   def generate_key(account_id, type, original_filename)
-      when type in ~w(photos documents avatars) do
-    ext = Path.extname(original_filename)
+      when type in ~w(photos documents avatars imports) do
+    # A filename is display metadata, never part of a storage path. Retain only
+    # a bounded conventional extension; arbitrary document names remain valid.
+    candidate = Path.extname(original_filename)
+    ext = if Regex.match?(~r/\A\.[A-Za-z0-9]{1,16}\z/, candidate), do: candidate, else: ""
     uuid = Ecto.UUID.generate()
     "#{account_id}/#{type}/#{uuid}#{ext}"
   end
@@ -156,18 +184,26 @@ defmodule Kith.Storage do
   defp backend do
     case Application.get_env(:kith, Kith.Storage, []) |> Keyword.get(:backend, :local) do
       :local -> Kith.Storage.Local
-      :s3 -> Kith.Storage.S3
+      :s3 -> S3
       other -> raise "Invalid storage backend: #{inspect(other)}. Must be :local or :s3."
     end
   end
 
-  defp validate_storage_key(key) do
-    if String.contains?(key, "..") do
-      {:error, :invalid_path}
-    else
+  @doc "Validates the shared relative object-key policy for every storage operation."
+  def validate_storage_key(key) when is_binary(key) and byte_size(key) in 1..4096 do
+    parts = String.split(key, "/")
+
+    if String.valid?(key) and Path.type(key) == :relative and
+         not String.contains?(key, ["\\", <<0>>]) and
+         not Regex.match?(~r/%[0-9A-Fa-f]{2}/, key) and
+         Enum.all?(parts, &(&1 not in ["", ".", ".."] and not String.contains?(&1, ".."))) do
       :ok
+    else
+      {:error, :invalid_path}
     end
   end
+
+  def validate_storage_key(_), do: {:error, :invalid_path}
 
   defp compute_usage(account_id) do
     import Ecto.Query
@@ -186,6 +222,13 @@ defmodule Kith.Storage do
       )
       |> Kith.Repo.one()
 
-    photos_sum + documents_sum
+    avatars_sum =
+      from(a in "avatar_assets",
+        where: a.account_id == ^account_id,
+        select: coalesce(sum(a.byte_size), 0)
+      )
+      |> Kith.Repo.one()
+
+    photos_sum + documents_sum + avatars_sum
   end
 end

@@ -2,12 +2,18 @@ defmodule Kith.Contacts.Contact do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @derive {Flop.Schema,
-           filterable: [],
-           sortable: [:display_name, :inserted_at, :last_talked_to],
-           default_order: %{order_by: [:display_name], order_directions: [:asc]},
-           default_limit: 20,
-           max_limit: 100}
+  use Flop.Schema
+
+  @flop_options [
+    filterable: [],
+    sortable: [:display_name, :inserted_at, :last_talked_to],
+    default_order: %{order_by: [:display_name], order_directions: [:asc]},
+    tiebreaker: {:primary_key, :asc},
+    default_limit: 20,
+    max_limit: 100
+  ]
+
+  @type t :: %__MODULE__{}
 
   schema "contacts" do
     field :first_name, :string
@@ -37,12 +43,15 @@ defmodule Kith.Contacts.Contact do
     field :first_met_year_unknown, :boolean, default: false
     field :first_met_where, :string
     field :first_met_additional_info, :string
+    field :first_met_reminder, :boolean, default: false
     field :birthdate_year_unknown, :boolean, default: false
 
     belongs_to :account, Kith.Accounts.Account
     belongs_to :gender, Kith.Contacts.Gender
     belongs_to :currency, Kith.Contacts.Currency
     belongs_to :first_met_through, Kith.Contacts.Contact
+
+    has_one :dav, Kith.DAV.ContactDav, foreign_key: :contact_id
 
     has_many :addresses, Kith.Contacts.Address
     has_many :contact_fields, Kith.Contacts.ContactField
@@ -98,11 +107,14 @@ defmodule Kith.Contacts.Contact do
       :first_met_where,
       :first_met_through_id,
       :first_met_additional_info,
+      :first_met_reminder,
       :birthdate_year_unknown
     ])
-    |> validate_required([:first_name, :account_id])
+    |> validate_required([:account_id])
+    |> validate_name()
     |> assoc_constraint(:account)
     |> compute_display_name()
+    |> validate_column_lengths()
     |> validate_first_met_through_account()
   end
 
@@ -135,10 +147,12 @@ defmodule Kith.Contacts.Contact do
       :first_met_where,
       :first_met_through_id,
       :first_met_additional_info,
+      :first_met_reminder,
       :birthdate_year_unknown
     ])
-    |> validate_required([:first_name])
-    |> compute_display_name()
+    |> validate_name()
+    |> maybe_compute_display_name()
+    |> validate_column_lengths()
     |> validate_first_met_through_account()
   end
 
@@ -178,6 +192,41 @@ defmodule Kith.Contacts.Contact do
       true ->
         add_error(changeset, :first_met_through_id, "must be a contact in the same account")
     end
+  end
+
+  @varchar_fields [
+    :first_name,
+    :last_name,
+    :middle_name,
+    :display_name,
+    :nickname,
+    :occupation,
+    :company,
+    :first_met_where
+  ]
+
+  defp validate_column_lengths(changeset) do
+    Enum.reduce(@varchar_fields, changeset, fn field, cs ->
+      validate_length(cs, field, max: 255, count: :codepoints)
+    end)
+  end
+
+  defp validate_name(changeset) do
+    if get_field(changeset, :first_name) in [nil, ""] and
+         is_binary(get_field(changeset, :last_name)) and
+         String.trim(get_field(changeset, :last_name)) != "" do
+      # Family-only vCards have no given name; the database column is NOT NULL.
+      put_change(changeset, :first_name, "")
+    else
+      validate_required(changeset, [:first_name])
+    end
+  end
+
+  defp maybe_compute_display_name(changeset) do
+    if Enum.any?(
+         [:first_name, :middle_name, :last_name],
+         &Ecto.Changeset.changed?(changeset, &1)
+       ), do: compute_display_name(changeset), else: changeset
   end
 
   defp compute_display_name(changeset) do

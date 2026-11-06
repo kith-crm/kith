@@ -1,0 +1,246 @@
+import { test, expect, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import { passwordLogin } from "./helpers/password-login";
+
+test.skip(process.env.KITH_E2E !== "1", "Requires local regression fixtures");
+let fixture: {email: string; contact_id: number};
+test.beforeAll(() => {
+  const output = execFileSync("mix", ["run", "--no-start", "--no-compile", "test/playwright/fixtures/regressions/control.exs", "prepare", JSON.stringify({scenario: "editor"})], {
+    env: {...process.env, MIX_ENV: "test", KITH_E2E: "1", KITH_TEST_SERVER: "0"}, encoding: "utf8", timeout: 120_000,
+  });
+  fixture = JSON.parse(output.split(/\r?\n/).findLast(line => line.startsWith("KITH_TEST_RESULT="))!.slice("KITH_TEST_RESULT=".length));
+});
+
+async function open(page: Page) {
+  await expect(page.locator("[data-phx-main].phx-connected")).toBeVisible();
+  await page.locator('[phx-click="open-entry-modal"][phx-value-type="note"]').click();
+  await expect(page.locator("trix-editor")).toBeVisible();
+}
+async function block(page: Page, attribute: string, text: string) {
+  const editor = page.locator("trix-editor");
+  await editor.focus();
+  await page.locator(`[data-trix-attribute="${attribute}"]`).click();
+  await editor.pressSequentially(text);
+  if (["bold", "italic", "strike"].includes(attribute)) {
+    await page.locator(`[data-trix-attribute="${attribute}"]`).click();
+    await editor.press("Enter");
+  } else {
+    await editor.press("Enter");
+    if (attribute !== "heading1") await editor.press("Enter");
+  }
+}
+
+test("toolbar formatting persists with visible markers, history, and modal lifecycle", async ({page}) => {
+  await passwordLogin(page, fixture.email, "ValidP@ssword123!");
+  await page.goto(`/contacts/${fixture.contact_id}`);
+  await open(page);
+  const editor = page.locator("trix-editor");
+  await expect(page.locator('[data-trix-action="attachFiles"]')).toBeHidden();
+  await expect(page.getByRole("button", {name: "Bold", exact: true}).locator("svg")).toBeVisible();
+  for (const [attribute, text] of [["bold", "bold text"], ["italic", "italic text"], ["strike", "strike text"]]) {
+    await block(page, attribute, text);
+  }
+  for (const [attribute, text] of [["heading1", "Heading"], ["quote", "Quotation"], ["code", "Code sample"], ["bullet", "Bullet item"], ["number", "Number item"]]) {
+    await block(page, attribute, text);
+  }
+  await editor.focus();
+  await page.locator('[data-trix-attribute="bullet"]').click();
+  await editor.pressSequentially("Parent item");
+  await editor.press("Enter");
+  await page.locator('[data-trix-action="increaseNestingLevel"]').click();
+  await editor.pressSequentially("Nested child");
+  await editor.press("Enter");
+  await page.locator('[data-trix-action="decreaseNestingLevel"]').click();
+  await page.locator('[data-trix-attribute="bullet"]').click();
+  await page.locator('[data-trix-attribute="href"]').click();
+  await page.locator('[data-trix-input][name="href"]').fill("https://example.com");
+  await page.locator('[data-trix-method="setAttribute"]').click();
+  await editor.press("End");
+  await editor.pressSequentially(" history");
+  await page.locator('[data-trix-action="undo"]').click();
+  await expect(editor).not.toContainText("history");
+  await page.locator('[data-trix-action="redo"]').click();
+  await expect(editor).toContainText("history");
+  await page.locator('input[name="entry[is_private]"][type="checkbox"]').check();
+  await page.getByRole("button", {name: "Save", exact: true}).click();
+  const body = page.locator(".note-body").first();
+  for (const selector of ["strong", "em", "del", "pre", "h1", "blockquote", "ul li", "ol li", "ul ul li", "a"]) {
+    await expect(body.locator(selector).first()).toBeVisible();
+  }
+  expect(await body.locator("em").boundingBox().then(box => box!.y)).toBeGreaterThan(await body.locator("strong").boundingBox().then(box => box!.y));
+  expect(await body.locator("ul").first().evaluate(el => getComputedStyle(el).listStyleType)).toBe("disc");
+  expect(await body.locator("ol").first().evaluate(el => getComputedStyle(el).listStyleType)).toBe("decimal");
+  await page.reload();
+  await expect(body.locator("strong")).toHaveText("bold text");
+  const edit = page.locator('[phx-click="edit-entry"][phx-value-type="note"]').first();
+  await edit.locator("..").locator("..").locator(":scope > button").click();
+  await edit.click();
+  await expect(editor).toContainText("bold text");
+  await expect(page.locator('input[name="entry[is_private]"][type="checkbox"]')).toBeChecked();
+  await editor.press("ControlOrMeta+End");
+  await editor.pressSequentially(" unsaved typing");
+  // Force a normal component patch while the ignored editor retains local changes.
+  await page.locator('[phx-click="filter-toggle"][phx-value-type="note"]').first().evaluate((el: HTMLElement) => el.click());
+  await expect(editor).toContainText("unsaved typing");
+  await page.getByRole("button", {name: "Cancel", exact: true}).click();
+  await edit.locator("..").locator("..").locator(":scope > button").click();
+  await edit.click();
+  await expect(editor).not.toContainText("unsaved typing");
+  await page.getByRole("button", {name: "Cancel", exact: true}).click();
+  await page.setViewportSize({width: 390, height: 844});
+  await page.evaluate(() => document.documentElement.dataset.theme = "dark");
+  await open(page);
+  await expect(editor).not.toContainText("bold text");
+  await editor.pressSequentially("Second separate note");
+  await page.getByRole("button", {name: "Save", exact: true}).click();
+  await expect(page.locator(".note-body")).toHaveCount(2);
+  await edit.locator("..").locator("..").locator(":scope > button").click();
+  await edit.click();
+  await expect(editor).toContainText("Second separate note");
+  await expect(editor).not.toContainText("bold text");
+  await expect(page.locator('input[name="entry[is_private]"][type="checkbox"]')).not.toBeChecked();
+  await expect(page.getByRole("button", {name: "Bold", exact: true}).locator("svg")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("button", {name: "Cancel", exact: true}).click();
+  const olderEdit = page.locator('[phx-click="edit-entry"][phx-value-type="note"]').last();
+  await olderEdit.locator("..").locator("..").locator(":scope > button").click();
+  await olderEdit.click();
+  await expect(editor).toContainText("bold text");
+  await expect(editor).not.toContainText("Second separate note");
+});
+
+test("delayed invalid submit preserves newer corrections", async ({page}) => {
+  let holdReply = false;
+  let pendingRef: string | undefined;
+  let releaseReply: (() => void) | undefined;
+  await page.routeWebSocket("**/live/websocket*", socket => {
+    const server = socket.connectToServer();
+    socket.onMessage(message => {
+      const frame = JSON.parse(message.toString());
+      if (holdReply && frame[3] === "event" && frame[4]?.event === "save-entry") {
+        pendingRef = frame[1];
+      }
+      server.send(message);
+    });
+    server.onMessage(message => {
+      const frame = JSON.parse(message.toString());
+      if (pendingRef && frame[1] === pendingRef && frame[3] === "phx_reply") {
+        pendingRef = undefined;
+        holdReply = false;
+        releaseReply = () => socket.send(message);
+      } else {
+        socket.send(message);
+      }
+    });
+  });
+  await passwordLogin(page, fixture.email, "ValidP@ssword123!");
+  await page.goto(`/contacts/${fixture.contact_id}`);
+  await open(page);
+  const editor = page.locator("trix-editor");
+  await editor.pressSequentially("Original saved body");
+  await page.getByRole("button", {name: "Save", exact: true}).click();
+  const body = page.locator(".note-body").filter({hasText: "Original saved body"});
+  await expect(body).toBeVisible();
+  const edit = body.locator("xpath=..").locator('[phx-click="edit-entry"][phx-value-type="note"]');
+  await edit.locator("..").locator("..").locator(":scope > button").click();
+  await edit.click();
+  await expect(editor).toContainText("Original saved body");
+  // Click waits for the opening modal to settle before keyboard selection.
+  await editor.click();
+  await editor.focus();
+  await expect(editor).toBeFocused();
+  await editor.press("ControlOrMeta+A");
+  await editor.press("Backspace");
+  await expect(page.locator('input[name="entry[body]"]')).toHaveValue("");
+  holdReply = true;
+  await page.getByRole("button", {name: "Save", exact: true}).click();
+  await expect.poll(() => !!releaseReply).toBe(true);
+  await editor.pressSequentially("Correction typed while waiting");
+  releaseReply!();
+  await expect(page.getByText("body: can't be blank", {exact: true})).toBeVisible();
+  await expect(editor).toContainText("Correction typed while waiting");
+  await page.getByRole("button", {name: "Save", exact: true}).click();
+  await expect(page.locator(".note-body").filter({hasText: "Correction typed while waiting"})).toBeVisible();
+});
+
+
+test("custom toolbar supports keyboard commands, links, and narrow RTL layouts", async ({page}) => {
+  await passwordLogin(page, fixture.email, "ValidP@ssword123!");
+  await page.goto(`/contacts/${fixture.contact_id}`);
+  await open(page);
+  const editor = page.locator("trix-editor");
+  const bold = page.getByRole("button", {name: "Bold", exact: true});
+  await editor.click(); // Wait for the modal opening animation before selecting text.
+  await editor.pressSequentially("Selected text");
+  // Establish a stable selection; keyboard activation of the toolbar is tested below.
+  await editor.evaluate((el: any) => el.editor.setSelectedRange([0, 13]));
+  await expect.poll(() => editor.evaluate((el: any) => el.editor.getSelectedRange())).toEqual([0, 13]);
+  await bold.focus();
+  await bold.press("Space");
+  await expect(editor.locator("strong")).toHaveText("Selected text");
+  await expect(bold).toHaveAttribute("aria-pressed", "true");
+  const link = page.getByRole("button", {name: "Link", exact: true});
+  await link.focus();
+  await link.press("Enter");
+  await expect(link).toHaveAttribute("aria-expanded", "true");
+  const url = page.getByLabel("Link URL", {exact: true});
+  await expect(url).toBeFocused();
+  await url.fill("javascript:alert(1)");
+  await url.press("Enter");
+  await expect(link).toHaveAttribute("aria-expanded", "true");
+  await expect(editor.locator("a")).toHaveCount(0);
+  await url.fill("https://example.com/keyboard");
+  await url.press("Enter");
+  await expect(editor.locator("a")).toHaveAttribute("href", "https://example.com/keyboard");
+  await expect(editor).toBeFocused();
+  await expect(link).toHaveAttribute("aria-expanded", "false");
+  await link.click();
+  await url.press("Escape");
+  await expect(url).toBeHidden();
+  await expect(editor).toBeFocused();
+  await expect(link).toHaveAttribute("aria-expanded", "false");
+  await link.click();
+  await page.getByRole("button", {name: "Remove link", exact: true}).click();
+  await expect(editor.locator("a")).toHaveCount(0);
+  const desktopRows = await page.locator(".note-toolbar-button").evaluateAll(buttons =>
+    [...new Set(buttons.map(button => Math.round(button.getBoundingClientRect().top)))].length);
+  expect(desktopRows).toBe(1);
+  await editor.press("ControlOrMeta+End");
+  await page.locator(".note-editor").screenshot({path: "test-results/note-toolbar-desktop.png"});
+  for (const width of [320, 390, 768]) {
+    await page.setViewportSize({width, height: 900});
+    for (const theme of ["light", "dark"]) {
+      for (const dir of ["ltr", "rtl"]) {
+        await page.evaluate(({theme, dir}) => {
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.dir = dir;
+        }, {theme, dir});
+        const geometry = await page.locator(".note-editor").evaluate(el => {
+          const rect = el.getBoundingClientRect();
+          return [...el.querySelectorAll(".note-toolbar-button")].map(button => {
+            const b = button.getBoundingClientRect();
+            return {inside: b.left >= rect.left && b.right <= rect.right, width: b.width, height: b.height, top: Math.round(b.top)};
+          });
+        });
+        expect(new Set(geometry.map(b => b.top)).size).toBe(1);
+        if (width > 640) expect(geometry.every(b => b.inside)).toBe(true);
+        const controls = page.locator(".note-toolbar-button");
+        // Every action remains reachable by touch scrolling or keyboard focus.
+        for (const index of [12, 0]) {
+          await controls.nth(index).scrollIntoViewIfNeeded();
+          const reachable = await controls.nth(index).evaluate(button => {
+            const b = button.getBoundingClientRect();
+            const row = button.closest(".note-toolbar-row")!.getBoundingClientRect();
+            return b.left >= row.left && b.right <= row.right;
+          });
+          expect(reachable).toBe(true);
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        if (width === 390 && theme === "dark" && dir === "rtl") {
+          await page.locator(".note-editor").screenshot({path: "test-results/note-toolbar-mobile-dark-rtl.png"});
+        }
+        if (width <= 390) expect(geometry.every(b => b.width >= 40 && b.height >= 40)).toBe(true);
+      }
+    }
+  }
+});

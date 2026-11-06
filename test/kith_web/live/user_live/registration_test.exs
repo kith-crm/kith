@@ -1,5 +1,7 @@
 defmodule KithWeb.UserLive.RegistrationTest do
-  use KithWeb.ConnCase, async: true
+  # async: false — this module flips :require_tos_acceptance, which is
+  # node-global. See the note in Kith.Accounts.TosAcceptanceTest.
+  use KithWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
   import Kith.AccountsFixtures

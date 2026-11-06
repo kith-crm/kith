@@ -1,0 +1,10 @@
+BEGIN:VCARD
+VERSION:4.0
+UID:{{UID}}
+PRODID:-//Mozilla.org/NONSGML Mozilla Addressbook//EN
+N:Thunderbird;{{PREFIX}} Theo;;;
+FN:{{PREFIX}} Theo Thunderbird
+EMAIL;PREF=1:theo@example.test
+URL:https://theo.example.test
+X-MOZILLA-HTML:TRUE
+END:VCARD

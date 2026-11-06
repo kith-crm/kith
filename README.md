@@ -16,7 +16,8 @@ Kith helps you keep track of the people who matter most — their birthdays, how
 - **Reminders** — birthday alerts, stay-in-touch nudges, and recurring reminders
 - **Photo sync** — read-only integration with [Immich](https://immich.app) photo servers
 - **Import/export** — vCard and Monica CRM import support
-- **CardDAV/CalDAV** — sync contacts with your phone or email client
+- **CardDAV** — sync contacts with your phone or email client
+  Set up `https://<host>/dav` (or discovery via `/.well-known/carddav`) with Basic auth using your account email and password; see [setup and client limits](docs/carddav.md).
 - **REST API** — bearer token auth, cursor pagination, compound documents
 - **Multi-account** — account-scoped multitenancy with full data isolation
 - **Background jobs** — powered by Oban with 9 queues and nightly cron tasks
@@ -97,8 +98,8 @@ mix test test/path/to_test.exs:42
 mix phx.server                              # Terminal 1
 npx playwright test --project=e2e           # Terminal 2
 
-# Browser tests with Wallaby
-WALLABY=1 mix test --only wallaby
+# Isolated browser regressions (starts its own fixture server)
+npm run test:regressions
 ```
 
 ### Test Tags
@@ -107,7 +108,6 @@ WALLABY=1 mix test --only wallaby
 |-----|---------|------------|
 | `:integration` | DB-touching tests (most tests) | `mix test` (default) |
 | `:external` | Hits real APIs (Immich, LocationIQ) | `EXTERNAL_TESTS=true mix test --only external` |
-| `:wallaby` | Browser E2E via Wallaby | `WALLABY=1 mix test --only wallaby` |
 | `:slow` | Large dataset performance tests | `mix test --only slow` |
 
 ## Code Quality

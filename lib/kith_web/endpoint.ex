@@ -16,8 +16,8 @@ defmodule KithWeb.Endpoint do
   ]
 
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [connect_info: [:peer_data, :x_headers, session: @session_options]],
+    longpoll: [connect_info: [:peer_data, :x_headers, session: @session_options]]
 
   # Serve at "/" the static files from "priv/static" directory.
   #
@@ -45,10 +45,12 @@ defmodule KithWeb.Endpoint do
     cookie_key: "request_logger"
 
   # Real IP extraction (must be before any rate limiting)
-  plug RemoteIp
+  plug KithWeb.Plugs.TrustedProxy
 
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+
+  plug KithWeb.Plugs.DavRequireContentLength
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],

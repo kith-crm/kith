@@ -12,14 +12,14 @@ defmodule Kith.Journal.Entry do
   @moods ~w(great good neutral bad awful)
 
   schema "journal_entries" do
-    field :title, :string
-    field :content, :string
-    field :occurred_at, :utc_datetime
-    field :mood, :string
-    field :is_private, :boolean, default: true
+    field(:title, :string)
+    field(:content, :string)
+    field(:occurred_at, :utc_datetime)
+    field(:mood, :string)
+    field(:is_private, :boolean, default: true)
 
-    belongs_to :account, Kith.Accounts.Account
-    belongs_to :author, Kith.Accounts.User
+    belongs_to(:account, Kith.Accounts.Account)
+    belongs_to(:author, Kith.Accounts.User)
 
     timestamps(type: :utc_datetime)
   end
@@ -32,6 +32,7 @@ defmodule Kith.Journal.Entry do
     entry
     |> cast(attrs, [:title, :content, :occurred_at, :mood, :is_private])
     |> validate_required([:content, :occurred_at])
+    |> update_change(:content, &Kith.RichText.sanitize/1)
     |> then(fn cs ->
       if get_field(cs, :mood), do: validate_inclusion(cs, :mood, @moods), else: cs
     end)

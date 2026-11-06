@@ -3,13 +3,13 @@ defmodule Kith.Contacts.Note do
   import Ecto.Changeset
 
   schema "notes" do
-    field :body, :string
-    field :favorite, :boolean, default: false
-    field :is_private, :boolean, default: false
+    field(:body, :string)
+    field(:favorite, :boolean, default: false)
+    field(:is_private, :boolean, default: false)
 
-    belongs_to :contact, Kith.Contacts.Contact
-    belongs_to :account, Kith.Accounts.Account
-    belongs_to :author, Kith.Accounts.User
+    belongs_to(:contact, Kith.Contacts.Contact)
+    belongs_to(:account, Kith.Accounts.Account)
+    belongs_to(:author, Kith.Accounts.User)
 
     timestamps(type: :utc_datetime)
   end
@@ -21,13 +21,24 @@ defmodule Kith.Contacts.Note do
     |> sanitize_body()
   end
 
+  @doc "Returns sanitized note HTML, preserving legacy plain text and line breaks."
+  def render_body(body), do: body |> prepare_body() |> Kith.RichText.sanitize()
+
+  defp prepare_body(body) when is_binary(body) do
+    if Regex.match?(~r/<[a-z!\/]/i, body),
+      do: body,
+      else: body |> String.replace("<", "&lt;") |> String.replace(">", "&gt;")
+  end
+
+  defp prepare_body(nil), do: ""
+
   defp sanitize_body(changeset) do
     case get_change(changeset, :body) do
       nil ->
         changeset
 
       body ->
-        sanitized = HtmlSanitizeEx.Scrubber.scrub(body, __MODULE__.Scrubber)
+        sanitized = render_body(body)
         put_change(changeset, :body, sanitized)
     end
   end
@@ -43,10 +54,15 @@ defmodule Kith.Contacts.Note do
     Meta.allow_tag_with_uri_attributes("a", ["href"], ["http", "https", "mailto"])
     Meta.allow_tag_with_these_attributes("a", ["target", "rel"])
 
+    # Trix serializes paragraph blocks as divs. Keep their boundaries while
+    # rejecting all attributes, including style and event handlers.
+    Meta.allow_tag_with_these_attributes("div", [])
     Meta.allow_tag_with_these_attributes("p", [])
     Meta.allow_tag_with_these_attributes("br", [])
     Meta.allow_tag_with_these_attributes("strong", [])
     Meta.allow_tag_with_these_attributes("em", [])
+    Meta.allow_tag_with_these_attributes("del", [])
+    Meta.allow_tag_with_these_attributes("pre", [])
     Meta.allow_tag_with_these_attributes("ul", [])
     Meta.allow_tag_with_these_attributes("ol", [])
     Meta.allow_tag_with_these_attributes("li", [])
@@ -58,6 +74,6 @@ defmodule Kith.Contacts.Note do
     Meta.allow_tag_with_these_attributes("h6", [])
     Meta.allow_tag_with_these_attributes("blockquote", [])
 
-    Meta.strip_everything_not_covered()
+    @before_compile HtmlSanitizeEx.ScrubberCompiler
   end
 end

@@ -58,6 +58,7 @@ Variables are grouped by the implementation phase that introduces them. The "Pha
 |---|---|---|---|---|---|
 | `RATE_LIMIT_BACKEND` | enum(`ets`/`redis`) | `ets` | 01 | No | Rate limiting storage backend. `ets` is in-process and suitable for single-node deployments. `redis` is required for multi-node deployments. |
 | `REDIS_URL` | string | — | 01 | No | Redis connection URL (e.g., `redis://localhost:6379`). Required when `RATE_LIMIT_BACKEND=redis`. |
+| `MONICA_RATE_LIMIT_PER_MINUTE` | integer | `55` | 07 | No | Requests per minute Kith sends to a Monica instance during API import, per Monica host. Raise it together with `RATE_LIMIT_PER_MINUTE_API` on a self-hosted Monica, keeping this value a call or two below Monica's. Must be a positive integer. |
 
 ### Networking
 
@@ -102,16 +103,9 @@ REDIS_URL=redis://redis:6379
 
 ### Startup Behavior
 
-The application **must not crash** if Redis is unavailable at startup. The startup sequence is:
+When `RATE_LIMIT_BACKEND=redis`, startup connects to Redis and verifies that the server is Redis 7 or newer. An unavailable or unsupported server prevents the application from starting. Configure readiness checks and alerts for Redis availability before starting web or worker containers.
 
-1. If `RATE_LIMIT_BACKEND=redis`, attempt to connect to Redis.
-2. If connection fails, log a warning at the `warn` level:
-   ```
-   [warn] Redis unavailable at startup — falling back to ETS rate limiting
-   ```
-3. Continue startup using ETS as the backend.
-
-This fallback ensures the application remains available during Redis maintenance windows. A health check or alert should be used to detect the degraded state.
+The Redis backend fails closed: connection errors at runtime fail the rate-limited operation rather than authorizing it or switching to local ETS counters. It never falls back to ETS automatically, because independent counters would lose the shared attempt budget across nodes. Restore Redis connectivity before retrying failed operations.
 
 ### Summary
 
@@ -119,7 +113,7 @@ This fallback ensures the application remains available during Redis maintenance
 |---|---|---|
 | Single node | `ets` | Default, no configuration needed |
 | Multi-node | `redis` | Set `RATE_LIMIT_BACKEND=redis` + `REDIS_URL` |
-| Redis unavailable | `ets` (fallback) | Warn log emitted; app continues |
+| Redis unavailable | `redis` | Startup fails; runtime rate-limited operations fail without ETS fallback |
 
 ---
 

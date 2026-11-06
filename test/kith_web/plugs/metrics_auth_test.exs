@@ -1,32 +1,74 @@
 defmodule KithWeb.Plugs.MetricsAuthTest do
-  use KithWeb.ConnCase
+  use ExUnit.Case, async: true
 
-  describe "GET /metrics" do
-    test "returns 401 without Authorization header", %{conn: conn} do
-      conn = get(conn, "/metrics")
-      assert conn.status == 401
-    end
+  import Plug.Conn
+  import Plug.Test
 
-    test "returns 401 with wrong Bearer token", %{conn: conn} do
-      conn =
-        conn
-        |> put_req_header("authorization", "Bearer wrong-token")
-        |> get("/metrics")
+  alias KithWeb.Plugs.MetricsAuth
 
-      assert conn.status == 401
-    end
+  test "rejects a missing bearer token before reaching the exporter" do
+    conn = conn(:get, "/metrics") |> MetricsAuth.call([])
+    assert conn.status == 401
+    assert conn.halted
+    assert Jason.decode!(conn.resp_body) == %{"error" => "Invalid or missing metrics token"}
+  end
 
-    test "authenticates with correct Bearer token", %{conn: conn} do
-      token = Application.get_env(:kith, :metrics_token)
+  test "rejects an incorrect bearer token before reaching the exporter" do
+    conn =
+      conn(:get, "/metrics")
+      |> put_req_header("authorization", "Bearer wrong-token")
+      |> MetricsAuth.call([])
 
-      conn =
-        conn
-        |> put_req_header("authorization", "Bearer #{token}")
-        |> get("/metrics")
+    assert conn.status == 401
+    assert conn.halted
+  end
 
-      # PromEx may not be initialized in test, so we get 503 instead of 200.
-      # The key assertion is that auth passed (not 401).
-      assert conn.status in [200, 503]
-    end
+  test "allows the configured bearer token to continue to the exporter" do
+    conn =
+      conn(:get, "/metrics")
+      |> put_req_header("authorization", "Bearer test-metrics-token")
+      |> MetricsAuth.call([])
+
+    assert conn.status == nil
+    refute conn.halted
+  end
+end
+
+defmodule KithWeb.MetricsEndpointTest do
+  use KithWeb.ConnCase, async: false
+
+  import ExUnit.CaptureLog
+
+  test "disabled exporter returns exactly 503 after successful authentication", %{conn: conn} do
+    log =
+      capture_log(fn ->
+        conn =
+          conn |> put_req_header("authorization", "Bearer test-metrics-token") |> get("/metrics")
+
+        assert response(conn, 503) == "Service Unavailable"
+      end)
+
+    assert log =~ "Kith.PromEx"
+    assert log =~ "has not been initialized"
+  end
+
+  test "initialized exporter serves Prometheus metrics through the authenticated route", %{
+    conn: conn
+  } do
+    # The Oban poller queries outside the sandbox. Its database integration is
+    # separate from HTTP export; retain all other production metric collectors.
+    Kith.TestEnv.put_env_restoring(:kith, Kith.PromEx,
+      disabled: false,
+      drop_metrics_groups: [:oban_queue_poll_metrics]
+    )
+
+    start_supervised!(Kith.PromEx)
+
+    conn = conn |> put_req_header("authorization", "Bearer test-metrics-token") |> get("/metrics")
+    body = response(conn, 200)
+    assert get_resp_header(conn, "content-type") == ["text/plain; charset=utf-8"]
+    assert body =~ "# HELP kith_prom_ex_"
+    assert body =~ "# TYPE kith_prom_ex_"
+    stop_supervised!(Kith.PromEx)
   end
 end

@@ -28,6 +28,8 @@ defmodule Kith.MonicaApiFixtures do
       "is_partial" => false,
       "is_active" => Map.get(overrides, :is_active, true),
       "is_dead" => overrides[:is_dead] || false,
+      "stay_in_touch_frequency" => overrides[:stay_in_touch_frequency],
+      "stay_in_touch_trigger_date" => overrides[:stay_in_touch_trigger_date],
       "is_me" => false,
       "information" => %{
         "relationships" => overrides[:relationships] || default_relationships(),
@@ -154,8 +156,8 @@ defmodule Kith.MonicaApiFixtures do
       "is_favorited" => false,
       "favorited_at" => nil,
       "account" => %{"id" => 1},
-      "created_at" => "2024-02-20T12:00:00Z",
-      "updated_at" => "2024-02-20T12:00:00Z"
+      "created_at" => Map.get(overrides, :created_at, "2024-02-20T12:00:00Z"),
+      "updated_at" => Map.get(overrides, :updated_at, "2024-02-20T12:00:00Z")
     }
   end
 
@@ -221,10 +223,13 @@ defmodule Kith.MonicaApiFixtures do
       "id" => overrides[:id] || System.unique_integer([:positive]),
       "uuid" => overrides[:uuid] || Ecto.UUID.generate(),
       "object" => "contactfield",
-      "content" => overrides[:content] || "test@example.com",
+      "content" => Map.get(overrides, :content, "test@example.com"),
+      "label" => overrides[:label],
       "contact_field_type" => %{
         "id" => overrides[:type_id] || 1,
-        "name" => overrides[:type_name] || "Email"
+        "name" => overrides[:type_name] || "Email",
+        "protocol" => overrides[:protocol],
+        "type" => overrides[:type]
       }
     }
   end

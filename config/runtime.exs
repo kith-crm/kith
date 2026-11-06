@@ -1,14 +1,7 @@
 import Config
 
-# Helper: read from env var or Docker secret file (VAR_FILE takes precedence)
-defmodule Kith.ConfigHelpers do
-  def read_secret(env_var) do
-    case System.get_env("#{env_var}_FILE") do
-      nil -> System.get_env(env_var)
-      file_path -> file_path |> String.trim() |> File.read!() |> String.trim()
-    end
-  end
-end
+# Kith.ConfigHelpers (lib/kith/config_helpers.ex) — read from env var or
+# Docker secret file (VAR_FILE takes precedence).
 
 # ## Shared (all environments)
 
@@ -17,6 +10,22 @@ if System.get_env("PHX_SERVER") do
 end
 
 config :kith, KithWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+
+config :kith, :trusted_proxies, Kith.TrustedProxies.parse!(System.get_env("TRUSTED_PROXIES", ""))
+
+# Outbound Monica HTTP attempt budget per host per minute, including retries,
+# redirects, photos and document downloads. Leave headroom below the server's
+# actual RATE_LIMIT_PER_MINUTE_API. Unset preserves the environment default
+# (55 in config.exs); changing this environment variable requires a restart.
+if monica_limit = System.get_env("MONICA_RATE_LIMIT_PER_MINUTE") do
+  case Integer.parse(monica_limit) do
+    {n, ""} when n > 0 ->
+      config :kith, :monica_rate_limit, n
+
+    _ ->
+      raise "MONICA_RATE_LIMIT_PER_MINUTE must be a positive integer, got: #{inspect(monica_limit)}"
+  end
+end
 
 # Feature flags
 config :kith,
@@ -68,15 +77,19 @@ if config_env() == :prod do
     http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}],
     secret_key_base: secret_key_base
 
-  # Cloak encryption vault — production key from env
+  # Credential vault — preserve env/secret-file loading and validate in every
+  # production mode, including release migrations which do not start the app.
   cloak_key =
     Kith.ConfigHelpers.read_secret("CLOAK_KEY") ||
       raise "CLOAK_KEY is required in production (base64-encoded 32-byte key)"
 
-  config :kith, Kith.Vault,
-    ciphers: [
-      default: {Cloak.Ciphers.AES.GCM, tag: "AES.GCM.V1", key: Base.decode64!(cloak_key)}
-    ]
+  decoded_cloak_key =
+    case Base.decode64(cloak_key) do
+      {:ok, key} when byte_size(key) == 32 -> key
+      _ -> raise "CLOAK_KEY must be base64-encoded and decode to exactly 32 bytes"
+    end
+
+  config :kith, Kith.Vault, key: decoded_cloak_key
 
   # WebAuthn — rp_id must match KITH_HOSTNAME exactly
   config :wax_,
@@ -189,10 +202,7 @@ if config_env() == :prod do
         region: System.get_env("AWS_REGION", "us-east-1")
 
       if endpoint = System.get_env("AWS_S3_ENDPOINT") do
-        config :ex_aws, :s3,
-          scheme: "http://",
-          host: URI.parse(endpoint).host,
-          port: URI.parse(endpoint).port
+        config :ex_aws, :s3, Kith.ConfigHelpers.s3_endpoint_config(endpoint)
       end
 
       config :kith, Kith.Storage,
@@ -211,21 +221,61 @@ if config_env() == :prod do
       System.get_env("REDIS_URL") ||
         raise "REDIS_URL is required when RATE_LIMIT_BACKEND=redis"
 
-    config :hammer,
-      backend: {Hammer.Backend.Redis, [expiry_ms: 60_000 * 60, redis_url: redis_url]}
+    config :kith, Kith.RateLimiter, backend: :redis, redis_url: redis_url
   end
 
   # Oban — only the worker container processes jobs in production.
   # The web container can call `Oban.insert/1` to enqueue jobs, but
   # runs no queues or plugins (no cron, no pruner) — so it never claims
-  # rows from `oban_jobs`. The worker container keeps the full config
-  # from `config.exs`.
+  # rows from `oban_jobs`.
+  #
+  # The worker container re-declares `plugins` here (rather than keeping
+  # `config.exs`'s value) so `OBAN_PRUNER_MAX_AGE_DAYS` is read at container
+  # boot instead of being baked in at release build time — same rationale
+  # as `DATABASE_URL`/`SECRET_KEY_BASE` above.
   #
   # Dev (`config_env() == :dev`) is unaffected: this block only runs in
   # `:prod`. Test env is pinned to `testing: :manual` in `config/test.exs`.
   case System.get_env("KITH_MODE", "web") do
     "worker" ->
-      :ok
+      # `OBAN_PRUNER_MAX_AGE_DAYS` (whole days) is how long terminal `oban_jobs`
+      # rows are kept. Empty, non-numeric, or sub-1 values fall back to the
+      # 7-day default so a stray override can't near-instantly prune. The
+      # effective value is logged at boot by `Kith.Application`.
+      oban_pruner_max_age_days = System.get_env("OBAN_PRUNER_MAX_AGE_DAYS", "7")
+
+      oban_pruner_max_age_seconds =
+        case Integer.parse(String.trim(oban_pruner_max_age_days)) do
+          {days, ""} when days >= 1 -> days * 24 * 60 * 60
+          _ -> 7 * 24 * 60 * 60
+        end
+
+      # `OBAN_LIFELINE_RESCUE_AFTER_MINUTES` is how long a job may sit `executing`
+      # before Lifeline treats it as orphaned by a restart and re-queues it. Keep
+      # it above the longest worker timeout (30 min); smaller or invalid values
+      # fall back to 60 so a stray override can't re-run jobs that are still live.
+      oban_lifeline_rescue_after_minutes =
+        case Integer.parse(
+               String.trim(System.get_env("OBAN_LIFELINE_RESCUE_AFTER_MINUTES", "60"))
+             ) do
+          {minutes, ""} when minutes > 30 -> minutes
+          _ -> 60
+        end
+
+      config :kith, Oban,
+        plugins: [
+          {Oban.Plugins.Pruner, max_age: oban_pruner_max_age_seconds},
+          {Oban.Plugins.Lifeline,
+           rescue_after: :timer.minutes(oban_lifeline_rescue_after_minutes)},
+          {Oban.Plugins.Cron,
+           crontab: [
+             {"0 * * * *", Kith.Workers.ReminderDispatcher},
+             {"0 3 * * *", Kith.Workers.ContactPurgeWorker},
+             {"0 4 * * 0", Kith.Workers.DuplicateDetectionWorker},
+             {"0 5 * * 0", Kith.Workers.ImportFileCleanupWorker},
+             {"15 * * * *", Kith.Workers.ImportApiKeySweepWorker}
+           ]}
+        ]
 
     _web ->
       config :kith, Oban, queues: false, plugins: false
@@ -264,7 +314,11 @@ if config_env() == :prod do
   end
 
   # Sentry error tracking (optional — only when SENTRY_DSN is set)
-  if sentry_dsn = System.get_env("SENTRY_DSN") do
+  sentry_dsn = System.get_env("SENTRY_DSN", "") |> String.trim()
+
+  if sentry_dsn != "" do
+    System.put_env("SENTRY_DSN", sentry_dsn)
+
     config :sentry,
       dsn: sentry_dsn,
       environment_name: System.get_env("SENTRY_ENVIRONMENT", "production"),
@@ -276,6 +330,11 @@ if config_env() == :prod do
       filter: Kith.SentryFilter,
       before_send: {Kith.SentryEventHandler, :before_send},
       enable_source_code_context: true
+  else
+    # Sentry re-reads this variable when validating partial runtime updates;
+    # an empty variable would override the disabled configuration on that path.
+    System.delete_env("SENTRY_DSN")
+    config :sentry, client: Kith.SentryReqClient, dsn: nil
   end
 
   # Geolix — local MaxMind GeoLite2 database (optional)
@@ -286,14 +345,6 @@ if config_env() == :prod do
       ]
   end
 
-  # Trusted proxies for real IP extraction
-  trusted_proxies =
-    System.get_env("TRUSTED_PROXIES", "127.0.0.1/8")
-    |> String.split(",", trim: true)
-    |> Enum.map(&String.trim/1)
-
-  config :remote_ip, headers: ~w[x-forwarded-for], proxies: trusted_proxies
-
   # Metrics endpoint authentication
   metrics_token =
     System.get_env("METRICS_TOKEN") ||
@@ -301,8 +352,23 @@ if config_env() == :prod do
 
   config :kith, metrics_token: metrics_token
 
-  # Structured JSON logging in production
+  # `LOG_LEVEL=debug` turns on the importer workers' per-request and per-contact
+  # debug lines (see `MonicaMiscDataWorker`) without a rebuild. Anything other
+  # than debug/info/warning/error keeps the `:info` set in config/prod.exs.
+  case System.get_env("LOG_LEVEL") do
+    level when level in ~w(debug info warning error) ->
+      config :logger, level: String.to_existing_atom(level)
+
+    _ ->
+      :ok
+  end
+
+  # Structured JSON logging in production. `import_id` and `worker` are set by
+  # the Monica import workers, so a log line says which import it belongs to.
   config :logger, :default_handler,
     formatter:
-      {LoggerJSON.Formatters.Basic, metadata: [:request_id, :user_id, :account_id, :reason]}
+      LoggerJSON.Formatters.Basic.new(
+        metadata: [:request_id, :client_ip, :user_id, :account_id, :reason, :import_id, :worker],
+        redactors: [Kith.LogRedactor.new()]
+      )
 end

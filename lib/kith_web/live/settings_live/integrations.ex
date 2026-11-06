@@ -306,7 +306,7 @@ defmodule KithWeb.SettingsLive.Integrations do
               <div
                 x-data="copyText"
                 data-copy-value={@carddav_url}
-                class="flex items-center gap-2"
+                class="flex flex-wrap items-center gap-2"
               >
                 <input
                   id="carddav-url"
@@ -327,6 +327,15 @@ defmodule KithWeb.SettingsLive.Integrations do
                     <.icon name="hero-check" class="size-4 text-[var(--color-success)]" /> Copied!
                   </span>
                 </button>
+                <p
+                  x-show="copyFailed"
+                  x-cloak
+                  role="status"
+                  aria-live="polite"
+                  class="w-full text-sm text-[var(--color-text-secondary)]"
+                >
+                  Could not copy automatically. Select the URL and copy it manually.
+                </p>
               </div>
             </div>
 

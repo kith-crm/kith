@@ -11,7 +11,7 @@ defmodule Kith.Contacts.Gift do
     field :description, :string
     field :occasion, :string
     field :date, :date
-    field :amount, :decimal
+    field :amount, Kith.Types.BoundedDecimal
     field :direction, :string
     field :status, :string, default: "idea"
     field :purchase_url, :string

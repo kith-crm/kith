@@ -4,6 +4,8 @@ defmodule Kith.Contacts.DuplicateCandidate do
 
   @statuses ~w(pending merged dismissed)
 
+  @type t :: %__MODULE__{}
+
   schema "duplicate_candidates" do
     field :score, :float
     field :reasons, {:array, :string}, default: []
@@ -45,10 +47,5 @@ defmodule Kith.Contacts.DuplicateCandidate do
   def dismiss_changeset(candidate) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
     change(candidate, status: "dismissed", resolved_at: now)
-  end
-
-  def merge_changeset(candidate) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
-    change(candidate, status: "merged", resolved_at: now)
   end
 end

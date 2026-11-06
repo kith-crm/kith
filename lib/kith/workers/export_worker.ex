@@ -39,19 +39,38 @@ defmodule Kith.Workers.ExportWorker do
     :ok
   end
 
-  defp cache_export(key, data, token) do
-    # Simple file-based cache for exports
-    dir = Path.join(System.tmp_dir!(), "kith_exports")
-    File.mkdir_p!(dir)
-    path = Path.join(dir, "#{key}.json")
-    File.write!(path, data)
+  @doc false
+  def cache_export(key, data, token) do
+    # The shared OS temporary directory is not a trusted cache root. Reserve a
+    # fresh, unpredictable directory atomically; never follow an existing name.
+    # The application OS user is trusted (as for its upload storage tree).
+    suffix = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
+    dir = Path.join(System.tmp_dir!(), "kith_export_#{suffix}")
+    File.mkdir!(dir)
+    File.chmod!(dir, 0o700)
 
-    # Store token mapping
-    meta_path = Path.join(dir, "#{key}.meta")
+    try do
+      path = Path.join(dir, "export.json")
+      File.write!(path, data, [:exclusive])
+      File.chmod!(path, 0o600)
+      meta_path = Path.join(dir, "export.meta")
 
-    File.write!(
-      meta_path,
-      Jason.encode!(%{token: token, expires_at: System.system_time(:second) + 86_400})
-    )
+      File.write!(
+        meta_path,
+        Jason.encode!(%{
+          key: key,
+          token: token,
+          expires_at: System.system_time(:second) + 86_400
+        }),
+        [:exclusive]
+      )
+
+      File.chmod!(meta_path, 0o600)
+      {:ok, dir}
+    rescue
+      error ->
+        File.rm_rf!(dir)
+        reraise error, __STACKTRACE__
+    end
   end
 end

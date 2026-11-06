@@ -1,78 +1,89 @@
 defmodule Kith.Storage.Local do
   @moduledoc """
-  Local disk storage backend. Writes files to a configurable directory
-  (defaults to `priv/uploads/`).
+  Local disk storage in an operator-configured directory (default `priv/uploads`).
 
-  Files are served by `KithWeb.UploadsController` with authentication checks.
+  The root and its ancestors must be owned by the application/operator, and only
+  this application may mutate the tree. Uploaders supply bytes, never filesystem
+  entries. Every operation rejects existing symlinks in the root and key path.
+  These checks are defense in depth, not an atomic openat/O_NOFOLLOW guarantee
+  against another OS process replacing path components concurrently. Do not share
+  this tree with an untrusted local writer; use object storage for that model.
   """
 
   @behaviour Kith.Storage.Backend
 
-  require Logger
-
   @impl true
   def upload(source_path, storage_key, _opts \\ []) do
-    dest = full_path(storage_key)
-    dest |> Path.dirname() |> File.mkdir_p!()
-
-    case File.cp(source_path, dest) do
-      :ok -> {:ok, storage_key}
-      {:error, reason} -> {:error, reason}
+    with :ok <- Kith.Storage.validate_storage_key(storage_key),
+         {:ok, binary} <- File.read(source_path) do
+      upload_binary(binary, storage_key)
     end
   end
 
   @impl true
   def upload_binary(binary, storage_key, _opts \\ []) do
-    dest = full_path(storage_key)
-    dest |> Path.dirname() |> File.mkdir_p!()
-
-    case File.write(dest, binary) do
-      :ok -> {:ok, storage_key}
-      {:error, reason} -> {:error, reason}
+    with {:ok, dest} <- confined_path(storage_key),
+         :ok <- File.mkdir_p(Path.dirname(dest)),
+         {:ok, ^dest} <- confined_path(storage_key),
+         :ok <- File.write(dest, binary) do
+      {:ok, storage_key}
     end
   end
 
   @impl true
   def read(storage_key) do
-    path = full_path(storage_key)
-    File.read(path)
+    with {:ok, path} <- confined_path(storage_key), do: File.read(path)
   end
 
   @impl true
   def delete(storage_key) do
-    path = full_path(storage_key)
-
-    case File.rm(path) do
-      :ok ->
-        :ok
-
-      {:error, :enoent} ->
-        {:error, :not_found}
-
-      {:error, reason} ->
-        Logger.warning("Failed to delete storage file #{storage_key}: #{inspect(reason)}")
-        {:error, reason}
+    with {:ok, path} <- confined_path(storage_key) do
+      case File.rm(path) do
+        {:error, :enoent} -> {:error, :not_found}
+        result -> result
+      end
     end
   end
 
   @impl true
   def url(storage_key) do
-    "/uploads/#{storage_key}"
+    with :ok <- Kith.Storage.validate_storage_key(storage_key), do: "/uploads/#{storage_key}"
   end
 
-  @doc "Returns the full filesystem path for a storage key."
+  @doc "Returns a validated local path, rejecting existing symlink components."
+  def confined_path(storage_key) do
+    with :ok <- Kith.Storage.validate_storage_key(storage_key) do
+      root = upload_root()
+      parts = String.split(storage_key, "/")
+      paths = Enum.scan(parts, root, &Path.join(&2, &1))
+
+      case Enum.reduce_while([root | paths], :ok, &check_component/2) do
+        :ok -> {:ok, List.last(paths)}
+        error -> error
+      end
+    end
+  end
+
+  @doc "Returns the validated filesystem path, raising for invalid keys."
   def full_path(storage_key) do
-    Path.join(upload_root(), storage_key)
+    case confined_path(storage_key) do
+      {:ok, path} -> path
+      {:error, reason} -> raise ArgumentError, "invalid storage path: #{inspect(reason)}"
+    end
+  end
+
+  defp check_component(path, :ok) do
+    case File.lstat(path) do
+      {:ok, %{type: :symlink}} -> {:halt, {:error, :invalid_path}}
+      {:ok, _} -> {:cont, :ok}
+      {:error, :enoent} -> {:cont, :ok}
+      {:error, reason} -> {:halt, {:error, reason}}
+    end
   end
 
   defp upload_root do
-    config = Application.get_env(:kith, Kith.Storage, [])
-    path = Keyword.get(config, :path, "priv/uploads")
-
-    if Path.type(path) == :absolute do
-      path
-    else
-      Path.join(File.cwd!(), path)
-    end
+    Application.get_env(:kith, Kith.Storage, [])
+    |> Keyword.get(:path, "priv/uploads")
+    |> Path.expand()
   end
 end

@@ -33,6 +33,7 @@ defmodule KithWeb.API.ContactJSON do
       first_met_where: contact.first_met_where,
       first_met_through_id: contact.first_met_through_id,
       first_met_additional_info: contact.first_met_additional_info,
+      first_met_reminder: contact.first_met_reminder,
       birthdate_year_unknown: contact.birthdate_year_unknown,
       inserted_at: contact.inserted_at,
       updated_at: contact.updated_at
@@ -174,8 +175,12 @@ defmodule KithWeb.API.ContactJSON do
       contact_id: r.contact_id,
       type: r.type,
       title: r.title,
+      description: r.description,
+      anchor_date: r.anchor_date,
+      interval_unit: r.interval_unit,
+      interval_count: r.interval_count,
+      frequency: Reminder.frequency_preset(r),
       next_reminder_date: r.next_reminder_date,
-      frequency: r.frequency,
       inserted_at: r.inserted_at,
       updated_at: r.updated_at
     }

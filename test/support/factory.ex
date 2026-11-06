@@ -220,8 +220,10 @@ defmodule Kith.Factory do
       creator: creator,
       type: "one_time",
       title: sequence(:reminder_title, &"Reminder #{&1}"),
+      anchor_date: Date.add(Date.utc_today(), 7),
       next_reminder_date: Date.add(Date.utc_today(), 7),
-      enqueued_oban_job_ids: [],
+      interval_unit: nil,
+      interval_count: nil,
       active: true
     }
   end
@@ -230,7 +232,9 @@ defmodule Kith.Factory do
     build(:reminder,
       type: "birthday",
       title: nil,
-      frequency: nil,
+      interval_unit: "year",
+      interval_count: 1,
+      anchor_date: Date.add(Date.utc_today(), 30),
       next_reminder_date: Date.add(Date.utc_today(), 30)
     )
   end
@@ -239,7 +243,9 @@ defmodule Kith.Factory do
     build(:reminder,
       type: "stay_in_touch",
       title: nil,
-      frequency: "monthly",
+      interval_unit: "month",
+      interval_count: 1,
+      anchor_date: Date.add(Date.utc_today(), 30),
       next_reminder_date: Date.add(Date.utc_today(), 30)
     )
   end
@@ -248,7 +254,9 @@ defmodule Kith.Factory do
     build(:reminder,
       type: "recurring",
       title: "Weekly check-in",
-      frequency: "weekly",
+      interval_unit: "week",
+      interval_count: 1,
+      anchor_date: Date.add(Date.utc_today(), 7),
       next_reminder_date: Date.add(Date.utc_today(), 7)
     )
   end
@@ -265,7 +273,10 @@ defmodule Kith.Factory do
       status: "pending",
       scheduled_for: DateTime.utc_now(:second),
       fired_at: nil,
-      resolved_at: nil
+      resolved_at: nil,
+      occurrence_date: Date.utc_today(),
+      kind: "on_day",
+      days_before: 0
     }
   end
 

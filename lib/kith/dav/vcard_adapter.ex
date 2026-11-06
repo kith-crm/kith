@@ -4,15 +4,16 @@ defmodule Kith.DAV.VCardAdapter do
   for the CardDAV server.
 
   Delegates to the existing `Kith.VCard.Serializer` and `Kith.VCard.Parser`
-  modules, adding a UID property for CardDAV identification and adapting the
+  modules, loading stored CardDAV identities and adapting the
   parser output into changeset-compatible attribute maps.
   """
 
   alias Kith.Contacts
   alias Kith.Contacts.Contact
+  alias Kith.DAV.{Document, Store, UID}
   alias Kith.Repo
-  alias Kith.Storage
-  alias Kith.VCard.{Parser, Serializer}
+  alias Kith.VCard.Document, as: VCardDocument
+  alias Kith.VCard.Parser
 
   @doc """
   Converts a Kith contact to a vCard string with a CardDAV UID.
@@ -21,15 +22,20 @@ defmodule Kith.DAV.VCardAdapter do
 
   Options:
     - `:version` — `:v30` (default) for vCard 3.0, `:v40` for vCard 4.0
+    - `:preloaded` — use the caller's loaded DAV snapshot (default: false)
   """
   def contact_to_vcard(%Contact{} = contact, opts \\ []) do
     version = Keyword.get(opts, :version, :v30)
-    include_photo = Keyword.get(opts, :include_photo, true)
-    contact = Repo.preload(contact, Contacts.dav_preloads())
-    contact = if include_photo, do: maybe_load_avatar_data(contact), else: contact
 
-    vcard = Serializer.serialize(contact, version: version)
-    inject_uid(vcard, contact.id, version)
+    contact =
+      if Keyword.get(opts, :preloaded, false) do
+        contact
+      else
+        Store.ensure_rows(contact.account_id)
+        Repo.preload(contact, Contacts.dav_preloads(), force: true)
+      end
+
+    Document.render(contact, Keyword.put(opts, :version, version))
   end
 
   @doc """
@@ -41,18 +47,79 @@ defmodule Kith.DAV.VCardAdapter do
   `nested_data` contains `:emails`, `:phones`, `:urls`, `:addresses`, `:uid`.
   """
   def vcard_to_attrs(vcard_string, opts \\ []) do
-    case Parser.parse(vcard_string) do
-      {:ok, [parsed | _]} -> build_attrs(parsed, opts)
+    with {:ok, document} <- VCardDocument.parse(vcard_string),
+         true <- length(VCardDocument.properties(document, "UID")) <= 1,
+         public_document <- shared_input(document),
+         parsed <- Parser.from_properties(public_document.properties, legacy_bday: false),
+         {attrs, nested} <- normalize_identity(parsed, opts) do
+      nested =
+        nested
+        |> Map.put(:dav_document, vcard_string)
+        |> Map.put(:dav_parsed_document, document)
+        |> put_relationship_entries(document, parsed.related_present?)
+        |> Map.put(
+          :categories,
+          document.properties
+          |> Enum.filter(&(&1.normalized_name == "CATEGORIES"))
+          |> Enum.flat_map(&Document.category_values(&1.value))
+          |> Enum.uniq()
+        )
+
+      {attrs, nested}
+    else
+      _ -> :error
+    end
+  end
+
+  # Omission (including name-only v3 companions) cannot express a native
+  # relationship replacement. A supported empty URI property can.
+  defp put_relationship_entries(nested, document, true) do
+    entries = relationship_entries(document)
+
+    # Text names remain client data and cannot replace UID-backed native edges.
+    # A URI property, including an explicitly empty one, expresses replacement.
+    if Enum.any?(entries, &(&1.value_type == "uri")),
+      do: Map.put(nested, :related, entries),
+      else: nested
+  end
+
+  defp put_relationship_entries(nested, _document, false), do: nested
+
+  defp relationship_entries(document) do
+    document.properties
+    |> Enum.filter(&(&1.normalized_name in ["RELATED", "X-KITH-RELATED"]))
+    |> Enum.map(fn property ->
+      params = Map.new(property.parameters, &{&1.normalized_name, &1.values})
+
+      %{
+        value: unescape(property.value),
+        type: params |> Map.get("TYPE", ["contact"]) |> hd(),
+        value_type: params |> Map.get("VALUE", ["uri"]) |> hd() |> String.downcase()
+      }
+    end)
+  end
+
+  defp unescape(value), do: Parser.unescape(value)
+
+  defp shared_input(document) do
+    allowed =
+      ~w(VERSION UID FN N NICKNAME BDAY ORG TITLE EMAIL TEL URL ADR CATEGORIES RELATED X-KITH-RELATED PHOTO)
+
+    %{document | properties: Enum.filter(document.properties, &(&1.normalized_name in allowed))}
+  end
+
+  defp normalize_identity(%{uid: nil} = parsed, opts), do: build_attrs(parsed, opts)
+
+  defp normalize_identity(parsed, opts) do
+    case UID.normalize(parsed.uid) do
+      {:ok, uid} -> build_attrs(%{parsed | uid: uid}, opts)
       _ -> :error
     end
   end
 
   defp build_attrs(parsed, opts) do
-    account_id = Keyword.get(opts, :account_id)
-
     scalar_attrs =
       build_scalar_attrs(parsed)
-      |> maybe_resolve_gender(parsed, account_id)
       |> maybe_strip_nils(opts)
 
     nested_data = build_nested_data(parsed)
@@ -61,14 +128,14 @@ defmodule Kith.DAV.VCardAdapter do
 
   defp build_scalar_attrs(parsed) do
     %{
-      "first_name" => parsed.first_name,
+      "first_name" => parsed.first_name || if(is_nil(parsed.last_name), do: parsed.display_name),
       "last_name" => parsed.last_name,
       "middle_name" => parsed.middle_name,
       "nickname" => parsed.nickname,
       "company" => parsed.company,
       "occupation" => parsed.occupation,
-      "description" => parsed.description,
-      "birthdate" => parsed.birthdate && Date.to_iso8601(parsed.birthdate)
+      "birthdate" => parsed.birthdate && Date.to_iso8601(parsed.birthdate),
+      "birthdate_year_unknown" => parsed.birthdate_year_unknown
     }
   end
 
@@ -80,24 +147,11 @@ defmodule Kith.DAV.VCardAdapter do
       addresses: parsed.addresses || [],
       uid: parsed.uid,
       categories: parsed.categories || [],
-      related: parsed.related || [],
-      impp: parsed.impp || [],
       photo: parsed.photo
     }
   end
 
   # ── Private ────────────────────────────────────────────────────────────
-
-  # Inserts a UID line after the VERSION line in the serialized vCard.
-  defp inject_uid(vcard, contact_id, :v30) do
-    uid_line = "UID:kith-contact-#{contact_id}"
-    String.replace(vcard, "VERSION:3.0\r\n", "VERSION:3.0\r\n#{uid_line}\r\n")
-  end
-
-  defp inject_uid(vcard, contact_id, :v40) do
-    uid_line = "UID:urn:uuid:kith-contact-#{contact_id}"
-    String.replace(vcard, "VERSION:4.0\r\n", "VERSION:4.0\r\n#{uid_line}\r\n")
-  end
 
   defp maybe_strip_nils(attrs, opts) do
     if Keyword.get(opts, :strip_nils, true) do
@@ -106,50 +160,4 @@ defmodule Kith.DAV.VCardAdapter do
       attrs
     end
   end
-
-  # ── Avatar loading ──────────────────────────────────────────────────
-
-  defp maybe_load_avatar_data(%Contact{avatar: nil} = contact), do: contact
-
-  defp maybe_load_avatar_data(%Contact{avatar: key} = contact) do
-    max_embed = Application.get_env(:kith, :max_vcard_photo_embed_bytes, 512 * 1024)
-
-    case Storage.read(key) do
-      {:ok, binary} when byte_size(binary) <= max_embed ->
-        ct = Storage.content_type(key)
-        %{contact | avatar_data: %{binary: binary, content_type: ct}}
-
-      _ ->
-        contact
-    end
-  end
-
-  # ── Gender resolution ───────────────────────────────────────────────
-
-  defp maybe_resolve_gender(attrs, _parsed, nil), do: attrs
-
-  defp maybe_resolve_gender(attrs, parsed, account_id) do
-    gender_name = resolve_gender_name(parsed.gender, parsed.gender_text)
-    gender_record = gender_name && find_gender_by_name(account_id, gender_name)
-
-    if gender_record,
-      do: Map.put(attrs, "gender_id", gender_record.id),
-      else: attrs
-  end
-
-  defp find_gender_by_name(account_id, name) do
-    downcased = String.downcase(name)
-
-    account_id
-    |> Kith.Contacts.list_genders()
-    |> Enum.find(fn g -> String.downcase(g.name) == downcased end)
-  end
-
-  defp resolve_gender_name("M", _), do: "Male"
-  defp resolve_gender_name("F", _), do: "Female"
-  defp resolve_gender_name("O", text) when is_binary(text) and text != "", do: text
-  defp resolve_gender_name("N", _), do: nil
-  defp resolve_gender_name("U", _), do: nil
-  defp resolve_gender_name(nil, text) when is_binary(text) and text != "", do: text
-  defp resolve_gender_name(_, _), do: nil
 end

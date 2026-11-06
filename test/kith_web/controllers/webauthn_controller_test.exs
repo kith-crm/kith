@@ -12,6 +12,26 @@ defmodule KithWeb.WebauthnControllerTest do
     -3 => :crypto.strong_rand_bytes(32)
   }
 
+  setup %{conn: conn} do
+    # Phoenix.ConnTest normally bypasses CSRF. Exercise the actual browser policy.
+    Plug.CSRFProtection.delete_csrf_token()
+    token = Plug.CSRFProtection.get_csrf_token()
+    state = Plug.CSRFProtection.dump_state()
+
+    conn =
+      conn
+      |> init_test_session(%{"_csrf_token" => state})
+      |> put_private(:plug_skip_csrf_protection, false)
+      |> put_req_header("x-csrf-token", token)
+
+    %{conn: conn, csrf_state: state}
+  end
+
+  defp csrf_login(conn, user) do
+    state = get_session(conn, "_csrf_token")
+    conn |> log_in_user(user) |> put_session("_csrf_token", state)
+  end
+
   defp create_credential(user, opts \\ []) do
     %WebauthnCredential{}
     |> WebauthnCredential.changeset(%{
@@ -24,10 +44,161 @@ defmodule KithWeb.WebauthnControllerTest do
     |> Kith.Repo.insert!()
   end
 
+  describe "browser JSON request protection" do
+    test "rejects missing and invalid CSRF tokens", %{conn: conn} do
+      for token <- [nil, "invalid"] do
+        request = delete_req_header(conn, "x-csrf-token")
+        request = if token, do: put_req_header(request, "x-csrf-token", token), else: request
+
+        assert_raise Plug.CSRFProtection.InvalidCSRFTokenError, fn ->
+          post(request, ~p"/auth/webauthn/authenticate/challenge")
+        end
+      end
+    end
+
+    test "authenticated registration and deletion require CSRF", %{conn: conn} do
+      conn = csrf_login(conn, user_fixture()) |> delete_req_header("x-csrf-token")
+
+      assert_raise Plug.CSRFProtection.InvalidCSRFTokenError, fn ->
+        post(conn, ~p"/auth/webauthn/register/challenge")
+      end
+
+      assert_raise Plug.CSRFProtection.InvalidCSRFTokenError, fn ->
+        delete(conn, ~p"/auth/webauthn/credentials/1")
+      end
+    end
+
+    test "returns the custom CSP on JSON responses", %{conn: conn} do
+      conn = post(conn, ~p"/auth/webauthn/authenticate/challenge")
+      assert json_response(conn, 200)["publicKey"]["challenge"]
+      assert [policy] = get_resp_header(conn, "content-security-policy")
+      assert policy =~ "default-src 'self'"
+      assert policy =~ "script-src"
+    end
+
+    test "a real signed assertion authenticates with a stored key and valid CSRF token", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      credential = create_credential(user)
+
+      {<<4, x::binary-size(32), y::binary-size(32)>>, private_key} =
+        :crypto.generate_key(:ecdh, :secp256r1)
+
+      key = %{1 => 2, 3 => -7, -1 => 1, -2 => x, -3 => y}
+
+      credential
+      |> Ecto.Changeset.change(public_key: :erlang.term_to_binary(key))
+      |> Kith.Repo.update!()
+
+      challenge_conn =
+        post(conn, ~p"/auth/webauthn/authenticate/challenge", %{"email" => user.email})
+
+      %{"publicKey" => %{"challenge" => challenge_bytes}} = json_response(challenge_conn, 200)
+      challenge = get_session(challenge_conn, :webauthn_auth_challenge)
+
+      client_data =
+        Jason.encode!(%{
+          type: "webauthn.get",
+          challenge: challenge_bytes,
+          origin: challenge.origin
+        })
+
+      auth_data = :crypto.hash(:sha256, challenge.rp_id) <> <<1, 1::32>>
+
+      signature =
+        :crypto.sign(:ecdsa, :sha256, auth_data <> :crypto.hash(:sha256, client_data), [
+          private_key,
+          :secp256r1
+        ])
+
+      conn =
+        challenge_conn
+        |> recycle()
+        |> put_private(:plug_skip_csrf_protection, false)
+        |> put_req_header("x-csrf-token", hd(get_req_header(conn, "x-csrf-token")))
+        |> post(~p"/auth/webauthn/authenticate/complete", %{
+          "credentialId" => Base.url_encode64(credential.credential_id, padding: false),
+          "authenticatorData" => Base.url_encode64(auth_data, padding: false),
+          "signature" => Base.url_encode64(signature, padding: false),
+          "clientDataJSON" => Base.url_encode64(client_data, padding: false)
+        })
+
+      assert redirected_to(conn) == "/dashboard"
+      assert get_session(conn, :user_token)
+      assert Kith.Repo.reload!(credential).sign_count == 1
+      refute get_session(conn, :webauthn_auth_challenge)
+    end
+
+    test "invalid curve point stored in a credential returns a controlled error", %{conn: conn} do
+      user = user_fixture()
+      credential = create_credential(user)
+      invalid_key = %{1 => 2, 3 => -7, -1 => 1, -2 => <<0::256>>, -3 => <<0::256>>}
+
+      credential
+      |> Ecto.Changeset.change(public_key: :erlang.term_to_binary(invalid_key))
+      |> Kith.Repo.update!()
+
+      challenge_conn = post(conn, ~p"/auth/webauthn/authenticate/challenge")
+      %{"publicKey" => %{"challenge" => challenge_bytes}} = json_response(challenge_conn, 200)
+      challenge = get_session(challenge_conn, :webauthn_auth_challenge)
+
+      client_data =
+        Jason.encode!(%{
+          type: "webauthn.get",
+          challenge: challenge_bytes,
+          origin: challenge.origin
+        })
+
+      auth_data = :crypto.hash(:sha256, challenge.rp_id) <> <<1, 1::32>>
+
+      conn =
+        challenge_conn
+        |> recycle()
+        |> put_private(:plug_skip_csrf_protection, false)
+        |> put_req_header("x-csrf-token", hd(get_req_header(conn, "x-csrf-token")))
+        |> post(~p"/auth/webauthn/authenticate/complete", %{
+          "credentialId" => Base.url_encode64(credential.credential_id, padding: false),
+          "authenticatorData" => Base.url_encode64(auth_data, padding: false),
+          "signature" => Base.url_encode64("invalid", padding: false),
+          "clientDataJSON" => Base.url_encode64(client_data, padding: false)
+        })
+
+      assert json_response(conn, 401) == %{"error" => "Invalid stored credential"}
+      refute get_session(conn, :user_token)
+      assert Kith.Repo.reload!(credential).sign_count == 0
+    end
+
+    test "malformed stored credential fails authentication without decoding arbitrary terms", %{
+      conn: conn
+    } do
+      user = user_fixture()
+      credential = create_credential(user)
+      credential |> Ecto.Changeset.change(public_key: <<131, 255>>) |> Kith.Repo.update!()
+      challenge_conn = post(conn, ~p"/auth/webauthn/authenticate/challenge")
+      assert json_response(challenge_conn, 200)["publicKey"]["challenge"]
+
+      conn =
+        challenge_conn
+        |> recycle()
+        |> put_private(:plug_skip_csrf_protection, false)
+        |> put_req_header("x-csrf-token", get_req_header(conn, "x-csrf-token") |> hd())
+        |> post(~p"/auth/webauthn/authenticate/complete", %{
+          "credentialId" => Base.url_encode64(credential.credential_id, padding: false),
+          "authenticatorData" => Base.url_encode64("fake", padding: false),
+          "signature" => Base.url_encode64("fake", padding: false),
+          "clientDataJSON" => Base.url_encode64("fake", padding: false)
+        })
+
+      assert json_response(conn, 401) == %{"error" => "Invalid stored credential"}
+      refute get_session(conn, :webauthn_auth_challenge)
+    end
+  end
+
   describe "register_challenge (POST /auth/webauthn/register/challenge)" do
     setup %{conn: conn} do
       user = user_fixture()
-      conn = log_in_user(conn, user)
+      conn = csrf_login(conn, user)
       %{conn: conn, user: user}
     end
 
@@ -57,7 +228,7 @@ defmodule KithWeb.WebauthnControllerTest do
   describe "register_complete (POST /auth/webauthn/register/complete)" do
     setup %{conn: conn} do
       user = user_fixture()
-      conn = log_in_user(conn, user)
+      conn = csrf_login(conn, user)
       %{conn: conn, user: user}
     end
 
@@ -122,7 +293,7 @@ defmodule KithWeb.WebauthnControllerTest do
   describe "list_credentials (GET /auth/webauthn/credentials)" do
     setup %{conn: conn} do
       user = user_fixture()
-      conn = log_in_user(conn, user)
+      conn = csrf_login(conn, user)
       %{conn: conn, user: user}
     end
 
@@ -147,7 +318,7 @@ defmodule KithWeb.WebauthnControllerTest do
   describe "delete_credential (DELETE /auth/webauthn/credentials/:id)" do
     setup %{conn: conn} do
       user = user_fixture()
-      conn = log_in_user(conn, user)
+      conn = csrf_login(conn, user)
       %{conn: conn, user: user}
     end
 

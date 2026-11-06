@@ -46,9 +46,7 @@ defmodule KithWeb.API.RelationshipController do
          {:ok, contact} <- fetch_contact(account_id, contact_id),
          :ok <- validate_related_contact(account_id, attrs),
          {:ok, relationship} <-
-           %Relationship{contact_id: contact.id, account_id: account_id}
-           |> Relationship.changeset(attrs)
-           |> Repo.insert() do
+           Contacts.create_relationship(contact, attrs) do
       conn
       |> put_status(201)
       |> put_resp_header("location", "/api/relationships/#{relationship.id}")
@@ -83,7 +81,7 @@ defmodule KithWeb.API.RelationshipController do
     with true <- Policy.can?(user, :delete, :relationship),
          relationship when not is_nil(relationship) <-
            Relationship |> TenantScope.scope_to_account(account_id) |> Repo.get(id),
-         {:ok, _relationship} <- Repo.delete(relationship) do
+         {:ok, _relationship} <- Contacts.delete_relationship(relationship) do
       send_resp(conn, 204, "")
     else
       false -> {:error, :forbidden}

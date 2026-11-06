@@ -33,6 +33,7 @@ defmodule Kith.Workers.ImportSourceWorkerTest do
       assert updated.summary["contacts"] >= 1
     end
 
+    @tag :capture_log
     test "marks import as failed on file not found", %{account_id: account_id, user: user} do
       import_job =
         import_fixture(account_id, user.id, %{

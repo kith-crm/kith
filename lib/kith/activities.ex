@@ -14,13 +14,6 @@ defmodule Kith.Activities do
   alias Kith.Contacts.Contact
   alias Kith.Repo
 
-  # Suppress Ecto.Multi opaque type warnings (Dialyzer false positives)
-  @dialyzer [
-    {:nowarn_function, create_activity: 4},
-    {:nowarn_function, update_activity: 4},
-    {:nowarn_function, create_call: 2}
-  ]
-
   ## Activities
 
   def list_activities(account_id, opts \\ []) do

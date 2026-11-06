@@ -13,7 +13,9 @@ defmodule Kith.SentryReqClientTest do
 
   describe "post/3" do
     setup do
-      start_supervised!({Finch, name: SentryReqClient})
+      unless Process.whereis(SentryReqClient),
+        do: start_supervised!({Finch, name: SentryReqClient})
+
       :ok
     end
 

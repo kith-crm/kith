@@ -10,8 +10,6 @@ defmodule Kith.Conversations do
   alias Kith.Conversations.{Conversation, Message}
   alias Kith.Repo
 
-  @dialyzer {:nowarn_function, add_message: 2}
-
   def list_conversations(account_id, contact_id) do
     Conversation
     |> scope_to_account(account_id)

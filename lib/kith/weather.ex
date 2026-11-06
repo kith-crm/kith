@@ -1,7 +1,7 @@
 defmodule Kith.Weather do
   @moduledoc """
   Fetches current weather data for a given latitude/longitude from OpenWeatherMap.
-  Uses Cachex for caching (1-hour TTL) and :fuse for circuit breaking.
+  Uses local caching (1-hour TTL) and :fuse for circuit breaking.
   """
 
   require Logger
@@ -23,11 +23,7 @@ defmodule Kith.Weather do
   def fetch_current(lat, lng) when is_number(lat) and is_number(lng) do
     cache_key = {:weather, Float.round(lat * 1.0, 2), Float.round(lng * 1.0, 2)}
 
-    case Cachex.get(:kith_cache, cache_key) do
-      {:ok, nil} -> fetch_and_cache(lat, lng, cache_key)
-      {:ok, result} -> {:ok, result}
-      _ -> fetch_and_cache(lat, lng, cache_key)
-    end
+    Kith.Cache.fetch(cache_key, fn -> fetch_with_circuit(lat, lng) end, ttl: @cache_ttl)
   end
 
   def fetch_current(_, _), do: {:error, :invalid_coordinates}
@@ -39,20 +35,13 @@ defmodule Kith.Weather do
 
   # -- Private --
 
-  defp fetch_and_cache(lat, lng, cache_key) do
+  defp fetch_with_circuit(lat, lng) do
     case check_circuit() do
       :ok ->
         result = do_fetch(lat, lng)
         handle_circuit_result(result)
 
-        case result do
-          {:ok, weather} ->
-            Cachex.put(:kith_cache, cache_key, weather, ttl: @cache_ttl)
-            {:ok, weather}
-
-          error ->
-            error
-        end
+        result
 
       {:error, :circuit_open} ->
         {:error, :circuit_open}

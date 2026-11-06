@@ -119,10 +119,14 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
       # Rate limiting
+      MONICA_RATE_LIMIT_PER_MINUTE: ${MONICA_RATE_LIMIT_PER_MINUTE:-55}
       RATE_LIMIT_BACKEND: ${RATE_LIMIT_BACKEND:-ets}
       REDIS_URL: ${REDIS_URL:-}
       # Network
-      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.16.0.0/12}
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-172.30.44.2/32}
+    networks:
+      - default
+      - ingress
     volumes:
       - uploads:/app/uploads
     deploy:
@@ -192,6 +196,10 @@ services:
       IMMICH_API_KEY: ${IMMICH_API_KEY:-}
       IMMICH_SYNC_INTERVAL_HOURS: ${IMMICH_SYNC_INTERVAL_HOURS:-24}
       METRICS_TOKEN: ${METRICS_TOKEN}
+      # Monica API import throttle (requests/min); imports run in this container
+      MONICA_RATE_LIMIT_PER_MINUTE: ${MONICA_RATE_LIMIT_PER_MINUTE:-55}
+      RATE_LIMIT_BACKEND: ${RATE_LIMIT_BACKEND:-ets}
+      REDIS_URL: ${REDIS_URL:-}
     volumes:
       - uploads:/app/uploads
     deploy:
@@ -215,6 +223,11 @@ services:
   # ---------------------------------------------------------------------------
   caddy:
     image: caddy:2-alpine
+    environment:
+      KITH_HOSTNAME: ${KITH_HOSTNAME:-localhost}
+    networks:
+      ingress:
+        ipv4_address: 172.30.44.2
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"
@@ -225,7 +238,7 @@ services:
     depends_on:
       - app
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:80/health/live"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2019/config/ >/dev/null"]
       interval: 30s
       timeout: 3s
       retries: 3
@@ -251,6 +264,15 @@ services:
   #       limits:
   #         memory: 128M
   #   restart: unless-stopped
+
+networks:
+  default:
+  # Only Caddy and app join this ingress network. Trust Caddy's exact address,
+  # never the wider shared backend network or arbitrary forwarded chains.
+  ingress:
+    ipam:
+      config:
+        - subnet: 172.30.44.0/29
 
 volumes:
   postgres_data:

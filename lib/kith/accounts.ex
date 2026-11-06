@@ -13,6 +13,7 @@ defmodule Kith.Accounts do
   alias Kith.Accounts.{
     Account,
     AccountInvitation,
+    CoseKey,
     User,
     UserIdentity,
     UserNotifier,
@@ -20,15 +21,6 @@ defmodule Kith.Accounts do
     UserToken,
     WebauthnCredential
   }
-
-  # Suppress Ecto.Multi opaque type warnings (Dialyzer false positives)
-  @dialyzer [
-    {:nowarn_function, register_user: 1},
-    {:nowarn_function, confirm_user: 1},
-    {:nowarn_function, register_oauth_user: 4},
-    {:nowarn_function, accept_invitation: 2},
-    {:nowarn_function, do_remove_user: 1}
-  ]
 
   ## Database getters
 
@@ -48,6 +40,61 @@ defmodule Kith.Accounts do
       when is_binary(email) and is_binary(password) do
     user = Repo.get_by(User, email: email) |> Repo.preload(:account)
     if User.valid_password?(user, password), do: user
+  end
+
+  @verified_password_ttl :timer.minutes(5)
+
+  @doc """
+  Like `get_user_by_email_and_password/2`, but remembers a successful check for
+  a few minutes so a chatty client (CardDAV sends Basic credentials on every
+  request) does not pay the deliberately slow password hash each time.
+
+  The remembered entry is keyed by an HMAC (random per-boot key) of the user's
+  current `hashed_password` and the password, so changing the password invalidates it.
+  The user row is read on every call, so confirmation and deletion are always
+  current. Only successes are remembered; a wrong password always pays the full
+  hash.
+  """
+  def get_user_by_email_and_verified_password(email, password)
+      when is_binary(email) and is_binary(password) do
+    user = Repo.get_by(User, email: email) |> Repo.preload(:account)
+
+    case user do
+      %User{hashed_password: hashed} when is_binary(hashed) and byte_size(password) > 0 ->
+        key = {:verified_password, verified_password_digest(hashed, password)}
+
+        if verified_password_cached?(key),
+          do: user,
+          else: verify_and_remember(user, password, key)
+
+      _ ->
+        if User.valid_password?(user, password), do: user
+    end
+  end
+
+  # HMAC under a random per-boot key that lives only in this node's memory: the
+  # cached digest cannot be tested against guesses offline, even by someone who
+  # holds both the cache contents and `users.hashed_password`.
+  defp verified_password_digest(hashed, password) do
+    :crypto.mac(:hmac, :sha256, verified_password_key(), [hashed, 0, password])
+  end
+
+  defp verified_password_key do
+    :persistent_term.get({__MODULE__, :verified_password_key})
+  end
+
+  @doc false
+  def init_verified_password_key do
+    :persistent_term.put({__MODULE__, :verified_password_key}, :crypto.strong_rand_bytes(32))
+  end
+
+  defp verified_password_cached?(key), do: match?({:ok, true}, Kith.Cache.get(key))
+
+  defp verify_and_remember(user, password, key) do
+    if User.valid_password?(user, password) do
+      Kith.Cache.put(key, true, ttl: @verified_password_ttl)
+      user
+    end
   end
 
   @doc """
@@ -72,6 +119,10 @@ defmodule Kith.Accounts do
       |> User.registration_changeset(attrs)
       |> Ecto.Changeset.put_change(:role, "admin")
       |> maybe_auto_confirm()
+    end)
+    |> Ecto.Multi.run(:reminder_rules, fn _repo, %{account: account} ->
+      {count, _} = Kith.Reminders.seed_default_rules(account.id)
+      {:ok, count}
     end)
     |> Repo.transaction()
     |> case do
@@ -378,11 +429,25 @@ defmodule Kith.Accounts do
   end
 
   @doc """
-  Verifies a TOTP code against a secret. Allows window of 1 (previous period).
+  Verifies a six-digit TOTP code against a nonempty Base32 secret.
+
+  The existing POT configuration accepts the current and next two 30-second
+  intervals, not the preceding interval. This boundary preserves that window.
   """
-  def valid_totp_code?(secret, code) do
-    :pot.valid_totp(code, secret, window: 1, addwindow: 1)
+  def valid_totp_code?(secret, code)
+      when is_binary(secret) and byte_size(secret) > 0 and is_binary(code) and
+             byte_size(code) == 6 do
+    with true <- :pot.valid_token(code),
+         key when is_binary(key) and byte_size(key) > 0 <- :pot_base32.decode(secret) do
+      :pot.valid_totp(code, secret, window: 1, addwindow: 1)
+    else
+      _ -> false
+    end
+  rescue
+    _error in [ArgumentError, FunctionClauseError] -> false
   end
+
+  def valid_totp_code?(_secret, _code), do: false
 
   @doc """
   Enables TOTP for a user after verifying the confirmation code.
@@ -472,7 +537,7 @@ defmodule Kith.Accounts do
   @doc """
   Verifies and consumes a recovery code. Returns true if valid (and deletes it).
   """
-  def use_recovery_code(user, code) do
+  def use_recovery_code(user, code) when is_binary(code) and byte_size(code) == 9 do
     codes = Repo.all(from(rc in UserRecoveryCode, where: rc.user_id == ^user.id))
 
     Enum.find(codes, fn rc -> UserRecoveryCode.valid_code?(code, rc.hashed_code) end)
@@ -485,6 +550,8 @@ defmodule Kith.Accounts do
         true
     end
   end
+
+  def use_recovery_code(_user, _code), do: false
 
   ## WebAuthn Credentials
 
@@ -524,8 +591,11 @@ defmodule Kith.Accounts do
       select: {wc.credential_id, wc.public_key}
     )
     |> Repo.all()
-    |> Enum.map(fn {cred_id, pk_binary} ->
-      {cred_id, :erlang.binary_to_term(pk_binary)}
+    |> Enum.flat_map(fn {cred_id, pk_binary} ->
+      case CoseKey.decode(pk_binary) do
+        {:ok, key} -> [{cred_id, key}]
+        {:error, :invalid_key} -> []
+      end
     end)
   end
 
@@ -724,6 +794,10 @@ defmodule Kith.Accounts do
         expires_at: token_attrs[:expires_at]
       })
     end)
+    |> Ecto.Multi.run(:reminder_rules, fn _repo, %{account: account} ->
+      {count, _} = Kith.Reminders.seed_default_rules(account.id)
+      {:ok, count}
+    end)
     |> Repo.transaction()
     |> case do
       {:ok, %{user: user, account: account}} ->
@@ -838,7 +912,11 @@ defmodule Kith.Accounts do
     case Repo.update(changeset) do
       {:ok, updated_user} = result ->
         if format_changed? do
-          %{account_id: user.account_id, display_name_format: updated_user.display_name_format}
+          %{
+            account_id: user.account_id,
+            user_id: updated_user.id,
+            display_name_format: updated_user.display_name_format
+          }
           |> DisplayNameRecomputeWorker.new()
           |> Oban.insert()
         end

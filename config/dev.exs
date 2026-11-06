@@ -6,7 +6,7 @@ config :kith, Kith.Repo,
   password: "postgres",
   hostname: System.get_env("DB_HOST", "localhost"),
   port: String.to_integer(System.get_env("DB_PORT", "5434")),
-  database: "kith_dev",
+  database: System.get_env("DB_NAME", "kith_dev"),
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10
@@ -81,7 +81,7 @@ config :kith, Kith.Mailer,
 config :swoosh, :api_client, false
 
 # Disable Sentry in dev
-config :sentry, client: Sentry.NoopClient, dsn: nil
+config :sentry, client: Kith.SentryReqClient, dsn: nil
 
 # Dev metrics token (for testing /metrics endpoint locally)
 config :kith, metrics_token: "dev-metrics-token"
@@ -106,3 +106,5 @@ config :phoenix_live_view,
   debug_attributes: true,
   # Enable helpful, but potentially expensive runtime checks
   enable_expensive_runtime_checks: true
+
+config :kith, Kith.Storage, backend: :local, path: System.get_env("STORAGE_PATH", "priv/uploads")

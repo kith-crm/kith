@@ -12,6 +12,10 @@
 
 # Ignore digested assets cache.
 /priv/static/cache_manifest.json
+# phx.digest also creates fingerprinted copies and compressed sidecars outside
+# assets/ (fonts, favicon and images); keep their source files tracked.
+/priv/static/**/*-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].*
+/priv/static/**/*.gz
 
 # Environment files
 .env
@@ -50,6 +54,8 @@ erl_crash.dump
 # Generated reports
 /docs/playwright-report/
 /docs/screenshots/
+/tmp/browser-regressions/
+/tmp/security/
 
 # Git worktrees
 .worktrees/
@@ -68,3 +74,6 @@ erl_crash.dump
 
 
 .worktrees/
+
+# Isolated CardDAV live harness state, storage and artifacts.
+/.carddav-task10/

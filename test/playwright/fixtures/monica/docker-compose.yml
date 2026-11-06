@@ -1,0 +1,40 @@
+name: kith-monica-e2e
+
+services:
+  monica-db:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    environment:
+      MYSQL_ROOT_PASSWORD: secret
+      MYSQL_DATABASE: monica
+      MYSQL_USER: homestead
+      MYSQL_PASSWORD: secret
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-psecret"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    tmpfs:
+      - /var/lib/mysql
+
+  monica:
+    image: monica:4.1.2-apache
+    depends_on:
+      monica-db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8089:80"
+    environment:
+      APP_ENV: production
+      APP_KEY: base64:Zm9yX2tpdGhfbW9uaWNhX2UyZV9vbmx5XzMyYnl0ZXM=
+      APP_URL: http://localhost:8089
+      DB_CONNECTION: mysql
+      DB_HOST: monica-db
+      DB_DATABASE: monica
+      DB_USERNAME: homestead
+      DB_PASSWORD: secret
+      MAIL_MAILER: log
+      QUEUE_CONNECTION: sync
+      APP_DISABLE_SIGNUP: "false"
+      CHECK_VERSION: "false"
+      APP_TRUSTED_PROXIES: "*"

@@ -28,7 +28,7 @@ test.describe("Contact Management", () => {
 
     // Should show "Contacts" heading
     await expect(
-      page.getByRole("heading", { name: /contacts/i }),
+      page.getByRole("heading", { name: "Contacts", exact: true, level: 1 }),
     ).toBeVisible();
 
     // New Contact button should be visible
@@ -111,7 +111,7 @@ test.describe("Contact Management", () => {
   // Contacts: View
   // ─────────────────────────────────────────
 
-  test("view contact show page with tabs", async ({ page }) => {
+  test("view contact show page with activity actions", async ({ page }) => {
     // Create a contact first
     await page.goto("/contacts/new");
     await page.waitForLoadState("networkidle");
@@ -125,8 +125,8 @@ test.describe("Contact Management", () => {
     const content = await page.content();
     expect(content).toContain("TabTest");
 
-    // Check for tab buttons
-    await expect(page.getByRole("button", { name: "Notes" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "+ Note", exact: true })).toBeVisible();
+    await expect(page.getByText("No activity yet", { exact: true })).toBeVisible();
   });
 
   // ─────────────────────────────────────────
@@ -155,14 +155,10 @@ test.describe("Contact Management", () => {
     await page.goto("/contacts");
     await page.waitForLoadState("networkidle");
 
-    const searchInput = page.getByPlaceholder(/search/i);
+    const searchInput = page.getByPlaceholder("Search contacts...", { exact: true });
     await searchInput.fill("Searchable");
-    await page.waitForTimeout(500); // Wait for debounced search
-
-    // Should show Searchable but not Hidden
-    const content = await page.content();
-    expect(content).toContain("Searchable");
-    expect(content).not.toContain("Hidden");
+    await expect(page.locator("tbody").getByText("Searchable Person", { exact: true })).toBeVisible();
+    await expect(page.locator("tbody").getByText("Hidden Other", { exact: true })).toHaveCount(0);
   });
 
   // ─────────────────────────────────────────

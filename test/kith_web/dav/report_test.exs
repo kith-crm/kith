@@ -12,6 +12,156 @@ defmodule KithWeb.DAV.ReportTest do
 
   setup :setup_dav_user
 
+  test "relationship changes publish both wire endpoints and private type renames stay stable",
+       c do
+    owner = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Owner"})
+    target = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Target"})
+    control = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Control"})
+    paths = Enum.map([owner, target], &contact_path/1)
+    control_path = contact_path(control)
+    initial = authed_dav(c, "REPORT", "/dav/addressbooks/default/", sync_collection_body())
+    assert initial.status == 207
+    assert count_responses(initial.resp_body) == 3
+
+    token = fn response ->
+      [value] =
+        Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, response.resp_body,
+          capture: :all_but_first
+        )
+
+      value
+    end
+
+    etags = fn ->
+      Map.new(paths, fn path -> {path, authed_dav(c, "GET", path) |> get_resp_header("etag")} end)
+    end
+
+    incremental = fn previous ->
+      body =
+        String.replace(
+          sync_collection_body(),
+          "<d:sync-token/>",
+          "<d:sync-token>#{token.(previous)}</d:sync-token>"
+        )
+
+      authed_dav(c, "REPORT", "/dav/addressbooks/default/", body)
+    end
+
+    assert_changes = fn previous, before ->
+      response = incremental.(previous)
+      assert response.status == 207
+      assert count_responses(response.resp_body) == 2
+
+      for path <- paths do
+        assert response.resp_body =~ path
+        refute authed_dav(c, "GET", path) |> get_resp_header("etag") == before[path]
+      end
+
+      refute response.resp_body =~ control_path
+      %{response | resp_body: String.replace(response.resp_body, ~r/\r?\n[ \t]/, "")}
+    end
+
+    type = Kith.Repo.get_by!(Kith.Contacts.RelationshipType, system_key: "parent")
+    before = etags.()
+    edge = ContactsFixtures.relationship_fixture(owner, target, type.id)
+    created = assert_changes.(initial, before)
+    assert created.resp_body =~ "X-ABLabel:_$!<Parent>!$_"
+    assert created.resp_body =~ "X-ABLabel:_$!<Child>!$_"
+    before = etags.()
+    {:ok, target} = Contacts.update_contact(target, %{first_name: "Renamed"})
+    renamed = assert_changes.(created, before)
+    assert renamed.resp_body =~ "X-ABRELATEDNAMES:Renamed"
+    before = etags.()
+    {:ok, _} = Contacts.delete_relationship(edge)
+    removed = assert_changes.(renamed, before)
+    refute removed.resp_body =~ "X-KITH-RELATED"
+
+    {:ok, private} =
+      Contacts.create_relationship_type(c.account_id, %{
+        name: "Secret subtype",
+        reverse_name: "Secret reverse"
+      })
+
+    ContactsFixtures.relationship_fixture(owner, target, private.id)
+    current = incremental.(removed)
+    before = etags.()
+
+    {:ok, _} =
+      Contacts.update_relationship_type(private, %{
+        name: "New private subtype",
+        reverse_name: "New private reverse"
+      })
+
+    unchanged = incremental.(current)
+    assert count_responses(unchanged.resp_body) == 0
+    assert etags.() == before
+  end
+
+  test "requested address-data includes the stored avatar across report types",
+       %{account_id: account_id} = context do
+    contact = ContactsFixtures.contact_fixture(account_id)
+    photo = ContactsFixtures.photo_fixture(contact)
+    original = Image.new!(40, 30, color: :blue) |> Image.write!(:memory, suffix: ".png")
+    {:ok, _} = Kith.Storage.upload_binary(original, photo.storage_key)
+    on_exit(fn -> Kith.Storage.delete(photo.storage_key) end)
+    {:ok, updated} = Contacts.set_avatar(contact, photo)
+    {:ok, avatar} = Kith.Storage.read(updated.avatar)
+    on_exit(fn -> Kith.Storage.delete(updated.avatar) end)
+
+    query =
+      ~s(<card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:prop><card:address-data/></d:prop><card:filter/></card:addressbook-query>)
+
+    for body <- [multiget_body([contact_path(contact)]), query, sync_collection_body()] do
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+      unfolded = String.replace(conn.resp_body, ~r/\r?\n[ \t]/, "")
+      assert unfolded =~ "PHOTO;ENCODING=b;TYPE=JPEG:#{Base.encode64(avatar)}"
+    end
+  end
+
+  test "PHOTO presence and absence filters use only the selected avatar", c do
+    avatar_contact = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Avatar"})
+    timeline_only = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "Timeline"})
+    no_photo = ContactsFixtures.contact_fixture(c.account_id, %{first_name: "None"})
+    original = Image.new!(40, 30, color: :green) |> Image.write!(:memory, suffix: ".png")
+
+    for contact <- [avatar_contact, timeline_only] do
+      photo = ContactsFixtures.photo_fixture(contact)
+      {:ok, _} = Kith.Storage.upload_binary(original, photo.storage_key)
+      on_exit(fn -> Kith.Storage.delete(photo.storage_key) end)
+
+      if contact.id == avatar_contact.id do
+        {:ok, updated} = Contacts.set_avatar(contact, photo)
+        on_exit(fn -> Kith.Storage.delete(updated.avatar) end)
+        # A second timeline photo must not create another PHOTO property.
+        ContactsFixtures.photo_fixture(contact)
+      end
+    end
+
+    for version <- ["3.0", "4.0"] do
+      query = fn inner ->
+        body =
+          ~s(<card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:prop><card:address-data version="#{version}"/></d:prop><card:filter><card:prop-filter name="PHOTO">#{inner}</card:prop-filter></card:filter></card:addressbook-query>)
+
+        authed_dav(c, "REPORT", "/dav/addressbooks/default/", body)
+      end
+
+      present = query.("")
+      assert present.status == 207
+      assert count_responses(present.resp_body) == 1
+      assert present.resp_body =~ contact_path(avatar_contact)
+      assert length(Regex.scan(~r/PHOTO[;:]/, present.resp_body)) == 1
+      refute present.resp_body =~ contact_path(timeline_only)
+
+      absent = query.("<card:is-not-defined/>")
+      assert absent.status == 207
+      assert count_responses(absent.resp_body) == 2
+      assert absent.resp_body =~ contact_path(timeline_only)
+      assert absent.resp_body =~ contact_path(no_photo)
+      refute absent.resp_body =~ contact_path(avatar_contact)
+    end
+  end
+
   # ── RFC 6352 §8.7 — addressbook-multiget ────────────────────────────────
 
   describe "RFC 6352 §8.7 — addressbook-multiget REPORT" do
@@ -69,7 +219,7 @@ defmodule KithWeb.DAV.ReportTest do
     test "MUST return 404 status for inaccessible/missing resources in multiget",
          %{account_id: account_id} = context do
       contact = ContactsFixtures.contact_fixture(account_id)
-      missing = "/dav/addressbooks/default/kith-contact-999999.vcf"
+      missing = "/dav/addressbooks/default/missing.vcf"
 
       body = multiget_body([contact_path(contact), missing])
       conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
@@ -151,8 +301,8 @@ defmodule KithWeb.DAV.ReportTest do
         authed_dav(context, "REPORT", "/dav/addressbooks/default/", sync_collection_body())
 
       assert conn.resp_body =~ "Active"
-      refute conn.resp_body =~ "kith-contact-#{archived.id}.vcf"
-      refute conn.resp_body =~ "kith-contact-#{deleted.id}.vcf"
+      refute conn.resp_body =~ contact_uid(archived)
+      refute conn.resp_body =~ contact_uid(deleted)
     end
   end
 
@@ -172,8 +322,6 @@ defmodule KithWeb.DAV.ReportTest do
           capture: :all_but_first
         )
 
-      # Wait and create a new contact
-      Process.sleep(1100)
       ContactsFixtures.contact_fixture(account_id, %{first_name: "NewAfterSync"})
 
       # Incremental sync with the token
@@ -208,8 +356,6 @@ defmodule KithWeb.DAV.ReportTest do
           capture: :all_but_first
         )
 
-      # Wait and delete the contact
-      Process.sleep(1100)
       {:ok, _} = Contacts.soft_delete_contact(contact)
 
       # Incremental sync
@@ -227,7 +373,7 @@ defmodule KithWeb.DAV.ReportTest do
         |> dav_request("REPORT", "/dav/addressbooks/default/", body)
 
       assert conn2.status == 207
-      assert conn2.resp_body =~ "kith-contact-#{contact.id}.vcf"
+      assert conn2.resp_body =~ contact_uid(contact)
       assert conn2.resp_body =~ "404 Not Found"
     end
   end
@@ -263,7 +409,7 @@ defmodule KithWeb.DAV.ReportTest do
   # ── Invalid sync tokens ──────────────────────────────────────────────────
 
   describe "RFC 6578 §3 — invalid sync tokens" do
-    test "garbage sync token falls back to full sync",
+    test "garbage sync token is 403 valid-sync-token",
          %{account_id: account_id} = context do
       ContactsFixtures.contact_fixture(account_id, %{first_name: "FullSync"})
 
@@ -277,11 +423,12 @@ defmodule KithWeb.DAV.ReportTest do
 
       conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
 
-      assert conn.status == 207
-      assert conn.resp_body =~ "FullSync"
+      assert conn.status == 403
+      assert conn.resp_body =~ "<d:valid-sync-token/>"
+      refute conn.resp_body =~ "FullSync"
     end
 
-    test "out-of-range timestamp in sync token falls back to full sync",
+    test "out-of-range sync token is 403 valid-sync-token",
          %{account_id: account_id} = context do
       ContactsFixtures.contact_fixture(account_id, %{first_name: "RangeTest"})
 
@@ -295,8 +442,8 @@ defmodule KithWeb.DAV.ReportTest do
 
       conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
 
-      assert conn.status == 207
-      assert conn.resp_body =~ "RangeTest"
+      assert conn.status == 403
+      assert conn.resp_body =~ "<d:valid-sync-token/>"
     end
   end
 
@@ -358,14 +505,15 @@ defmodule KithWeb.DAV.ReportTest do
   # ── Unsupported REPORT types ────────────────────────────────────────────
 
   describe "RFC 6352 — unsupported REPORT types" do
-    test "server MUST return 400 for unrecognized REPORT type", context do
+    test "server MUST return 403 supported-report for unrecognized REPORT type", context do
       body = """
       <?xml version="1.0" encoding="UTF-8"?>
       <d:unknown-report xmlns:d="DAV:"/>
       """
 
       conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
-      assert conn.status == 400
+      assert conn.status == 403
+      assert conn.resp_body =~ "<d:supported-report/>"
     end
   end
 
@@ -444,6 +592,813 @@ defmodule KithWeb.DAV.ReportTest do
       assert cdata_content =~ "END:VCARD"
       # CRLF must be preserved for RFC 2426 compliance
       assert cdata_content =~ "\r\n"
+    end
+  end
+
+  # ── CardDAV e2e regressions (Task 5) ────────────────────────────────────
+
+  describe "CardDAV e2e regressions — REPORT" do
+    defp sync_token!(conn) do
+      [token] =
+        Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, conn.resp_body,
+          capture: :all_but_first
+        )
+
+      token
+    end
+
+    defp sync(context, token, extra \\ "") do
+      body = """
+      <d:sync-collection xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+        <d:sync-token>#{token}</d:sync-token><d:sync-level>1</d:sync-level>#{extra}
+        <d:prop><d:getetag/></d:prop>
+      </d:sync-collection>
+      """
+
+      authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+    end
+
+    defp initial_token(context), do: context |> sync("") |> sync_token!()
+
+    # href => :present (200 propstat) | :removed (bare 404 status)
+    defp sync_changes(conn) do
+      assert conn.status == 207, conn.resp_body
+
+      ~r{<d:response>\s*<d:href>([^<]+)</d:href>(.*?)</d:response>}s
+      |> Regex.scan(conn.resp_body, capture: :all_but_first)
+      |> Map.new(fn [href, rest] ->
+        cond do
+          rest =~ ~r{\A\s*<d:status>HTTP/1.1 404 Not Found</d:status>\s*\z} -> {href, :removed}
+          rest =~ "HTTP/1.1 200 OK" -> {href, :present}
+          true -> {href, {:other, rest}}
+        end
+      end)
+    end
+
+    test "a hard delete invalidates older sync tokens, by every delete path",
+         %{account_id: account_id} = context do
+      deletes = [
+        fn c -> {:ok, _} = Contacts.hard_delete_contact(c) end,
+        fn _c -> {:ok, _} = Contacts.empty_trash(account_id) end
+      ]
+
+      for delete <- deletes do
+        contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Doomed"})
+        token = initial_token(context)
+        {:ok, contact} = Contacts.soft_delete_contact(contact)
+        delete.(contact)
+
+        conn = sync(context, token)
+        assert conn.status == 403
+        assert conn.resp_body =~ "<d:valid-sync-token/>"
+
+        # a token issued after the delete works
+        assert sync(context, initial_token(context)).status == 207
+      end
+
+      # another account's hard delete leaves this account's tokens alone
+      token = initial_token(context)
+      other = Kith.AccountsFixtures.user_fixture()
+      theirs = ContactsFixtures.contact_fixture(other.account_id)
+      {:ok, _} = Contacts.hard_delete_contact(theirs)
+      assert sync(context, token).status == 207
+    end
+
+    test "the ctag changes after every change to the book's members, in the same second",
+         %{account_id: account_id} = context do
+      ctag = fn ->
+        body =
+          ~s(<d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:prop><cs:getctag/></d:prop></d:propfind>)
+
+        conn =
+          context.conn
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("depth", "0")
+          |> dav_request("PROPFIND", "/dav/addressbooks/default/", body)
+
+        [ctag] =
+          Regex.run(~r{<cs:getctag>([^<]+)</cs:getctag>}, conn.resp_body, capture: :all_but_first)
+
+        ctag
+      end
+
+      older = ContactsFixtures.contact_fixture(account_id, %{first_name: "Older"})
+      other = ContactsFixtures.contact_fixture(account_id, %{first_name: "Other"})
+      _newest = ContactsFixtures.contact_fixture(account_id, %{first_name: "Newest"})
+
+      mutations = [
+        edit: fn -> {:ok, _} = Contacts.update_contact(other, %{first_name: "Edited"}) end,
+        trash_non_newest: fn -> {:ok, _} = Contacts.soft_delete_contact(older) end,
+        purge: fn -> {:ok, _} = Contacts.empty_trash(account_id) end,
+        archive: fn ->
+          {:ok, _} = Contacts.archive_contact(Contacts.get_contact!(account_id, other.id))
+        end
+      ]
+
+      Enum.reduce(mutations, ctag.(), fn {label, mutate}, before ->
+        mutate.()
+        after_ctag = ctag.()
+        refute after_ctag == before, "ctag unchanged after #{label}"
+        after_ctag
+      end)
+    end
+
+    test "sync-collection honours DAV:limit (507 when over it) and sync-level infinite",
+         %{account_id: account_id} = context do
+      for n <- 1..3, do: ContactsFixtures.contact_fixture(account_id, %{first_name: "Lim#{n}"})
+      limit = fn n -> "<d:limit><d:nresults>#{n}</d:nresults></d:limit>" end
+
+      conn = sync(context, "", limit.(2))
+      assert conn.status == 507
+      assert conn.resp_body =~ "<d:number-of-matches-within-limits/>"
+      refute conn.resp_body =~ "Lim1"
+
+      conn = sync(context, "", limit.(3))
+      assert conn.status == 207
+      assert count_responses(conn.resp_body) == 3
+
+      assert sync(context, "", limit.("x")).status == 400
+
+      # the book has no child collections, so infinite is the same as 1
+      body =
+        ~s(<d:sync-collection xmlns:d="DAV:"><d:sync-token/><d:sync-level>infinite</d:sync-level>) <>
+          ~s(<d:prop><d:getetag/></d:prop></d:sync-collection>)
+
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+      assert count_responses(conn.resp_body) == 3
+    end
+
+    test "REPORT on an address object (multiget) and on the other collections",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Member"})
+      path = contact_path(contact)
+
+      # RFC 6352 §8.7: addressbook-multiget may target the address object itself
+      conn = authed_dav(context, "REPORT", path, multiget_body([path]))
+      assert conn.status == 207
+      assert conn.resp_body =~ "<d:href>#{path}</d:href>"
+      assert conn.resp_body =~ "200 OK"
+
+      sync_body =
+        ~s(<d:sync-collection xmlns:d="DAV:"><d:sync-token/><d:sync-level>1</d:sync-level></d:sync-collection>)
+
+      conn = authed_dav(context, "REPORT", path, sync_body)
+      assert conn.status == 403
+      assert conn.resp_body =~ "<d:supported-report/>"
+
+      assert authed_dav(
+               context,
+               "REPORT",
+               "/dav/addressbooks/default/nope.vcf",
+               multiget_body([path])
+             ).status ==
+               404
+
+      for collection <- ["/dav/", "/dav/principals/", "/dav/addressbooks/"] do
+        conn = authed_dav(context, "REPORT", collection, multiget_body([path]))
+        assert conn.status == 403, collection
+        assert conn.resp_body =~ "<d:supported-report/>"
+        assert authed_dav(context, "REPORT", collection, "<d:oops").status == 400
+      end
+    end
+
+    test "token greater than current is refused with valid-sync-token", context do
+      token = initial_token(context)
+      revision = token |> String.split("/") |> List.last() |> String.to_integer()
+      conn = sync(context, "https://kith.app/ns/sync/#{revision + 1}")
+      assert conn.status == 403
+      assert conn.resp_body =~ "valid-sync-token"
+    end
+
+    test "tag validators agree across GET, PROPFIND, REPORT and conditional PUT for each version",
+         context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      path = contact_path(contact)
+      {:ok, tag} = Contacts.create_tag(context.account_id, %{name: "Family"})
+      Contacts.tag_contact(contact, tag)
+      ns = ~s(xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav")
+
+      for version <- ["3.0", "4.0"] do
+        get =
+          context.conn
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("accept", "text/vcard;version=#{version}")
+          |> dav_request("GET", path)
+
+        [etag] = get_resp_header(get, "etag")
+        props = ~s(<d:prop><d:getetag/><card:address-data version="#{version}"/></d:prop>)
+
+        bodies = [
+          ~s(<card:addressbook-multiget #{ns}>#{props}<d:href>#{path}</d:href></card:addressbook-multiget>),
+          ~s(<d:sync-collection #{ns}><d:sync-token/><d:sync-level>1</d:sync-level>#{props}</d:sync-collection>)
+        ]
+
+        escaped_etag = Kith.DAV.XMLBuilder.getetag(String.trim(etag, "\""))
+
+        for body <- bodies do
+          report = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+          assert report.status == 207
+          assert report.resp_body =~ escaped_etag
+          assert report.resp_body =~ "VERSION:#{version}"
+        end
+
+        propfind =
+          context.conn
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("accept", "text/vcard;version=#{version}")
+          |> put_req_header("depth", "0")
+          |> dav_request(
+            "PROPFIND",
+            path,
+            ~s(<d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>)
+          )
+
+        assert propfind.resp_body =~ escaped_etag
+
+        put =
+          context.conn
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("if-match", etag)
+          |> dav_request("PUT", path, get.resp_body)
+
+        assert put.status == 204
+        # PUT canonicalizes rich documents and intentionally omits validators.
+        assert get_resp_header(put, "etag") == []
+
+        assert get_resp_header(
+                 context.conn
+                 |> basic_auth(context.user.email, dav_password())
+                 |> put_req_header("accept", "text/vcard;version=#{version}")
+                 |> dav_request("GET", path),
+                 "etag"
+               ) == [etag]
+      end
+    end
+
+    test "every tag mutation publishes all affected contacts and leaves other members unchanged",
+         context do
+      aid = context.account_id
+
+      affected =
+        for n <- 1..2, do: ContactsFixtures.contact_fixture(aid, %{first_name: "Tagged#{n}"})
+
+      quiet = ContactsFixtures.contact_fixture(aid, %{first_name: "Quiet"})
+      {:ok, source} = Contacts.create_tag(aid, %{name: "Source"})
+      {:ok, target} = Contacts.create_tag(aid, %{name: "Target"})
+      # Exercise merge's ON CONFLICT path on one contact and its bulk insert path on the other.
+      Contacts.tag_contact(hd(affected), target)
+      Contacts.tag_contact(quiet, target)
+      quiet_before = authed_dav(context, "GET", contact_path(quiet))
+
+      ctag = fn ->
+        response =
+          context.conn
+          |> basic_auth(context.user.email, dav_password())
+          |> put_req_header("depth", "0")
+          |> dav_request(
+            "PROPFIND",
+            "/dav/addressbooks/default/",
+            ~s(<d:propfind xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/"><d:prop><cs:getctag/></d:prop></d:propfind>)
+          )
+
+        [value] =
+          Regex.run(~r{<cs:getctag>([^<]+)</cs:getctag>}, response.resp_body,
+            capture: :all_but_first
+          )
+
+        value
+      end
+
+      fixed = ~U[2026-01-01 12:00:00Z]
+
+      mutations = [
+        {"assignment", fn -> Enum.each(affected, &Contacts.tag_contact(&1, source)) end},
+        {"removal", fn -> Enum.each(affected, &Contacts.untag_contact(&1, source)) end},
+        {"reassignment", fn -> Enum.each(affected, &Contacts.tag_contact(&1, source)) end},
+        {"rename", fn -> {:ok, _} = Contacts.rename_tag(source, "Renamed") end},
+        {"update",
+         fn ->
+           {:ok, _} = Contacts.update_tag(Contacts.get_tag!(aid, source.id), %{name: "Updated"})
+         end},
+        {"merge",
+         fn -> {:ok, _} = Contacts.merge_tags(aid, Contacts.get_tag!(aid, source.id), target) end}
+      ]
+
+      # A delete probe needs its own preexisting category, otherwise the complete
+      # transaction would be a no-op. Keep each operation's initial token explicit.
+      Enum.each(mutations, fn {label, mutate} ->
+        token = initial_token(context)
+        before_ctag = ctag.()
+
+        before =
+          Map.new(affected, fn c ->
+            {c.id, get_resp_header(authed_dav(context, "GET", contact_path(c)), "etag")}
+          end)
+
+        # Native contact timestamps are held equal across every mutation, so a
+        # timestamp-only invalidation implementation cannot satisfy this test.
+        Enum.each(affected, fn c ->
+          c |> Ecto.Changeset.change(updated_at: fixed) |> Kith.Repo.update!()
+        end)
+
+        mutate.()
+        response = sync(context, token)
+        assert sync_changes(response) == Map.new(affected, &{contact_path(&1), :present}), label
+        refute sync_token!(response) == token, label
+        refute ctag.() == before_ctag, label
+
+        Enum.each(affected, fn c ->
+          after_get = authed_dav(context, "GET", contact_path(c))
+          refute get_resp_header(after_get, "etag") == before[c.id], label
+          assert Kith.Repo.reload!(c).updated_at == fixed
+        end)
+
+        quiet_after = authed_dav(context, "GET", contact_path(quiet))
+        assert quiet_after.resp_body == quiet_before.resp_body
+        assert get_resp_header(quiet_after, "etag") == get_resp_header(quiet_before, "etag")
+      end)
+
+      for delete <- [&Contacts.delete_tag/1, &Contacts.delete_tag_with_removal/1] do
+        {:ok, tag} = Contacts.create_tag(aid, %{name: "Delete"})
+        Enum.each(affected, &Contacts.tag_contact(&1, tag))
+        token = initial_token(context)
+        before_ctag = ctag.()
+
+        before =
+          Enum.map(
+            affected,
+            &get_resp_header(authed_dav(context, "GET", contact_path(&1)), "etag")
+          )
+
+        assert {:ok, _} = delete.(tag)
+        response = sync(context, token)
+        assert sync_changes(response) == Map.new(affected, &{contact_path(&1), :present})
+        refute sync_token!(response) == token
+        refute ctag.() == before_ctag
+
+        Enum.zip(affected, before)
+        |> Enum.each(fn {c, etag} ->
+          refute get_resp_header(authed_dav(context, "GET", contact_path(c)), "etag") == etag
+        end)
+
+        assert authed_dav(context, "GET", contact_path(quiet)).resp_body == quiet_before.resp_body
+      end
+    end
+
+    test "a tag rename appears in incremental sync", context do
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      {:ok, tag} = Contacts.create_tag(context.account_id, %{name: "Before"})
+      Contacts.tag_contact(contact, tag)
+      token = initial_token(context)
+      {:ok, _} = Contacts.update_tag(tag, %{name: "After"})
+      assert sync_changes(sync(context, token)) == %{contact_path(contact) => :present}
+    end
+
+    test "contact created in the UI appears in incremental sync", context do
+      token = initial_token(context)
+      contact = ContactsFixtures.contact_fixture(context.account_id)
+      assert sync_changes(sync(context, token)) == %{contact_path(contact) => :present}
+    end
+
+    test "changes in the same second the token was issued are reported",
+         %{account_id: account_id} = context do
+      edited = ContactsFixtures.contact_fixture(account_id, %{first_name: "Edited"})
+      trashed = ContactsFixtures.contact_fixture(account_id, %{first_name: "Trashed"})
+      _quiet = ContactsFixtures.contact_fixture(account_id, %{first_name: "Quiet"})
+
+      token = initial_token(context)
+      {:ok, _} = Contacts.update_contact(edited, %{first_name: "EditedAgain"})
+      {:ok, _} = Contacts.soft_delete_contact(trashed)
+      created = ContactsFixtures.contact_fixture(account_id, %{first_name: "Created"})
+
+      assert sync_changes(sync(context, token)) == %{
+               contact_path(edited) => :present,
+               contact_path(trashed) => :removed,
+               contact_path(created) => :present
+             }
+    end
+
+    test "incremental sync reports archiving as a removal and unarchiving as an addition",
+         %{account_id: account_id} = context do
+      to_archive = ContactsFixtures.contact_fixture(account_id, %{first_name: "ToArchive"})
+      archived = ContactsFixtures.contact_fixture(account_id, %{first_name: "Archived"})
+      {:ok, archived} = Contacts.archive_contact(archived)
+
+      token = initial_token(context)
+      {:ok, _} = Contacts.archive_contact(to_archive)
+      {:ok, _} = Contacts.unarchive_contact(archived)
+
+      assert sync_changes(sync(context, token)) == %{
+               contact_path(to_archive) => :removed,
+               contact_path(archived) => :present
+             }
+    end
+
+    test "REPORTs return only the requested properties",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Props"})
+      ns = ~s(xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav")
+      etag_only = "<d:prop><d:getetag/></d:prop>"
+
+      bodies = [
+        ~s(<card:addressbook-multiget #{ns}>#{etag_only}<d:href>#{contact_path(contact)}</d:href></card:addressbook-multiget>),
+        ~s(<d:sync-collection #{ns}><d:sync-token/><d:sync-level>1</d:sync-level>#{etag_only}</d:sync-collection>),
+        ~s(<card:addressbook-query #{ns}>#{etag_only}<card:filter><card:prop-filter name="FN"/></card:filter></card:addressbook-query>)
+      ]
+
+      for body <- bodies do
+        conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+        assert conn.status == 207
+        assert conn.resp_body =~ "<d:getetag>"
+        refute conn.resp_body =~ "address-data", body
+        refute conn.resp_body =~ "getcontenttype", body
+      end
+
+      for body <- bodies do
+        conn =
+          authed_dav(
+            context,
+            "REPORT",
+            "/dav/addressbooks/default/",
+            String.replace(body, etag_only, "<d:propname/>")
+          )
+
+        assert conn.status == 207
+        assert conn.resp_body =~ "<d:getetag/>"
+        assert conn.resp_body =~ "<card:address-data/>"
+        refute conn.resp_body =~ "BEGIN:VCARD"
+      end
+
+      # an unknown property is reported in a 404 propstat (RFC 4918 §9.1)
+      body =
+        ~s(<card:addressbook-multiget #{ns} xmlns:x="urn:x"><d:prop><d:getetag/><x:bogus/></d:prop>) <>
+          ~s(<d:href>#{contact_path(contact)}</d:href></card:addressbook-multiget>)
+
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+
+      assert conn.resp_body =~
+               ~r{<x:bogus xmlns:x="urn:x"/>\s*</d:prop>\s*<d:status>HTTP/1.1 404 Not Found}
+    end
+
+    defp put_card(context, name, card) do
+      conn = authed_dav(context, "PUT", "/dav/addressbooks/default/#{name}.vcf", card)
+      assert conn.status == 201
+      "/dav/addressbooks/default/#{name}.vcf"
+    end
+
+    defp query(context, filter, opts \\ []) do
+      test_attr = if opts[:test], do: ~s( test="#{opts[:test]}"), else: ""
+
+      limit =
+        if opts[:limit],
+          do: "<C:limit><C:nresults>#{opts[:limit]}</C:nresults></C:limit>",
+          else: ""
+
+      body =
+        ~s(<C:addressbook-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">) <>
+          ~s(<D:prop><D:getetag/></D:prop><C:filter#{test_attr}>#{filter}</C:filter>#{limit}) <>
+          "</C:addressbook-query>"
+
+      authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+    end
+
+    defp query_hrefs(context, filter, opts \\ []) do
+      conn = query(context, filter, opts)
+      assert conn.status == 207, conn.resp_body
+
+      Regex.scan(~r{<d:href>([^<]+)</d:href>}, conn.resp_body, capture: :all_but_first)
+      |> List.flatten()
+      |> Enum.sort()
+    end
+
+    defp tm(prop, text, attrs \\ ""),
+      do:
+        ~s(<C:prop-filter name="#{prop}"><C:text-match #{attrs}>#{text}</C:text-match></C:prop-filter>)
+
+    test "addressbook-query honours match-type, negate-condition, test, is-not-defined and param-filter",
+         context do
+      a =
+        put_card(
+          context,
+          "qa",
+          build_vcard("Qalpha", "Smith", email: "qa@example.test", phone: "+1 555 0001111")
+        )
+
+      b = put_card(context, "qb", build_vcard("Qbeta", "Jones", email: "qb@example.test"))
+      c = put_card(context, "qc", build_vcard("Qgamma", "Brown"))
+
+      assert query_hrefs(context, tm("FN", "Qalpha Smith", ~s(match-type="equals"))) == [a]
+      assert query_hrefs(context, tm("FN", "qal", ~s(match-type="starts-with"))) == [a]
+      assert query_hrefs(context, tm("FN", "JONES", ~s(match-type="ends-with"))) == [b]
+      assert query_hrefs(context, tm("EMAIL", "qa@", ~s(match-type="starts-with"))) == [a]
+      assert query_hrefs(context, tm("TEL", "0001111")) == [a]
+
+      assert query_hrefs(context, tm("FN", "Qalpha", ~s(negate-condition="yes"))) ==
+               Enum.sort([b, c])
+
+      assert query_hrefs(
+               context,
+               ~s(<C:prop-filter name="EMAIL"><C:is-not-defined/></C:prop-filter>)
+             ) ==
+               [c]
+
+      assert query_hrefs(context, ~s(<C:prop-filter name="EMAIL"/>)) == Enum.sort([a, b])
+
+      # TYPE survives the seeded tel: protocol serialization
+      param = fn inner ->
+        query_hrefs(
+          context,
+          ~s(<C:prop-filter name="TEL" test="allof"><C:param-filter name="TYPE">#{inner}</C:param-filter></C:prop-filter>)
+        )
+      end
+
+      assert param.("<C:is-not-defined/>") == []
+      assert param.(~s(<C:text-match>cell</C:text-match>)) == [a]
+
+      either =
+        tm("FN", "Qalpha Smith", ~s(match-type="equals")) <>
+          tm("FN", "Qbeta Jones", ~s(match-type="equals"))
+
+      # RFC 6352 §10.5: the filter's test defaults to anyof
+      assert query_hrefs(context, either) == Enum.sort([a, b])
+      assert query_hrefs(context, either, test: "anyof") == Enum.sort([a, b])
+      assert query_hrefs(context, either, test: "allof") == []
+      assert query_hrefs(context, tm("FN", "Q") <> tm("EMAIL", "qb@"), test: "allof") == [b]
+
+      # an unknown property is simply not defined
+      assert query_hrefs(context, tm("X-UNKNOWN", "Q")) == []
+    end
+
+    test "addressbook-query truncates at card:limit with a 507 for the collection",
+         context do
+      for n <- 1..3, do: put_card(context, "lim#{n}", build_vcard("Limit#{n}", "Many"))
+
+      conn = query(context, tm("FN", "Limit"), limit: 2)
+      assert conn.status == 207
+      assert count_responses(conn.resp_body) == 3
+
+      assert conn.resp_body =~
+               ~r{<d:href>/dav/addressbooks/default/</d:href>\s*<d:status>HTTP/1.1 507 Insufficient Storage</d:status>}
+
+      assert conn.resp_body =~ "<d:number-of-matches-within-limits/>"
+
+      conn = query(context, tm("FN", "Limit"), limit: 5)
+      assert count_responses(conn.resp_body) == 3
+      refute conn.resp_body =~ "507 Insufficient Storage"
+    end
+
+    test "unsupported query filters are 403, not match-all", context do
+      put_card(context, "unsup", build_vcard("Un", "Supported"))
+
+      conn = query(context, tm("FN", "x", ~s(match-type="regex")))
+      assert conn.status == 403
+      assert conn.resp_body =~ "<card:supported-filter/>"
+
+      conn = query(context, tm("FN", "x", ~s(collation="x-bogus")))
+      assert conn.status == 403
+      assert conn.resp_body =~ "<card:supported-collation/>"
+
+      assert query(context, tm("FN", "x"), test: "sometimes").status == 403
+      assert query(context, tm("FN", "Un", ~s(collation="i;ascii-casemap"))).status == 207
+    end
+
+    test "a missing multiget href is a response with a bare 404 status, no propstat",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Present"})
+      missing = "/dav/addressbooks/default/nope.vcf"
+      body = multiget_body([contact_path(contact), missing])
+
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+      assert conn.status == 207
+
+      [missing_block] =
+        Regex.scan(
+          ~r{<d:response>\s*<d:href>#{missing}</d:href>.*?</d:response>}s,
+          conn.resp_body
+        )
+        |> List.flatten()
+
+      refute missing_block =~ "propstat"
+
+      assert missing_block =~
+               ~r{<d:href>[^<]+</d:href>\s*<d:status>HTTP/1.1 404 Not Found</d:status>}
+    end
+
+    test "multiget answers equivalent hrefs with the resource's own href; foreign paths are 404",
+         %{account_id: account_id} = context do
+      contact = ContactsFixtures.contact_fixture(account_id, %{first_name: "Hrefs"})
+      path = contact_path(contact)
+      encoded = String.replace(path, "-", "%2D")
+      outside = String.replace(path, "/default/", "/other/")
+
+      for href <- ["http://www.example.com" <> path, encoded] do
+        conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", multiget_body([href]))
+        assert conn.status == 207
+
+        assert [^path] =
+                 Regex.scan(~r{<d:href>([^<]+)</d:href>}, conn.resp_body, capture: :all_but_first)
+                 |> List.flatten()
+
+        assert conn.resp_body =~ "200 OK"
+      end
+
+      for href <- [outside, "/dav/" <> contact_uid(contact)] do
+        conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", multiget_body([href]))
+        assert conn.status == 207
+        refute conn.resp_body =~ "200 OK", href
+        assert conn.resp_body =~ "404 Not Found"
+      end
+    end
+
+    test "a REPORT body over max-resource-size returns 413", context do
+      padding = String.duplicate(" ", 1_048_577)
+
+      body =
+        ~s(<card:addressbook-multiget xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">) <>
+          padding <> "</card:addressbook-multiget>"
+
+      assert authed_dav(context, "REPORT", "/dav/addressbooks/default/", body).status == 413
+    end
+
+    test "REPORT is dispatched on its namespaced root element, any prefix",
+         %{account_id: account_id} = context do
+      named = ContactsFixtures.contact_fixture(account_id, %{first_name: "sync-collection"})
+      other = ContactsFixtures.contact_fixture(account_id, %{first_name: "Other"})
+
+      # A query whose text-match mentions another report is still a query
+      query = """
+      <C:addressbook-query xmlns:A="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav">
+        <A:prop><A:getetag/></A:prop>
+        <C:filter><C:prop-filter name="FN">
+          <C:text-match>sync-collection</C:text-match>
+        </C:prop-filter></C:filter>
+      </C:addressbook-query>
+      """
+
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", query)
+      assert conn.status == 207
+      refute conn.resp_body =~ "sync-token"
+      assert conn.resp_body =~ contact_path(named)
+      refute conn.resp_body =~ contact_path(other)
+
+      # multiget with Apple's A: prefix for DAV: and with default namespaces
+      for body <- [
+            ~s(<B:addressbook-multiget xmlns:A="DAV:" xmlns:B="urn:ietf:params:xml:ns:carddav">) <>
+              ~s(<A:prop><A:getetag/><B:address-data/></A:prop>) <>
+              ~s(<A:href>#{contact_path(named)}</A:href></B:addressbook-multiget>),
+            ~s(<addressbook-multiget xmlns="urn:ietf:params:xml:ns:carddav">) <>
+              ~s(<prop xmlns="DAV:"><getetag/></prop>) <>
+              ~s(<href xmlns="DAV:">#{contact_path(named)}</href></addressbook-multiget>)
+          ] do
+        conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+        assert conn.status == 207
+        assert count_responses(conn.resp_body) == 1
+        assert conn.resp_body =~ contact_path(named)
+        assert conn.resp_body =~ "200 OK"
+      end
+
+      # a multiget href that only looks like DAV:href is not one
+      fake =
+        ~s(<card:addressbook-multiget xmlns:d="urn:not-dav" xmlns:card="urn:ietf:params:xml:ns:carddav">) <>
+          ~s(<d:href>#{contact_path(named)}</d:href></card:addressbook-multiget>)
+
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", fake)
+      assert conn.status == 207
+      assert count_responses(conn.resp_body) == 0
+    end
+
+    test "an unknown REPORT is 403 supported-report; malformed XML is 400", context do
+      unknown = ~s(<?xml version="1.0"?><d:unknown-report xmlns:d="DAV:"/>)
+      conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", unknown)
+      assert conn.status == 403
+      assert conn.resp_body =~ "supported-report"
+
+      # right local name, wrong namespace
+      wrong_ns = ~s(<x:sync-collection xmlns:x="urn:x"><x:sync-token/></x:sync-collection>)
+      assert authed_dav(context, "REPORT", "/dav/addressbooks/default/", wrong_ns).status == 403
+
+      for body <- [
+            ~s(<card:addressbook-multiget xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav"><d:href>x</d:prop>),
+            "",
+            "hello"
+          ] do
+        conn = authed_dav(context, "REPORT", "/dav/addressbooks/default/", body)
+        assert conn.status == 400, inspect(body)
+      end
+    end
+  end
+end
+
+defmodule KithWeb.DAV.TagReportBoundaryTest do
+  use KithWeb.ConnCase, async: false
+  import Ecto.Query
+  import KithWeb.DAV.TestHelpers
+  alias Ecto.Adapters.SQL.Sandbox
+  alias Kith.{Contacts, Repo}
+
+  test "a tag edit overlapping REPORT remains visible after its returned token" do
+    {user, contact, tag} =
+      Sandbox.unboxed_run(Repo, fn ->
+        user = Kith.AccountsFixtures.user_fixture()
+        contact = Kith.ContactsFixtures.contact_fixture(user.account_id)
+        {:ok, tag} = Contacts.create_tag(user.account_id, %{name: "Before"})
+        Contacts.tag_contact(contact, tag)
+        {user, contact, tag}
+      end)
+
+    on_exit(fn ->
+      Sandbox.unboxed_run(Repo, fn ->
+        Repo.delete_all(from a in Kith.Accounts.Account, where: a.id == ^user.account_id)
+      end)
+    end)
+
+    parent = self()
+    handler = "tag-report-boundary-#{user.account_id}"
+
+    :telemetry.attach(
+      handler,
+      [:kith, :repo, :query],
+      fn _, _, metadata, _ ->
+        if Process.get(:pause_tag_report) && String.contains?(metadata.query, "SELECT GREATEST") do
+          Process.delete(:pause_tag_report)
+          send(parent, {:report_boundary, self()})
+
+          receive do
+            :continue_report -> :ok
+          after
+            10_000 -> raise "REPORT boundary coordination timed out"
+          end
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    request = fn token ->
+      Sandbox.unboxed_run(Repo, fn ->
+        build_conn()
+        |> basic_auth(user.email, dav_password())
+        |> dav_request(
+          "REPORT",
+          "/dav/addressbooks/default/",
+          String.replace(
+            sync_collection_body(),
+            "<d:sync-token/>",
+            "<d:sync-token>#{token}</d:sync-token>"
+          )
+        )
+      end)
+    end
+
+    reader =
+      Task.async(fn ->
+        Process.put(:pause_tag_report, true)
+        request.("")
+      end)
+
+    assert_receive {:report_boundary, reader_pid}, 5_000
+
+    writer =
+      Task.async(fn ->
+        Sandbox.unboxed_run(Repo, fn ->
+          %{rows: [[backend]]} = Repo.query!("SELECT pg_backend_pid()")
+          send(parent, {:tag_writer, backend})
+          Contacts.rename_tag(tag, "After")
+        end)
+      end)
+
+    assert_receive {:tag_writer, backend}, 5_000
+    Sandbox.unboxed_run(Repo, fn -> assert_tag_writer_blocked(backend, 1_000) end)
+    send(reader_pid, :continue_report)
+    initial = Task.await(reader, 15_000)
+    assert initial.status == 207
+    assert initial.resp_body =~ "Before"
+    refute initial.resp_body =~ "CATEGORIES:After"
+    assert {:ok, _} = Task.await(writer, 15_000)
+
+    [token] =
+      Regex.run(~r{<d:sync-token>([^<]+)</d:sync-token>}, initial.resp_body,
+        capture: :all_but_first
+      )
+
+    incremental = request.(token)
+    assert incremental.status == 207
+    assert count_responses(incremental.resp_body) == 1
+    path = Sandbox.unboxed_run(Repo, fn -> contact_path(contact) end)
+    assert incremental.resp_body =~ path
+    assert incremental.resp_body =~ "CATEGORIES:After"
+  end
+
+  defp assert_tag_writer_blocked(backend, attempts) do
+    %{rows: rows} =
+      Repo.query!("SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1", [backend])
+
+    cond do
+      rows == [["Lock"]] -> :ok
+      attempts == 0 -> flunk("tag writer never reached the REPORT snapshot lock")
+      true -> assert_tag_writer_blocked(backend, attempts - 1)
     end
   end
 end

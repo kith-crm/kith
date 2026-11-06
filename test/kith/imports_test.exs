@@ -102,4 +102,125 @@ defmodule Kith.ImportsTest do
       assert updated.started_at == now
     end
   end
+
+  describe "monica_followups_pending?/1" do
+    setup %{account_id: account_id, user: user} do
+      {:ok, import} =
+        Imports.create_import(account_id, user.id, %{
+          source: "monica_api",
+          api_url: "https://monica.test",
+          api_key_encrypted: "test-key"
+        })
+
+      %{import: import}
+    end
+
+    test "is false when no follow-up job exists", %{import: import} do
+      refute Imports.monica_followups_pending?(import.id)
+    end
+
+    for state <- ~w[available scheduled executing retryable] do
+      test "is true while a follow-up job is #{state}", %{import: import} do
+        insert_job!(
+          Kith.Workers.MonicaPhotoSyncWorker,
+          %{"import_id" => import.id},
+          unquote(state)
+        )
+
+        assert Imports.monica_followups_pending?(import.id)
+      end
+    end
+
+    for state <- ~w[completed discarded cancelled] do
+      test "is false once every follow-up job is #{state}", %{import: import} do
+        insert_job!(
+          Kith.Workers.MonicaPhotoSyncWorker,
+          %{"import_id" => import.id},
+          unquote(state)
+        )
+
+        insert_job!(
+          Kith.Workers.MonicaDocumentImportWorker,
+          %{"import_id" => import.id},
+          unquote(state)
+        )
+
+        refute Imports.monica_followups_pending?(import.id)
+      end
+    end
+
+    test "counts misc-data and document jobs, not just photo sync", %{import: import} do
+      misc = insert_job!(Kith.Workers.MonicaMiscDataWorker, %{"import_id" => import.id})
+      assert Imports.monica_followups_pending?(import.id)
+
+      set_job_state!(misc, "completed")
+      insert_job!(Kith.Workers.MonicaDocumentImportWorker, %{"import_id" => import.id})
+      assert Imports.monica_followups_pending?(import.id)
+    end
+
+    test "ignores other imports' jobs and non-follow-up workers", %{import: import} do
+      insert_job!(Kith.Workers.MonicaPhotoSyncWorker, %{"import_id" => import.id + 1_000_000})
+      insert_job!(Kith.Workers.MonicaApiCrawlWorker, %{"import_id" => import.id})
+
+      refute Imports.monica_followups_pending?(import.id)
+    end
+  end
+
+  describe "wipe_stale_api_keys/1" do
+    @day 24 * 60 * 60
+
+    test "wipes keys of imports that finished longer ago than max age",
+         %{account_id: account_id, user: user} do
+      import = key_import!(account_id, user.id)
+      backdate!(import, completed_at: hours_ago(25))
+
+      assert Imports.wipe_stale_api_keys(@day) == 1
+      assert is_nil(Imports.get_import!(import.id).api_key_encrypted)
+    end
+
+    test "keeps keys of recently finished imports", %{account_id: account_id, user: user} do
+      import = key_import!(account_id, user.id)
+      backdate!(import, completed_at: hours_ago(1), updated_at: hours_ago(30))
+
+      assert Imports.wipe_stale_api_keys(@day) == 0
+      assert Imports.get_import!(import.id).api_key_encrypted == "test-key"
+    end
+
+    test "wipes imports that never finished once untouched past max age",
+         %{account_id: account_id, user: user} do
+      import = key_import!(account_id, user.id)
+      backdate!(import, updated_at: hours_ago(25))
+
+      assert Imports.wipe_stale_api_keys(@day) == 1
+      assert is_nil(Imports.get_import!(import.id).api_key_encrypted)
+    end
+  end
+
+  defp key_import!(account_id, user_id) do
+    {:ok, import} =
+      Imports.create_import(account_id, user_id, %{
+        source: "monica_api",
+        api_url: "https://monica.test",
+        api_key_encrypted: "test-key"
+      })
+
+    import
+  end
+
+  defp hours_ago(hours),
+    do: DateTime.utc_now() |> DateTime.add(-hours * 3600, :second) |> DateTime.truncate(:second)
+
+  defp backdate!(import, fields) do
+    Repo.update_all(from(i in Import, where: i.id == ^import.id), set: fields)
+  end
+
+  defp insert_job!(worker, args, state \\ "available") do
+    {:ok, job} = args |> worker.new() |> Oban.insert()
+    set_job_state!(job, state)
+  end
+
+  defp set_job_state!(job, state) do
+    Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [state: state])
+    job
+  end
 end

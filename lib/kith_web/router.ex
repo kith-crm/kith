@@ -28,7 +28,9 @@ defmodule KithWeb.Router do
   pipeline :browser_json do
     plug :accepts, ["json"]
     plug :fetch_session
+    plug :protect_from_forgery
     plug :put_secure_browser_headers
+    plug KithWeb.Plugs.CSP
     plug :fetch_current_scope_for_user
   end
 
@@ -107,6 +109,7 @@ defmodule KithWeb.Router do
     get "/contacts", ContactController, :index
     post "/contacts", ContactController, :create
     post "/contacts/merge", ContactController, :merge
+    get "/contacts/export.vcf", ContactExportController, :bulk
     get "/contacts/:id", ContactController, :show
     patch "/contacts/:id", ContactController, :update
     put "/contacts/:id", ContactController, :update
@@ -280,7 +283,6 @@ defmodule KithWeb.Router do
     delete "/life_event_types/:id", LifeEventTypeController, :delete
 
     # Export endpoints
-    get "/contacts/export.vcf", ContactExportController, :bulk
     get "/contacts/:id/export.vcf", ContactExportController, :show
     get "/export", ExportController, :create
 
@@ -350,10 +352,10 @@ defmodule KithWeb.Router do
       live "/contacts/archived", ContactLive.Index, :archived
       live "/contacts/trash", ContactLive.Index, :trash
       live "/contacts/duplicates", ContactLive.Index, :duplicates
+      live "/contacts/duplicates/cluster/:id", ContactLive.ClusterMerge, :show
       live "/contacts/new", ContactLive.New, :new
       live "/contacts/:id", ContactLive.Show, :show
       live "/contacts/:id/edit", ContactLive.Edit, :edit
-      live "/contacts/:id/merge", ContactLive.Merge, :index
 
       # Settings
       live "/settings/tags", SettingsLive.Tags, :index
