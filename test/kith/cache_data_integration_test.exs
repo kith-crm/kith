@@ -347,6 +347,48 @@ defmodule Kith.CacheDataIntegrationTest do
     end)
   end
 
+  test "account reset clears cached duplicate badge and storage usage after commit", ctx do
+    unboxed(fn ->
+      candidate = pair(ctx.first)
+      pair(ctx.second)
+      contact = Repo.get!(Kith.Contacts.Contact, candidate.contact_id)
+      assert {:ok, _} = Contacts.create_photo(contact, media_attrs("reset.jpg", 123))
+      assert DuplicateDetection.cluster_count(ctx.first.id) == 1
+      assert DuplicateDetection.cluster_count(ctx.second.id) == 1
+      assert {:ok, 123} = Storage.usage(ctx.first.id)
+
+      assert :ok =
+               Kith.Workers.AccountResetWorker.perform(%Oban.Job{
+                 args: %{"account_id" => ctx.first.id}
+               })
+
+      assert DuplicateDetection.list_clusters(ctx.first.id) == []
+      assert DuplicateDetection.cluster_count(ctx.first.id) == 0
+      assert {:ok, 0} = Storage.usage(ctx.first.id)
+      assert {:ok, 1} = Cache.get({:duplicate_cluster_count, ctx.second.id})
+    end)
+  end
+
+  test "standalone contact wipe clears cached duplicate badge and storage usage after commit",
+       ctx do
+    unboxed(fn ->
+      candidate = pair(ctx.first)
+      pair(ctx.second)
+      contact = Repo.get!(Kith.Contacts.Contact, candidate.contact_id)
+      assert {:ok, _} = Contacts.create_photo(contact, media_attrs("reset.jpg", 123))
+      assert DuplicateDetection.cluster_count(ctx.first.id) == 1
+      assert DuplicateDetection.cluster_count(ctx.second.id) == 1
+      assert {:ok, 123} = Storage.usage(ctx.first.id)
+
+      assert :ok = Kith.Contacts.Cleanup.wipe_for_account(ctx.first.id)
+
+      assert DuplicateDetection.list_clusters(ctx.first.id) == []
+      assert DuplicateDetection.cluster_count(ctx.first.id) == 0
+      assert {:ok, 0} = Storage.usage(ctx.first.id)
+      assert {:ok, 1} = Cache.get({:duplicate_cluster_count, ctx.second.id})
+    end)
+  end
+
   defp eventually_blocked?(backend_pid, attempts \\ 100)
   defp eventually_blocked?(_backend_pid, 0), do: false
 

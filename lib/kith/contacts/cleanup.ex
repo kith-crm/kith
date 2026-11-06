@@ -21,6 +21,7 @@ defmodule Kith.Contacts.Cleanup do
   contacts axis-of-change and have no other purpose.
   """
 
+  alias Kith.Cache.Invalidation
   alias Kith.Contacts.{Contact, Tag}
   alias Kith.DAV.Store
   alias Kith.Repo
@@ -39,6 +40,7 @@ defmodule Kith.Contacts.Cleanup do
         {tags_deleted, _} = Repo.delete_all(from(t in Tag, where: t.account_id == ^account_id))
         {contacts_deleted, tags_deleted}
       end)
+      |> Invalidation.after_contact_removal(account_id)
 
     Logger.info(
       "[Contacts.Cleanup] hard-deleted #{contacts_deleted} contact(s) + " <>
