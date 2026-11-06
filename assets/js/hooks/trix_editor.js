@@ -18,6 +18,29 @@ const TrixEditor = {
   mounted() {
     this.editor = this.el.querySelector("trix-editor")
     this.hiddenInput = this.el.querySelector("input[type=hidden]")
+    this.toolbar = this.el.querySelector("trix-toolbar")
+    // Trix invokes toolbar commands on mousedown. Keyboard activation emits click.
+    this.toolbarClickHandler = event => {
+      const button = event.target.closest(".note-toolbar-button")
+      if (button && event.detail === 0 && !button.disabled) {
+        button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }))
+      }
+    }
+    this.toolbar.addEventListener("click", this.toolbarClickHandler)
+    // Let Trix dismiss the link dialog before an enclosing modal sees Escape.
+    this.dialogKeyHandler = event => {
+      if (event.key === "Escape" && event.target.matches("[data-trix-input]")) event.stopPropagation()
+    }
+    this.el.addEventListener("keydown", this.dialogKeyHandler)
+    this.toolbarObserver = new MutationObserver(() => {
+      this.toolbar.querySelectorAll("[data-trix-attribute]").forEach(button => {
+        const active = button.dataset.trixAttribute === "href"
+          ? this.toolbar.querySelector('[data-trix-dialog="href"]').hasAttribute("data-trix-active")
+          : button.hasAttribute("data-trix-active")
+        button.setAttribute(button.dataset.trixAttribute === "href" ? "aria-expanded" : "aria-pressed", String(active))
+      })
+    })
+    this.toolbarObserver.observe(this.toolbar, { subtree: true, attributes: true, attributeFilter: ["data-trix-active"] })
     this.serverValue = this.el.dataset.value || ""
     this.changeHandler = () => {
       if (this.loading || !this.editor.editor) return
@@ -62,6 +85,9 @@ const TrixEditor = {
   },
 
   destroyed() {
+    this.toolbarObserver.disconnect()
+    this.el.removeEventListener("keydown", this.dialogKeyHandler)
+    this.toolbar.removeEventListener("click", this.toolbarClickHandler)
     this.editor.removeEventListener("trix-change", this.changeHandler)
     this.editor.removeEventListener("trix-file-accept", this.fileHandler)
     this.editor.removeEventListener("trix-initialize", this.initialize)
