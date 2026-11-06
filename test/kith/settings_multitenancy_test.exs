@@ -583,6 +583,26 @@ defmodule Kith.SettingsMultitenancyTest do
                Accounts.request_account_reset(account_id, "RESET!")
     end
 
+    test "a completed reset does not block a new reset", %{account_id: account_id} do
+      {:ok, previous} =
+        %{account_id: account_id}
+        |> Kith.Workers.AccountResetWorker.new()
+        |> Oban.insert()
+
+      previous |> Ecto.Changeset.change(state: "completed") |> Repo.update!()
+
+      assert {:ok, :queued} = Accounts.request_account_reset(account_id, "RESET")
+
+      assert Repo.aggregate(
+               from(j in Oban.Job,
+                 where:
+                   j.worker == "Kith.Workers.AccountResetWorker" and j.state == "available" and
+                     fragment("?->>'account_id'", j.args) == ^Integer.to_string(account_id)
+               ),
+               :count
+             ) == 1
+    end
+
     test "accepts RESET and queues job", %{account_id: account_id} do
       assert {:ok, :queued} = Accounts.request_account_reset(account_id, "RESET")
     end

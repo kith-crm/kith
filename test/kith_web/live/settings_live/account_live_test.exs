@@ -75,10 +75,26 @@ defmodule KithWeb.SettingsLive.AccountTest do
       html =
         lv
         |> element("form[phx-submit='reset-account']")
-        |> render_submit()
+        |> render_submit(%{"confirmation" => "RESET"})
 
       assert html =~ "Account data reset has been queued"
       assert_enqueued(worker: Kith.Workers.AccountResetWorker, args: %{account_id: account.id})
+    end
+
+    test "submitted confirmation is checked even when validation has not run", %{
+      conn: conn,
+      user: user
+    } do
+      {:ok, lv, _html} = live(conn, ~p"/settings/account")
+
+      html = render_submit(lv, "reset-account", %{"confirmation" => "RESET"})
+
+      assert html =~ "Account data reset has been queued"
+
+      assert_enqueued(
+        worker: Kith.Workers.AccountResetWorker,
+        args: %{account_id: user.account_id}
+      )
     end
 
     test "wrong confirmation shows error flash and no job is enqueued", %{conn: conn} do

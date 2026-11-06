@@ -123,10 +123,10 @@ defmodule KithWeb.SettingsLive.Account do
     {:noreply, assign(socket, :reset_confirmation, value)}
   end
 
-  def handle_event("reset-account", _params, socket) do
+  def handle_event("reset-account", params, socket) do
     account = socket.assigns.account
 
-    if socket.assigns.reset_confirmation == "RESET" do
+    if params["confirmation"] == "RESET" do
       case Accounts.request_account_reset(account.id, "RESET") do
         {:ok, :queued} ->
           {:noreply,
