@@ -170,8 +170,11 @@ test("custom toolbar supports keyboard commands, links, and narrow RTL layouts",
   await open(page);
   const editor = page.locator("trix-editor");
   const bold = page.getByRole("button", {name: "Bold", exact: true});
+  await editor.click(); // Wait for the modal opening animation before selecting text.
   await editor.pressSequentially("Selected text");
-  await editor.press("ControlOrMeta+A");
+  // Establish a stable selection; keyboard activation of the toolbar is tested below.
+  await editor.evaluate((el: any) => el.editor.setSelectedRange([0, 13]));
+  await expect.poll(() => editor.evaluate((el: any) => el.editor.getSelectedRange())).toEqual([0, 13]);
   await bold.focus();
   await bold.press("Space");
   await expect(editor.locator("strong")).toHaveText("Selected text");
@@ -216,10 +219,23 @@ test("custom toolbar supports keyboard commands, links, and narrow RTL layouts",
           const rect = el.getBoundingClientRect();
           return [...el.querySelectorAll(".note-toolbar-button")].map(button => {
             const b = button.getBoundingClientRect();
-            return {inside: b.left >= rect.left && b.right <= rect.right, width: b.width, height: b.height};
+            return {inside: b.left >= rect.left && b.right <= rect.right, width: b.width, height: b.height, top: Math.round(b.top)};
           });
         });
-        expect(geometry.every(b => b.inside)).toBe(true);
+        expect(new Set(geometry.map(b => b.top)).size).toBe(1);
+        if (width > 640) expect(geometry.every(b => b.inside)).toBe(true);
+        const controls = page.locator(".note-toolbar-button");
+        // Every action remains reachable by touch scrolling or keyboard focus.
+        for (const index of [12, 0]) {
+          await controls.nth(index).scrollIntoViewIfNeeded();
+          const reachable = await controls.nth(index).evaluate(button => {
+            const b = button.getBoundingClientRect();
+            const row = button.closest(".note-toolbar-row")!.getBoundingClientRect();
+            return b.left >= row.left && b.right <= row.right;
+          });
+          expect(reachable).toBe(true);
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         if (width === 390 && theme === "dark" && dir === "rtl") {
           await page.locator(".note-editor").screenshot({path: "test-results/note-toolbar-mobile-dark-rtl.png"});
         }

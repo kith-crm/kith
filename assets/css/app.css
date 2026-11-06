@@ -311,6 +311,12 @@ trix-toolbar .trix-button--icon-attach, trix-toolbar .trix-button-group--file-to
   color: var(--color-accent-foreground);
 }
 @media (max-width: 640px), (pointer: coarse) {
+  .note-editor .note-toolbar-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
   .note-editor .note-toolbar-button { width: 40px; height: 40px; }
   .note-editor .note-toolbar-group { padding-inline: 4px; }
   .note-editor .note-toolbar-group:first-child { padding-inline-start: 0; }
