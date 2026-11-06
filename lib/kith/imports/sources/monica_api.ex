@@ -726,14 +726,18 @@ defmodule Kith.Imports.Sources.MonicaApi do
   end
 
   defp import_api_contact_fields(contact, api_contact, ref_data, ctx) do
-    case api_contact["contactFields"] do
-      fields when is_list(fields) ->
+    case {Map.fetch(api_contact, "contactFields"), api_contact["is_partial"]} do
+      {{:ok, fields}, _} when is_list(fields) ->
         Enum.flat_map(fields, fn field ->
           contact_field_errors(
             import_single_contact_field(contact, field, ref_data, ctx),
             api_contact["id"]
           )
         end)
+
+      {:error, true} ->
+        # Monica's partial relationship contacts omit the embedded fields key.
+        []
 
       _ ->
         [

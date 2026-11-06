@@ -1357,11 +1357,10 @@ defmodule Kith.Accounts do
   Queues an Oban job to perform the actual reset.
   """
   def request_account_reset(account_id, "RESET") do
-    %{account_id: account_id}
-    |> AccountResetWorker.new()
-    |> Oban.insert()
-
-    {:ok, :queued}
+    case %{account_id: account_id} |> AccountResetWorker.new() |> Oban.insert() do
+      {:ok, _job} -> {:ok, :queued}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   def request_account_reset(_account_id, _confirmation), do: {:error, :invalid_confirmation}

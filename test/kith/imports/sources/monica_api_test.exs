@@ -159,7 +159,11 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
             {Map.delete(contact_json(id: 1), "contactFields"), 1},
             {Map.put(contact_json(id: 1), "contactFields", nil), 1},
             {Map.put(contact_json(id: 1), "contactFields", %{}), 1},
-            {contact_json(id: 1), 0}
+            {contact_json(id: 1), 0},
+            {contact_json(id: 1) |> Map.put("is_partial", true) |> Map.delete("contactFields"),
+             0},
+            {contact_json(id: 1) |> Map.put("is_partial", true) |> Map.put("contactFields", %{}),
+             1}
           ] do
         Req.Test.stub(@stub_name, fn conn ->
           assert conn.request_path == "/api/contacts"
@@ -3208,8 +3212,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
                 "first_name" => "Partial",
                 "last_name" => "Stub",
                 "is_active" => true,
-                "is_partial" => true,
-                "contactFields" => []
+                "is_partial" => true
               }
             })
 
@@ -3221,6 +3224,7 @@ defmodule Kith.Imports.Sources.MonicaApiTest do
       {:ok, summary} =
         MonicaApi.crawl(account_id, user.id, credential(), import_job, %{})
 
+      assert summary.error_count == 0
       assert summary.coverage_backfill.imported_partial == 1
       assert summary.coverage_backfill.imported_full == 0
       assert summary.coverage_backfill.unresolved_gap == 0

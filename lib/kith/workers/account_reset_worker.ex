@@ -13,7 +13,12 @@ defmodule Kith.Workers.AccountResetWorker do
   use Oban.Worker,
     queue: :default,
     max_attempts: 3,
-    unique: [period: 300, fields: [:args], keys: [:account_id]]
+    unique: [
+      period: 300,
+      fields: [:args],
+      keys: [:account_id],
+      states: [:available, :scheduled, :executing, :retryable]
+    ]
 
   alias Kith.{
     Activities,
