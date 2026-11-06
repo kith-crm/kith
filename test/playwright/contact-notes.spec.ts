@@ -36,7 +36,7 @@ test("toolbar formatting persists with visible markers, history, and modal lifec
   await open(page);
   const editor = page.locator("trix-editor");
   await expect(page.locator('[data-trix-action="attachFiles"]')).toBeHidden();
-  expect(await page.locator('[data-trix-attribute="bold"]').evaluate(el => getComputedStyle(el, "::before").backgroundImage)).not.toBe("none");
+  await expect(page.getByRole("button", {name: "Bold", exact: true}).locator("svg")).toBeVisible();
   for (const [attribute, text] of [["bold", "bold text"], ["italic", "italic text"], ["strike", "strike text"]]) {
     await block(page, attribute, text);
   }
@@ -99,7 +99,7 @@ test("toolbar formatting persists with visible markers, history, and modal lifec
   await expect(editor).toContainText("Second separate note");
   await expect(editor).not.toContainText("bold text");
   await expect(page.locator('input[name="entry[is_private]"][type="checkbox"]')).not.toBeChecked();
-  expect(await page.locator('[data-trix-attribute="bold"]').evaluate(el => getComputedStyle(el, "::before").filter)).toContain("invert(1)");
+  await expect(page.getByRole("button", {name: "Bold", exact: true}).locator("svg")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole("button", {name: "Cancel", exact: true}).click();
   const olderEdit = page.locator('[phx-click="edit-entry"][phx-value-type="note"]').last();
@@ -161,4 +161,86 @@ test("delayed invalid submit preserves newer corrections", async ({page}) => {
   await expect(editor).toContainText("Correction typed while waiting");
   await page.getByRole("button", {name: "Save", exact: true}).click();
   await expect(page.locator(".note-body").filter({hasText: "Correction typed while waiting"})).toBeVisible();
+});
+
+
+test("custom toolbar supports keyboard commands, links, and narrow RTL layouts", async ({page}) => {
+  await passwordLogin(page, fixture.email, "ValidP@ssword123!");
+  await page.goto(`/contacts/${fixture.contact_id}`);
+  await open(page);
+  const editor = page.locator("trix-editor");
+  const bold = page.getByRole("button", {name: "Bold", exact: true});
+  await editor.click(); // Wait for the modal opening animation before selecting text.
+  await editor.pressSequentially("Selected text");
+  // Establish a stable selection; keyboard activation of the toolbar is tested below.
+  await editor.evaluate((el: any) => el.editor.setSelectedRange([0, 13]));
+  await expect.poll(() => editor.evaluate((el: any) => el.editor.getSelectedRange())).toEqual([0, 13]);
+  await bold.focus();
+  await bold.press("Space");
+  await expect(editor.locator("strong")).toHaveText("Selected text");
+  await expect(bold).toHaveAttribute("aria-pressed", "true");
+  const link = page.getByRole("button", {name: "Link", exact: true});
+  await link.focus();
+  await link.press("Enter");
+  await expect(link).toHaveAttribute("aria-expanded", "true");
+  const url = page.getByLabel("Link URL", {exact: true});
+  await expect(url).toBeFocused();
+  await url.fill("javascript:alert(1)");
+  await url.press("Enter");
+  await expect(link).toHaveAttribute("aria-expanded", "true");
+  await expect(editor.locator("a")).toHaveCount(0);
+  await url.fill("https://example.com/keyboard");
+  await url.press("Enter");
+  await expect(editor.locator("a")).toHaveAttribute("href", "https://example.com/keyboard");
+  await expect(editor).toBeFocused();
+  await expect(link).toHaveAttribute("aria-expanded", "false");
+  await link.click();
+  await url.press("Escape");
+  await expect(url).toBeHidden();
+  await expect(editor).toBeFocused();
+  await expect(link).toHaveAttribute("aria-expanded", "false");
+  await link.click();
+  await page.getByRole("button", {name: "Remove link", exact: true}).click();
+  await expect(editor.locator("a")).toHaveCount(0);
+  const desktopRows = await page.locator(".note-toolbar-button").evaluateAll(buttons =>
+    [...new Set(buttons.map(button => Math.round(button.getBoundingClientRect().top)))].length);
+  expect(desktopRows).toBe(1);
+  await editor.press("ControlOrMeta+End");
+  await page.locator(".note-editor").screenshot({path: "test-results/note-toolbar-desktop.png"});
+  for (const width of [320, 390, 768]) {
+    await page.setViewportSize({width, height: 900});
+    for (const theme of ["light", "dark"]) {
+      for (const dir of ["ltr", "rtl"]) {
+        await page.evaluate(({theme, dir}) => {
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.dir = dir;
+        }, {theme, dir});
+        const geometry = await page.locator(".note-editor").evaluate(el => {
+          const rect = el.getBoundingClientRect();
+          return [...el.querySelectorAll(".note-toolbar-button")].map(button => {
+            const b = button.getBoundingClientRect();
+            return {inside: b.left >= rect.left && b.right <= rect.right, width: b.width, height: b.height, top: Math.round(b.top)};
+          });
+        });
+        expect(new Set(geometry.map(b => b.top)).size).toBe(1);
+        if (width > 640) expect(geometry.every(b => b.inside)).toBe(true);
+        const controls = page.locator(".note-toolbar-button");
+        // Every action remains reachable by touch scrolling or keyboard focus.
+        for (const index of [12, 0]) {
+          await controls.nth(index).scrollIntoViewIfNeeded();
+          const reachable = await controls.nth(index).evaluate(button => {
+            const b = button.getBoundingClientRect();
+            const row = button.closest(".note-toolbar-row")!.getBoundingClientRect();
+            return b.left >= row.left && b.right <= row.right;
+          });
+          expect(reachable).toBe(true);
+        }
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+        if (width === 390 && theme === "dark" && dir === "rtl") {
+          await page.locator(".note-editor").screenshot({path: "test-results/note-toolbar-mobile-dark-rtl.png"});
+        }
+        if (width <= 390) expect(geometry.every(b => b.width >= 40 && b.height >= 40)).toBe(true);
+      }
+    }
+  }
 });

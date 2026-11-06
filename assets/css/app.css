@@ -217,3 +217,112 @@ trix-toolbar .trix-button--icon::before { opacity: 0.8; }
 [data-theme="dark"] trix-toolbar .trix-button--icon::before { filter: invert(1); }
 trix-toolbar .trix-button--icon-attach, trix-toolbar .trix-button-group--file-tools { display: none; }
 @media (max-width: 480px) { trix-toolbar .trix-button-group { margin-inline-end: 0.3em; } }
+
+/* Custom Trix toolbar: keep document behaviour in Trix, presentation in Kith. */
+.note-editor {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-elevated);
+}
+.note-editor trix-toolbar { position: relative; display: block; }
+.note-editor .note-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 0;
+  padding: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+.note-editor .note-toolbar-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding-inline: 7px;
+  border-inline-end: 1px solid var(--color-border);
+}
+.note-editor .note-toolbar-group:first-child { padding-inline-start: 0; }
+.note-editor .note-toolbar-group:last-child { border: 0; padding-inline-end: 0; }
+.note-editor .note-toolbar-button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 32px;
+  padding: 5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+.note-editor .note-toolbar-button svg { width: 18px; height: 18px; pointer-events: none; }
+.note-editor .note-toolbar-button:hover:not(:disabled) {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-primary);
+}
+.note-editor .note-toolbar-button.trix-active {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+.note-editor .note-toolbar-button:disabled { opacity: 0.35; cursor: default; }
+.note-editor :is(button, input, trix-editor):focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+.note-editor trix-editor {
+  border: 0;
+  padding: 20px;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+.note-editor .trix-dialog {
+  inset-inline: 8px;
+  top: calc(100% + 4px);
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-overlay);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-dropdown);
+}
+.note-editor .note-link-label { display: block; margin-bottom: 8px; font-size: 0.75rem; font-weight: 600; }
+.note-editor .trix-dialog__link-fields { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.note-editor .trix-input--dialog {
+  flex: 1 1 160px;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-elevated);
+  color: var(--color-text-primary);
+}
+.note-editor .note-link-actions { display: flex; gap: 4px; }
+.note-editor .trix-button--dialog {
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  background: var(--color-surface-sunken);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.note-editor .trix-button--dialog[data-trix-method="setAttribute"] {
+  background: var(--color-accent);
+  color: var(--color-accent-foreground);
+}
+@media (max-width: 640px), (pointer: coarse) {
+  .note-editor .note-toolbar-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+  .note-editor .note-toolbar-button { width: 40px; height: 40px; }
+  .note-editor .note-toolbar-group { padding-inline: 4px; }
+  .note-editor .note-toolbar-group:first-child { padding-inline-start: 0; }
+  .note-editor trix-editor { padding: 16px; }
+}
+.note-editor .trix-input[data-trix-validate]:invalid { border-color: var(--color-error); }
+.note-editor:dir(rtl) :is([data-trix-action="decreaseNestingLevel"], [data-trix-action="increaseNestingLevel"]) svg {
+  transform: scaleX(-1);
+}
