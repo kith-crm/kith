@@ -14,6 +14,7 @@ defmodule Kith.Workers.AccountResetWorkerTest do
   alias Kith.Tasks.Task, as: TaskSchema
   alias Kith.Workers.AccountResetWorker
 
+  import Kith.Factory, only: [insert: 2]
   import Ecto.Query
   import Kith.AccountsFixtures
   import Kith.ContactsFixtures
@@ -88,6 +89,9 @@ defmodule Kith.Workers.AccountResetWorkerTest do
 
       # Target wiped across every domain
       assert empty?(ctx.target_account)
+      assert :ok = perform_job(AccountResetWorker, %{account_id: ctx.target_account})
+      assert empty?(ctx.target_account)
+      assert Repo.get!(Kith.Accounts.User, ctx.target_user).account_id == ctx.target_account
 
       # Other account is bit-identical to before
       assert snapshot(ctx.other_account) == before_other
@@ -95,6 +99,22 @@ defmodule Kith.Workers.AccountResetWorkerTest do
       # Sanity: target_contact is gone, other account still has its contact
       refute Repo.get(Contact, target_contact.id)
     end
+  end
+
+  test "reset preserves account configuration and reference data", ctx do
+    account = Repo.get!(Kith.Accounts.Account, ctx.target_account)
+    gender = insert(:gender, account: account)
+    field_type = insert(:contact_field_type, account: account)
+    gender = Repo.get!(Kith.Contacts.Gender, gender.id)
+    field_type = Repo.get!(Kith.Contacts.ContactFieldType, field_type.id)
+    rules = Kith.Reminders.list_reminder_rules(ctx.target_account)
+
+    assert :ok = perform_job(AccountResetWorker, %{account_id: ctx.target_account})
+
+    assert Repo.get!(Kith.Accounts.Account, account.id) == account
+    assert Repo.get!(Kith.Contacts.Gender, gender.id) == gender
+    assert Repo.get!(Kith.Contacts.ContactFieldType, field_type.id) == field_type
+    assert Kith.Reminders.list_reminder_rules(ctx.target_account) == rules
   end
 
   defp populate_data!(account_id, user_id) do
@@ -109,6 +129,29 @@ defmodule Kith.Workers.AccountResetWorkerTest do
 
     {:ok, _} =
       Imports.record_imported_entity(target_import, "contact", "1", "contact", contact.id)
+
+    account = Repo.get!(Kith.Accounts.Account, account_id)
+
+    for factory <- [
+          :address,
+          :contact_field,
+          :photo,
+          :document,
+          :pet,
+          :gift,
+          :debt,
+          :immich_candidate
+        ] do
+      insert(factory, account: account, contact: contact)
+    end
+
+    second_contact = contact_fixture(account_id)
+
+    insert(:duplicate_candidate,
+      account: account,
+      contact: contact,
+      duplicate_contact: second_contact
+    )
 
     Repo.insert!(%Tag{account_id: account_id, name: "t"})
 
@@ -140,7 +183,8 @@ defmodule Kith.Workers.AccountResetWorkerTest do
       status: "active"
     })
 
-    _reminder = reminder_fixture(account_id, contact.id, user_id)
+    reminder = reminder_fixture(account_id, contact.id, user_id)
+    Kith.RemindersFixtures.reminder_instance_fixture(reminder)
 
     {:ok, _} =
       Kith.AuditLogs.create_audit_log(account_id, %{
@@ -155,6 +199,7 @@ defmodule Kith.Workers.AccountResetWorkerTest do
 
   defp snapshot(account_id) do
     %{
+      subrecords: Enum.map(wiped_subrecord_schemas(), &count(&1, account_id)),
       contacts: count(Contact, account_id),
       imports: count(Import, account_id),
       import_records: count(ImportRecord, account_id),
@@ -171,6 +216,7 @@ defmodule Kith.Workers.AccountResetWorkerTest do
   defp empty?(account_id) do
     snapshot(account_id) ==
       %{
+        subrecords: Enum.map(wiped_subrecord_schemas(), fn _ -> 0 end),
         contacts: 0,
         imports: 0,
         import_records: 0,
@@ -182,6 +228,23 @@ defmodule Kith.Workers.AccountResetWorkerTest do
         activities: 0,
         audit_logs: 0
       }
+  end
+
+  defp wiped_subrecord_schemas do
+    [
+      Kith.Contacts.Address,
+      Kith.Contacts.ContactField,
+      Kith.Contacts.Photo,
+      Kith.Contacts.Document,
+      Kith.Contacts.Pet,
+      Kith.Contacts.Gift,
+      Kith.Contacts.Debt,
+      Kith.Contacts.ImmichCandidate,
+      Kith.Contacts.DuplicateCandidate,
+      Kith.DAV.ContactDav,
+      Kith.DAV.DocumentReference,
+      Kith.Reminders.ReminderInstance
+    ]
   end
 
   defp count(schema, account_id) do

@@ -27,6 +27,7 @@ defmodule Kith.Workers.AccountResetWorker do
     Tasks
   }
 
+  alias Kith.Cache.Invalidation
   alias Kith.DAV.Store
 
   require Logger
@@ -57,6 +58,7 @@ defmodule Kith.Workers.AccountResetWorker do
           :ok = cleaner.wipe_for_account(account_id)
         end)
       end)
+      |> Invalidation.after_contact_removal(account_id)
 
     Logger.info("[AccountReset] completed reset for account #{account_id}")
     :ok
