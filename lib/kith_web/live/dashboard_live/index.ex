@@ -148,7 +148,12 @@ defmodule KithWeb.DashboardLive.Index do
                   navigate={~p"/contacts/#{contact.id}"}
                   class="flex items-center gap-3 px-5 py-3 hover:bg-[var(--color-surface-sunken)] transition-colors duration-150"
                 >
-                  <KithUI.avatar name={contact.display_name} size={:sm} />
+                  <KithUI.avatar
+                    id={"recent-contact-avatar-#{contact.id}"}
+                    src={KithUI.avatar_url(contact)}
+                    name={contact.display_name}
+                    size={:sm}
+                  />
                   <div class="flex-1 min-w-0">
                     <p class="text-sm font-medium text-[var(--color-text-primary)] truncate">
                       {contact.display_name}
