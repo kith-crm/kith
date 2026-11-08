@@ -225,6 +225,53 @@ defmodule KithWeb.ContactLive.ShowTest do
   end
 
   describe "birthday badge" do
+    test "yearless DAV birthday hides placeholder year and age in both profile layouts", %{
+      conn: conn,
+      account_id: account_id
+    } do
+      {attrs, _nested} =
+        Kith.DAV.VCardAdapter.vcard_to_attrs(
+          "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Yearless Birthday\r\nBDAY:--0203\r\nEND:VCARD\r\n"
+        )
+
+      {:ok, contact} = Kith.Contacts.create_contact(account_id, attrs)
+
+      {:ok, view, _html} = live(conn, ~p"/contacts/#{contact.id}")
+      birthday_rows = render(view)
+
+      rows =
+        birthday_rows
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("dl > div")
+        |> Enum.filter(&(LazyHTML.query(&1, "dt") |> LazyHTML.text() == "Birthday"))
+
+      assert length(rows) == 2
+
+      for row <- rows do
+        assert LazyHTML.text(row) =~ "Feb"
+        refute LazyHTML.text(row) =~ "2000"
+        refute LazyHTML.text(row) =~ "("
+      end
+    end
+
+    test "known birthday year and age remain visible", %{conn: conn, account_id: account_id} do
+      contact = contact_fixture(account_id, %{birthdate: ~D[2000-02-03]})
+      {:ok, view, _html} = live(conn, ~p"/contacts/#{contact.id}")
+
+      rows =
+        render(view)
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query("dl > div")
+        |> Enum.filter(&(LazyHTML.query(&1, "dt") |> LazyHTML.text() == "Birthday"))
+
+      assert length(rows) == 2
+
+      for row <- rows do
+        assert LazyHTML.text(row) =~ "2000"
+        assert LazyHTML.text(row) =~ "("
+      end
+    end
+
     test "a 29 February birthday renders the expected next-birthday text in any year", %{
       conn: conn,
       account_id: account_id
