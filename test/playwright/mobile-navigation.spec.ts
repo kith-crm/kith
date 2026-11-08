@@ -3,8 +3,8 @@ import { registerUser, TEST_PASSWORD } from "./helpers/auth";
 import { createContact } from "./helpers/contacts";
 import { passwordLogin } from "./helpers/password-login";
 
-// The shared login budget can require up to 60s Retry-After in the full harness.
-test.setTimeout(90_000);
+// Independent signup/login quotas can each require up to 60s in the full harness.
+test.setTimeout(150_000);
 
 async function authenticate(page: Page) {
   if (process.env.MOBILE_LAYOUT_EMAIL) {
@@ -216,16 +216,14 @@ for (const width of [1366, 1440]) {
   });
 }
 
-test("fresh-account login fallback honors Retry-After", async ({ page }) => {
+test("login helper honors HTTP Retry-After", async ({ page }) => {
   let loginPosts = 0;
+  // Keep this HTTP-contract test independent of the real shared login quota.
+  // The other scenarios exercise real registration and authentication.
   await page.route("**/users/log-in*", async (route) => {
     if (route.request().method() !== "POST") return route.continue();
     loginPosts++;
     if (loginPosts === 1) {
-      // Exercise the registration helper's documented fallback deterministically.
-      return route.fulfill({ status: 303, headers: { location: "/users/log-in" }, body: "" });
-    }
-    if (loginPosts === 2) {
       return route.fulfill({
         status: 429,
         headers: { "retry-after": "1" },
@@ -233,11 +231,10 @@ test("fresh-account login fallback honors Retry-After", async ({ page }) => {
         body: "Too many login attempts. Please try again later.",
       });
     }
-    return route.continue();
+    return route.fulfill({ status: 303, headers: { location: "/users/log-in?retry_complete=1" }, body: "" });
   });
 
-  // Always create an isolated user, even when other scenarios use a dev fixture.
-  await registerUser(page);
-  expect(loginPosts).toBe(3);
-  await expect(page).toHaveURL(/\/(dashboard|users\/confirm-email)$/);
+  await passwordLogin(page, "retry-contract@test.local", TEST_PASSWORD, /\/users\/log-in\?retry_complete=1$/);
+  expect(loginPosts).toBe(2);
+  await expect(page.getByRole("button", { name: /log in/i })).toBeVisible();
 });

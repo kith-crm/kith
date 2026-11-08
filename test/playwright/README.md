@@ -96,6 +96,10 @@ MOBILE_LAYOUT_EMAIL=playwright@test.local \
 
 The fresh-account path uses the harness's disabled email double opt-in;
 `MOBILE_LAYOUT_PASSWORD` optionally overrides the existing account password.
+Fresh-account scenarios retain the real signup and login limits. The helpers
+wait once for each server-provided retry delay; their 150s budget accommodates
+both independent 60s windows. A separate HTTP-contract test verifies login's
+429/Retry-After handling without consuming the shared authentication quota.
 Use a test account only. Browser geometry and interaction checks complement
 native Android verification rather than emulating its complete browser UI.
 

@@ -23,16 +23,33 @@ export async function registerUser(
 
   await page.goto("/users/register");
   await page.waitForLoadState("networkidle");
-  // Small delay for LiveView to fully mount
-  await page.waitForTimeout(300);
+  await expect(page.locator("[data-phx-main]")).toHaveClass(/phx-connected/);
 
-  await page.getByRole("textbox", { name: /email/i }).fill(userEmail);
-  await page.locator('input[type="password"]').fill(TEST_PASSWORD);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.getByRole("textbox", { name: /email/i }).fill(userEmail);
+    await page.locator('input[type="password"]').fill(TEST_PASSWORD);
+    await page.getByRole("button", { name: /create an account/i }).click();
 
-  await page.getByRole("button", { name: /create an account/i }).click();
+    let throttleMessage: string | undefined;
+    // Registration can navigate while the alert locator is being evaluated.
+    // Retry the whole observation through that document replacement.
+    await expect(async () => {
+      if (new URL(page.url()).pathname !== "/users/register") return;
+      throttleMessage = (await page.getByRole("alert").allTextContents())
+        .find((text) => /Too many signup attempts/.test(text));
+      expect(throttleMessage).toBeDefined();
+    }).toPass({ timeout: 15_000 });
+    if (!throttleMessage) break;
 
-  // Wait for any navigation (registration triggers phx-trigger-action POST)
-  await page.waitForTimeout(3000);
+    // Real signup and login quotas are independent. Never authenticate an
+    // account that registration has not created, or disable either quota.
+    expect(attempt, "Signup remained throttled after Retry-After").toBe(0);
+    const delay = Number(throttleMessage.match(/in (\d+) seconds/)?.[1]);
+    expect(Number.isInteger(delay) && delay >= 1 && delay <= 60).toBe(true);
+    await page.getByRole("alert").filter({ hasText: /Too many signup attempts/ })
+      .getByRole("button", { name: "close", exact: true }).click();
+    await page.waitForTimeout(delay * 1000 + 100);
+  }
 
   // Phoenix's phx-trigger-action POSTs to /users/log-in?_action=registered,
   // but the password field gets cleared during LiveView re-render before the
