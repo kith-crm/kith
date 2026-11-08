@@ -1,6 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { registerUser } from "./helpers/auth";
 
+// The shared login/signup helpers honor up to 60s Retry-After windows.
+test.setTimeout(150_000);
+
 test.skip(process.env.KITH_E2E !== "1", "Requires the local regression harness in fixtures/regressions/README.md");
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) {
