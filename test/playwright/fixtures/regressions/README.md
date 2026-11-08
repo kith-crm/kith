@@ -104,7 +104,11 @@ status and rendered contact data rather than relying on a cross-node PubSub
 broadcast. CLI actions never start a web listener, cron, or background queues.
 
 The suite also covers authenticator and recovery-code submission, native entry
-animations, and contact-search recovery after a LiveView reconnect.
+animations, contact-search recovery after a LiveView reconnect, and mobile shell
+visibility across content scroll boundaries and browser-toolbar size changes.
+The mobile spec includes a deterministic model of Android's large-vs-visible
+viewport height difference; see [mobile viewport regression](../../README.md#mobile-viewport-regression).
+Focus it with `npm run test:regressions -- --grep 'mobile shell'`.
 
 Historical execution counts and point-in-time validation are preserved in the
 [immutable harness history](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/test/playwright/fixtures/pr44/README.md).

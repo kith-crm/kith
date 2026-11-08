@@ -32,7 +32,7 @@ defmodule KithWeb.Layouts do
   def app(assigns) do
     ~H"""
     <div
-      class="flex h-screen bg-[var(--color-surface)]"
+      class="flex h-dvh bg-[var(--color-surface)]"
       x-data="sidebar"
     >
       <%!-- Desktop sidebar --%>
