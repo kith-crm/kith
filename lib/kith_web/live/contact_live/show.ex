@@ -234,7 +234,9 @@ defmodule KithWeb.ContactLive.Show do
     {:noreply, assign(socket, :contact, contact)}
   end
 
-  defp compute_age(birthdate) when is_struct(birthdate, Date) do
+  defp compute_age(_birthdate, true), do: nil
+
+  defp compute_age(birthdate, false) when is_struct(birthdate, Date) do
     today = Date.utc_today()
     years = today.year - birthdate.year
 
@@ -245,7 +247,7 @@ defmodule KithWeb.ContactLive.Show do
     end
   end
 
-  defp compute_age(_), do: nil
+  defp compute_age(_, _), do: nil
 
   defp can?(assigns, action, resource) do
     Kith.Policy.can?(assigns.current_scope.user, action, resource)

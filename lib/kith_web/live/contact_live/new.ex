@@ -66,7 +66,10 @@ defmodule KithWeb.ContactLive.New do
               prompt="Select gender"
               options={Enum.map(@genders, &{&1.name, &1.id})}
             />
-            <UI.input field={f[:birthdate]} type="date" label="Birthdate" />
+            <KithWeb.BirthdatePicker.birthdate_picker
+              field={f[:birthdate]}
+              year_unknown={f[:birthdate_year_unknown]}
+            />
             <UI.input field={f[:occupation]} type="text" label="Occupation" />
             <UI.input field={f[:company]} type="text" label="Company" />
             <UI.input field={f[:deceased]} type="checkbox" label="Deceased" />

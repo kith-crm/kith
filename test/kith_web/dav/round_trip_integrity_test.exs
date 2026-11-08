@@ -54,7 +54,9 @@ defmodule KithWeb.DAV.RoundTripIntegrityTest do
 
       assert uploaded.status == 204
       expected = if unquote(replacement) == "--0203", do: ~D[2000-02-03], else: ~D[1991-02-03]
-      assert Repo.reload!(contact).birthdate == expected
+      updated = Repo.reload!(contact)
+      assert updated.birthdate == expected
+      assert updated.birthdate_year_unknown == (unquote(replacement) == "--0203")
       refreshed = authed_dav(%{c | conn: conn}, "GET", path)
       assert refreshed.resp_body =~ "BDAY:#{unquote(replacement)}"
       refute get_resp_header(refreshed, "etag") == [etag]
