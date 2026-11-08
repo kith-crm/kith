@@ -87,7 +87,9 @@ defmodule Kith.DAV.AccessControl do
     write =
       if Policy.can?(user, :update, :contact) do
         case kind do
-          :book -> ~w(write-properties bind unbind)
+          # DAVx5 uses the collection privilege to decide whether member
+          # edits can be uploaded; omitting it makes the book read-only.
+          :book -> ~w(write-properties write-content bind unbind)
           :contact -> ~w(write-properties write-content)
           _ -> ~w(write-properties)
         end

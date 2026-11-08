@@ -275,3 +275,38 @@ native discovery, v3/v4 round trips and the full conflict/auth/floor matrix usin
 disposable profiles before release; preserve the personal Thunderbird installation
 and profile. General ACL grant support and editable property storage remain open
 product/standards decisions. See plan section 17 for final automated/live evidence.
+
+## Android edit reset regression (2026-11-08)
+
+Reproduced on the local Pixel_4 emulator with Android Contacts and DAVx5 OSE
+4.5.21: edit January 2 to February 3 without a year, save, then synchronize.
+Before the fix, Android restored January 2 and the native contact stayed unchanged.
+DAVx5 labeled the address book read-only. Collection discovery advertised
+`write-properties`, `bind`, and `unbind`, but omitted `write-content` for admins
+and editors. Direct PUT tests passed because the write handler correctly allowed
+those roles; they bypassed DAVx5's discovery-based decision to discard local edits.
+
+The fix advertises `write-content` on writable address books as well as contact
+resources. Viewer privileges remain read-only. Against this checkout's isolated
+`kith_birthday_repro` database/server, a freshly discovered DAVx5 account no longer
+showed read-only. Native Android edits uploaded successfully: the birthday became
+February 3 with its unknown-year flag preserved; first name, phone and email also
+reached Kith's native rows. Android displayed February 3 after synchronization.
+No production account was used. Existing clients may need their collection list
+refreshed after deploying the fix to replace cached permissions.
+
+Automated coverage in `test/kith_web/dav/round_trip_integrity_test.exs` now checks
+collection discovery and conditional download/edit/upload/download cycles for
+birthdays with/without a year, structured names, nickname, organization, title,
+email, phone, URL, address, categories and client NOTE. The field matrix includes
+removal and both vCard versions. NOTE remains client-document data. Role tests
+check admin/editor collection content privileges and retain viewer restrictions.
+Validation: the final CardDAV suite passed all 563 tests, including all 33
+round-trip tests. Formatting and diff checks passed.
+
+The Apple community runner is complementary protocol coverage, not an Android
+Contacts/DAVx5 workflow test. Its recorded failures and skips in
+`carddav-community-testing.md` must not be treated as successful field coverage.
+The missed seam here was a real client using collection permissions before PUT,
+not birthday parsing. Keep discovery assertions alongside field round-trip tests
+and real-client checks. The Apple runner was not rerun for this change.
