@@ -103,9 +103,10 @@ const BirthdatePicker = {
   open(value) {
     this.calendar.hidden = !value
     this.trigger.setAttribute("aria-expanded", String(value))
-    // Year must remain part of native form validation even with the panel shut.
+    // Selected dates retain native year validation when the panel is shut.
     if (!value && this.selected && !this.unknown.checked && !this.valid()) this.calendar.hidden = false
     this.trigger.setAttribute("aria-expanded", String(!this.calendar.hidden))
+    this.yearInput.disabled = this.unknown.checked || (!this.selected && this.calendar.hidden)
   },
 
   valid() {
@@ -139,7 +140,7 @@ const BirthdatePicker = {
     const selected = this.selected
     this.monthInput.value = this.month
     this.yearInput.hidden = unknown
-    this.yearInput.disabled = unknown
+    this.yearInput.disabled = unknown || (!selected && this.calendar.hidden)
     this.yearInput.required = !unknown && !!selected
     this.yearInput.setCustomValidity(!unknown && selected && !this.valid() ? "Choose a valid birth year and day." : "")
     this.find("[data-label]").textContent = selected
