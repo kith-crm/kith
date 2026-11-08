@@ -110,5 +110,11 @@ The mobile spec includes a deterministic model of Android's large-vs-visible
 viewport height difference; see [mobile viewport regression](../../README.md#mobile-viewport-regression).
 Focus it with `npm run test:regressions -- --grep 'mobile shell'`.
 
+The mobile navigation suite also verifies Home/Contacts/Settings/More at narrow
+widths, the Reminders/Journal menu and its keyboard behavior, named logout,
+responsive timeline actions, wrapped Contacts tabs and mood filters, plus
+desktop sidebar navigation and responsive resizing. Focus these checks with
+`npm run test:regressions -- --grep 'Mobile navigation|desktop navigation'`.
+
 Historical execution counts and point-in-time validation are preserved in the
 [immutable harness history](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/test/playwright/fixtures/pr44/README.md).

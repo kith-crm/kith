@@ -24,7 +24,7 @@ defmodule KithWeb.ContactLive.SectionNav do
 
   def section_nav(assigns) do
     ~H"""
-    <nav class="flex items-center gap-1 border-b border-[var(--color-border)]">
+    <nav class="flex flex-wrap items-center gap-1 border-b border-[var(--color-border)]">
       <.link
         :for={
           {label, icon, path, action} <- [
@@ -37,7 +37,7 @@ defmodule KithWeb.ContactLive.SectionNav do
         patch={if @link_mode == :patch, do: path}
         navigate={if @link_mode == :navigate, do: path}
         class={[
-          "inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors",
+          "inline-flex min-h-11 items-center gap-1.5 whitespace-nowrap px-3 py-2 text-sm font-medium border-b-2 transition-colors sm:min-h-0",
           if(@active == action,
             do: "border-[var(--color-accent)] text-[var(--color-accent)]",
             else:

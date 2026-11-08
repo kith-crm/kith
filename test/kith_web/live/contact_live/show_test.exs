@@ -133,11 +133,20 @@ defmodule KithWeb.ContactLive.ShowTest do
       assert html =~ "Shared note"
     end
 
-    test "quick-add buttons are visible", %{conn: conn, contact: contact} do
-      {:ok, _view, html} = live(conn, ~p"/contacts/#{contact.id}")
-      assert html =~ "+ Note"
-      assert html =~ "+ Call"
-      assert html =~ "+ Event"
+    test "Note and Call are direct actions and Life Event is in the overflow menu", %{
+      conn: conn,
+      contact: contact
+    } do
+      {:ok, view, html} = live(conn, ~p"/contacts/#{contact.id}")
+      assert has_element?(view, "#activity-stream button[phx-value-type='note']", "+ Note")
+      assert has_element?(view, "#activity-stream button[phx-value-type='call']", "+ Call")
+      refute html =~ "+ Event"
+
+      assert has_element?(
+               view,
+               "#activity-stream button[aria-label='Add timeline entry'] + div[x-show='open'] button[phx-value-type='life_event']",
+               "+ Life Event"
+             )
     end
   end
 

@@ -390,9 +390,9 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
       <p :if={@flash["error"]} role="alert">{@flash["error"]}</p>
       <%!-- Stream Header --%>
       <div class="bg-[var(--color-surface-elevated)] rounded-xl p-3.5 shadow-[var(--shadow-card)] border border-[var(--color-border-subtle)] mb-3.5">
-        <div class="flex justify-between items-center">
+        <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <span class="font-semibold text-sm text-[var(--color-text-primary)]">Activity</span>
-          <div class="flex gap-1.5">
+          <div class="relative flex w-full flex-wrap items-center gap-1.5 sm:w-auto [&>div>button]:min-h-11 sm:[&>div>button]:min-h-0">
             <.filter_dropdown
               active_filters={@active_filters}
               all_types={@all_types}
@@ -402,7 +402,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               phx-click="open-entry-modal"
               phx-value-type="note"
               phx-target={@myself}
-              class="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer"
+              class="inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer sm:min-h-0"
             >
               + Note
             </button>
@@ -410,24 +410,16 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               phx-click="open-entry-modal"
               phx-value-type="call"
               phx-target={@myself}
-              class="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer"
+              class="inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer sm:min-h-0"
             >
               + Call
             </button>
-            <button
-              phx-click="open-entry-modal"
-              phx-value-type="life_event"
-              phx-target={@myself}
-              class="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer"
-            >
-              + Event
-            </button>
-            <%!-- More types overflow --%>
-            <div x-data="{ open: false }" class="relative">
+            <%!-- Anchor the popup to the full action row so wrapping cannot push it off-screen. --%>
+            <div x-data="{ open: false }" class="shrink-0">
               <button
                 @click="open = !open"
                 aria-label="Add timeline entry"
-                class="inline-flex items-center justify-center size-8 rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer"
+                class="inline-flex items-center justify-center size-11 rounded-lg border border-[var(--color-border)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer sm:size-8"
               >
                 <.icon name="hero-plus-mini" class="size-4" />
               </button>
@@ -438,7 +430,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
                 class="absolute end-0 top-full mt-1 z-10 w-40 rounded-lg bg-[var(--color-surface-overlay)] border border-[var(--color-border)] shadow-[var(--shadow-dropdown)] p-1"
               >
                 <button
-                  :for={type <- [:task, :gift, :conversation, :activity, :photo]}
+                  :for={type <- [:life_event, :task, :gift, :conversation, :activity, :photo]}
                   phx-click="open-entry-modal"
                   phx-value-type={type}
                   phx-target={@myself}

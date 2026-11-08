@@ -6,6 +6,8 @@ import { loginUser, registerUser, TEST_PASSWORD } from "./helpers/auth";
 const visibleViewport = { width: 411, height: 802 };
 
 test.use({ viewport: visibleViewport, isMobile: true, hasTouch: true });
+// Fresh CI accounts may wait for both independent signup and login quotas.
+test.setTimeout(150_000);
 
 async function geometry(page: Page) {
   return page.evaluate(() => {
