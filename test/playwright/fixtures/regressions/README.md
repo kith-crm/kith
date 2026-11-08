@@ -118,3 +118,8 @@ desktop sidebar navigation and responsive resizing. Focus these checks with
 
 Historical execution counts and point-in-time validation are preserved in the
 [immutable harness history](https://github.com/kith-crm/kith/blob/be8259183cfe0b61e639b9fd2eb4b4604e7df969/test/playwright/fixtures/pr44/README.md).
+
+The birthdate picker regression covers desktop and mobile calendar selection,
+yearless February 29, form validation patches, restoring a known year, rejecting
+non-leap-year February 29, clearing the date, and keyboard dismissal. Run it with
+`npm run test:regressions -- --grep 'yearless birthday'`.

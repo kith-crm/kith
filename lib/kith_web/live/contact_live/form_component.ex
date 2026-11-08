@@ -163,17 +163,10 @@ defmodule KithWeb.ContactLive.FormComponent do
             </select>
           </div>
 
-          <div>
-            <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">
-              Birthdate
-            </label>
-            <input
-              type="date"
-              name="contact[birthdate]"
-              value={Ecto.Changeset.get_field(@changeset, :birthdate)}
-              class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm text-[var(--color-text-primary)] focus:border-[var(--color-border-focus)] focus:outline-none focus:ring-2 focus:ring-[var(--color-border-focus)]/20 transition-colors duration-150"
-            />
-          </div>
+          <KithWeb.BirthdatePicker.birthdate_picker
+            field={to_form(@changeset, as: :contact)[:birthdate]}
+            year_unknown={to_form(@changeset, as: :contact)[:birthdate_year_unknown]}
+          />
 
           <div>
             <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-1.5">

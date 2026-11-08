@@ -10,6 +10,7 @@ import topbar from "../vendor/topbar"
 import TrixEditor from "./hooks/trix_editor"
 import CommandPalette from "./hooks/command_palette"
 import ImgFallback from "./hooks/img_fallback"
+import BirthdatePicker from "./hooks/birthdate_picker"
 import AvatarCropper, {AvatarUpload} from "./hooks/avatar_cropper"
 
 // Alpine.js (CSP build -- no runtime code generation, compatible with strict Content-Security-Policy)
@@ -30,6 +31,7 @@ const Hooks = {
   TrixEditor,
   CommandPalette,
   ImgFallback,
+  BirthdatePicker,
   AvatarCropper,
   AvatarUpload,
 }
