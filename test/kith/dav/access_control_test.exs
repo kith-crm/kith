@@ -52,6 +52,7 @@ defmodule Kith.DAV.AccessControlTest do
     for user <- [ctx.admin, ctx.editor] do
       scope = Scope.for_user(user)
       assert "write-content" in AccessControl.privileges(scope, :contact)
+      assert "write-content" in AccessControl.privileges(scope, :book)
       assert "bind" in AccessControl.privileges(scope, :book)
       assert "unbind" in AccessControl.privileges(scope, :book)
       refute "bind" in AccessControl.privileges(scope, :contact)
