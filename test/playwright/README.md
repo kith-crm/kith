@@ -67,6 +67,38 @@ scroll. Retain physical Android verification for native touch, browser toolbar,
 safe-area, and keyboard behavior. The 57px case guards against restoring a
 large-viewport shell height; do not skip it or mark it as expected failure.
 
+## Mobile navigation and responsive page regressions
+
+`mobile-navigation.spec.ts` covers the four-item mobile navigation at 320, 375,
+and 393px: Home, Contacts, Settings, and More. More contains Reminders and
+Journal, supports keyboard/outside dismissal, and marks the current route.
+Jobs stays absent from mobile navigation. The mobile logout link must have an
+accessible name. Settings is current on both Profile and Account settings.
+
+The 320px page scenario creates its own contact, opens/cancels timeline entry
+forms, uses the extra-action menu, visits every Contacts section, and applies
+every journal mood filter. Geometry and pointer-hit checks catch controls
+clipped by an ancestor before Playwright can automatically pan to them. The
+outer page must not become horizontally scrollable; intentional contained
+contact-detail tabs are allowed.
+
+Desktop scenarios at 1366 and 1440px exercise sidebar navigation and a
+desktop/mobile/desktop resize round trip. These checks run in the maintained
+browser harness alongside `mobile-layout.spec.ts`, which continues to guard
+the Android viewport-height issue.
+
+```sh
+npm run test:regressions -- --grep 'Mobile navigation|desktop navigation'
+# Or use an existing confirmed test account against a local dev server:
+MOBILE_LAYOUT_EMAIL=playwright@test.local \
+  npx playwright test --project=e2e --workers=1 test/playwright/mobile-navigation.spec.ts
+```
+
+The fresh-account path uses the harness's disabled email double opt-in;
+`MOBILE_LAYOUT_PASSWORD` optionally overrides the existing account password.
+Use a test account only. Browser geometry and interaction checks complement
+native Android verification rather than emulating its complete browser UI.
+
 ## CardDAV live harness
 
 The harness recreates its dedicated fresh database and seeds 2,000 performance

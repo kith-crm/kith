@@ -176,12 +176,12 @@ defmodule KithWeb.JournalLive.Index do
 
         <%!-- Mood filter bar --%>
         <div class="mb-6">
-          <div class="inline-flex rounded-[var(--radius-full)] border border-[var(--color-border)] p-0.5 bg-[var(--color-surface-sunken)]">
+          <div class="inline-flex max-w-full flex-wrap gap-1 rounded-[var(--radius-lg)] border border-[var(--color-border)] p-0.5 bg-[var(--color-surface-sunken)] sm:gap-0 sm:rounded-[var(--radius-full)]">
             <button
               phx-click="filter-mood"
               phx-value-mood=""
               class={[
-                "px-3.5 py-1 rounded-[var(--radius-full)] text-sm font-medium transition-all duration-200 cursor-pointer",
+                "min-h-11 whitespace-nowrap px-3.5 py-1 rounded-[var(--radius-full)] text-sm font-medium transition-all duration-200 cursor-pointer sm:min-h-0",
                 if(@mood_filter == nil,
                   do: "bg-[var(--color-accent)] text-[var(--color-accent-foreground)] shadow-sm",
                   else: "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
@@ -195,7 +195,7 @@ defmodule KithWeb.JournalLive.Index do
               phx-click="filter-mood"
               phx-value-mood={mood}
               class={[
-                "px-3.5 py-1 rounded-[var(--radius-full)] text-sm font-medium transition-all duration-200 cursor-pointer",
+                "min-h-11 whitespace-nowrap px-3.5 py-1 rounded-[var(--radius-full)] text-sm font-medium transition-all duration-200 cursor-pointer sm:min-h-0",
                 if(@mood_filter == mood,
                   do: "bg-[var(--color-accent)] text-[var(--color-accent-foreground)] shadow-sm",
                   else: "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"

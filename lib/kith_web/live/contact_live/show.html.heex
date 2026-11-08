@@ -598,7 +598,7 @@
       </aside>
 
       <%!-- ===== RIGHT: ACTIVITY STREAM ===== --%>
-      <main class="flex-1 min-w-0 w-full overflow-hidden">
+      <main class="flex-1 min-w-0 w-full overflow-x-clip overflow-y-visible">
         <.live_component
           module={KithWeb.ContactLive.ActivityStreamComponent}
           id={"activity-stream-#{@contact.id}"}

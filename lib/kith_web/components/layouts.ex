@@ -30,6 +30,14 @@ defmodule KithWeb.Layouts do
   slot :inner_block, required: true
 
   def app(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :mobile_more_active,
+        path_matches?(assigns.current_path, "/reminders") ||
+          path_matches?(assigns.current_path, "/journal")
+      )
+
     ~H"""
     <div
       class="flex h-dvh bg-[var(--color-surface)]"
@@ -181,6 +189,7 @@ defmodule KithWeb.Layouts do
             <.link
               href={~p"/users/log-out"}
               method="delete"
+              aria-label="Log out"
               class="rounded-[var(--radius-md)] p-2 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-elevated)] transition-colors"
             >
               <.icon name="hero-arrow-right-on-rectangle" class="size-5" />
@@ -198,7 +207,10 @@ defmodule KithWeb.Layouts do
         </main>
 
         <%!-- Mobile bottom nav --%>
-        <nav class="md:hidden flex items-center justify-around border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-sunken)] py-2">
+        <nav
+          aria-label="Mobile navigation"
+          class="md:hidden grid grid-cols-4 shrink-0 border-t border-[var(--color-border-subtle)] bg-[var(--color-surface-sunken)] py-2"
+        >
           <.mobile_nav_link
             path={~p"/dashboard"}
             current_path={@current_path}
@@ -213,34 +225,69 @@ defmodule KithWeb.Layouts do
             match_prefix="/contacts"
           />
           <.mobile_nav_link
-            path={~p"/reminders/upcoming"}
-            current_path={@current_path}
-            icon="hero-bell"
-            label="Reminders"
-            match_prefix="/reminders"
-          />
-          <.mobile_nav_link
-            path={~p"/journal"}
-            current_path={@current_path}
-            icon="hero-book-open"
-            label="Journal"
-            match_prefix="/journal"
-          />
-          <.mobile_nav_link
             path={~p"/users/settings"}
             current_path={@current_path}
             icon="hero-cog-6-tooth"
             label="Settings"
             match_prefix="/settings"
           />
-          <.mobile_nav_link
-            :if={Kith.Policy.can?(@current_scope.user, :manage, :oban)}
-            path={~p"/admin/oban"}
-            current_path={@current_path}
-            icon="hero-queue-list"
-            label="Jobs"
-            match_prefix="/admin"
-          />
+          <div
+            class="relative min-w-0"
+            x-data="mobileNavigation"
+            x-on:click.outside="close"
+            x-on:focusout="closeIfFocusOutside"
+            x-on:keydown.escape.window="dismiss"
+          >
+            <button
+              id="mobile-more-button"
+              type="button"
+              aria-haspopup="menu"
+              aria-controls="mobile-more-menu"
+              aria-expanded="false"
+              aria-current={@mobile_more_active && "page"}
+              x-ref="trigger"
+              x-bind:aria-expanded="open"
+              x-on:click="toggle"
+              x-on:keydown.arrow-down.prevent="openAndFocus"
+              class={[
+                "flex min-h-11 w-full flex-col items-center justify-center gap-1 px-1 py-1 text-xs transition-colors duration-150 cursor-pointer",
+                @mobile_more_active && "text-[var(--color-accent)]",
+                !@mobile_more_active && "text-[var(--color-text-tertiary)]"
+              ]}
+            >
+              <.icon name="hero-ellipsis-horizontal" class="size-5" />
+              <span>More</span>
+            </button>
+            <div
+              id="mobile-more-menu"
+              role="menu"
+              aria-label="More destinations"
+              x-ref="menu"
+              x-on:click="close"
+              x-show="open"
+              x-cloak
+              x-on:keydown.arrow-down.prevent="focusNext"
+              x-on:keydown.arrow-up.prevent="focusPrevious"
+              x-on:keydown.home.prevent="focusFirst"
+              x-on:keydown.end.prevent="focusLast"
+              class="absolute end-0 bottom-full mb-2 w-44 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-8rem)] overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface-overlay)] p-1 shadow-[var(--shadow-dropdown)]"
+            >
+              <.mobile_more_link
+                path={~p"/reminders/upcoming"}
+                current_path={@current_path}
+                match_prefix="/reminders"
+                icon="hero-bell"
+                label="Reminders"
+              />
+              <.mobile_more_link
+                path={~p"/journal"}
+                current_path={@current_path}
+                match_prefix="/journal"
+                icon="hero-book-open"
+                label="Journal"
+              />
+            </div>
+          </div>
         </nav>
       </div>
     </div>
@@ -348,13 +395,39 @@ defmodule KithWeb.Layouts do
       navigate={@path}
       aria-current={@active && "page"}
       class={[
-        "flex flex-col items-center gap-1 px-3 py-1 text-xs transition-colors duration-150",
+        "flex min-h-11 min-w-0 flex-col items-center justify-center gap-1 px-1 py-1 text-xs transition-colors duration-150",
         @active && "text-[var(--color-accent)]",
         !@active && "text-[var(--color-text-tertiary)]"
       ]}
     >
       <.icon name={@icon} class="size-5" />
       <span>{@label}</span>
+    </.link>
+    """
+  end
+
+  attr :path, :string, required: true
+  attr :current_path, :string, required: true
+  attr :match_prefix, :string, required: true
+  attr :icon, :string, required: true
+  attr :label, :string, required: true
+
+  defp mobile_more_link(assigns) do
+    assigns = assign(assigns, :active, path_matches?(assigns.current_path, assigns.match_prefix))
+
+    ~H"""
+    <.link
+      navigate={@path}
+      role="menuitem"
+      aria-current={@active && "page"}
+      class={[
+        "flex min-h-11 items-center gap-2 rounded-[var(--radius-md)] px-3 py-2 text-sm hover:bg-[var(--color-surface-sunken)]",
+        @active && "text-[var(--color-accent)]",
+        !@active && "text-[var(--color-text-secondary)]"
+      ]}
+    >
+      <.icon name={@icon} class="size-5 shrink-0" />
+      {@label}
     </.link>
     """
   end
@@ -457,10 +530,15 @@ defmodule KithWeb.Layouts do
   # Helpers
   # ==========================================================================
 
+  defp active?(current_path, "/users/settings", _prefix),
+    do: path_matches?(current_path, "/users/settings") || path_matches?(current_path, "/settings")
+
   defp active?(current_path, exact_path, nil), do: current_path == exact_path
 
-  defp active?(current_path, _exact_path, prefix),
-    do: String.starts_with?(current_path, prefix)
+  defp active?(current_path, _exact_path, prefix), do: path_matches?(current_path, prefix)
+
+  defp path_matches?(current_path, prefix),
+    do: current_path == prefix || String.starts_with?(current_path, prefix <> "/")
 
   defp user_initials(%{email: email}) do
     email
