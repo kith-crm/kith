@@ -34,6 +34,39 @@ npx playwright test --project=e2e --headed
 npx playwright test --project=smoke
 ```
 
+## Mobile viewport regression
+
+`mobile-layout.spec.ts` checks the real authenticated app shell on the long
+Account settings page, including content scroll boundaries and extra outward
+scroll gestures. It runs in the maintained `npm run test:regressions` CI harness.
+That harness provisions fresh users with email double opt-in disabled.
+
+For an already running local development server with double opt-in enabled,
+use a confirmed **test** account:
+
+```sh
+MOBILE_LAYOUT_EMAIL=playwright@test.local \
+  npx playwright test --project=e2e --workers=1 test/playwright/mobile-layout.spec.ts
+```
+
+The default password is the test fixture password from `helpers/auth.ts`;
+`MOBILE_LAYOUT_PASSWORD` can override it. Do not target production.
+
+The normal viewport is a control. The 57px browser-toolbar case models the
+physical Xiaomi capture (visible viewport about 802px, large viewport about
+859px). A test-only stylesheet adapter resolves legacy `vh`/`lvh` lengths
+against the large viewport, leaving `dvh`/`svh` at their normal visible sizes.
+This is a deterministic simulation of the measured browser-sizing contract,
+not full Android toolbar/touch emulation. No app class or component height is
+overridden. Ordinary Playwright viewport resizing makes `vh` and `dvh` equal
+and cannot catch this failure by itself.
+
+Assertions require the header and bottom menu to stay inside the visible
+viewport and the outer document to remain unscrollable. The content must still
+scroll. Retain physical Android verification for native touch, browser toolbar,
+safe-area, and keyboard behavior. The 57px case guards against restoring a
+large-viewport shell height; do not skip it or mark it as expected failure.
+
 ## CardDAV live harness
 
 The harness recreates its dedicated fresh database and seeds 2,000 performance
