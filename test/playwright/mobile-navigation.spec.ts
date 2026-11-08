@@ -1,10 +1,14 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { loginUser, registerUser, TEST_PASSWORD } from "./helpers/auth";
+import { registerUser, TEST_PASSWORD } from "./helpers/auth";
 import { createContact } from "./helpers/contacts";
+import { passwordLogin } from "./helpers/password-login";
+
+// The shared login budget can require up to 60s Retry-After in the full harness.
+test.setTimeout(90_000);
 
 async function authenticate(page: Page) {
   if (process.env.MOBILE_LAYOUT_EMAIL) {
-    await loginUser(page, process.env.MOBILE_LAYOUT_EMAIL, process.env.MOBILE_LAYOUT_PASSWORD ?? TEST_PASSWORD);
+    await passwordLogin(page, process.env.MOBILE_LAYOUT_EMAIL, process.env.MOBILE_LAYOUT_PASSWORD ?? TEST_PASSWORD);
   } else {
     await registerUser(page);
   }
@@ -139,7 +143,8 @@ test.describe("Mobile navigation", () => {
     await filterMenu.click();
     await expectUnclipped(stream.getByRole("button", { name: "Note", exact: true }));
     await filterMenu.click();
-    for (const [name, heading] of [["+ Note", "New Note"], ["+ Call", "Log Call"], ["+ Event", "New Life Event"]]) {
+    await expect(stream.getByRole("button", { name: "+ Event", exact: true })).toHaveCount(0);
+    for (const [name, heading] of [["+ Note", "New Note"], ["+ Call", "Log Call"]]) {
       const action = stream.getByRole("button", { name, exact: true });
       await expectUnclipped(action);
       await action.click();
@@ -150,12 +155,15 @@ test.describe("Mobile navigation", () => {
     }
     const add = stream.getByRole("button", { name: "Add timeline entry", exact: true });
     await expectUnclipped(add);
-    await add.click();
-    const task = stream.getByRole("button", { name: "+ Task", exact: true });
-    await expectUnclipped(task);
-    await task.click();
-    await expect(page.getByRole("dialog").getByRole("heading", { name: "New Task", exact: true })).toBeVisible();
-    await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+    for (const [name, heading] of [["+ Life Event", "New Life Event"], ["+ Task", "New Task"]]) {
+      await add.click();
+      const action = stream.getByRole("button", { name, exact: true });
+      await expectUnclipped(action);
+      await action.click();
+      await expect(page.getByRole("dialog").getByRole("heading", { name: heading, exact: true })).toBeVisible();
+      await page.getByRole("dialog").getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(page.getByRole("dialog")).toBeHidden();
+    }
     await expectNoPageHorizontalOverflow(page);
 
     for (const [name, route] of [["All", "/contacts"], ["Archived", "/contacts/archived"], ["Duplicates", "/contacts/duplicates"], ["Trash", "/contacts/trash"]]) {
@@ -207,3 +215,29 @@ for (const width of [1366, 1440]) {
     await expectNoPageHorizontalOverflow(page);
   });
 }
+
+test("fresh-account login fallback honors Retry-After", async ({ page }) => {
+  let loginPosts = 0;
+  await page.route("**/users/log-in*", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+    loginPosts++;
+    if (loginPosts === 1) {
+      // Exercise the registration helper's documented fallback deterministically.
+      return route.fulfill({ status: 303, headers: { location: "/users/log-in" }, body: "" });
+    }
+    if (loginPosts === 2) {
+      return route.fulfill({
+        status: 429,
+        headers: { "retry-after": "1" },
+        contentType: "text/html",
+        body: "Too many login attempts. Please try again later.",
+      });
+    }
+    return route.continue();
+  });
+
+  // Always create an isolated user, even when other scenarios use a dev fixture.
+  await registerUser(page);
+  expect(loginPosts).toBe(3);
+  await expect(page).toHaveURL(/\/(dashboard|users\/confirm-email)$/);
+});

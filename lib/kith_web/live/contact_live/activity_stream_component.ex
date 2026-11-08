@@ -414,14 +414,6 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             >
               + Call
             </button>
-            <button
-              phx-click="open-entry-modal"
-              phx-value-type="life_event"
-              phx-target={@myself}
-              class="inline-flex min-h-11 items-center gap-1 whitespace-nowrap rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-elevated)] transition-colors cursor-pointer sm:min-h-0"
-            >
-              + Event
-            </button>
             <%!-- Anchor the popup to the full action row so wrapping cannot push it off-screen. --%>
             <div x-data="{ open: false }" class="shrink-0">
               <button
@@ -438,7 +430,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
                 class="absolute end-0 top-full mt-1 z-10 w-40 rounded-lg bg-[var(--color-surface-overlay)] border border-[var(--color-border)] shadow-[var(--shadow-dropdown)] p-1"
               >
                 <button
-                  :for={type <- [:task, :gift, :conversation, :activity, :photo]}
+                  :for={type <- [:life_event, :task, :gift, :conversation, :activity, :photo]}
                   phx-click="open-entry-modal"
                   phx-value-type={type}
                   phx-target={@myself}

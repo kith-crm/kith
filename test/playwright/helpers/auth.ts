@@ -1,4 +1,5 @@
 import { type Page, expect } from "@playwright/test";
+import { passwordLogin } from "./password-login";
 
 /**
  * Generate a unique email address for test isolation.
@@ -43,18 +44,7 @@ export async function registerUser(
     currentUrl.includes("/confirm-email");
 
   if (!isLoggedIn) {
-    await page.goto("/users/log-in");
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(300);
-
-    await page.getByRole("textbox", { name: /email/i }).fill(userEmail);
-    // Password inputs don't have textbox ARIA role — use locator
-    await page.locator('input[type="password"]').fill(TEST_PASSWORD);
-    await page.getByRole("button", { name: /log in/i }).click();
-
-    await page.waitForURL(/\/(dashboard|users\/confirm-email)/, {
-      timeout: 15_000,
-    });
+    await passwordLogin(page, userEmail, TEST_PASSWORD, /\/(dashboard|users\/confirm-email)/);
   }
 
   return userEmail;
