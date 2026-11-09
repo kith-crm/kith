@@ -193,3 +193,10 @@ between distinct sites and checks the Lax binding and Strict session boundaries,
 local MFA, signup/link/reauth and credential lifecycle. Phone widths are viewport
 simulation; Android Chrome/DAVx5 and a live Authentik provider are not claimed.
 The ordinary regression runner also includes Settings and credential-copy specs.
+
+For actual devices run `node scripts/android/oidc-chrome.mjs` after preparing the
+[Android prerequisites](../../docs/design/oidc-android-validation.md). It requires
+exactly one authorized device and preinstalled driver, trusted distinct HTTPS
+sites and protected fixture controls; missing infrastructure fails. The automated
+subset does not certify native keyboard/copy behavior, DAVx5 or live Authentik.
+See the [outstanding acceptance matrix](../../docs/design/oidc-validation/task-10-acceptance.md).

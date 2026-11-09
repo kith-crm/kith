@@ -110,6 +110,8 @@ defmodule Kith.Auth.OIDCTest do
 
   test "invalid signed claim values fail closed", %{fixture: fixture, config: config} do
     now = System.system_time(:second)
+    # Sequential HTTPS exchanges must not move a +61s rejection into the +60s allowance.
+    config = Keyword.put(config, :now, DateTime.from_unix!(now))
 
     for claims <- [
           %{"iss" => "https://other.test"},
