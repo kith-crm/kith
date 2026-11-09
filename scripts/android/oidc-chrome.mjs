@@ -113,6 +113,8 @@ try {
   await page.goto(new URL("/settings/security", app).href);
   await path("/users/log-in");
   await connected();
+  // The provider is authenticating again, even when the initial journey took >60s.
+  await control("claims", { sub: viewer.subject, email: viewer.email, email_verified: true });
   await page.locator("#oidc-reauth-form").getByRole("button").tap();
   await expect.poll(() => new URL(page.url()).searchParams.get("max_age")).toBe("0");
   await authorize("/users/two-factor");
