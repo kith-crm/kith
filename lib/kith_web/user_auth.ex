@@ -120,12 +120,19 @@ defmodule KithWeb.UserAuth do
   defp create_or_extend_session(conn, user, params) do
     token = Accounts.generate_user_session_token(user)
     remember_me = get_session(conn, :user_remember_me)
+    challenge_binding = get_session(conn, :auth_challenge_binding)
 
     conn
     |> renew_session(user)
+    |> preserve_challenge_binding(challenge_binding)
     |> put_token_in_session(token)
     |> maybe_write_remember_me_cookie(token, params, remember_me)
   end
+
+  defp preserve_challenge_binding(conn, binding) when is_binary(binding),
+    do: put_session(conn, :auth_challenge_binding, binding)
+
+  defp preserve_challenge_binding(conn, _binding), do: conn
 
   # Do not renew session if the user is already logged in
   # to prevent CSRF errors or data being lost in tabs that are still open

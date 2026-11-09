@@ -62,6 +62,7 @@ defmodule Kith.Auth.Challenges do
 
       completion = %{
         user: user,
+        browser_binding: binding,
         intent: row.intent,
         authenticated_at: row.authenticated_at,
         session_token: decode_token(payload["session_token"]),

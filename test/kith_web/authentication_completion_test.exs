@@ -314,4 +314,143 @@ defmodule KithWeb.AuthenticationCompletionTest do
 
     refute get_session(replay, :user_token)
   end
+
+  test "logout cancels a sibling login after completing another flow", %{conn: conn} do
+    assert_sibling_logout(conn, false)
+  end
+
+  test "logout cancels a sibling login after subsequent reauthentication", %{conn: conn} do
+    assert_sibling_logout(conn, true)
+  end
+
+  test "failed completion preserves the browser cancellation identity", %{conn: conn} do
+    user = user_fixture()
+
+    conn =
+      conn
+      |> init_test_session(%{auth_challenge_binding: "existing-browser-binding"})
+      |> Phoenix.Controller.fetch_flash()
+
+    rejected =
+      Authentication.begin(conn, user, %{intent: :reauth, session_token: "revoked-origin"})
+
+    assert redirected_to(rejected) == "/users/log-in"
+    assert get_session(rejected, :auth_challenge_binding) == "existing-browser-binding"
+    refute get_session(rejected, :user_token)
+  end
+
+  test "verified Lax binding preserves logout cancellation without the Strict cookie", %{
+    conn: conn
+  } do
+    secret = Accounts.generate_totp_secret()
+
+    user =
+      user_fixture()
+      |> Ecto.Changeset.change(totp_enabled: true, totp_secret: secret)
+      |> Kith.Repo.update!()
+
+    sibling =
+      post(conn, "/users/log-in", %{user: %{email: user.email, password: valid_user_password()}})
+
+    binding = get_session(sibling, :auth_challenge_binding)
+    principal = %Kith.Auth.Principal{issuer: "https://issuer.example", subject: "subject"}
+
+    flow = %Kith.Auth.OIDC.Transaction{
+      intent: :login,
+      issuer: principal.issuer,
+      consumed_at: DateTime.utc_now(),
+      binding_hash: :crypto.hash(:sha256, binding),
+      return_to: "/dashboard"
+    }
+
+    callback = build_conn() |> init_test_session(%{}) |> Phoenix.Controller.fetch_flash()
+
+    rejected =
+      Authentication.begin_oidc(callback, user, flow, principal, browser_binding: "wrong-binding")
+
+    refute get_session(rejected, :totp_token)
+    refute get_session(rejected, :user_token)
+    pending = Authentication.begin_oidc(callback, user, flow, principal, browser_binding: binding)
+    assert get_session(pending, :auth_challenge_binding) == binding
+
+    {:ok, completion} =
+      Kith.Auth.Challenges.complete(get_session(pending, :totp_token), binding, :pot.totp(secret))
+
+    # Exercise the trusted callback boundary without relying on a preexisting
+    # Strict session; the verified completion itself retains cancellation proof.
+    finished = Authentication.finish(callback, completion)
+    assert get_session(finished, :user_token)
+    assert get_session(finished, :auth_challenge_binding) == binding
+
+    logout_conn =
+      build_conn() |> init_test_session(get_session(finished)) |> Phoenix.Controller.fetch_flash()
+
+    KithWeb.UserAuth.log_out_user(logout_conn)
+
+    assert {:error, :invalid} =
+             Kith.Auth.Challenges.complete(
+               get_session(sibling, :totp_token),
+               binding,
+               :pot.totp(secret)
+             )
+  end
+
+  defp assert_sibling_logout(conn, reauthenticate?) do
+    secret = Accounts.generate_totp_secret()
+
+    user =
+      user_fixture()
+      |> Ecto.Changeset.change(totp_enabled: true, totp_secret: secret)
+      |> Kith.Repo.update!()
+
+    params = %{user: %{email: user.email, password: valid_user_password()}}
+    first = post(conn, "/users/log-in", params)
+    first_handle = get_session(first, :totp_token)
+    second = post(recycle(first), "/users/log-in", params)
+    second_handle = get_session(second, :totp_token)
+    assert second_handle != first_handle
+
+    assert get_session(second, :auth_challenge_binding) ==
+             get_session(first, :auth_challenge_binding)
+
+    finished =
+      post(recycle(first), "/users/totp-verify", %{
+        totp_token: first_handle,
+        totp: %{code: :pot.totp(secret)}
+      })
+
+    assert get_session(finished, :user_token)
+
+    finished =
+      if reauthenticate? do
+        pending = post(recycle(finished), "/users/log-in", params)
+
+        assert get_session(pending, :auth_challenge_binding) ==
+                 get_session(second, :auth_challenge_binding)
+
+        post(recycle(pending), "/users/totp-verify", %{
+          totp_token: get_session(pending, :totp_token),
+          totp: %{code: :pot.totp(secret)}
+        })
+      else
+        finished
+      end
+
+    assert get_session(finished, :user_token)
+    # A successful tab must not invalidate another tab before explicit logout.
+    row =
+      Kith.Repo.get_by!(Kith.Auth.Challenge, handle_hash: :crypto.hash(:sha256, second_handle))
+
+    assert is_nil(row.consumed_at)
+    logout = delete(recycle(finished), "/users/log-out")
+    refute get_session(logout, :user_token)
+
+    replay =
+      post(recycle(second), "/users/totp-verify", %{
+        totp_token: second_handle,
+        totp: %{code: :pot.totp(secret)}
+      })
+
+    refute get_session(replay, :user_token)
+  end
 end

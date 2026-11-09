@@ -26,16 +26,27 @@ defmodule KithWeb.Authentication do
 
   defp fresh?(_, _), do: false
 
-  @doc "Task 8 callback contract: consumed protocol flow plus its verified principal."
+  @doc """
+  Completes a consumed protocol flow with its verified principal.
+
+  Task 8 may supply `browser_binding:` from the Lax cookie already verified by
+  transaction consumption when the Strict cookie is absent. The supplied value
+  must match the consumed flow's binding hash; never pass public intent/owner
+  parameters. Omitting options retains the current session binding behavior.
+  """
   def begin_oidc(
         conn,
         user,
         %Kith.Auth.OIDC.Transaction{} = flow,
-        %Kith.Auth.Principal{} = principal
+        %Kith.Auth.Principal{} = principal,
+        opts \\ []
       ) do
-    if valid_oidc_completion?(user, flow, principal) do
+    binding = Keyword.get(opts, :browser_binding)
+
+    if valid_oidc_completion?(user, flow, principal) and verified_binding?(flow, binding) do
       begin(conn, user, %{
         intent: flow.intent,
+        browser_binding: binding,
         method: :oidc,
         principal: principal,
         session_token: flow.session_token,
@@ -46,6 +57,14 @@ defmodule KithWeb.Authentication do
       invalid(conn)
     end
   end
+
+  defp verified_binding?(_flow, nil), do: true
+
+  defp verified_binding?(%{binding_hash: hash}, binding)
+       when is_binary(hash) and is_binary(binding),
+       do: Plug.Crypto.secure_compare(hash, :crypto.hash(:sha256, binding))
+
+  defp verified_binding?(_, _), do: false
 
   defp valid_oidc_completion?(user, flow, principal) do
     flow.consumed_at != nil and flow.issuer == principal.issuer and
@@ -98,7 +117,7 @@ defmodule KithWeb.Authentication do
 
   defp begin_verified(conn, %{totp_enabled: true} = user, completion) do
     binding =
-      get_session(conn, :auth_challenge_binding) ||
+      completion[:browser_binding] || get_session(conn, :auth_challenge_binding) ||
         Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 
     {:ok, handle} = Challenges.issue(user, Map.put(completion, :browser_binding, binding))
@@ -126,12 +145,16 @@ defmodule KithWeb.Authentication do
          :ok <- Challenges.validate_origin(user, completion),
          :ok <- require_recent(user),
          :ok <- complete_intent(user, completion) do
+      # This browser may have other pending MFA flows. Retain their cancellation
+      # identity across rotation so logout can revoke them without breaking tabs.
+      binding = completion[:browser_binding] || get_session(conn, :auth_challenge_binding)
       token = completion[:session_token] || get_session(conn, :user_token)
       if token, do: Accounts.delete_user_session_token(token)
 
       conn
       |> configure_session(renew: true)
       |> clear_session()
+      |> put_session(:auth_challenge_binding, binding)
       |> put_session(:user_return_to, safe_return_to(completion[:return_to]))
       |> put_flash(:info, "Authentication completed successfully.")
       |> UserAuth.log_in_user(user, %{
@@ -174,7 +197,6 @@ defmodule KithWeb.Authentication do
   defp invalid(conn) do
     conn
     |> delete_session(:totp_token)
-    |> delete_session(:auth_challenge_binding)
     |> put_flash(:error, "Your authentication has expired. Please try again.")
     |> redirect(to: "/users/log-in")
   end
