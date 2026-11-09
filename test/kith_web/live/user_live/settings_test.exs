@@ -48,17 +48,20 @@ defmodule KithWeb.UserLive.SettingsTest do
     end
   end
 
-  describe "update password form" do
-    test "validates password", %{conn: conn} do
-      {:ok, lv, _html} = live(conn, ~p"/users/settings")
+  test "email confirmation returns to Profile and updates the email", %{conn: conn, user: user} do
+    new_email = unique_user_email()
 
-      result =
-        lv
-        |> element("#password_form")
-        |> render_change(%{user: %{password: "short", password_confirmation: "mismatch"}})
+    changed =
+      Ecto.Changeset.apply_changes(Kith.Accounts.change_user_email(user, %{email: new_email}))
 
-      assert result =~ "should be at least 12 character"
-      assert result =~ "does not match password"
-    end
+    token =
+      extract_user_token(fn url ->
+        Kith.Accounts.deliver_user_update_email_instructions(changed, user.email, url)
+      end)
+
+    assert {:error, {:live_redirect, %{to: "/users/settings"}}} =
+             live(conn, "/users/settings/confirm-email/#{token}")
+
+    assert Kith.Accounts.get_user!(user.id).email == new_email
   end
 end

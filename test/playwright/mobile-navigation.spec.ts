@@ -120,7 +120,7 @@ test.describe("Mobile navigation", () => {
         await expect(menu.getByRole("menuitem", { name, exact: true })).toHaveAttribute("aria-current", "page");
         await page.keyboard.press("Escape");
       }
-      for (const route of ["/users/settings", "/settings/account"]) {
+      for (const route of ["/users/settings", "/settings/account", "/settings/security"]) {
         await page.goto(route);
         await connected(page);
         await expect(nav.getByRole("link", { name: "Settings", exact: true })).toHaveAttribute("aria-current", "page");
@@ -132,6 +132,31 @@ test.describe("Mobile navigation", () => {
       }
     });
   }
+
+  test("grouped settings selector supports keyboard navigation and history", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 844 });
+    await authenticate(page);
+    await page.goto("/users/settings");
+    await connected(page);
+    const selector = page.getByLabel("Settings section", { exact: true });
+    await expectUnclipped(selector);
+    expect(await selector.locator("optgroup").evaluateAll(groups => groups.map(group => group.getAttribute("label")))).toEqual(["Personal", "Workspace", "Data"]);
+    await expect(page.getByRole("navigation", { name: "Settings sections", exact: true })).toBeHidden();
+    await selector.focus();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/\/settings\/security$/);
+    await connected(page);
+    await expect(selector).toHaveValue("/settings/security");
+    await expect(mobileNavigation(page).getByRole("link", { name: "Settings", exact: true })).toHaveAttribute("aria-current", "page");
+    await expectUnclipped(selector);
+    await selector.selectOption("/settings/tags");
+    await expect(page).toHaveURL(/\/settings\/tags$/);
+    await page.goBack();
+    await expect(page).toHaveURL(/\/settings\/security$/);
+    await expect(selector).toHaveValue("/settings/security");
+    await expectNoPageHorizontalOverflow(page);
+  });
 
   test("contact actions, section tabs and mood filters remain reachable at 320px", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 844 });

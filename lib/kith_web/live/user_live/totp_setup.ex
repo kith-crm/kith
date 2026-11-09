@@ -48,7 +48,7 @@ defmodule KithWeb.UserLive.TotpSetup do
             </button>
           </div>
 
-          <UI.button navigate={~p"/users/settings"} class="w-full">
+          <UI.button navigate={~p"/settings/security"} class="w-full">
             I've saved my recovery codes
           </UI.button>
         <% else %>
@@ -93,7 +93,7 @@ defmodule KithWeb.UserLive.TotpSetup do
 
           <p class="text-center text-sm text-[var(--color-text-tertiary)]">
             <.link
-              navigate={~p"/users/settings"}
+              navigate={~p"/settings/security"}
               class="font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors"
             >
               Cancel
@@ -113,7 +113,7 @@ defmodule KithWeb.UserLive.TotpSetup do
       {:ok,
        socket
        |> put_flash(:info, "Two-factor authentication is already enabled.")
-       |> redirect(to: ~p"/users/settings")}
+       |> redirect(to: ~p"/settings/security")}
     else
       secret = Accounts.generate_totp_secret()
       uri = Accounts.totp_uri(secret, user.email)

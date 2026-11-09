@@ -335,6 +335,7 @@ defmodule KithWeb.Router do
     live_session :require_authenticated_user,
       on_mount: [{KithWeb.UserAuth, :require_authenticated}] do
       live "/users/settings", UserLive.Settings, :edit
+      live "/settings/security", SettingsLive.Security, :index
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
       live "/users/totp-setup", UserLive.TotpSetup, :new
 

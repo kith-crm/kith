@@ -6,6 +6,8 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/kith"
 import topbar from "../vendor/topbar"
 
+import SettingsNavigation from "./hooks/settings_navigation"
+
 // Custom hooks
 import TrixEditor from "./hooks/trix_editor"
 import CommandPalette from "./hooks/command_palette"
@@ -28,6 +30,7 @@ Alpine.start()
 
 const Hooks = {
   ...colocatedHooks,
+  SettingsNavigation,
   TrixEditor,
   CommandPalette,
   ImgFallback,

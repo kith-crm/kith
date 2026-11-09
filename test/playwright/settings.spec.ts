@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { registerUser, ensureOnDashboard } from "./helpers/auth";
 
 test.describe("Settings", () => {
+  test.setTimeout(150_000);
   test.beforeEach(async ({ page }) => {
     await registerUser(page);
     await ensureOnDashboard(page);
@@ -26,12 +27,9 @@ test.describe("Settings", () => {
     await page.goto("/users/settings");
     await page.waitForLoadState("networkidle");
 
-    // Should have an email input pre-filled
-    const emailInput = page.locator("input[type='email'], input[name*='email']");
-    if ((await emailInput.count()) > 0) {
-      const value = await emailInput.first().inputValue();
-      expect(value).toContain("@");
-    }
+    const emailInput = page.locator("#email_form input[type='email']");
+    await expect(emailInput).toHaveValue(/@/);
+    await expect(page.locator("#password_form")).toHaveCount(0);
   });
 
   // ─────────────────────────────────────────
@@ -59,65 +57,28 @@ test.describe("Settings", () => {
     expect(content).toMatch(/delete account/i);
   });
 
-  test("account reset with wrong confirmation shows error", async ({
-    page,
-  }) => {
+  test("account reset with wrong confirmation stays disabled", async ({ page }) => {
     await page.goto("/settings/account");
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(300);
-
-    // Fill wrong confirmation in reset form
-    const resetInput = page.locator(
-      "input[name='confirmation'][form*='reset'], form[phx-submit='reset-account'] input",
-    );
-    if ((await resetInput.count()) > 0) {
-      await resetInput.first().fill("WRONG");
-      await page.getByRole("button", { name: /reset account/i }).click();
-      await page.waitForTimeout(500);
-
-      const content = await page.content();
-      expect(content).toMatch(/RESET|invalid|confirmation/i);
-    }
+    const form = page.locator("#account-reset-form");
+    await form.locator("input[name='confirmation']").fill("WRONG");
+    await expect(form.getByRole("button", { name: "Reset Account Data", exact: true })).toBeDisabled();
   });
 
-  test("account reset with correct confirmation enqueues reset job", async ({
-    page,
-  }) => {
+  test("account reset with correct confirmation enqueues reset job", async ({ page }) => {
     await page.goto("/settings/account");
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(300);
-
-    const resetInput = page.locator(
-      "form[phx-submit='reset-account'] input",
-    );
-    if ((await resetInput.count()) > 0) {
-      await resetInput.first().fill("RESET");
-      await page.getByRole("button", { name: /reset account/i }).click();
-      await page.waitForTimeout(1000);
-
-      const content = await page.content();
-      expect(content).toMatch(/reset|scheduled|processing/i);
-    }
+    const form = page.locator("#account-reset-form");
+    await form.locator("input[name='confirmation']").fill("RESET");
+    const submit = form.getByRole("button", { name: "Reset Account Data", exact: true });
+    await expect(submit).toBeEnabled();
+    await submit.click();
+    await expect(page.getByRole("alert").filter({ hasText: "Account data reset has been queued." })).toBeVisible();
   });
 
-  test("account delete with wrong confirmation shows error", async ({
-    page,
-  }) => {
+  test("account delete with wrong confirmation stays disabled", async ({ page }) => {
     await page.goto("/settings/account");
-    await page.waitForLoadState("networkidle");
-    await page.waitForTimeout(300);
-
-    const deleteInput = page.locator(
-      "form[phx-submit='delete-account'] input",
-    );
-    if ((await deleteInput.count()) > 0) {
-      await deleteInput.first().fill("WRONG");
-      await page.getByRole("button", { name: /delete account/i }).click();
-      await page.waitForTimeout(500);
-
-      const content = await page.content();
-      expect(content).toMatch(/DELETE|invalid|confirmation/i);
-    }
+    const form = page.locator("#account-delete-form");
+    await form.locator("input[name='confirmation']").fill("WRONG");
+    await expect(form.getByRole("button", { name: "Delete Account Permanently", exact: true })).toBeDisabled();
   });
 
   // ─────────────────────────────────────────
@@ -136,28 +97,10 @@ test.describe("Settings", () => {
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(300);
 
-    // Look for Add/Create tag button
-    const addBtn = page.getByRole("button", { name: /add|create|new/i });
-    if ((await addBtn.count()) > 0) {
-      await addBtn.first().click();
-      await page.waitForTimeout(500);
-
-      // Fill tag name
-      const nameInput = page.getByLabel(/name/i);
-      if ((await nameInput.count()) > 0) {
-        await nameInput.first().fill("PlaywrightTag");
-
-        // Submit
-        const saveBtn = page.getByRole("button", { name: /save|create/i });
-        if ((await saveBtn.count()) > 0) {
-          await saveBtn.last().click();
-          await page.waitForTimeout(1000);
-
-          const content = await page.content();
-          expect(content).toContain("PlaywrightTag");
-        }
-      }
-    }
+    const form = page.locator("#tag-settings-form");
+    await form.locator("input[name='tag[name]']").fill("PlaywrightTag");
+    await form.getByRole("button", { name: "Create", exact: true }).click();
+    await expect(page.locator(".badge").filter({ hasText: "PlaywrightTag" })).toBeVisible();
   });
 
   // ─────────────────────────────────────────
@@ -224,20 +167,21 @@ test.describe("Settings", () => {
     await page.goto("/settings/account");
     await page.waitForLoadState("networkidle");
 
-    // Navigate to Tags via sidebar link
-    const tagsLink = page.getByRole("link", { name: /tags/i });
-    if ((await tagsLink.count()) > 0) {
-      await tagsLink.first().click();
-      await expect(page).toHaveURL(/\/settings\/tags/, { timeout: 5_000 });
+    const nav = page.getByRole("navigation", { name: "Settings sections", exact: true });
+    await expect(nav.getByRole("heading")).toHaveText(["Personal", "Workspace", "Data"]);
+    for (const [label, path] of [["Tags", "/settings/tags"], ["Integrations", "/settings/integrations"], ["Security", "/settings/security"]]) {
+      const link = nav.getByRole("link", { name: label, exact: true });
+      await link.focus();
+      await link.press("Enter");
+      await expect(page).toHaveURL(new RegExp(`${path}$`));
+      await expect(link).toHaveAttribute("aria-current", "page");
     }
-
-    // Navigate to Integrations
-    const intLink = page.getByRole("link", { name: /integrations/i });
-    if ((await intLink.count()) > 0) {
-      await intLink.first().click();
-      await expect(page).toHaveURL(/\/settings\/integrations/, {
-        timeout: 5_000,
-      });
-    }
+    await expect(page.locator("#password_form")).toBeHidden();
+    await page.getByText("Change password", { exact: true }).click();
+    await expect(page.locator("#password_form")).toBeVisible();
+    await expect(page.getByRole("link", { name: "Set up authenticator app", exact: true })).toBeVisible();
+    await page.goBack();
+    await expect(page).toHaveURL(/\/settings\/integrations$/);
+    await expect(nav.getByRole("link", { name: "Integrations", exact: true })).toHaveAttribute("aria-current", "page");
   });
 });
