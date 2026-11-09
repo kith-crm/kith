@@ -181,3 +181,15 @@ test/playwright/
 | ExUnit (`mix test`) | ExUnit | Unit + integration | Ecto sandbox |
 | Smoke (`e2e/`) | Playwright | Unauthenticated pages | None (stateless) |
 | **E2E** (`test/playwright/`) | Playwright | Full user flows | Per-user registration |
+
+## OIDC and personal DAV credentials
+
+Run `bash test/playwright/fixtures/oidc/run.sh` for the mandatory, isolated HTTPS
+journeys. See [the fixture runbook](fixtures/oidc/README.md) for the four policy
+instances, runner-local certificate trust, safe artifacts and owned teardown.
+The `oidc` project is separate from ordinary `e2e`: calling its specs without the
+runner fails instead of silently skipping. It follows real provider redirects
+between distinct sites and checks the Lax binding and Strict session boundaries,
+local MFA, signup/link/reauth and credential lifecycle. Phone widths are viewport
+simulation; Android Chrome/DAVx5 and a live Authentik provider are not claimed.
+The ordinary regression runner also includes Settings and credential-copy specs.

@@ -58,6 +58,50 @@ defmodule KithWeb.OIDCController do
   end
 
   def callback(conn, params) do
+    conn |> register_before_send(&commit_browser_origin/1) |> complete_callback(params)
+  end
+
+  # A Strict cookie is withheld for the entire cross-site redirect chain, even
+  # after the callback sets a new cookie. Commit a clean same-site document
+  # before navigating to a route that needs that cookie. The signed value only
+  # selects a local destination; it is never authentication evidence.
+  def complete(conn, %{"destination" => token}) do
+    case Phoenix.Token.verify(KithWeb.Endpoint, "oidc-browser-destination", token, max_age: 60) do
+      {:ok, destination} when is_binary(destination) ->
+        destination = Authentication.safe_return_to(destination)
+
+        conn
+        |> put_view(html: KithWeb.OIDCHTML)
+        |> put_root_layout(false)
+        |> render(:complete, destination: destination)
+
+      _ ->
+        conn |> fetch_flash() |> failed()
+    end
+  end
+
+  def complete(conn, _params), do: conn |> fetch_flash() |> failed()
+
+  defp commit_browser_origin(%{status: status} = conn) when status in [302, 303] do
+    case get_resp_header(conn, "location") do
+      ["/" <> _ = destination] ->
+        token =
+          Phoenix.Token.sign(
+            KithWeb.Endpoint,
+            "oidc-browser-destination",
+            Authentication.safe_return_to(destination)
+          )
+
+        put_resp_header(conn, "location", ~p"/auth/oidc/complete?destination=#{token}")
+
+      _ ->
+        conn
+    end
+  end
+
+  defp commit_browser_origin(conn), do: conn
+
+  defp complete_callback(conn, params) do
     conn = fetch_cookies(conn, signed: [@cookie])
     binding = conn.cookies[@cookie]
 

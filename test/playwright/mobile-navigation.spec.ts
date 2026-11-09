@@ -138,7 +138,7 @@ test.describe("Mobile navigation", () => {
     await authenticate(page);
     await page.goto("/users/settings");
     await connected(page);
-    const selector = page.getByLabel("Settings section", { exact: true });
+    const selector = page.getByLabel("Settings", { exact: true });
     await expectUnclipped(selector);
     expect(await selector.locator("optgroup").evaluateAll(groups => groups.map(group => group.getAttribute("label")))).toEqual(["Personal", "Workspace", "Data"]);
     await expect(page.getByRole("navigation", { name: "Settings sections", exact: true })).toBeHidden();

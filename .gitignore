@@ -55,6 +55,7 @@ erl_crash.dump
 /docs/playwright-report/
 /docs/screenshots/
 /tmp/browser-regressions/
+/tmp/oidc-browser/
 /tmp/security/
 
 # Git worktrees

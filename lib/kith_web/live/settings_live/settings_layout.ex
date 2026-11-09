@@ -46,7 +46,12 @@ defmodule KithWeb.SettingsLive.SettingsLayout do
       %{
         label: "Data",
         items: [
-          %{path: "/settings/import", label: "Import", icon: "hero-arrow-up-tray"},
+          %{
+            path: "/settings/import",
+            label: "Import",
+            icon: "hero-arrow-up-tray",
+            permission: {:create, :import}
+          },
           %{path: "/settings/imports", label: "Import History", icon: "hero-clock"},
           %{path: "/settings/export", label: "Export", icon: "hero-arrow-down-tray"},
           %{
@@ -59,7 +64,18 @@ defmodule KithWeb.SettingsLive.SettingsLayout do
       }
     ]
     |> Enum.map(fn group ->
-      %{group | items: Enum.filter(group.items, &(admin? or !Map.get(&1, :admin, false)))}
+      %{
+        group
+        | items:
+            Enum.filter(group.items, fn item ->
+              allowed = admin? or !Map.get(item, :admin, false)
+
+              case Map.get(item, :permission) do
+                {action, resource} -> allowed and authorized?(scope.user, action, resource)
+                nil -> allowed
+              end
+            end)
+      }
     end)
     |> Enum.reject(&(&1.items == []))
   end
@@ -74,10 +90,11 @@ defmodule KithWeb.SettingsLive.SettingsLayout do
     ~H"""
     <div class="flex flex-col md:flex-row gap-8">
       <div class="md:hidden">
-        <label for="settings-destination" class="block mb-2 text-sm font-medium">Settings section</label>
+        <label for="settings-destination" class="block mb-2 text-sm font-medium">Settings</label>
         <select
           id="settings-destination"
           phx-hook="SettingsNavigation"
+          disabled
           class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] px-3 py-2"
         >
           <optgroup :for={group <- @groups} label={group.label}>

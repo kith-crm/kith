@@ -7,7 +7,7 @@ defmodule KithWeb.Router do
     plug :accepts, ["html"]
     plug :contact_sync_cache
     plug :fetch_session
-    plug :fetch_live_flash
+    plug :fetch_browser_flash
     plug :put_root_layout, html: {KithWeb.Layouts, :root}
     plug :protect_from_forgery
     plug :put_secure_browser_headers
@@ -15,6 +15,11 @@ defmodule KithWeb.Router do
     plug :fetch_current_scope_for_user
     plug KithWeb.Plugs.AssignLocale
   end
+
+  # The completion document must not consume the callback flash before the
+  # destination can read it, and cannot assume the Strict cookie is present.
+  defp fetch_browser_flash(%{request_path: "/auth/oidc/complete"} = conn, _opts), do: conn
+  defp fetch_browser_flash(conn, opts), do: fetch_live_flash(conn, opts)
 
   defp contact_sync_cache(conn, _opts) do
     if conn.request_path == "/settings/contact-sync" or
@@ -437,6 +442,7 @@ defmodule KithWeb.Router do
 
     get "/oidc", OIDCController, :request
     get "/oidc/callback", OIDCController, :callback
+    get "/oidc/complete", OIDCController, :complete
     get "/:provider", OAuthController, :request
     get "/:provider/callback", OAuthController, :callback
   end

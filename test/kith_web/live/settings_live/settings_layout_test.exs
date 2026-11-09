@@ -21,14 +21,22 @@ defmodule KithWeb.SettingsLive.SettingsLayoutTest do
   ]
   @admin_paths ["/settings/account", "/settings/integrations", "/settings/audit-log"]
 
-  test "groups preserve all destinations and hide admin routes from other roles" do
+  test "groups preserve destinations allowed by each role" do
     for role <- ["admin", "editor", "viewer"] do
       scope = user_scope_fixture(user_fixture(%{role: role}))
       groups = SettingsLayout.destinations(scope)
       assert Enum.map(groups, & &1.label) == ["Personal", "Workspace", "Data"]
       assert Enum.all?(groups, &(&1.items != []))
       paths = Enum.flat_map(groups, fn group -> Enum.map(group.items, & &1.path) end)
-      assert paths == if(role == "admin", do: @paths, else: @paths -- @admin_paths)
+
+      expected =
+        case role do
+          "admin" -> @paths
+          "editor" -> @paths -- @admin_paths
+          "viewer" -> @paths -- (@admin_paths ++ ["/settings/import"])
+        end
+
+      assert paths == expected
 
       html =
         render_component(&SettingsLayout.settings_shell/1,
@@ -50,6 +58,11 @@ defmodule KithWeb.SettingsLive.SettingsLayoutTest do
              ]
 
       assert LazyHTML.attribute(LazyHTML.query(doc, "label"), "for") == ["settings-destination"]
+      assert LazyHTML.text(LazyHTML.query(doc, "label")) == "Settings"
+
+      assert LazyHTML.attribute(LazyHTML.query(doc, "select[disabled]"), "id") == [
+               "settings-destination"
+             ]
     end
   end
 

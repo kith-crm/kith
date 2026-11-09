@@ -10,7 +10,7 @@ defmodule KithWeb.OIDCControllerTest do
 
   test "disabled OIDC rejects direct starts and callbacks", %{conn: conn} do
     conn = get(conn, "/auth/oidc")
-    refute redirected_to(conn) =~ "issuer.test"
+    refute final_destination(conn) =~ "issuer.test"
 
     refute get_resp_header(conn, "set-cookie")
            |> Enum.any?(&String.contains?(&1, "__Host-kith_oidc="))
@@ -22,6 +22,31 @@ defmodule KithWeb.OIDCControllerTest do
 
     assert Phoenix.Flash.get(callback.assigns.flash, :error) ==
              "OpenID Connect is unavailable. Please try again."
+  end
+
+  test "completion destination requires a valid short-lived signature and stays local" do
+    expired =
+      Phoenix.Token.sign(KithWeb.Endpoint, "oidc-browser-destination", "/dashboard",
+        signed_at: System.system_time(:second) - 120
+      )
+
+    for params <- [%{}, %{"destination" => "forged"}, %{"destination" => expired}] do
+      denied = get(build_conn(), "/auth/oidc/complete", params)
+      assert redirected_to(denied) == "/users/log-in"
+      refute get_session(denied, :user_token)
+    end
+
+    for {destination, expected} <- [
+          {"https://attacker.test", "/dashboard"},
+          {"//attacker.test", "/settings/security"},
+          {"/\\attacker.test", "/settings/security"}
+        ] do
+      token = Phoenix.Token.sign(KithWeb.Endpoint, "oidc-browser-destination", destination)
+      bridge = get(build_conn(), "/auth/oidc/complete", %{"destination" => token})
+      assert html_response(bridge, 200) =~ "url=#{expected}"
+      refute bridge.resp_body =~ "attacker.test"
+      refute get_session(bridge, :user_token)
+    end
   end
 
   describe "enabled provider" do
@@ -73,7 +98,7 @@ defmodule KithWeb.OIDCControllerTest do
                Kith.Accounts.get_user_by_session_token(get_session(callback, :user_token))
 
       assert resolved.id == user.id
-      assert redirected_to(callback) == "/dashboard"
+      assert final_destination(callback) == "/dashboard"
       assert get_resp_header(callback, "cache-control") == ["no-store"]
       assert get_resp_header(callback, "referrer-policy") == ["no-referrer"]
       replay = callback_conn(start) |> get("/auth/oidc/callback", params)
@@ -86,7 +111,7 @@ defmodule KithWeb.OIDCControllerTest do
     } do
       start = get(conn, "/auth/oidc")
       callback = callback_conn(start) |> get("/auth/oidc/callback", authorize(start, fixture))
-      assert redirected_to(callback) == "/users/oidc/register"
+      assert final_destination(callback) == "/users/oidc/register"
       refute get_session(callback, :user_token)
       refute Kith.Accounts.get_user_by_email("person@example.test")
 
@@ -132,7 +157,7 @@ defmodule KithWeb.OIDCControllerTest do
       user = Kith.AccountsFixtures.user_fixture()
       Kith.OIDCFixture.update(fixture, %{claims: %{"auth_time" => System.os_time(:second)}})
       start = conn |> log_in_user(user) |> post("/users/oidc/link", %{"user_id" => "999"})
-      assert URI.decode_query(URI.parse(redirected_to(start)).query)["max_age"] == "0"
+      assert URI.decode_query(URI.parse(final_destination(start)).query)["max_age"] == "0"
       result = callback_conn(start) |> get("/auth/oidc/callback", authorize(start, fixture))
 
       assert {resolved, _} =
@@ -140,7 +165,7 @@ defmodule KithWeb.OIDCControllerTest do
 
       assert resolved.id == user.id
       assert [%{subject: "subject"}] = Kith.Accounts.OIDC.list(user)
-      assert redirected_to(result) == "/settings/security"
+      assert final_destination(result) == "/settings/security"
     end
 
     test "logged out originating link cannot complete", %{conn: conn, fixture: fixture} do
@@ -190,7 +215,7 @@ defmodule KithWeb.OIDCControllerTest do
 
       start = get(conn, "/auth/oidc")
       pending = callback_conn(start) |> get("/auth/oidc/callback", authorize(start, fixture))
-      assert redirected_to(pending) == "/users/two-factor"
+      assert final_destination(pending) == "/users/two-factor"
       refute get_session(pending, :user_token)
 
       assert get_session(pending, :auth_challenge_binding) ==
@@ -238,7 +263,7 @@ defmodule KithWeb.OIDCControllerTest do
         )
         |> post("/users/oidc/link")
 
-      assert redirected_to(stale) == "/users/log-in"
+      assert final_destination(stale) == "/users/log-in"
       start = build_conn() |> log_in_user(user) |> post("/users/oidc/link")
       denied = callback_conn(start) |> get("/auth/oidc/callback", authorize(start, fixture))
       refute get_session(denied, :user_token)
@@ -293,7 +318,7 @@ defmodule KithWeb.OIDCControllerTest do
       start = get(conn, "/auth/oidc")
       pending = callback_conn(start) |> get("/auth/oidc/callback", authorize(start, fixture))
       missing = recycle(pending) |> post("/users/oidc/register", %{"user" => %{}})
-      assert redirected_to(missing) == "/users/oidc/register"
+      assert final_destination(missing) == "/users/oidc/register"
       refute Kith.Accounts.get_user_by_email("person@example.test")
 
       done =
@@ -339,11 +364,11 @@ defmodule KithWeb.OIDCControllerTest do
       })
 
       denied = callback_conn(start) |> get("/auth/oidc/callback", params)
-      assert redirected_to(denied) == "/users/log-in"
+      assert final_destination(denied) == "/users/log-in"
       refute denied.resp_body =~ params["code"]
       missing = callback_conn(start) |> get("/auth/oidc/callback", %{"code" => "secret-marker"})
       refute get_session(missing, :user_token)
-      assert redirected_to(missing) == "/users/log-in"
+      assert final_destination(missing) == "/users/log-in"
     end
 
     test "link, reauth and registration posts require CSRF", %{conn: conn} do
@@ -362,7 +387,7 @@ defmodule KithWeb.OIDCControllerTest do
       start = get(conn, "/auth/oidc")
       pending = callback_conn(start) |> get("/auth/oidc/callback", authorize(start, fixture))
       cancelled = recycle(pending) |> post("/users/oidc/register", %{"cancel" => "true"})
-      assert redirected_to(cancelled) == "/users/log-in"
+      assert final_destination(cancelled) == "/users/log-in"
 
       refute recycle(pending)
              |> post("/users/oidc/register", %{"user" => %{"tos_accepted" => "true"}})
@@ -376,7 +401,7 @@ defmodule KithWeb.OIDCControllerTest do
       Kith.OIDCFixture.update(fixture, %{claims: %{"email" => "invalid-email"}})
       start = get(conn, "/auth/oidc")
       denied = callback_conn(start) |> get("/auth/oidc/callback", authorize(start, fixture))
-      assert redirected_to(denied) == "/users/log-in"
+      assert final_destination(denied) == "/users/log-in"
       assert Phoenix.Flash.get(denied.assigns.flash, :error) =~ "verified email"
     end
 
@@ -438,7 +463,7 @@ defmodule KithWeb.OIDCControllerTest do
         |> get("/auth/oidc/callback", authorize(start, fixture))
 
       assert Kith.Accounts.OIDC.list(user) == []
-      assert redirected_to(callback) == "/users/log-in"
+      assert final_destination(callback) == "/users/log-in"
     end
 
     test "tampered binding cannot redeem and valid original binding still completes", %{
@@ -475,7 +500,7 @@ defmodule KithWeb.OIDCControllerTest do
       })
 
       failed = get(conn, "/auth/oidc")
-      assert redirected_to(failed) == "/users/log-in"
+      assert final_destination(failed) == "/users/log-in"
       refute failed.resp_cookies["__Host-kith_oidc"]
     end
 
@@ -494,7 +519,7 @@ defmodule KithWeb.OIDCControllerTest do
       output =
         ExUnit.CaptureLog.capture_log([level: :debug], fn ->
           done = callback_conn(start) |> get("/auth/oidc/callback", params)
-          assert redirected_to(done) == "/dashboard"
+          assert final_destination(done) == "/dashboard"
         end)
 
       assert output =~ "Processing with KithWeb.OIDCController.callback/2"
@@ -524,7 +549,7 @@ defmodule KithWeb.OIDCControllerTest do
       output =
         ExUnit.CaptureLog.capture_log([level: :debug], fn ->
           denied = callback_conn(start) |> get("/auth/oidc/callback", params)
-          assert redirected_to(denied) == "/users/log-in"
+          assert final_destination(denied) == "/users/log-in"
           refute get_session(denied, :user_token)
         end)
 
@@ -555,7 +580,7 @@ defmodule KithWeb.OIDCControllerTest do
     {:ok, %{status: 302, headers: headers}} =
       Kith.Auth.OIDC.Metadata.HTTPAdapter.request(
         :get,
-        redirected_to(start),
+        final_destination(start),
         nil,
         [],
         fixture.config
@@ -568,5 +593,26 @@ defmodule KithWeb.OIDCControllerTest do
   defp callback_conn(start) do
     build_conn()
     |> put_req_cookie("__Host-kith_oidc", start.resp_cookies["__Host-kith_oidc"].value)
+  end
+
+  defp final_destination(conn) do
+    location = redirected_to(conn)
+
+    if String.starts_with?(location, "/auth/oidc/complete?") do
+      %{"destination" => token} = URI.decode_query(URI.parse(location).query)
+
+      assert {:ok, destination} =
+               Phoenix.Token.verify(KithWeb.Endpoint, "oidc-browser-destination", token,
+                 max_age: 60
+               )
+
+      bridge = get(build_conn(), location)
+      assert html_response(bridge, 200) =~ "Continue to Kith"
+      assert get_resp_header(bridge, "cache-control") == ["no-store"]
+      assert get_resp_header(bridge, "referrer-policy") == ["no-referrer"]
+      destination
+    else
+      location
+    end
   end
 end

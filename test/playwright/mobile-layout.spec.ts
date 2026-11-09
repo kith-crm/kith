@@ -66,6 +66,7 @@ for (const toolbarHeight of [0, 57]) {
     }
     await page.goto("/settings/account");
     await expect(page.getByRole("heading", { name: "Account Settings", exact: true })).toBeVisible();
+    await expect(page.getByLabel("Settings", { exact: true })).toBeEnabled();
     await expect(page.locator("[data-phx-main]")).toHaveClass(/phx-connected/);
 
     const main = page.locator("main");

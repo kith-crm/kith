@@ -18,9 +18,8 @@ test.describe("Settings", () => {
 
     await expect(page).toHaveURL(/\/users\/settings/);
 
-    // Should show profile settings form
-    const content = await page.content();
-    expect(content).toMatch(/settings|profile|email/i);
+    await expect(page.locator("#email_form")).toBeVisible();
+    await expect(page.locator("#password_form")).toHaveCount(0);
   });
 
   test("user settings shows email form", async ({ page }) => {
