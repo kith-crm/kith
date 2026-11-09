@@ -46,6 +46,7 @@ defmodule Kith.Accounts.User do
     has_many :user_recovery_codes, Kith.Accounts.UserRecoveryCode
     has_many :webauthn_credentials, Kith.Accounts.WebauthnCredential
     has_many :user_identities, Kith.Accounts.UserIdentity
+    has_many :oidc_identities, Kith.Accounts.OIDCIdentity
 
     timestamps(type: :utc_datetime)
   end
@@ -69,6 +70,17 @@ defmodule Kith.Accounts.User do
     |> validate_email(opts)
     |> validate_password(opts)
     |> maybe_require_tos()
+  end
+
+  @doc "Registers a verified OIDC user without creating a local password."
+  def oidc_registration_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:email, :display_name, :tos_accepted])
+    |> validate_email([])
+    |> update_change(:display_name, &(&1 |> HtmlSanitizeEx.strip_tags() |> String.trim()))
+    |> validate_length(:display_name, max: 255)
+    |> maybe_require_tos()
+    |> put_change(:confirmed_at, DateTime.utc_now(:second))
   end
 
   @doc """
