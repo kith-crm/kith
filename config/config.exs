@@ -7,6 +7,9 @@
 # General application configuration
 import Config
 
+# Authentication handles, OTPs and provider callback credentials must never reach logs.
+config :phoenix, :filter_parameters, ["password", "secret", "token", "code", "state", "binding"]
+
 # Register .vcf (vCard) MIME type for LiveView uploads
 config :mime, :types, %{"text/vcard" => ["vcf"], "application/json" => ["json"]}
 

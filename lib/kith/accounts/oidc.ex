@@ -181,19 +181,9 @@ defmodule Kith.Accounts.OIDC do
     end)
   end
 
-  # Provisional conservative sudo gate. Task 7 replaces this with persisted,
-  # MFA-aware authentication evidence; a provider auth_time alone is insufficient.
-  defp require_fresh!(user, persisted) do
-    fresh? =
-      case user.authenticated_at do
-        %DateTime{} = timestamp ->
-          Accounts.sudo_mode?(user) and DateTime.compare(timestamp, DateTime.utc_now()) != :gt
-
-        _ ->
-          false
-      end
-
-    unless fresh? and not persisted.totp_enabled, do: Repo.rollback(:reauthentication_required)
+  defp require_fresh!(user, _persisted) do
+    unless KithWeb.Authentication.require_recent(user) == :ok,
+      do: Repo.rollback(:reauthentication_required)
   end
 
   defp identity(principal),

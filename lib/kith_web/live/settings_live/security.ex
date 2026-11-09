@@ -131,8 +131,15 @@ defmodule KithWeb.SettingsLive.Security do
   defp handle_password_event("update_password", params, socket) do
     %{"user" => user_params} = params
     user = socket.assigns.current_scope.user
-    true = Accounts.sudo_mode?(user)
 
+    if KithWeb.Authentication.require_recent(user) == :ok do
+      update_sensitive(socket, user, user_params)
+    else
+      {:noreply, redirect(socket, to: ~p"/users/reauth?return_to=security")}
+    end
+  end
+
+  defp update_sensitive(socket, user, user_params) do
     case Accounts.change_user_password(user, user_params) do
       %{valid?: true} = changeset ->
         {:noreply, assign(socket, trigger_submit: true, password_form: to_form(changeset))}

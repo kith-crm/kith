@@ -20,6 +20,7 @@ defmodule Kith.Accounts.User do
     field :tos_accepted_at, :utc_datetime
     field :tos_accepted, :boolean, virtual: true
     field :authenticated_at, :utc_datetime, virtual: true
+    field :mfa_authenticated_at, :utc_datetime, virtual: true
 
     # Profile preferences
     field :display_name, :string

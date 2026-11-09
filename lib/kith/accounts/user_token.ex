@@ -20,6 +20,7 @@ defmodule Kith.Accounts.UserToken do
     field :context, :string
     field :sent_to, :string
     field :authenticated_at, :utc_datetime
+    field :mfa_authenticated_at, :utc_datetime
     belongs_to :user, Kith.Accounts.User
 
     timestamps(type: :utc_datetime, updated_at: false)
@@ -42,8 +43,16 @@ defmodule Kith.Accounts.UserToken do
   """
   def build_session_token(user) do
     token = :crypto.strong_rand_bytes(@rand_size)
-    dt = user.authenticated_at || DateTime.utc_now(:second)
-    {token, %UserToken{token: token, context: "session", user_id: user.id, authenticated_at: dt}}
+    dt = user.authenticated_at
+
+    {token,
+     %UserToken{
+       token: token,
+       context: "session",
+       user_id: user.id,
+       authenticated_at: dt,
+       mfa_authenticated_at: user.mfa_authenticated_at
+     }}
   end
 
   @doc """
@@ -58,8 +67,12 @@ defmodule Kith.Accounts.UserToken do
         join: account in assoc(user, :account),
         where: token.inserted_at > ago(@session_validity_in_days, "day"),
         select:
-          {%{user | authenticated_at: token.authenticated_at, account: account},
-           token.inserted_at}
+          {%{
+             user
+             | authenticated_at: token.authenticated_at,
+               mfa_authenticated_at: token.mfa_authenticated_at,
+               account: account
+           }, token.inserted_at}
 
     {:ok, query}
   end

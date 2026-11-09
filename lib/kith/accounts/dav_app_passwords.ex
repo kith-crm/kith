@@ -77,10 +77,5 @@ defmodule Kith.Accounts.DavAppPasswords do
     end
   end
 
-  # Provisional sudo evidence; task 7 replaces this with persisted MFA-aware freshness.
-  defp fresh?(%User{authenticated_at: %DateTime{} = timestamp} = user) do
-    Kith.Accounts.sudo_mode?(user) and DateTime.compare(timestamp, DateTime.utc_now()) != :gt
-  end
-
-  defp fresh?(_), do: false
+  defp fresh?(user), do: KithWeb.Authentication.require_recent(user) == :ok
 end

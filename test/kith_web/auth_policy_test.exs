@@ -128,7 +128,9 @@ defmodule KithWeb.AuthPolicyTest do
     user = user_fixture()
     secret = Accounts.generate_totp_secret()
     code = :pot.totp(secret)
-    {:ok, _} = Accounts.enable_totp(user, secret, code)
+
+    {:ok, _} =
+      Accounts.enable_totp(%{user | authenticated_at: DateTime.utc_now(:second)}, secret, code)
 
     pending =
       post(conn, "/users/log-in", %{

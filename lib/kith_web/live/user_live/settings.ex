@@ -88,8 +88,15 @@ defmodule KithWeb.UserLive.Settings do
   def handle_event("update_email", params, socket) do
     %{"user" => user_params} = params
     user = socket.assigns.current_scope.user
-    true = Accounts.sudo_mode?(user)
 
+    if KithWeb.Authentication.require_recent(user) == :ok do
+      update_sensitive(socket, user, user_params)
+    else
+      {:noreply, redirect(socket, to: ~p"/users/reauth?return_to=profile")}
+    end
+  end
+
+  defp update_sensitive(socket, user, user_params) do
     case Accounts.change_user_email(user, user_params) do
       %{valid?: true} = changeset ->
         Accounts.deliver_user_update_email_instructions(

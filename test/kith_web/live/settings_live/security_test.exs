@@ -58,6 +58,8 @@ defmodule KithWeb.SettingsLive.SecurityTest do
     assert has_element?(view, "a[href='/users/totp-setup']", "Set up authenticator app")
     refute has_element?(view, "button", "Manage recovery codes")
     Kith.Repo.update!(Ecto.Changeset.change(user, totp_enabled: true))
+    user = %{user | mfa_authenticated_at: DateTime.utc_now(:second)}
+    conn = log_in_user(conn, user)
     {:ok, view, _} = live(conn, "/settings/security")
     assert has_element?(view, "#totp-status", "Enabled")
     refute has_element?(view, "a[href='/users/totp-setup']")
@@ -67,6 +69,8 @@ defmodule KithWeb.SettingsLive.SecurityTest do
     {:ok, view, _} = live(conn, "/users/totp-setup")
     assert has_element?(view, "a[href='/settings/security']", "Cancel")
     Kith.Repo.update!(Ecto.Changeset.change(user, totp_enabled: true))
+    user = %{user | mfa_authenticated_at: DateTime.utc_now(:second)}
+    conn = log_in_user(conn, user)
     assert {:error, {:redirect, %{to: "/settings/security"}}} = live(conn, "/users/totp-setup")
   end
 
@@ -102,6 +106,7 @@ defmodule KithWeb.SettingsLive.SecurityTest do
         token_authenticated_at: DateTime.add(DateTime.utc_now(:second), -21, :minute)
       )
 
-    assert {:error, {:redirect, %{to: "/users/log-in"}}} = live(stale_conn, "/settings/security")
+    assert {:error, {:redirect, %{to: "/users/reauth?return_to=security"}}} =
+             live(stale_conn, "/settings/security")
   end
 end

@@ -458,10 +458,10 @@ defmodule Kith.Accounts do
   recovery codes. Returns `{:ok, user, raw_recovery_codes}` or `{:error, reason}`.
   """
   def enable_totp(user, secret, code) do
-    if valid_totp_code?(secret, code) do
-      do_enable_totp(user, secret)
-    else
-      {:error, :invalid_code}
+    with :ok <- KithWeb.Authentication.require_recent(user) do
+      if valid_totp_code?(secret, code),
+        do: do_enable_totp(user, secret),
+        else: {:error, :invalid_code}
     end
   end
 

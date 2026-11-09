@@ -13,6 +13,7 @@ defmodule KithWeb.UserLive.Login do
           <p class="mt-1 text-sm text-[var(--color-text-secondary)]">
             <%= if @current_scope do %>
               You need to reauthenticate to perform sensitive actions on your account.
+              After authentication, return to your settings and retry the action.
             <% else %>
               <%= if Policy.password_registration_enabled?() do %>
                 Don't have an account?

@@ -8,6 +8,7 @@ defmodule KithWeb.UserAuth do
 
   alias Kith.Accounts
   alias Kith.Accounts.Scope
+  alias Kith.Auth.Challenges
   alias Kith.DuplicateDetection
   alias KithWeb.Plugs.AssignLocale
 
@@ -37,6 +38,7 @@ defmodule KithWeb.UserAuth do
   or falls back to the `signed_in_path/1`.
   """
   def log_in_user(conn, user, params \\ %{}) do
+    user = %{user | authenticated_at: user.authenticated_at || DateTime.utc_now(:second)}
     user_return_to = get_session(conn, :user_return_to)
 
     conn
@@ -50,6 +52,7 @@ defmodule KithWeb.UserAuth do
   It clears all session data for safety. See renew_session.
   """
   def log_out_user(conn) do
+    Challenges.cancel_browser(get_session(conn, :auth_challenge_binding))
     user_token = get_session(conn, :user_token)
     user_token && Accounts.delete_user_session_token(user_token)
 
@@ -265,13 +268,20 @@ defmodule KithWeb.UserAuth do
   def on_mount(:require_sudo_mode, _params, session, socket) do
     socket = mount_current_scope(socket, session)
 
-    if Accounts.sudo_mode?(socket.assigns.current_scope.user, -10) do
+    if KithWeb.Authentication.require_recent(socket.assigns.current_scope.user) == :ok do
       {:cont, socket}
     else
+      destination =
+        case socket.view do
+          KithWeb.UserLive.TotpSetup -> "totp"
+          KithWeb.UserLive.Settings -> "profile"
+          _ -> "security"
+        end
+
       socket =
         socket
         |> Phoenix.LiveView.put_flash(:error, "You must re-authenticate to access this page.")
-        |> Phoenix.LiveView.redirect(to: ~p"/users/log-in")
+        |> Phoenix.LiveView.redirect(to: ~p"/users/reauth?return_to=#{destination}")
 
       {:halt, socket}
     end

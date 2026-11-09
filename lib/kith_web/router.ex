@@ -342,6 +342,7 @@ defmodule KithWeb.Router do
   scope "/", KithWeb do
     pipe_through [:browser, :require_authenticated_user, :require_confirmed_user]
 
+    get "/users/reauth", UserSessionController, :reauth
     get "/settings/contact-sync/reauth", UserSessionController, :contact_sync_reauth
 
     live_session :require_authenticated_user,

@@ -2,12 +2,10 @@ defmodule KithWeb.UserSessionController do
   use KithWeb, :controller
 
   alias Kith.Accounts
-  alias Kith.Auth.Policy
-  alias KithWeb.UserAuth
+  alias Kith.Auth.{Challenges, Policy}
+  alias KithWeb.{Authentication, UserAuth}
 
-  plug :require_password_login when action in [:create, :totp_verify, :update_password]
-
-  @totp_token_max_age 300
+  plug :require_password_login when action in [:create, :update_password]
 
   defp require_password_login(conn, _opts) do
     if Policy.password_login_enabled?() do
@@ -18,6 +16,20 @@ defmodule KithWeb.UserSessionController do
       |> redirect(to: ~p"/users/log-in")
       |> halt()
     end
+  end
+
+  def reauth(conn, params) do
+    destination =
+      case params["return_to"] do
+        "totp" -> "/users/totp-setup"
+        "profile" -> "/users/settings"
+        _ -> "/settings/security"
+      end
+
+    conn
+    |> put_session(:user_return_to, destination)
+    |> put_resp_header("cache-control", "no-store")
+    |> redirect(to: ~p"/users/log-in")
   end
 
   def contact_sync_reauth(conn, params) do
@@ -66,19 +78,24 @@ defmodule KithWeb.UserSessionController do
     %{"email" => email, "password" => password} = user_params
 
     if user = Accounts.get_user_by_email_and_password(email, password) do
-      if user.totp_enabled do
-        # TOTP required — create a signed intermediate token instead of a session
-        totp_token =
-          Phoenix.Token.sign(conn, "totp_challenge", user.id)
+      current = conn.assigns[:current_scope] && conn.assigns.current_scope.user
 
+      if current && current.id != user.id do
         conn
-        |> put_session(:totp_token, totp_token)
-        |> put_session(:remember_me, user_params["remember_me"] == "true")
-        |> redirect(to: ~p"/users/two-factor")
+        |> put_flash(:error, "Authenticate with your current account.")
+        |> redirect(to: ~p"/users/log-in")
       else
         conn
         |> put_flash(:info, info)
-        |> UserAuth.log_in_user(user, user_params)
+        |> Authentication.begin(user, %{
+          method: :password,
+          intent: if(current, do: :reauth, else: :login),
+          session_token: get_session(conn, :user_token),
+          remember_me: user_params["remember_me"] == "true",
+          return_to:
+            get_session(conn, :user_return_to) ||
+              if(current, do: "/users/settings", else: "/dashboard")
+        })
       end
     else
       conn
@@ -98,54 +115,28 @@ defmodule KithWeb.UserSessionController do
     end
   end
 
-  defp verify_totp_challenge(
-         conn,
-         %{"totp_token" => totp_token, "totp" => %{"code" => code}} = params
-       )
-       when is_binary(totp_token) do
-    remember_me = params["remember_me"] == "true"
+  defp verify_totp_challenge(conn, %{"totp_token" => handle, "totp" => %{"code" => code}}) do
+    case Challenges.complete(handle, get_session(conn, :auth_challenge_binding), code) do
+      {:ok, completion} ->
+        Authentication.finish(conn, completion)
 
-    case Phoenix.Token.verify(conn, "totp_challenge", totp_token, max_age: @totp_token_max_age) do
-      {:ok, user_id} ->
-        case Kith.RateLimiter.check_totp_user(user_id) do
-          :ok -> authenticate_totp(conn, user_id, code, totp_token, remember_me)
-          {:error, :rate_limited, retry_after_ms} -> totp_rate_limited(conn, retry_after_ms)
-        end
+      {:error, :rate_limited} ->
+        totp_rate_limited(conn, 60_000)
 
-      {:error, _reason} ->
+      {:error, :invalid} ->
+        if get_session(conn, :totp_token) == handle,
+          do:
+            conn
+            |> put_flash(:error, "Invalid authentication code.")
+            |> redirect(to: ~p"/users/two-factor"),
+          else: expired_totp_challenge(conn)
+
+      {:error, :expired} ->
         expired_totp_challenge(conn)
     end
   end
 
   defp verify_totp_challenge(conn, _params), do: expired_totp_challenge(conn)
-
-  defp authenticate_totp(conn, user_id, code, totp_token, remember_me) do
-    user = Accounts.get_user!(user_id)
-
-    cond do
-      Accounts.valid_totp_code?(user.totp_secret, code) ->
-        conn
-        |> delete_session(:totp_token)
-        |> put_flash(:info, "Welcome back!")
-        |> UserAuth.log_in_user(user, %{"remember_me" => to_string(remember_me)})
-
-      Accounts.use_recovery_code(user, code) ->
-        conn
-        |> delete_session(:totp_token)
-        |> put_flash(
-          :info,
-          "Welcome back! You used a recovery code. #{Accounts.recovery_code_count(user)} codes remaining."
-        )
-        |> UserAuth.log_in_user(user, %{"remember_me" => to_string(remember_me)})
-
-      true ->
-        conn
-        |> put_flash(:error, "Invalid authentication code.")
-        |> put_session(:totp_token, totp_token)
-        |> put_session(:remember_me, remember_me)
-        |> redirect(to: ~p"/users/two-factor")
-    end
-  end
 
   defp expired_totp_challenge(conn) do
     conn
@@ -168,16 +159,26 @@ defmodule KithWeb.UserSessionController do
     |> halt()
   end
 
-  def update_password(conn, %{"user" => user_params} = params) do
+  def update_password(conn, %{"user" => user_params}) do
     user = conn.assigns.current_scope.user
-    true = Accounts.sudo_mode?(user)
-    {:ok, {_user, expired_tokens}} = Accounts.update_user_password(user, user_params)
 
-    UserAuth.disconnect_sessions(expired_tokens)
+    with :ok <- Authentication.require_recent(user),
+         {:ok, {updated, expired_tokens}} <- Accounts.update_user_password(user, user_params) do
+      UserAuth.disconnect_sessions(expired_tokens)
 
-    conn
-    |> put_session(:user_return_to, ~p"/settings/security")
-    |> create(params, "Password updated successfully!")
+      Authentication.finish(conn, %{
+        user: updated,
+        intent: :login,
+        authenticated_at: user.authenticated_at,
+        mfa_authenticated_at: user.mfa_authenticated_at,
+        return_to: "/settings/security"
+      })
+    else
+      _ ->
+        conn
+        |> put_flash(:error, "Please authenticate again before changing your password.")
+        |> redirect(to: ~p"/users/reauth?return_to=security")
+    end
   end
 
   def delete(conn, _params) do

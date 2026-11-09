@@ -48,7 +48,9 @@ defmodule KithWeb.API.AuthControllerTest do
       user = user_fixture()
       secret = Accounts.generate_totp_secret()
       code = :pot.totp(secret)
-      {:ok, _} = Accounts.enable_totp(user, secret, code)
+
+      {:ok, _} =
+        Accounts.enable_totp(%{user | authenticated_at: DateTime.utc_now(:second)}, secret, code)
 
       # Without TOTP code
       conn1 =
@@ -77,7 +79,9 @@ defmodule KithWeb.API.AuthControllerTest do
       user = user_fixture()
       secret = Accounts.generate_totp_secret()
       code = :pot.totp(secret)
-      {:ok, {user, recovery_codes}} = Accounts.enable_totp(user, secret, code)
+
+      {:ok, {user, recovery_codes}} =
+        Accounts.enable_totp(%{user | authenticated_at: DateTime.utc_now(:second)}, secret, code)
 
       conn =
         post(conn, ~p"/api/auth/token", %{

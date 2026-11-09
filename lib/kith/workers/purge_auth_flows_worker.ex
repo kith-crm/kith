@@ -9,6 +9,7 @@ defmodule Kith.Workers.PurgeAuthFlowsWorker do
   def perform(_job) do
     now = DateTime.utc_now()
     Repo.delete_all(from(f in Transaction, where: f.expires_at <= ^now))
+    Repo.delete_all(from(f in Kith.Auth.Challenge, where: f.expires_at <= ^now))
     :ok
   end
 end

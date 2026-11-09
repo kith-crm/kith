@@ -1,6 +1,8 @@
 defmodule KithWeb.UserLive.TotpSetup do
   use KithWeb, :live_view
 
+  on_mount {KithWeb.UserAuth, :require_sudo_mode}
+
   alias Kith.Accounts
 
   @impl true
@@ -106,7 +108,7 @@ defmodule KithWeb.UserLive.TotpSetup do
   end
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     user = socket.assigns.current_scope.user
 
     if user.totp_enabled do
@@ -121,6 +123,7 @@ defmodule KithWeb.UserLive.TotpSetup do
 
       {:ok,
        assign(socket,
+         session_token: session["user_token"],
          secret: secret,
          qr_data_url: qr_data_url,
          recovery_codes: nil,
@@ -136,10 +139,24 @@ defmodule KithWeb.UserLive.TotpSetup do
 
     case Accounts.enable_totp(user, secret, code) do
       {:ok, {_user, raw_codes}} ->
+        import Ecto.Query
+
+        Kith.Repo.update_all(
+          from(t in Kith.Accounts.UserToken,
+            where:
+              t.token == ^socket.assigns.session_token and t.user_id == ^user.id and
+                t.context == "session"
+          ),
+          set: [mfa_authenticated_at: DateTime.utc_now(:second)]
+        )
+
         {:noreply,
          socket
          |> put_flash(:info, "Two-factor authentication has been enabled.")
          |> assign(recovery_codes: raw_codes)}
+
+      {:error, :reauthentication_required} ->
+        {:noreply, redirect(socket, to: ~p"/users/reauth?return_to=totp")}
 
       {:error, :invalid_code} ->
         {:noreply,
