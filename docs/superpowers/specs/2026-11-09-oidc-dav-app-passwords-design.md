@@ -1,7 +1,9 @@
 # Generic OIDC and DAV app passwords
 
 **Source:** User discussion and approved scope, 2026-11-09.
-**Status:** Written design for review; implementation has not started.
+**Status:** Design and settings mockup approved in conversation; implementation has not started.
+**Approved UI:** [Settings iteration 2](../../design/previews/show-me-settings-v2.html). [Login/MFA exploration](../../design/previews/show-me-oidc-ui.html) supplies the login direction only; its combined settings screen is superseded.
+**Implementation plan:** [Subagent-driven delivery plan](../plans/2026-11-09-oidc-dav-app-passwords.md).
 **Research:** [OIDC standards and Assent 0.3.2 findings](../../design/oidc-research.md).
 
 ## Goal and scope
@@ -76,6 +78,46 @@ Provide keyboard-operable controls, accessible names/errors, visible focus, and 
 
 Logout ends the Kith session. Provider-wide logout, back-channel logout, SCIM, role/group mapping, multiple simultaneous generic issuers, and automatic external deprovisioning are excluded. Clearly document that disabling someone at the issuer does not revoke existing Kith sessions, API tokens, or DAV credentials. Avoid retaining access/refresh/ID tokens after login unless a concrete implemented function needs them; initial login-only scope does not.
 
+## Settings integration audit and approved revised scope
+
+Source inspection following the UI preview found that the visual primitives exist, but the preview's information architecture does not. This section supersedes the first preview's combined Security/DAV screen. The user approved iteration 2 and requested an implementation plan using subagent-driven development. Preview controls, demo messages, and simulated credentials are not product UI. Preserve existing application chrome; the mockup demonstrates settings organization rather than replacing the application shell.
+
+### Existing constraints
+
+- `components/ui.ex` already supplies cards, headers, inputs, buttons, modals and tabs. Preserve Kith's warm surface/amber accent tokens, typography and spacing; the HTML preview is not production styling.
+- `SettingsLayout.settings_shell/1` presents up to eleven destinations in one flat list. On mobile it stacks the full navigation above the page content. Adding more flat destinations would worsen the current navigation burden.
+- `UserLive.Settings` combines email/password under Profile and requires recent authentication on the entire page. There is no existing Security destination or Preferences destination matching the mockup.
+- TOTP setup exists as a standalone auth-layout flow, but the inspected settings page has no security overview/entry point. Passkey/social management UI is not added by this feature.
+- CardDAV instructions currently live below Immich in `SettingsLive.Integrations`, whose navigation and backend require account-management permission. Personal DAV credentials must be available to every eligible user, independently of permission to manage account integrations.
+- Existing CardDAV setup advertises `Endpoint.url() <> "/dav/principals/"`. Reuse and verify the existing supported discovery/setup URL; the preview's illustrative `/dav/` URL is not authoritative.
+- `UI.tabs` uses LiveView button events rather than route-aware navigation and lacks a complete keyboard tab interaction contract. Use ordinary route links for settings destinations rather than adopting it unchanged as the mobile navigation.
+
+### Recommended organization
+
+Keep one shared settings shell and group its navigation by ownership/task:
+
+- **Personal:** Profile, Security, Contact sync.
+- **Workspace:** Account, Tags, Emotions, Activity Types, Life Event Types, Integrations.
+- **Data:** Import, Import History, Export, Audit Log.
+
+Retain all existing destination permissions, especially Account, Integrations and Audit Log. Group headings do not confer access. Hide groups with no visible destinations. Use links with `aria-current`; on small screens replace the long stacked sidebar with a labelled native destination selector grouped by the same headings, preserving direct links, current location and browser history. On desktop retain the sidebar with section labels. Test both modes with keyboard and Android navigation.
+
+**Profile (`/users/settings`):** retain email and its confirmation flow. Move the password form to Security rather than duplicating it. Keep email changes protected by recent authentication and preserve confirmation-token routes.
+
+**Security (`/settings/security`):** account password controls when enabled, OIDC linking/status, and local two-factor status with a link into the existing TOTP setup flow. Display an actionable reauthentication state for sensitive operations. Do not implement Google/GitHub or passkey management as part of this relocation; existing behavior remains unchanged. Use focused cards and short status summaries, not an always-expanded collection of setup forms. The mockup recovery-options button must expose only supported existing recovery behavior; it does not authorize a new recovery-code regeneration subsystem.
+
+**Contact sync (`/settings/contact-sync`):** server URL, username, client instructions and DAV app passwords in one personal destination. Keep the credential list as the default view; open creation and one-time secret display only on request, using existing modal primitives or a focused in-page step on small screens. Require recent authentication for credential mutations, not merely reading setup instructions. Retain owner checks on every event after LiveView mount/reconnect.
+
+**Integrations (`/settings/integrations`):** retain account-owned Immich configuration and replace the moved DAV section with a link to Contact sync. Preserve existing deep links where present and test old navigation/return destinations. Do not redesign unrelated settings content or change route names for existing data/workspace pages.
+
+### Scope and acceptance impact
+
+This is a targeted settings navigation and responsibility change in addition to authentication work. It touches the shared shell, profile/password placement, new security/sync routes and LiveViews, integrations instructions, TOTP return destinations and settings tests. It must be represented explicitly in the implementation plan rather than estimated as two additional cards on the current page.
+
+Add regression coverage for every existing destination and active state, role-specific visibility and direct-route authorization, desktop/sidebar and mobile/selector behavior, return from authentication/TOTP, email confirmation, password-form relocation, personal DAV access for non-admin users, and the retained Immich permission boundary. Test that no unavailable or empty group creates a dead end and that navigating away clears one-time credential display.
+
+Alternatives: appending everything to Profile is smaller but compounds clutter; redesigning every settings page is substantially broader than this feature. The grouped shell and separate Security/Contact sync destinations provide focused ownership while reusing the current component system.
+
 ## Verification and acceptance
 
 Coverage measures security boundaries and completed journeys, not a line-percentage target. Every requirement below needs a positive case and relevant rejection/boundary cases. Backend policy tests must call direct endpoints/context functions rather than relying on hidden UI controls.
@@ -97,4 +139,4 @@ Report commands, results and exact environments. If Android, DAVx5 or live-provi
 
 ## Delivery boundary
 
-Implement configuration and policy, OIDC backend/UI, and DAV credentials backend/UI as reviewable slices with their tests. Include environment examples, deployment/migration notes, issuer registration/callback instructions, operator recovery and DAV setup documentation. Preserve legacy identities and credentials without a destructive backfill. Google/GitHub UI changes remain in issue #62. This design is the source for a subsequent detailed Superpowers implementation plan after written-spec review.
+Implement configuration and policy, OIDC backend/UI, and DAV credentials backend/UI as reviewable slices with their tests. Include environment examples, deployment/migration notes, issuer registration/callback instructions, operator recovery and DAV setup documentation. Preserve legacy identities and credentials without a destructive backfill. Google/GitHub UI changes remain in issue #62. This design is the source for a subsequent detailed Superpowers implementation plan using subagent-driven development, as explicitly requested by the user.
