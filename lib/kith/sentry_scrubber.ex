@@ -2,8 +2,12 @@ defmodule Kith.SentryScrubber do
   @moduledoc "Sentry 14 before_send boundary for authentication credentials in event payloads."
   alias Kith.SentryEventHandler
 
-  @sensitive ~w(password secret token code state binding nonce verifier authorization cookie payload)
+  @sensitive ~w(password secret token code state binding nonce verifier authorization cookie payload error_description error_uri)
   @query_credentials ~r/\b(code|state|nonce|code_verifier|access_token|refresh_token|id_token|client_secret|password|auth_challenge_binding)(=|%3D)[^&\s"<>]*/i
+
+  # Provider diagnostics may echo arbitrary credentials without recognizable
+  # credential key names. Remove the entire serialized field, including spaces.
+  @provider_diagnostics ~r/\b(error_description|error_uri)(=|%3D)[^&]*/i
 
   def before_send(%Sentry.Event{} = event) do
     event |> SentryEventHandler.before_send() |> scrub()
@@ -17,8 +21,10 @@ defmodule Kith.SentryScrubber do
   defp scrub(list) when is_list(list), do: Enum.map(list, &scrub/1)
   defp scrub({key, value}), do: scrub_pair({key, value})
 
-  defp scrub(value) when is_binary(value),
-    do: Regex.replace(@query_credentials, value, "\\1=[FILTERED]")
+  defp scrub(value) when is_binary(value) do
+    value = Regex.replace(@provider_diagnostics, value, "\\1=[FILTERED]")
+    Regex.replace(@query_credentials, value, "\\1=[FILTERED]")
+  end
 
   defp scrub(value), do: value
 

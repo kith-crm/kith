@@ -82,6 +82,38 @@ defmodule Kith.SentryUpgradeIntegrationTest do
         do: refute(body =~ marker)
   end
 
+  test "actual envelope filters complete provider diagnostics and retains the event" do
+    query =
+      URI.encode_query(%{
+        "error" => "access_denied",
+        "error_description" => "Rejected credential CREDENTIALMARK",
+        "error_uri" => "https://issuer.test/diagnostics/URICREDENTIALMARK"
+      })
+
+    assert {:ok, _} =
+             Sentry.capture_exception(%RuntimeError{message: "Provider denied authorization"},
+               request: %{
+                 url: "https://kith.test/auth/oidc/callback?" <> query,
+                 query_string: query
+               },
+               extra: %{
+                 provider: %{
+                   error_description: "Rejected credential NESTEDMARK",
+                   error_uri: "https://issuer.test/NESTEDURIMARK"
+                 },
+                 diagnostic:
+                   "error_description=Rejected credential SERIALIZEDMARK&error=access_denied"
+               }
+             )
+
+    assert :ok = Sentry.flush(timeout: 5_000)
+    assert_receive {:sentry_envelope, body, _, "/api/1/envelope/"}, 1_000
+    assert body =~ "Provider denied authorization"
+
+    for marker <- ~w(CREDENTIALMARK URICREDENTIALMARK NESTEDMARK NESTEDURIMARK SERIALIZEDMARK),
+        do: refute(body =~ marker)
+  end
+
   test "actual envelope redacts request, URL, nested context and enriches user identity" do
     Logger.metadata(user_id: 12, account_id: 34)
 

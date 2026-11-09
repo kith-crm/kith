@@ -487,15 +487,52 @@ defmodule KithWeb.OIDCControllerTest do
       start = get(conn, "/auth/oidc", %{"return_to" => "https://attacker.test"})
       params = authorize(start, fixture)
 
+      previous_level = Logger.level()
+      Logger.configure(level: :debug)
+      on_exit(fn -> Logger.configure(level: previous_level) end)
+
       output =
         ExUnit.CaptureLog.capture_log([level: :debug], fn ->
           done = callback_conn(start) |> get("/auth/oidc/callback", params)
           assert redirected_to(done) == "/dashboard"
         end)
 
+      assert output =~ "Processing with KithWeb.OIDCController.callback/2"
       refute output =~ params["code"]
       refute output =~ params["state"]
       refute output =~ get_session(start, :auth_challenge_binding)
+    end
+
+    test "provider denial logs filter complete opaque diagnostics", %{
+      conn: conn,
+      fixture: fixture
+    } do
+      start = get(conn, "/auth/oidc")
+
+      params =
+        authorize(start, fixture)
+        |> Map.merge(%{
+          "error" => "access_denied",
+          "error_description" => "Rejected credential CREDENTIALMARK",
+          "error_uri" => "https://issuer.test/diagnostics/URICREDENTIALMARK"
+        })
+
+      previous_level = Logger.level()
+      Logger.configure(level: :debug)
+      on_exit(fn -> Logger.configure(level: previous_level) end)
+
+      output =
+        ExUnit.CaptureLog.capture_log([level: :debug], fn ->
+          denied = callback_conn(start) |> get("/auth/oidc/callback", params)
+          assert redirected_to(denied) == "/users/log-in"
+          refute get_session(denied, :user_token)
+        end)
+
+      assert output =~ "Processing with KithWeb.OIDCController.callback/2"
+      refute output =~ "CREDENTIALMARK"
+      refute output =~ "URICREDENTIALMARK"
+
+      refute Enum.any?(Kith.OIDCFixture.requests(fixture), fn {path, _, _} -> path == "/token" end)
     end
   end
 

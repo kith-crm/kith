@@ -16,7 +16,9 @@ config :phoenix, :filter_parameters, [
   "state",
   "binding",
   "nonce",
-  "verifier"
+  "verifier",
+  "error_description",
+  "error_uri"
 ]
 
 # Register .vcf (vCard) MIME type for LiveView uploads
@@ -148,7 +150,17 @@ config :kith, :oauth_providers, %{}
 config :sentry,
   telemetry_processor_categories: [:error],
   before_send: {Kith.SentryScrubber, :before_send},
-  scrubber: [param_keys: ["code", "state", "nonce", "verifier", "binding"]],
+  scrubber: [
+    param_keys: [
+      "code",
+      "state",
+      "nonce",
+      "verifier",
+      "binding",
+      "error_description",
+      "error_uri"
+    ]
+  ],
   before_send_metric: {Kith.SentryEventHandler, :before_send_metric},
   logs: nil,
   traces_sample_rate: nil,
