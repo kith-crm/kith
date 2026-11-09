@@ -71,7 +71,9 @@ defmodule Kith.Auth.OIDC do
     params = [scope: "email profile", response_mode: "query"]
 
     params =
-      if flow.intent in [:link, :reauth], do: Keyword.put(params, :max_age, 0), else: params
+      if flow.intent in [:link, :reauth],
+        do: Keyword.merge(params, max_age: 0, prompt: "login"),
+        else: params
 
     config ++
       [

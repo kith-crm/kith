@@ -74,6 +74,8 @@ defmodule Kith.Auth.OIDCTest do
     assert query["nonce"] == flow.nonce
     assert query["state"] == flow.state
     assert query["response_type"] == "code"
+    refute Map.has_key?(query, "prompt")
+    refute Map.has_key?(query, "max_age")
     assert query["response_mode"] == "query"
     assert query["scope"] == "openid email profile"
     assert query["redirect_uri"] == flow.redirect_uri
@@ -247,17 +249,18 @@ defmodule Kith.Auth.OIDCTest do
     assert Enum.count(OIDCFixture.requests(fixture), &(elem(&1, 0) == "/jwks")) == 2
   end
 
-  test "fresh authentication requests max_age and binds auth_time to initiation", %{
-    fixture: fixture,
-    config: config
-  } do
+  test "sensitive authentication requests interactive login and max_age and binds auth_time to initiation",
+       %{
+         fixture: fixture,
+         config: config
+       } do
     user = Kith.AccountsFixtures.user_fixture()
 
-    for offset <- [-61, -60, 0, 61] do
+    for intent <- [:link, :reauth], offset <- [-61, -60, 0, 61] do
       {:ok, flow} =
         Transactions.start(
           %{
-            intent: :reauth,
+            intent: intent,
             issuer: config[:issuer],
             redirect_uri: "https://kith.test/auth/oidc/callback",
             return_to: "/settings/security",
@@ -269,7 +272,9 @@ defmodule Kith.Auth.OIDCTest do
 
       now = DateTime.to_unix(flow.initiated_at)
       {:ok, url} = OIDC.authorize(flow, config)
-      assert URI.decode_query(URI.parse(url).query)["max_age"] == "0"
+      query = URI.decode_query(URI.parse(url).query)
+      assert query["max_age"] == "0"
+      assert query["prompt"] == "login"
       OIDCFixture.update(fixture, %{claims: %{"auth_time" => now + offset}})
       result = callback(fixture, flow, Keyword.put(config, :now, flow.initiated_at))
 

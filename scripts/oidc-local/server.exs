@@ -13,7 +13,7 @@ Application.put_env(
     username: "authentik",
     password: System.fetch_env!("POSTGRES_PASSWORD"),
     port: 15449,
-    database: "kith_local_" <> run["run_id"],
+    database: "kith_local_" <> run["run_id"] <> System.get_env("KITH_OIDC_DATABASE_SUFFIX", ""),
     pool_size: 4
   )
 )
@@ -85,14 +85,30 @@ defmodule Kith.RealProviderPlug do
       {:ok, body, conn} = read_body(conn)
       args = Jason.decode!(body)
 
-      if args["action"] in ["prepare", "stale", "expire", "revoke_sessions", "snapshot"] and
+      if args["action"] in [
+           "prepare",
+           "stale",
+           "expire",
+           "revoke_sessions",
+           "snapshot",
+           "environment"
+         ] and
            get_req_header(conn, "authorization") == [
              "Bearer " <> System.fetch_env!("KITH_TEST_FIXTURE_TOKEN")
            ] do
         send_resp(
           conn,
           200,
-          Jason.encode!(Kith.OIDCBrowserControl.run(args["action"], args["args"]))
+          Jason.encode!(
+            if args["action"] == "environment" do
+              %{
+                password: Application.fetch_env!(:kith, :auth).password_login_enabled,
+                database_suffix: System.get_env("KITH_OIDC_DATABASE_SUFFIX", "")
+              }
+            else
+              Kith.OIDCBrowserControl.run(args["action"], args["args"])
+            end
+          )
         )
       else
         send_resp(conn, 404, "")

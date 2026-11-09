@@ -69,3 +69,24 @@ allowlist of service names/status/exit codes/OOM/health failure counts/restarts;
 it contains no raw log bodies, headers, query strings, environment or credentials.
 Raw logs remain private and must not be published. Preserve these artifacts with
 the report before explicitly deleting private run state.
+
+Real-provider desktop checks: `KITH_OIDC_PASSWORD=true
+KITH_OIDC_DATABASE_SUFFIX=_unique node scripts/oidc-local/browser.mjs` after starting
+a matching fresh app/database with `restart-app.sh` and the same environment.
+The restart script remains attached; it uses the ownership gate and restarts only
+Kith, retaining provider/proxy. Use a new suffix per full run: provider users persist
+but Kith users must not. Run again with password false and another fresh suffix.
+Do not overlap full runs. Private app-mode.json records the active policy/database.
+The optional KITH_CASE substring runs a targeted case against an existing prepared
+database; it does not satisfy a full fresh-run requirement.
+
+The browser harness uses Chromium's ephemeral exact-leaf SPKI allowlist with local
+resolver mappings, never ignoreHTTPSErrors. It reads disposable credentials only
+from run.json, and emits safe case names/statuses. No screenshots/traces/videos or
+saved cookies are created. Private browser-<policy><database-suffix>.json files hold per-run
+safe case results and policy/database identity verified against the running app. Protocol observation in the TLS edge stores only booleans and
+HTTP status for token exchanges; no code/verifier/token/header/claim values are
+written. Successful Kith sessions prove its normal signature/claim validation ran;
+proxy claim-shape booleans alone do not prove signature validation. consent.py applies and then disables an owned Authentik application access policy
+for actual provider denial attempts (the provider renders denial with HTTP200). See the Task3
+report for unresolved cases; a harness completion message does not imply all pass.

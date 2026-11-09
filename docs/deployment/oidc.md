@@ -63,7 +63,7 @@ and explicit configured terms acceptance. External roles/groups confer no member
 or privilege. Changing issuer does not migrate old identities.
 
 Sensitive actions require completed authentication within 600 seconds, including
-local MFA where enabled. OIDC reauthentication requests `max_age=0` and validates
+local MFA where enabled. OIDC linking and reauthentication request `prompt=login` with `max_age=0` and validate
 `auth_time` against initiation (60 seconds skew); a remembered Kith session alone
 cannot satisfy it. Unlink refuses to remove the last usable interactive method under
 current deployment policy; DAV credentials do not count. No provider tokens are
