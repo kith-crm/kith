@@ -15,10 +15,12 @@ defmodule KithWeb.UserLive.Login do
               You need to reauthenticate to perform sensitive actions on your account.
               After authentication, return to your settings and retry the action.
             <% else %>
-              <%= if Policy.password_registration_enabled?() do %>
+              <%= if Policy.registration_enabled?() and (Policy.password_login_enabled?() or Policy.oidc_enabled?()) do %>
                 Don't have an account?
                 <.link
-                  navigate={~p"/users/register"}
+                  href={
+                    if Policy.password_login_enabled?(), do: ~p"/users/register", else: ~p"/auth/oidc"
+                  }
                   class="font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors"
                 >
                   Sign up
@@ -26,6 +28,27 @@ defmodule KithWeb.UserLive.Login do
               <% end %>
             <% end %>
           </p>
+        </div>
+
+        <div :if={Policy.oidc_enabled?()}>
+          <UI.button :if={!@current_scope} href={~p"/auth/oidc"} class="w-full">
+            Continue with {Application.fetch_env!(:kith, :auth).oidc[:display_name] ||
+              "OpenID Connect"}
+          </UI.button>
+          <.form
+            :if={@current_scope}
+            for={%{}}
+            action={~p"/users/oidc/reauth"}
+            method="post"
+            id="oidc-reauth-form"
+            phx-submit="oidc_reauth"
+            phx-trigger-action={@oidc_trigger_submit}
+          >
+            <UI.button class="w-full" phx-disable-with="Connecting...">
+              Verify with {Application.fetch_env!(:kith, :auth).oidc[:display_name] ||
+                "OpenID Connect"}
+            </UI.button>
+          </.form>
         </div>
 
         <.form
@@ -140,11 +163,18 @@ defmodule KithWeb.UserLive.Login do
 
     form = to_form(%{"email" => email}, as: "user")
 
-    {:ok, assign(socket, form: form, trigger_submit: false)}
+    {:ok, assign(socket, form: form, trigger_submit: false, oidc_trigger_submit: false)}
   end
 
   @impl true
   def handle_event("submit", _params, socket) do
     {:noreply, assign(socket, :trigger_submit, Policy.password_login_enabled?())}
+  end
+
+  def handle_event("oidc_reauth", _, socket) do
+    {:noreply,
+     assign(socket,
+       oidc_trigger_submit: Policy.oidc_enabled?() and not is_nil(socket.assigns.current_scope)
+     )}
   end
 end

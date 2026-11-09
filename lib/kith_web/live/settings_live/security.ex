@@ -71,6 +71,46 @@ defmodule KithWeb.SettingsLive.Security do
           </details>
         </UI.card>
 
+        <UI.card :if={Policy.oidc_enabled?()} class="mt-6">
+          <:header>Connected sign-in</:header>
+          <p class="text-sm font-medium">
+            {Application.fetch_env!(:kith, :auth).oidc[:display_name] || "OpenID Connect"}
+          </p>
+          <p id="oidc-status" class="mt-1 text-sm">
+            {if @oidc_identities == [], do: "Not connected", else: "Connected"}
+          </p>
+          <p :if={@oidc_identities != []} class="text-sm">{@current_email}</p>
+          <.form
+            :if={@oidc_identities == []}
+            for={%{}}
+            action={~p"/users/oidc/link"}
+            id="oidc-link-form"
+            phx-submit="link_oidc"
+            phx-trigger-action={@oidc_trigger_submit}
+            method="post"
+            class="mt-4"
+          >
+            <UI.button phx-disable-with="Connecting...">Connect account</UI.button>
+          </.form>
+          <UI.button
+            :for={identity <- @oidc_identities}
+            id={"oidc-unlink-#{identity.id}"}
+            phx-click="confirm_unlink"
+            phx-value-id={identity.id}
+            class="mt-4"
+          >Unlink</UI.button>
+          <div :if={@unlink_id} class="mt-4 space-y-3">
+            <p>Unlink this identity? You must keep another available sign-in method.</p>
+            <UI.button
+              id="oidc-unlink-confirm"
+              phx-click="unlink_oidc"
+              phx-disable-with="Unlinking..."
+            >Unlink account</UI.button>
+            <UI.button phx-click="cancel_unlink">Cancel</UI.button>
+          </div>
+          <p role="status" class="mt-3 text-sm">{@oidc_status}</p>
+        </UI.card>
+
         <UI.card class="mt-6">
           <:header>Two-factor authentication</:header>
           <p class="text-sm font-medium">Authenticator app</p>
@@ -98,6 +138,12 @@ defmodule KithWeb.SettingsLive.Security do
     {:ok,
      socket
      |> assign(:current_email, user.email)
+     |> assign(
+       oidc_identities: current_identities(user),
+       unlink_id: nil,
+       oidc_status: nil,
+       oidc_trigger_submit: false
+     )
      |> assign(:password_login_enabled, Policy.password_login_enabled?())
      |> assign(
        :password_form,
@@ -114,6 +160,59 @@ defmodule KithWeb.SettingsLive.Security do
     else
       {:noreply, assign(socket, password_login_enabled: false, trigger_submit: false)}
     end
+  end
+
+  def handle_event("link_oidc", _, socket) do
+    if KithWeb.Authentication.require_recent(socket.assigns.current_scope.user) == :ok do
+      {:noreply, assign(socket, oidc_trigger_submit: Policy.oidc_enabled?())}
+    else
+      {:noreply, redirect(socket, to: ~p"/users/reauth?return_to=security")}
+    end
+  end
+
+  def handle_event("confirm_unlink", %{"id" => id}, socket) do
+    owned =
+      Enum.find(current_identities(socket.assigns.current_scope.user), &(to_string(&1.id) == id))
+
+    {:noreply, assign(socket, unlink_id: owned && owned.id)}
+  end
+
+  def handle_event("cancel_unlink", _, socket), do: {:noreply, assign(socket, unlink_id: nil)}
+
+  def handle_event("unlink_oidc", _, socket) do
+    user = socket.assigns.current_scope.user
+
+    cond do
+      KithWeb.Authentication.require_recent(user) != :ok ->
+        {:noreply, redirect(socket, to: ~p"/users/reauth?return_to=security")}
+
+      not Policy.oidc_enabled?() or is_nil(socket.assigns.unlink_id) ->
+        {:noreply, assign(socket, oidc_status: "Please select an identity to unlink.")}
+
+      true ->
+        case Accounts.OIDC.unlink(user, socket.assigns.unlink_id) do
+          :ok ->
+            {:noreply,
+             assign(socket,
+               oidc_identities: current_identities(user),
+               unlink_id: nil,
+               oidc_status: "Identity unlinked."
+             )}
+
+          {:error, :last_login_method} ->
+            {:noreply,
+             assign(socket, oidc_status: "Cannot unlink your last available sign-in method.")}
+
+          _ ->
+            {:noreply,
+             assign(socket, oidc_status: "Unable to unlink this identity. Please try again.")}
+        end
+    end
+  end
+
+  defp current_identities(user) do
+    issuer = if Policy.oidc_enabled?(), do: Application.fetch_env!(:kith, :auth).oidc[:issuer]
+    Enum.filter(Accounts.OIDC.list(user), &(&1.issuer == issuer))
   end
 
   defp handle_password_event("validate_password", params, socket) do

@@ -118,6 +118,15 @@ defmodule KithWeb.UserLive.Registration do
   end
 
   def mount(_params, _session, socket) do
+    if Policy.registration_enabled?() and Policy.oidc_enabled?() and
+         not Policy.password_login_enabled?() do
+      {:ok, redirect(socket, to: ~p"/auth/oidc")}
+    else
+      mount_password(socket)
+    end
+  end
+
+  defp mount_password(socket) do
     if Policy.password_registration_enabled?() do
       changeset = Accounts.change_user_registration(%User{})
 

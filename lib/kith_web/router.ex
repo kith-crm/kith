@@ -342,6 +342,8 @@ defmodule KithWeb.Router do
   scope "/", KithWeb do
     pipe_through [:browser, :require_authenticated_user, :require_confirmed_user]
 
+    post "/users/oidc/link", OIDCController, :link
+    post "/users/oidc/reauth", OIDCController, :reauth
     get "/users/reauth", UserSessionController, :reauth
     get "/settings/contact-sync/reauth", UserSessionController, :contact_sync_reauth
 
@@ -433,6 +435,8 @@ defmodule KithWeb.Router do
   scope "/auth", KithWeb do
     pipe_through [:browser]
 
+    get "/oidc", OIDCController, :request
+    get "/oidc/callback", OIDCController, :callback
     get "/:provider", OAuthController, :request
     get "/:provider/callback", OAuthController, :callback
   end
@@ -443,6 +447,7 @@ defmodule KithWeb.Router do
 
     live_session :current_user,
       on_mount: [{KithWeb.UserAuth, :mount_current_scope}] do
+      live "/users/oidc/register", UserLive.OIDCRegistration, :new
       live "/users/register", UserLive.Registration, :new
       live "/users/log-in", UserLive.Login, :new
       live "/users/confirm/:token", UserLive.Confirmation, :new
@@ -454,6 +459,7 @@ defmodule KithWeb.Router do
       live "/invitations/:token", UserLive.InvitationAcceptance, :new
     end
 
+    post "/users/oidc/register", OIDCController, :register
     post "/users/log-in", UserSessionController, :create
     post "/users/totp-verify", UserSessionController, :totp_verify
     delete "/users/log-out", UserSessionController, :delete

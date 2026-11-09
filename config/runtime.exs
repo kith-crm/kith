@@ -332,7 +332,7 @@ if config_env() == :prod do
       },
       client: Kith.SentryReqClient,
       filter: Kith.SentryFilter,
-      before_send: {Kith.SentryEventHandler, :before_send},
+      before_send: {Kith.SentryScrubber, :before_send},
       enable_source_code_context: true
   else
     # Sentry re-reads this variable when validating partial runtime updates;

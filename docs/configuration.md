@@ -300,10 +300,10 @@ challenge), password-authenticated API token issuance, password recovery request
 and outstanding reset-token redemption. It hides password login/recovery controls.
 Existing authenticated sessions and API bearer tokens keep their existing validity;
 this policy does not revoke credentials. Public password signup also requires
-password login to be enabled, even when registration is permitted. During the
-configuration foundation stage, OIDC signup/login routes are not yet installed,
-so password-disabled public signup fails closed. OIDC routes and buttons are
-provided by the subsequent OIDC integration slice.
+password login to be enabled, even when registration is permitted. When OIDC is
+enabled, password-disabled signup starts provider authentication and then requires
+completion at `/users/oidc/register`. Registration policy and configured terms are
+checked again before creating the account.
 
 Startup validates local configuration without contacting discovery endpoints or
 inspecting users' credentials. When passwords are disabled, configure OIDC, a
@@ -320,3 +320,27 @@ The DAV account-password policy is enforced by the DAV credential integration
 slice. DAV app passwords remain usable independently of password login once that
 slice is installed. Disabling a user at an external issuer does not itself revoke
 existing Kith sessions, API tokens, or DAV credentials.
+
+
+### OIDC browser callbacks and log privacy
+
+Register exactly `https://YOUR_KITH_HOST/auth/oidc/callback` at the issuer. Kith
+accepts code/query GET callbacks, uses a signed `__Host-kith_oidc` cookie with
+Secure, HttpOnly, Path=/ and SameSite=Lax, and retains SameSite=Strict for its
+main session cookie. Each transaction expires after five minutes and is single
+use. Parallel tabs share a cancellation binding; completing one does not cancel
+another, while explicit Kith logout cancels pending login, linking, terms and MFA
+flows for that browser. Link and reauthentication start through CSRF-protected
+POSTs in Security/login, never through callback ownership parameters.
+
+Configure every reverse proxy, load balancer, CDN and access-log collector to omit
+query strings for `/auth/oidc/callback` (prefer the path alone for all auth routes).
+For example, an nginx access-log format must use `$uri`, not `$request` or
+`$request_uri`, for this endpoint. Do not record Cookie/Set-Cookie/Authorization
+headers or response Location headers on authentication routes. Disable analytics,
+request-body capture and tracing on these routes; provider errors may contain
+credentials. Application parameter filtering and the Sentry `before_send`
+scrubber cannot sanitize logs already collected outside the application.
+Callbacks redirect immediately to clean local URLs with generic errors. Kith's
+Sentry configuration keeps logs/traces disabled and scrubs code, state, nonce,
+verifier, binding and token fields, including callback URLs and diagnostic strings.

@@ -16,7 +16,8 @@ defmodule Kith.Auth.OIDC.Transactions do
         "code_verifier" => verifier,
         "redirect_uri" => attrs.redirect_uri,
         "return_to" => attrs.return_to,
-        "session_token" => encode_session(attrs[:session_token])
+        "session_token" => encode_session(attrs[:session_token]),
+        "principal" => attrs[:principal]
       }
 
       result =
@@ -63,6 +64,32 @@ defmodule Kith.Auth.OIDC.Transactions do
 
   def consume(_, _, _), do: {:error, :invalid_transaction}
 
+  def pending_registration(state, binding) when is_binary(state) and is_binary(binding) do
+    flow =
+      Repo.one(
+        from(f in Transaction, where: f.state_hash == ^hash(state) and f.intent == :registration),
+        log: false
+      )
+
+    if valid?(flow, binding, DateTime.utc_now()),
+      do: {:ok, restore(flow, Jason.decode!(flow.payload), state)},
+      else: {:error, :invalid_transaction}
+  end
+
+  def pending_registration(_, _), do: {:error, :invalid_transaction}
+
+  def cancel_browser(binding) when is_binary(binding) do
+    Repo.update_all(
+      from(f in Transaction, where: f.binding_hash == ^hash(binding) and is_nil(f.consumed_at)),
+      [set: [consumed_at: DateTime.utc_now()]],
+      log: false
+    )
+
+    :ok
+  end
+
+  def cancel_browser(_), do: :ok
+
   defp valid?(nil, _, _), do: false
 
   defp valid?(flow, binding, now) do
@@ -78,14 +105,15 @@ defmodule Kith.Auth.OIDC.Transactions do
         code_verifier: payload["code_verifier"],
         redirect_uri: payload["redirect_uri"],
         return_to: payload["return_to"],
-        session_token: decode_session(payload["session_token"])
+        session_token: decode_session(payload["session_token"]),
+        principal: payload["principal"]
     }
   end
 
   defp validate(attrs, binding)
        when is_map(attrs) and is_binary(binding) and byte_size(binding) > 0 do
     valid =
-      attrs[:intent] in [:login, :link, :reauth] and
+      attrs[:intent] in [:login, :link, :reauth, :registration] and
         https?(attrs[:issuer]) and https?(attrs[:redirect_uri]) and local?(attrs[:return_to]) and
         ownership?(attrs)
 
@@ -94,7 +122,7 @@ defmodule Kith.Auth.OIDC.Transactions do
 
   defp validate(_, _), do: {:error, :invalid_transaction}
 
-  defp ownership?(%{intent: :login}), do: true
+  defp ownership?(%{intent: intent}) when intent in [:login, :registration], do: true
   defp ownership?(attrs), do: is_integer(attrs[:user_id]) and is_binary(attrs[:session_token])
 
   defp https?(value) when is_binary(value) do

@@ -8,7 +8,16 @@
 import Config
 
 # Authentication handles, OTPs and provider callback credentials must never reach logs.
-config :phoenix, :filter_parameters, ["password", "secret", "token", "code", "state", "binding"]
+config :phoenix, :filter_parameters, [
+  "password",
+  "secret",
+  "token",
+  "code",
+  "state",
+  "binding",
+  "nonce",
+  "verifier"
+]
 
 # Register .vcf (vCard) MIME type for LiveView uploads
 config :mime, :types, %{"text/vcard" => ["vcf"], "application/json" => ["json"]}
@@ -138,6 +147,8 @@ config :kith, :oauth_providers, %{}
 # not disable metric capture; the explicit callback drops those events.
 config :sentry,
   telemetry_processor_categories: [:error],
+  before_send: {Kith.SentryScrubber, :before_send},
+  scrubber: [param_keys: ["code", "state", "nonce", "verifier", "binding"]],
   before_send_metric: {Kith.SentryEventHandler, :before_send_metric},
   logs: nil,
   traces_sample_rate: nil,

@@ -6,6 +6,51 @@ defmodule KithWeb.SettingsLive.SecurityTest do
   @moduletag token_authenticated_at: DateTime.utc_now(:second)
   setup :register_and_log_in_user
 
+  test "OIDC identity unlink requires confirmation and preserves the last usable method", %{
+    conn: conn,
+    user: user
+  } do
+    old = Application.fetch_env!(:kith, :auth)
+    on_exit(fn -> Application.put_env(:kith, :auth, old) end)
+
+    Application.put_env(:kith, :auth, %{
+      old
+      | oidc_enabled: true,
+        oidc: [issuer: "https://issuer.test", display_name: "Company"]
+    })
+
+    principal = %Kith.Auth.Principal{issuer: "https://issuer.test", subject: "owner"}
+
+    {:ok, identity} =
+      Kith.Accounts.OIDC.link(%{user | authenticated_at: DateTime.utc_now(:second)}, principal)
+
+    {:ok, view, _} = live(conn, "/settings/security")
+    assert has_element?(view, "#oidc-status", "Connected")
+    view |> element("#oidc-unlink-#{identity.id}") |> render_click()
+    assert has_element?(view, "#oidc-unlink-confirm")
+    assert Kith.Accounts.OIDC.list(user) != []
+
+    Application.put_env(:kith, :auth, %{
+      Application.fetch_env!(:kith, :auth)
+      | password_login_enabled: false
+    })
+
+    view |> element("#oidc-unlink-confirm") |> render_click()
+    assert render(view) =~ "last available sign-in method"
+    assert Kith.Accounts.OIDC.list(user) != []
+
+    Application.put_env(:kith, :auth, %{
+      Application.fetch_env!(:kith, :auth)
+      | password_login_enabled: true
+    })
+
+    view |> element("#oidc-unlink-confirm") |> render_click()
+    assert Kith.Accounts.OIDC.list(user) == []
+    assert has_element?(view, "form[action='/users/oidc/link'][method='post']")
+    view |> form("#oidc-link-form") |> render_submit()
+    assert has_element?(view, "#oidc-link-form[phx-trigger-action]")
+  end
+
   test "password form moves out of profile", %{conn: conn} do
     user = Kith.AccountsFixtures.user_fixture()
     conn = log_in_user(conn, user)

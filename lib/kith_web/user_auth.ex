@@ -9,6 +9,7 @@ defmodule KithWeb.UserAuth do
   alias Kith.Accounts
   alias Kith.Accounts.Scope
   alias Kith.Auth.Challenges
+  alias Kith.Auth.OIDC.Transactions
   alias Kith.DuplicateDetection
   alias KithWeb.Plugs.AssignLocale
 
@@ -53,6 +54,7 @@ defmodule KithWeb.UserAuth do
   """
   def log_out_user(conn) do
     Challenges.cancel_browser(get_session(conn, :auth_challenge_binding))
+    Transactions.cancel_browser(get_session(conn, :auth_challenge_binding))
     user_token = get_session(conn, :user_token)
     user_token && Accounts.delete_user_session_token(user_token)
 

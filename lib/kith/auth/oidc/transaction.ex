@@ -7,7 +7,7 @@ defmodule Kith.Auth.OIDC.Transaction do
     field :state_hash, :binary
     field :binding_hash, :binary
     field :issuer, :string
-    field :intent, Ecto.Enum, values: [:login, :link, :reauth]
+    field :intent, Ecto.Enum, values: [:login, :link, :reauth, :registration]
     field :payload, Kith.EncryptedBinary
     belongs_to :user, Kith.Accounts.User
     field :initiated_at, :utc_datetime_usec
@@ -19,5 +19,6 @@ defmodule Kith.Auth.OIDC.Transaction do
     field :session_token, :binary, virtual: true
     field :redirect_uri, :string, virtual: true
     field :return_to, :string, virtual: true
+    field :principal, :map, virtual: true
   end
 end
