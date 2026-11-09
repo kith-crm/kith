@@ -272,6 +272,7 @@ if config_env() == :prod do
            rescue_after: :timer.minutes(oban_lifeline_rescue_after_minutes)},
           {Oban.Plugins.Cron,
            crontab: [
+             {"*/5 * * * *", Kith.Workers.PurgeAuthFlowsWorker},
              {"0 * * * *", Kith.Workers.ReminderDispatcher},
              {"0 3 * * *", Kith.Workers.ContactPurgeWorker},
              {"0 4 * * 0", Kith.Workers.DuplicateDetectionWorker},

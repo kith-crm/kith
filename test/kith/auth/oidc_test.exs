@@ -22,10 +22,40 @@ defmodule Kith.Auth.OIDCTest do
     flow
   end
 
-  defp callback(fixture, flow, config) do
-    OIDCFixture.update(fixture, %{nonce: flow.nonce})
-    {:ok, consumed} = Transactions.consume(flow.state, "browser")
-    OIDC.callback(consumed, %{"state" => flow.state, "code" => "fixture-code"}, config)
+  defp authorize(flow, config) do
+    {:ok, url} = OIDC.authorize(flow, config)
+
+    {:ok, %{status: 302, headers: headers}} =
+      Metadata.HTTPAdapter.request(:get, url, nil, [], config)
+
+    {"location", location} = List.keyfind(headers, "location", 0)
+    uri = URI.parse(location)
+    assert URI.to_string(%{uri | query: nil}) == flow.redirect_uri
+    URI.decode_query(uri.query)
+  end
+
+  defp redeem(flow, params, config) do
+    body =
+      URI.encode_query(%{
+        "grant_type" => "authorization_code",
+        "code" => params["code"],
+        "redirect_uri" => flow.redirect_uri,
+        "code_verifier" => flow.code_verifier
+      })
+
+    headers = [
+      {"content-type", "application/x-www-form-urlencoded"},
+      {"authorization",
+       "Basic " <> Base.encode64(config[:client_id] <> ":" <> config[:client_secret])}
+    ]
+
+    Metadata.HTTPAdapter.request(:post, config[:issuer] <> "/token", body, headers, config)
+  end
+
+  defp callback(_fixture, flow, config) do
+    params = authorize(flow, config)
+    {:ok, consumed} = Transactions.consume(params["state"], "browser")
+    OIDC.callback(consumed, params, config)
   end
 
   test "arbitrary request parameters cannot select discovery" do
@@ -356,5 +386,57 @@ defmodule Kith.Auth.OIDCTest do
   } do
     OIDCFixture.update(fixture, %{omit_kid: true})
     assert {:ok, _} = callback(fixture, flow(config), config)
+  end
+
+  test "HTTPS authorization codes are unique and a redeemed code cannot be replayed", %{
+    config: config
+  } do
+    flow = flow(config)
+    params = authorize(flow, config)
+    other = authorize(flow(config), config)
+    refute params["code"] == other["code"]
+    {:ok, consumed} = Transactions.consume(params["state"], "browser")
+
+    assert {:ok, %Kith.Auth.Principal{subject: "subject"}} =
+             OIDC.callback(consumed, params, config)
+
+    assert {:ok, %{status: 400}} = redeem(consumed, params, config)
+  end
+
+  test "the token endpoint rejects a verifier not bound to the issued challenge", %{
+    config: config
+  } do
+    flow = flow(config)
+    params = authorize(flow, config)
+    {:ok, consumed} = Transactions.consume(params["state"], "browser")
+
+    assert {:error, _} =
+             OIDC.callback(%{consumed | code_verifier: String.duplicate("x", 43)}, params, config)
+  end
+
+  test "the token endpoint binds codes to the redirect and authenticated client", %{
+    config: config
+  } do
+    for change <- [:redirect, :client, :secret] do
+      flow = flow(config)
+      params = authorize(flow, config)
+      {:ok, consumed} = Transactions.consume(params["state"], "browser")
+
+      {consumed, config} =
+        case change do
+          :redirect -> {%{consumed | redirect_uri: "https://kith.test/other"}, config}
+          :client -> {consumed, Keyword.put(config, :client_id, "other-client")}
+          :secret -> {consumed, Keyword.put(config, :client_secret, "wrong-secret")}
+        end
+
+      assert {:ok, %{status: 400}} = redeem(consumed, params, config)
+    end
+  end
+
+  test "the token endpoint rejects an unissued code", %{config: config} do
+    flow = flow(config)
+    {:ok, consumed} = Transactions.consume(flow.state, "browser")
+
+    assert {:ok, %{status: 400}} = redeem(consumed, %{"code" => "never-issued"}, config)
   end
 end

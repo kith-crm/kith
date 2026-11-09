@@ -85,7 +85,18 @@ defmodule Kith.OIDCFixture do
 
     {:ok, agent} =
       Agent.start_link(fn ->
-        %{pem: pem, jwk: jwk, claims: %{}, requests: [], behavior: %{}, metadata: %{}}
+        %{
+          pem: pem,
+          jwk: jwk,
+          claims: %{},
+          requests: [],
+          behavior: %{},
+          metadata: %{},
+          codes: %{},
+          client_id: "kith",
+          client_secret: "fixture-secret",
+          redirect_uris: ["https://kith.test/auth/oidc/callback"]
+        }
       end)
 
     {:ok, server} =
@@ -142,6 +153,7 @@ defmodule Kith.OIDCFixture do
       end)
     )
 
+    conn = put_private(conn, :request_body, body)
     state = Agent.get(agent, & &1)
     behavior = state.behavior[conn.request_path]
 
@@ -186,6 +198,80 @@ defmodule Kith.OIDCFixture do
   defp respond(%{request_path: "/jwks"} = conn, state), do: json(conn, %{"keys" => [state.jwk]})
 
   defp respond(%{request_path: "/token"} = conn, state) do
+    params = URI.decode_query(conn.private.request_body)
+
+    issued =
+      Agent.get_and_update(conn.private.issuer_agent, fn current ->
+        {issued, codes} = Map.pop(current.codes, params["code"])
+        {issued, %{current | codes: codes}}
+      end)
+
+    if valid_redemption?(conn, params, issued, state) do
+      token_response(conn, state, issued)
+    else
+      conn |> put_status(400) |> json(%{"error" => "invalid_grant"})
+    end
+  end
+
+  defp respond(%{request_path: "/userinfo"} = conn, state),
+    do: json(conn, state[:userinfo] || %{"sub" => "subject"})
+
+  defp respond(%{request_path: "/authorize"} = conn, state) do
+    conn = fetch_query_params(conn)
+    params = conn.query_params
+
+    if valid_authorization?(conn, params, state) do
+      code = Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+
+      issued = %{
+        client_id: params["client_id"],
+        redirect_uri: params["redirect_uri"],
+        challenge: params["code_challenge"],
+        nonce: params["nonce"],
+        expires_at: System.monotonic_time(:second) + 300
+      }
+
+      Agent.update(conn.private.issuer_agent, &put_in(&1, [:codes, code], issued))
+
+      url =
+        params["redirect_uri"] <>
+          "?" <> URI.encode_query(%{"code" => code, "state" => params["state"]})
+
+      conn |> put_resp_header("location", url) |> send_resp(302, "")
+    else
+      conn |> put_status(400) |> json(%{"error" => "invalid_request"})
+    end
+  end
+
+  defp respond(conn, _), do: send_resp(conn, 404, "")
+
+  defp valid_authorization?(conn, params, state) do
+    conn.method == "GET" and params["client_id"] == state.client_id and
+      params["redirect_uri"] in state.redirect_uris and params["response_type"] == "code" and
+      params["response_mode"] == "query" and params["code_challenge_method"] == "S256" and
+      is_binary(params["code_challenge"]) and is_binary(params["nonce"])
+  end
+
+  defp valid_redemption?(_, _, nil, _), do: false
+
+  defp valid_redemption?(conn, params, issued, state) do
+    expected_auth = "Basic " <> Base.encode64(state.client_id <> ":" <> state.client_secret)
+
+    conn.method == "POST" and get_req_header(conn, "authorization") == [expected_auth] and
+      issued.client_id == state.client_id and issued.redirect_uri == params["redirect_uri"] and
+      params["grant_type"] == "authorization_code" and
+      issued.expires_at > System.monotonic_time(:second) and
+      valid_verifier?(params["code_verifier"], issued.challenge)
+  end
+
+  defp valid_verifier?(verifier, challenge) when is_binary(verifier) do
+    actual = Base.url_encode64(:crypto.hash(:sha256, verifier), padding: false)
+    Plug.Crypto.secure_compare(actual, challenge)
+  end
+
+  defp valid_verifier?(_, _), do: false
+
+  defp token_response(conn, state, issued) do
     now = System.system_time(:second)
 
     claims =
@@ -198,7 +284,7 @@ defmodule Kith.OIDCFixture do
           "exp" => now + 300,
           "email" => "person@example.test",
           "email_verified" => true,
-          "nonce" => state[:nonce]
+          "nonce" => issued.nonce
         },
         state.claims
       )
@@ -221,29 +307,12 @@ defmodule Kith.OIDCFixture do
     })
   end
 
-  defp respond(%{request_path: "/userinfo"} = conn, state),
-    do: json(conn, state[:userinfo] || %{"sub" => "subject"})
-
-  defp respond(%{request_path: "/authorize"} = conn, state) do
-    conn = fetch_query_params(conn)
-    Agent.update(conn.private.issuer_agent, &Map.put(&1, :nonce, conn.query_params["nonce"]))
-
-    url =
-      conn.query_params["redirect_uri"] <>
-        "?" <>
-        URI.encode_query(%{"code" => "fixture-code", "state" => conn.query_params["state"]})
-
-    conn |> put_resp_header("location", url) |> send_resp(302, state.issuer)
-  end
-
-  defp respond(conn, _), do: send_resp(conn, 404, "")
-
   defp json(conn, data),
     do:
       conn
       |> put_resp_header("cache-control", "max-age=600")
       |> put_resp_content_type("application/json")
-      |> send_resp(200, Jason.encode!(data))
+      |> send_resp(conn.status || 200, Jason.encode!(data))
 
   defp integer(value), do: value |> :binary.encode_unsigned() |> Base.url_encode64(padding: false)
 
