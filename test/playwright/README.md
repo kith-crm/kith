@@ -200,3 +200,17 @@ exactly one authorized device and preinstalled driver, trusted distinct HTTPS
 sites and protected fixture controls; missing infrastructure fails. The automated
 subset does not certify native keyboard/copy behavior, DAVx5 or live Authentik.
 See the [outstanding acceptance matrix](../../docs/design/oidc-validation/task-10-acceptance.md).
+
+
+## Whole-feature release acceptance
+
+The [OIDC acceptance map](../../docs/design/oidc-validation/acceptance.md) maps
+protocol, policy, settings, MFA and DAV evidence to source/tests and review results.
+Run `bash test/playwright/fixtures/oidc/run.sh` for the four distinct-site policy
+modes, and `npm run test:regressions` for existing regressions. These runners own
+isolated databases and ports; do not use shared DB resets. Preserve a failing batch
+result even when focused rechecks pass. Do not retain traces, storage states, callback
+queries or revealed credentials. Only setup/revoked-state screenshots are safe.
+Actual Android/DAVx5 and live Authentik runs have separate prerequisites and remain
+NOT RUN until the [device acceptance record](../../docs/design/oidc-validation/task-10-acceptance.md)
+contains actual results. Final independent whole-branch review is also a release gate.

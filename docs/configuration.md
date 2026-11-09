@@ -316,10 +316,10 @@ login mechanisms. Restore environment/application configuration and restart to
 recover from an unusable login setup; do not reset the database. Discovery network
 availability is separate from local configuration validation.
 
-The DAV account-password policy is enforced by the DAV credential integration
-slice. DAV app passwords remain usable independently of password login once that
-slice is installed. Disabling a user at an external issuer does not itself revoke
-existing Kith sessions, API tokens, or DAV credentials.
+DAV account passwords are accepted only while password login is enabled. Active
+DAV app passwords remain usable independently of password login. Disabling a user
+at an external issuer does not itself revoke existing Kith sessions, API tokens,
+or DAV credentials.
 
 
 ### OIDC browser callbacks and log privacy
@@ -344,3 +344,11 @@ scrubber cannot sanitize logs already collected outside the application.
 Callbacks redirect immediately to clean local URLs with generic errors. Kith's
 Sentry configuration keeps logs/traces disabled and scrubs code, state, nonce,
 verifier, binding and token fields, including callback URLs and diagnostic strings.
+
+
+### Authentication operator guides
+
+See [OIDC deployment and recovery](deployment/oidc.md), [DAV client setup and
+revocation](deployment/dav-app-passwords.md), and the [release acceptance
+map](design/oidc-validation/acceptance.md). Provider logout/deprovisioning is not
+automatic; migration rollback has a passwordless-user NOT NULL constraint.
