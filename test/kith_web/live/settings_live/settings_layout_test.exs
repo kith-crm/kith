@@ -7,6 +7,7 @@ defmodule KithWeb.SettingsLive.SettingsLayoutTest do
   @paths [
     "/users/settings",
     "/settings/security",
+    "/settings/contact-sync",
     "/settings/account",
     "/settings/tags",
     "/settings/emotions",

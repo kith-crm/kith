@@ -5,6 +5,7 @@ defmodule KithWeb.Router do
 
   pipeline :browser do
     plug :accepts, ["html"]
+    plug :contact_sync_cache
     plug :fetch_session
     plug :fetch_live_flash
     plug :put_root_layout, html: {KithWeb.Layouts, :root}
@@ -13,6 +14,15 @@ defmodule KithWeb.Router do
     plug KithWeb.Plugs.CSP
     plug :fetch_current_scope_for_user
     plug KithWeb.Plugs.AssignLocale
+  end
+
+  defp contact_sync_cache(conn, _opts) do
+    if conn.request_path == "/settings/contact-sync" or
+         String.starts_with?(conn.request_path, "/settings/contact-sync/") do
+      Plug.Conn.put_resp_header(conn, "cache-control", "no-store")
+    else
+      conn
+    end
   end
 
   # REST API pipeline — JSON only, no CSRF, no session.
@@ -332,10 +342,16 @@ defmodule KithWeb.Router do
   scope "/", KithWeb do
     pipe_through [:browser, :require_authenticated_user, :require_confirmed_user]
 
+    get "/settings/contact-sync/reauth", UserSessionController, :contact_sync_reauth
+
     live_session :require_authenticated_user,
       on_mount: [{KithWeb.UserAuth, :require_authenticated}] do
       live "/users/settings", UserLive.Settings, :edit
       live "/settings/security", SettingsLive.Security, :index
+      live "/settings/contact-sync", SettingsLive.ContactSync, :index
+      live "/settings/contact-sync/new", SettingsLive.ContactSync, :new
+      live "/settings/contact-sync/created", SettingsLive.ContactSync, :created
+      live "/settings/contact-sync/:id/revoke", SettingsLive.ContactSync, :revoke
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
       live "/users/totp-setup", UserLive.TotpSetup, :new
 

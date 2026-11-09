@@ -46,9 +46,10 @@ const liveSocket = new LiveSocket("/live", Socket, {
   hooks: Hooks,
   dom: {
     onBeforeElUpdated(from, to) {
-      // Preserve Alpine.js state during LiveView patches
-      if (from._x_dataStack) {
-        window.Alpine.clone(from, to)
+      // Preserve scoped directives without initializing newly inserted descendants
+      // while Alpine is cloning. LiveView invokes this for each existing node.
+      if (window.Alpine.closestDataStack(from).length > 0) {
+        window.Alpine.cloneNode(from, to)
       }
     }
   }

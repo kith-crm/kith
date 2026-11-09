@@ -14,7 +14,8 @@ defmodule KithWeb.SettingsLive.SettingsLayout do
         label: "Personal",
         items: [
           %{path: "/users/settings", label: "Profile", icon: "hero-user"},
-          %{path: "/settings/security", label: "Security", icon: "hero-shield-check"}
+          %{path: "/settings/security", label: "Security", icon: "hero-shield-check"},
+          %{path: "/settings/contact-sync", label: "Contact sync", icon: "hero-arrow-path"}
         ]
       },
       %{

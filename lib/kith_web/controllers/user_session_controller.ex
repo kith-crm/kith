@@ -20,6 +20,18 @@ defmodule KithWeb.UserSessionController do
     end
   end
 
+  def contact_sync_reauth(conn, params) do
+    destination =
+      if params["return_to"] == "new",
+        do: ~p"/settings/contact-sync/new",
+        else: ~p"/settings/contact-sync"
+
+    conn
+    |> put_session(:user_return_to, destination)
+    |> put_resp_header("cache-control", "no-store")
+    |> redirect(to: ~p"/users/log-in")
+  end
+
   def create(conn, %{"_action" => "confirmed"} = params) do
     throttled_create(conn, params, "User confirmed successfully.")
   end

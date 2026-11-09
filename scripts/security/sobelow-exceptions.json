@@ -22,22 +22,22 @@
     "review_by": "2026-11-29"
   },
   {
-    "line": 12,
+    "line": 13,
     "type": "Config.CSP: Missing Content-Security-Policy",
     "file": "lib/kith_web/router.ex",
     "pipeline": "browser",
-    "source_sha256": "2aaf7ecc068f158c7ea2ca701eaf9e5544ae4bab1196bec3ee853f57c1571156",
+    "source_sha256": "c559dfcc96e841d85aecf54c5b9fca887b0d649982bb77bd27561fa3e3fcfd9c",
     "reason": "Both browser pipelines invoke KithWeb.Plugs.CSP which emits a nonce-bearing CSP; static scanner does not recognize the custom plug.",
     "evidence": "test/kith_web/plugs/csp_test.exs; test/kith_web/controllers/webauthn_controller_test.exs",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29"
   },
   {
-    "line": 32,
+    "line": 42,
     "type": "Config.CSP: Missing Content-Security-Policy",
     "file": "lib/kith_web/router.ex",
     "pipeline": "browser_json",
-    "source_sha256": "2aaf7ecc068f158c7ea2ca701eaf9e5544ae4bab1196bec3ee853f57c1571156",
+    "source_sha256": "c559dfcc96e841d85aecf54c5b9fca887b0d649982bb77bd27561fa3e3fcfd9c",
     "reason": "Both browser pipelines invoke KithWeb.Plugs.CSP which emits a nonce-bearing CSP; static scanner does not recognize the custom plug.",
     "evidence": "test/kith_web/plugs/csp_test.exs; test/kith_web/controllers/webauthn_controller_test.exs",
     "owner": "kith-crm maintainers",

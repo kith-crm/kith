@@ -17,6 +17,8 @@ test.describe("Immich Integration", () => {
 
     const content = await page.content();
     expect(content).toMatch(/immich/i);
+    await expect(page.getByRole("link", {name: "Contact sync", exact: true}).last()).toHaveAttribute("href", "/settings/contact-sync");
+    await expect(page.locator("#carddav-url")).toHaveCount(0);
 
     // Should have fields for server URL and API key
     const serverUrlInput = page.locator(
