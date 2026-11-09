@@ -75,6 +75,7 @@ config :kith, Oban,
        )},
     {Oban.Plugins.Cron,
      crontab: [
+       {"*/5 * * * *", Kith.Workers.PurgeAuthFlowsWorker},
        {"0 * * * *", Kith.Workers.ReminderDispatcher},
        {"0 3 * * *", Kith.Workers.ContactPurgeWorker},
        {"0 4 * * 0", Kith.Workers.DuplicateDetectionWorker},
