@@ -7,6 +7,14 @@ defmodule KithWeb.UserSessionControllerTest do
     %{user: user_fixture()}
   end
 
+  test "DAV credentials cannot log into the web", %{conn: conn, user: user} do
+    user = %{user | authenticated_at: DateTime.utc_now(:second)}
+    {:ok, _, secret} = Kith.Accounts.DavAppPasswords.create(user, %{name: "Phone"})
+    conn = post(conn, ~p"/users/log-in", %{user: %{email: user.email, password: secret}})
+    refute get_session(conn, :user_token)
+    assert redirected_to(conn) == ~p"/users/log-in"
+  end
+
   describe "POST /users/log-in" do
     test "logs the user in with valid credentials", %{conn: conn, user: user} do
       conn =

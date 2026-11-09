@@ -41,6 +41,7 @@ defmodule Kith.Accounts.User do
     field :webauthn_enabled, :boolean, default: false
 
     belongs_to :account, Kith.Accounts.Account
+    has_many :dav_app_passwords, Kith.Accounts.DavAppPassword
     has_many :user_tokens, Kith.Accounts.UserToken
     has_many :user_recovery_codes, Kith.Accounts.UserRecoveryCode
     has_many :webauthn_credentials, Kith.Accounts.WebauthnCredential

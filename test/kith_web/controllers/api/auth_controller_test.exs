@@ -6,6 +6,13 @@ defmodule KithWeb.API.AuthControllerTest do
 
   @valid_password valid_user_password()
 
+  test "DAV credentials cannot issue API tokens", %{conn: conn} do
+    user = %{user_fixture() | authenticated_at: DateTime.utc_now(:second)}
+    {:ok, _, secret} = Kith.Accounts.DavAppPasswords.create(user, %{name: "Phone"})
+    conn = post(conn, ~p"/api/auth/token", %{email: user.email, password: secret})
+    assert json_response(conn, 401)
+  end
+
   describe "POST /api/auth/token" do
     test "returns token with valid credentials", %{conn: conn} do
       user = user_fixture()
