@@ -1,9 +1,131 @@
 defmodule KithWeb.AuthenticationCompletionTest do
-  use KithWeb.ConnCase, async: true
+  use KithWeb.ConnCase, async: false
   require Phoenix.LiveViewTest
   alias Kith.Accounts
   alias KithWeb.Authentication
   import Kith.AccountsFixtures
+
+  setup do
+    original = Application.fetch_env!(:kith, :auth)
+    on_exit(fn -> Application.put_env(:kith, :auth, original) end)
+
+    Application.put_env(:kith, :auth, %{
+      original
+      | oidc_enabled: true,
+        oidc: [issuer: "https://issuer.example"]
+    })
+
+    :ok
+  end
+
+  for intent <- [:login, :reauth, :link], policy <- [:disabled, :switched, :unchanged] do
+    @tag intent: intent, policy: policy
+    test "pending OIDC #{intent} MFA honors #{policy} current policy", %{
+      conn: conn,
+      intent: intent,
+      policy: policy
+    } do
+      secret = Accounts.generate_totp_secret()
+      now = DateTime.utc_now(:second)
+
+      user =
+        user_fixture()
+        |> Ecto.Changeset.change(totp_enabled: true, totp_secret: secret)
+        |> Kith.Repo.update!()
+
+      principal = %Kith.Auth.Principal{
+        issuer: "https://issuer.example",
+        subject: "pending-subject",
+        auth_time: DateTime.to_unix(now)
+      }
+
+      if intent != :link do
+        {:ok, _} =
+          Accounts.OIDC.link(
+            %{user | authenticated_at: now, mfa_authenticated_at: now},
+            principal
+          )
+      end
+
+      old = DateTime.add(now, -601)
+
+      origin =
+        if intent != :login,
+          do:
+            Accounts.generate_user_session_token(%{
+              user
+              | authenticated_at: old,
+                mfa_authenticated_at: old
+            })
+
+      binding = "pending-policy-browser-binding"
+
+      flow = %Kith.Auth.OIDC.Transaction{
+        intent: intent,
+        user_id: user.id,
+        session_token: origin,
+        issuer: principal.issuer,
+        consumed_at: now,
+        initiated_at: now,
+        binding_hash: :crypto.hash(:sha256, binding),
+        return_to: "/settings/security"
+      }
+
+      callback = conn |> init_test_session(%{}) |> Phoenix.Controller.fetch_flash()
+
+      pending =
+        Authentication.begin_oidc(callback, user, flow, principal, browser_binding: binding)
+
+      assert redirected_to(pending) == "/users/two-factor"
+      refute get_session(pending, :user_token)
+      assert get_session(pending, :auth_challenge_binding) == binding
+      handle = get_session(pending, :totp_token)
+      before_tokens = Kith.Repo.aggregate(Accounts.UserToken, :count)
+      before_identities = Accounts.OIDC.list(user)
+      auth = Application.fetch_env!(:kith, :auth)
+
+      changed =
+        case policy do
+          :disabled -> %{auth | oidc_enabled: false, oidc: nil}
+          :switched -> %{auth | oidc: [issuer: "https://replacement.example"]}
+          :unchanged -> auth
+        end
+
+      Application.put_env(:kith, :auth, changed)
+
+      # Carry the actual pending session binding into the real MFA endpoint.
+      finished =
+        conn
+        |> init_test_session(get_session(pending))
+        |> post("/users/totp-verify", %{totp_token: handle, totp: %{code: :pot.totp(secret)}})
+
+      challenge =
+        Kith.Repo.get_by!(Kith.Auth.Challenge, handle_hash: :crypto.hash(:sha256, handle))
+
+      assert challenge.consumed_at != nil
+
+      if policy == :unchanged do
+        assert redirected_to(finished) == "/settings/security"
+        assert token = get_session(finished, :user_token)
+        assert {loaded, _} = Accounts.get_user_by_session_token(token)
+        assert :ok = Authentication.require_recent(loaded)
+        assert [%{subject: "pending-subject"}] = Accounts.OIDC.list(user)
+        if origin, do: refute(Accounts.get_user_by_session_token(origin))
+      else
+        assert redirected_to(finished) == "/users/log-in"
+        assert is_nil(get_session(finished, :user_token))
+        assert Kith.Repo.aggregate(Accounts.UserToken, :count) == before_tokens
+        assert Accounts.OIDC.list(user) == before_identities
+
+        if origin do
+          assert {loaded, _} = Accounts.get_user_by_session_token(origin)
+          assert loaded.authenticated_at == old
+          assert loaded.mfa_authenticated_at == old
+          assert {:error, :reauthentication_required} = Authentication.require_recent(loaded)
+        end
+      end
+    end
+  end
 
   test "renewing a session does not manufacture recent authentication" do
     user = Kith.AccountsFixtures.user_fixture()

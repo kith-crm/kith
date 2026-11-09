@@ -139,9 +139,7 @@ defmodule KithWeb.Authentication do
         mfa_authenticated_at: completion[:mfa_authenticated_at]
     }
 
-    with true <-
-           completion[:method] not in [:password, "password"] or
-             Policy.password_login_enabled?(),
+    with true <- method_enabled?(completion),
          :ok <- Challenges.validate_origin(user, completion),
          :ok <- require_recent(user),
          :ok <- complete_intent(user, completion) do
@@ -164,6 +162,23 @@ defmodule KithWeb.Authentication do
       _ -> invalid(conn)
     end
   end
+
+  defp method_enabled?(%{method: method}) when method in [:password, "password"],
+    do: Policy.password_login_enabled?()
+
+  defp method_enabled?(%{method: method} = completion) when method in [:oidc, "oidc"] do
+    auth = Application.fetch_env!(:kith, :auth)
+
+    case completion[:principal] do
+      %Kith.Auth.Principal{issuer: issuer} when is_binary(issuer) ->
+        auth.oidc_enabled and issuer == auth.oidc[:issuer]
+
+      _ ->
+        false
+    end
+  end
+
+  defp method_enabled?(_completion), do: true
 
   defp complete_intent(_user, %{intent: :login}), do: :ok
   defp complete_intent(_user, %{intent: :reauth, principal: nil}), do: :ok
