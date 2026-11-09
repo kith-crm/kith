@@ -2,9 +2,23 @@ defmodule KithWeb.UserSessionController do
   use KithWeb, :controller
 
   alias Kith.Accounts
+  alias Kith.Auth.Policy
   alias KithWeb.UserAuth
 
+  plug :require_password_login when action in [:create, :totp_verify, :update_password]
+
   @totp_token_max_age 300
+
+  defp require_password_login(conn, _opts) do
+    if Policy.password_login_enabled?() do
+      conn
+    else
+      conn
+      |> put_flash(:error, "Password login is disabled.")
+      |> redirect(to: ~p"/users/log-in")
+      |> halt()
+    end
+  end
 
   def create(conn, %{"_action" => "confirmed"} = params) do
     throttled_create(conn, params, "User confirmed successfully.")

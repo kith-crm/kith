@@ -21,7 +21,7 @@ Variables are grouped by the implementation phase that introduces them. The "Pha
 | `PORT` | integer | `4000` | 01 | No | HTTP port the Phoenix endpoint listens on. |
 | `POOL_SIZE` | integer | `10` | 01 | No | Ecto database connection pool size. Increase for high-concurrency deployments. |
 | `PHX_HOST` | string | `localhost` | 01 | No | Phoenix endpoint host header. Overridden by `KITH_HOSTNAME` in production. |
-| `DISABLE_SIGNUP` | boolean | `false` | 01 | No | When `true`, the registration endpoint returns 403. Existing users can still log in. |
+| `DISABLE_SIGNUP` | boolean | `false` | 01 | No | Legacy inverse of `REGISTRATION_ENABLED`; disabled public registration redirects to login. Existing users can still log in. |
 
 ### Authentication
 
@@ -275,3 +275,48 @@ SMTP_PASSWORD=
 # Default "From" address for outbound email.
 MAIL_FROM=noreply@kith.app
 ```
+
+
+## Authentication policy
+
+`OIDC_ENABLED` (default `false`), `PASSWORD_LOGIN_ENABLED` (default `true`), and
+`REGISTRATION_ENABLED` (default `true`) are independent policies. Supplied boolean
+values must be exactly `true` or `false`; empty values are invalid. If only
+`DISABLE_SIGNUP` is supplied, registration is its inverse. If both registration
+variables are supplied, they must agree or startup fails. Existing legacy social
+login configuration and passkey behavior are retained.
+
+Enabled OIDC requires `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`.
+The issuer must be an exact HTTPS URL, including any path, without userinfo,
+query or fragment. Private-network HTTPS issuers are allowed. The client secret
+supports `OIDC_CLIENT_SECRET_FILE`, which takes precedence and trims surrounding
+whitespace. Missing, blank or unreadable credentials fail startup without exposing
+credential values or secret-file paths. Unused OIDC credentials are ignored when
+OIDC is disabled. `OIDC_DISPLAY_NAME` defaults to `OpenID Connect` and is intended
+as an escaped operator label.
+
+Disabling passwords blocks web password login (including a pending password TOTP
+challenge), password-authenticated API token issuance, password recovery requests
+and outstanding reset-token redemption. It hides password login/recovery controls.
+Existing authenticated sessions and API bearer tokens keep their existing validity;
+this policy does not revoke credentials. Public password signup also requires
+password login to be enabled, even when registration is permitted. During the
+configuration foundation stage, OIDC signup/login routes are not yet installed,
+so password-disabled public signup fails closed. OIDC routes and buttons are
+provided by the subsequent OIDC integration slice.
+
+Startup validates local configuration without contacting discovery endpoints or
+inspecting users' credentials. When passwords are disabled, configure OIDC, a
+legacy external provider with client ID and secret, or explicitly declare passkey
+capability with application configuration `config :kith, :passkeys_enabled, true`.
+This declaration counts a deployment capability; it does not prove every user owns
+a passkey. It does not alter the existing passkey routes. The default declaration
+is `false`. DAV credentials and existing sessions do not count as interactive
+login mechanisms. Restore environment/application configuration and restart to
+recover from an unusable login setup; do not reset the database. Discovery network
+availability is separate from local configuration validation.
+
+The DAV account-password policy is enforced by the DAV credential integration
+slice. DAV app passwords remain usable independently of password login once that
+slice is installed. Disabling a user at an external issuer does not itself revoke
+existing Kith sessions, API tokens, or DAV credentials.

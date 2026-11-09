@@ -28,8 +28,11 @@ if monica_limit = System.get_env("MONICA_RATE_LIMIT_PER_MINUTE") do
 end
 
 # Feature flags
+auth = Kith.Auth.Config.from_env!(System.get_env())
+config :kith, :auth, auth
+
 config :kith,
-  disable_signup: System.get_env("DISABLE_SIGNUP") == "true",
+  disable_signup: not auth.registration_enabled,
   require_tos_acceptance: System.get_env("REQUIRE_TOS_ACCEPTANCE") == "true",
   max_upload_size_kb: String.to_integer(System.get_env("MAX_UPLOAD_SIZE_KB", "5120")),
   max_storage_size_mb: String.to_integer(System.get_env("MAX_STORAGE_SIZE_MB", "1024"))

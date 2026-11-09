@@ -10,6 +10,26 @@ defmodule KithWeb.API.AuthController do
   use KithWeb, :controller
 
   alias Kith.Accounts
+  alias Kith.Auth.Policy
+
+  plug :require_password_login when action == :create
+
+  defp require_password_login(conn, _opts) do
+    if Policy.password_login_enabled?() do
+      conn
+    else
+      conn
+      |> put_status(403)
+      |> put_resp_content_type("application/problem+json")
+      |> json(%{
+        type: "about:blank",
+        title: "Forbidden",
+        status: 403,
+        detail: "Password login is disabled."
+      })
+      |> halt()
+    end
+  end
 
   def create(conn, %{"email" => email, "password" => password} = params) do
     case Accounts.get_user_by_email_and_password(email, password) do

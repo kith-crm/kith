@@ -6,8 +6,15 @@ defmodule KithWeb.UserLive.SignupControlsTest do
 
   describe "registration when DISABLE_SIGNUP=true" do
     setup do
-      Application.put_env(:kith, :disable_signup, true)
-      on_exit(fn -> Application.put_env(:kith, :disable_signup, false) end)
+      old = Application.get_env(:kith, :auth)
+
+      Application.put_env(:kith, :auth, %{
+        password_login_enabled: true,
+        registration_enabled: false,
+        oidc_enabled: false
+      })
+
+      on_exit(fn -> Application.put_env(:kith, :auth, old) end)
       :ok
     end
 

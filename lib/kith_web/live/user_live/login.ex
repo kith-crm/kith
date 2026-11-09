@@ -1,6 +1,8 @@
 defmodule KithWeb.UserLive.Login do
   use KithWeb, :live_view
 
+  alias Kith.Auth.Policy
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -12,7 +14,7 @@ defmodule KithWeb.UserLive.Login do
             <%= if @current_scope do %>
               You need to reauthenticate to perform sensitive actions on your account.
             <% else %>
-              <%= unless Application.get_env(:kith, :disable_signup, false) do %>
+              <%= if Policy.password_registration_enabled?() do %>
                 Don't have an account?
                 <.link
                   navigate={~p"/users/register"}
@@ -27,6 +29,7 @@ defmodule KithWeb.UserLive.Login do
 
         <.form
           :let={f}
+          :if={Policy.password_login_enabled?()}
           for={@form}
           id="login_form"
           action={~p"/users/log-in"}
@@ -141,6 +144,6 @@ defmodule KithWeb.UserLive.Login do
 
   @impl true
   def handle_event("submit", _params, socket) do
-    {:noreply, assign(socket, :trigger_submit, true)}
+    {:noreply, assign(socket, :trigger_submit, Policy.password_login_enabled?())}
   end
 end

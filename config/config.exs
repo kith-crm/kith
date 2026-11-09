@@ -35,6 +35,13 @@ config :kith, :scopes,
 config :kith,
   ecto_repos: [Kith.Repo],
   generators: [timestamp_type: :utc_datetime],
+  auth: %{
+    oidc_enabled: false,
+    password_login_enabled: true,
+    registration_enabled: true,
+    oidc: nil
+  },
+  passkeys_enabled: false,
   disable_signup: false,
   require_tos_acceptance: false,
   signup_double_optin: true

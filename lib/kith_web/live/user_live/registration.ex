@@ -1,6 +1,8 @@
 defmodule KithWeb.UserLive.Registration do
   use KithWeb, :live_view
 
+  alias Kith.Auth.Policy
+
   alias Kith.Accounts
   alias Kith.Accounts.User
 
@@ -116,12 +118,7 @@ defmodule KithWeb.UserLive.Registration do
   end
 
   def mount(_params, _session, socket) do
-    if Application.get_env(:kith, :disable_signup, false) do
-      {:ok,
-       socket
-       |> put_flash(:error, "Registration is currently disabled.")
-       |> redirect(to: ~p"/users/log-in")}
-    else
+    if Policy.password_registration_enabled?() do
       changeset = Accounts.change_user_registration(%User{})
 
       {:ok,
@@ -130,11 +127,33 @@ defmodule KithWeb.UserLive.Registration do
          trigger_submit: false,
          signup_peer: signup_peer(socket)
        ), temporary_assigns: [form: nil]}
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "Registration is currently disabled.")
+       |> redirect(to: ~p"/users/log-in")}
     end
   end
 
   @impl true
   def handle_event("save", %{"user" => user_params}, socket) do
+    if Policy.password_registration_enabled?() do
+      save(socket, user_params)
+    else
+      {:noreply,
+       socket
+       |> assign(trigger_submit: false)
+       |> put_flash(:error, "Registration is currently disabled.")
+       |> redirect(to: ~p"/users/log-in")}
+    end
+  end
+
+  def handle_event("validate", %{"user" => user_params}, socket) do
+    changeset = Accounts.change_user_registration(%User{}, user_params)
+    {:noreply, assign_form(socket, Map.put(changeset, :action, :validate))}
+  end
+
+  defp save(socket, user_params) do
     case check_signup(socket.assigns.signup_peer) do
       :ok ->
         register_user(socket, user_params)
@@ -155,11 +174,6 @@ defmodule KithWeb.UserLive.Registration do
          |> assign_form(Accounts.change_user_registration(%User{}, user_params))
          |> put_flash(:error, "Unable to verify your connection. Please reload and try again.")}
     end
-  end
-
-  def handle_event("validate", %{"user" => user_params}, socket) do
-    changeset = Accounts.change_user_registration(%User{}, user_params)
-    {:noreply, assign_form(socket, Map.put(changeset, :action, :validate))}
   end
 
   defp register_user(socket, user_params) do
