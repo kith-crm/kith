@@ -26,6 +26,8 @@ for _ in {1..30}; do
 done
 [[ "$provisioned" == 1 ]] || { echo 'Provider provisioning failed; restricted .oidc-local/provision.log'; exit 1; }
 run_marker="--kith-run=$(python3 -c 'import json; print(json.load(open(".oidc-local/run.json"))["run_id"])')"
+[[ -f .oidc-local/freshness-original-provider.json ]] || scripts/oidc-local/freshness-profile.sh snapshot
+scripts/oidc-local/freshness-profile.sh apply
 nohup python3 "$PWD/scripts/oidc-local/proxy.py" "$run_marker" < /dev/null > .oidc-local/proxy.log 2>&1 &
 echo "$!" > .oidc-local/proxy.pid
 python3 scripts/oidc-local/ownership.py record proxy

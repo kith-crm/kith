@@ -2,7 +2,11 @@ if Mix.env() != :test or System.get_env("KITH_OIDC_E2E") != "1",
   do: raise("real provider harness requires isolated test mode")
 
 state = Path.expand(".oidc-local")
+app_port = String.to_integer(System.get_env("KITH_OIDC_APP_PORT", "8444"))
+fixture_port = String.to_integer(System.get_env("KITH_OIDC_FIXTURE_PORT", "8445"))
 run = state |> Path.join("run.json") |> File.read!() |> Jason.decode!()
+database = "kith_local_" <> run["run_id"] <> System.get_env("KITH_OIDC_DATABASE_SUFFIX", "")
+if byte_size(database) > 63, do: raise("test database name exceeds PostgreSQL identifier limit")
 :inet_db.set_lookup([:file, :dns])
 :inet_db.add_host({127, 0, 0, 1}, [~c"kith.test", ~c"fixture.test", ~c"authentik.test"])
 
@@ -13,7 +17,7 @@ Application.put_env(
     username: "authentik",
     password: System.fetch_env!("POSTGRES_PASSWORD"),
     port: 15449,
-    database: "kith_local_" <> run["run_id"] <> System.get_env("KITH_OIDC_DATABASE_SUFFIX", ""),
+    database: database,
     pool_size: 4
   )
 )
@@ -38,8 +42,8 @@ Application.put_env(
     http: false,
     code_reloader: false,
     watchers: [],
-    url: [scheme: "https", host: "kith.test", port: 8444],
-    check_origin: ["https://kith.test:8444"]
+    url: [scheme: "https", host: "kith.test", port: app_port],
+    check_origin: ["https://kith.test:#{app_port}"]
   )
 )
 
@@ -122,7 +126,10 @@ defmodule Kith.RealProviderPlug do
   def call(conn, :fixture), do: send_resp(conn, 404, "")
 end
 
-for {host, port, kind} <- [{"kith.test", 8444, :app}, {"fixture.test", 8445, :fixture}] do
+for {host, port, kind} <- [
+      {"kith.test", app_port, :app},
+      {"fixture.test", fixture_port, :fixture}
+    ] do
   {:ok, _} =
     Bandit.start_link(
       plug: {Kith.RealProviderPlug, kind},

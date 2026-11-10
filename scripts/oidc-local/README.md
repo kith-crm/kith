@@ -90,3 +90,55 @@ written. Successful Kith sessions prove its normal signature/claim validation ra
 proxy claim-shape booleans alone do not prove signature validation. consent.py applies and then disables an owned Authentik application access policy
 for actual provider denial attempts (the provider renders denial with HTTP200). See the Task3
 report for unresolved cases; a harness completion message does not imply all pass.
+
+## Authentik2026.8.5 local freshness profile
+
+This disposable profile intentionally requests actual provider credentials on
+EVERY authorization, including ordinary login. It works around the pinned
+provider's repeated prompt=login/max_age=0 behavior using supported Flow,
+Identification, Password and User Login stages. No claim mapping fabricates
+freshness, no upstream source is patched, and Kith's auth_time validation stays
+unchanged. The dedicated authorization flow has three unconditional stages, only
+the built-in database password backend, and User Login terminates no other
+sessions. Provider MFA is not configured for these synthetic users; Kith local
+TOTP remains independently required. Future up.sh provisioning snapshots original
+flow references/callbacks once and applies this stronger local authorization flow.
+consent.py restores this dedicated profile when returning to implicit mode.
+
+Use freshness-profile.sh snapshot|apply|restore through ownership-gated Compose.
+Snapshot refuses overwrite. restore sets exactly the saved original flow IDs and
+callbacks; it preserves dedicated stages for review/reapplication. These commands
+change the shared test provider, so coordinate with any active browser/device
+worker first. Never use provider logout or clear browser cookies to hide a
+freshness failure.
+
+Desktop regression runs a separate test app on8464/8465, leaving8444/8445 and the
+Android fixture untouched. Register the additional exact callback
+https://kith.test:8464/auth/oidc/callback on the owned client, retaining its normal
+callback. Start freshness-app.sh with KITH_OIDC_PASSWORD=true|false and a short
+unique KITH_OIDC_DATABASE_SUFFIX=_fresh_<suffix>; PostgreSQL identifiers must fit
+63 bytes. The server fails clearly on oversized names instead of silently sharing
+a truncated database. The freshness runner uses generated provider user3 and an
+ephemeral desktop browser; it never attaches to Android or clears provider cookies.
+Run node scripts/oidc-local/freshness.mjs with matching policy/suffix. Both delayed
+repetitions wait65 seconds and require real credential submissions, local MFA and
+the Security return destination. Traces/screenshots/storage-state dumps are absent.
+
+To reproduce the original provider defect first, coordinate restoration to the
+saved baseline, remove only the stale freshness-profile-ready marker, and set
+KITH_FRESHNESS_RED=1 for a fresh isolated DB. The runner performs a first sensitive
+credential+MFA exchange, waits65 seconds, and verifies old provider auth fails
+closed on the repeated request with no credential challenge. It preserves the
+same browser/context while awaiting freshness-profile.sh apply, then retries real
+credentials/MFA and two further65-second repeated exchanges. Keep the app runner
+attached, preserve private result JSON, and stop only its recorded exact process
+identity after review. This is desktop provider evidence, never Android evidence.
+
+freshness-process.py records the separate app PID/start/absolute command/run marker
+and requires that PID to own desktop port8464. Its stop action checks the exact
+saved identity and preserves the shared8444 process. KITH_FRESHNESS_LINK_ONLY=1
+runs signup/enrollment plus a65-second retained-session explicit-link check; the
+normal regression runs two65-second reauth repetitions and then that link check.
+All link cases use actual fresh provider credentials and Kith local MFA, asserting
+two identities on the original local owner. Use a fresh short database suffix per
+run, never reuse a completed enrollment dataset as a fresh-signup case.

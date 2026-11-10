@@ -10,7 +10,10 @@ defmodule Kith.Auth.ChallengesTest do
     user =
       user |> Ecto.Changeset.change(totp_enabled: true, totp_secret: secret) |> Repo.update!()
 
-    %{user: user, code: :pot.totp(secret), binding: "browser-binding-long-enough"}
+    # The configured window accepts the next interval as well as the current
+    # one. Use it so setup crossing a 30-second boundary does not expire the
+    # successful-completion input while the challenge checks run.
+    %{user: user, code: :pot.totp(secret, addwindow: 1), binding: "browser-binding-long-enough"}
   end
 
   test "requires browser binding and consumes successful challenges once", ctx do

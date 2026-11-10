@@ -10,7 +10,7 @@ mode=os.environ['KITH_CONSENT']
 assert mode in ('deny','implicit','explicit')
 p=OAuth2Provider.objects.get(name='kith-local')
 flow_mode='explicit' if mode=='explicit' else 'implicit'
-p.authorization_flow=Flow.objects.get(slug=f'default-provider-authorization-{flow_mode}-consent')
+p.authorization_flow=(Flow.objects.filter(slug='kith-local-always-authenticate').first() if mode != 'explicit' else None) or Flow.objects.get(slug=f'default-provider-authorization-{flow_mode}-consent')
 p.save(update_fields=['authorization_flow'])
 policy,_=ExpressionPolicy.objects.update_or_create(name='kith-local-denial-validation',defaults={'expression':'return False'})
 PolicyBinding.objects.update_or_create(target=Application.objects.get(slug='kith-local'),policy=policy,defaults={'order':0,'enabled':mode=='deny'})
