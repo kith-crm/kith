@@ -1,5 +1,9 @@
 # Task 10 sanitized acceptance record
 
+Current record (2026-11-10): prerequisites were supplied and actual Android,
+Authentik and DAVx5 cases executed. See [consolidated dated acceptance](task-6-final-2026-11-10.md).
+The following is the preserved **historical 2026-11-09 checkpoint**, not current prerequisites.
+
 Date: 2026-11-09. No actual Chrome/DAVx5/provider acceptance was executed.
 Read-only `_android.devices({omitDriverInstall:true})` enumeration found one
 emulator reporting model `Android SDK built for arm64`. Read-only device shell reports Android 10. `pm list packages` found no

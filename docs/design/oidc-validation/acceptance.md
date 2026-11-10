@@ -1,5 +1,11 @@
 # OIDC and DAV feature acceptance
 
+2026-11-10 update: actual Android/live-provider/DAVx5 acceptance now has
+[dated qualified evidence](task-6-final-2026-11-10.md). Prerequisite absences and
+NOT RUN statements below describe the historical feature checkpoint. Original
+failures and later qualified supplements are retained separately. Final cleanup
+and independent final review status are recorded in the dated record.
+
 Checkpoint: 2026-11-10, branch `t3/add-oidc-support`, task 11 base
 `fbcdd28f6226f2c4d2d2b06c124d88a390315f4b`.
 **Release acceptance is pending. Actual Android Chrome, DAVx5 and live Authentik

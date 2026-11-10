@@ -148,3 +148,18 @@ Long manual Android runs can opt into `KITH_OIDC_POOL_SIZE=16` and
 test app. Defaults remain 4 connections and 120000 ms. These options affect
 only the isolated test harness; record them with each run and do not interpret
 a database checkout failure before provider departure as provider acceptance.
+
+After evidence-only cleanup, `.oidc-local/task6/` remains but `run.json` does
+not. Before a new run, preserve that safe evidence outside the runtime directory:
+
+```sh
+# Only after owned teardown has completed and run.json has been removed:
+test ! -e .oidc-local/run.json
+mkdir -p .superpowers/validation-archives
+archive_dir=$(mktemp -d .superpowers/validation-archives/oidc-XXXXXXXX)
+mv .oidc-local "$archive_dir/evidence"
+scripts/oidc-local/up.sh
+```
+
+The archive stays ignored and preserves cleanup diagnostics. Do not move a live
+run's directory: its ownership checks and teardown require that state.

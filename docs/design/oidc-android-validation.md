@@ -1,8 +1,12 @@
 # Actual Android OIDC acceptance
 
-Status: **NOT RUN** (2026-11-09). Feature acceptance remains outstanding.
-The available emulator alone does not establish browser or DAVx5 interoperability.
-See [sanitized acceptance record](oidc-validation/task-10-acceptance.md).
+Status (2026-11-10): **qualified actual-device acceptance**, with historical failures
+and remaining gaps preserved. See the [dated consolidated record](oidc-validation/task-6-final-2026-11-10.md),
+[original Android matrix](oidc-validation/task-4-android-acceptance.md), and
+[configured-profile supplement](oidc-validation/task-4-android-freshness-2026-11-10.md).
+The standard runner below remains NOT RUN under the pinned-device-CLI UI constraint;
+actual cases used supported native adapters. Full native copy/clipboard verification
+and external keyboard remain NOT RUN after supported controls were exhausted.
 
 Run the automated subset from the repository:
 

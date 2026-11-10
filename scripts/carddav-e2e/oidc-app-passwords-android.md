@@ -1,7 +1,11 @@
 # DAVx5 app-password interoperability
 
-**NOT RUN for OIDC/app passwords.** Historical DAVx5/vCard results do not prove
-this flow. Use an actual authorized Android device/emulator with DAVx5 already
+**2026-11-10: actual OIDC/app-password DAVx5 functional cases executed in both policies.**
+See [initial record](../../docs/design/oidc-validation/task-5-davx5-2026-11-10.md),
+[qualified follow-up](../../docs/design/oidc-validation/task-5-followup-2026-11-10.md), and
+[consolidated acceptance/cleanup](../../docs/design/oidc-validation/task-6-final-2026-11-10.md).
+Authentication-specific native notification display FAIL; generic native failure observed.
+Historical partial results and attribution unknowns remain preserved. Use an actual authorized Android device/emulator with DAVx5 already
 installed and a disposable test address book. Installation, Contacts permissions,
 network and test CA provisioning need separate authorization; do not mutate a
 shared device or weaken TLS. See the [Android prerequisites and evidence rules](../../docs/design/oidc-android-validation.md).
