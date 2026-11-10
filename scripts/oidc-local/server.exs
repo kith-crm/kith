@@ -18,7 +18,9 @@ Application.put_env(
     password: System.fetch_env!("POSTGRES_PASSWORD"),
     port: 15449,
     database: database,
-    pool_size: 4
+    pool_size: String.to_integer(System.get_env("KITH_OIDC_POOL_SIZE", "4")),
+    ownership_timeout:
+      String.to_integer(System.get_env("KITH_OIDC_OWNERSHIP_TIMEOUT_MS", "120000"))
   )
 )
 

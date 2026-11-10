@@ -142,3 +142,9 @@ normal regression runs two65-second reauth repetitions and then that link check.
 All link cases use actual fresh provider credentials and Kith local MFA, asserting
 two identities on the original local owner. Use a fresh short database suffix per
 run, never reuse a completed enrollment dataset as a fresh-signup case.
+
+Long manual Android runs can opt into `KITH_OIDC_POOL_SIZE=16` and
+`KITH_OIDC_OWNERSHIP_TIMEOUT_MS=600000` when starting or restarting the owned
+test app. Defaults remain 4 connections and 120000 ms. These options affect
+only the isolated test harness; record them with each run and do not interpret
+a database checkout failure before provider departure as provider acceptance.
