@@ -1,0 +1,928 @@
+{
+  "date": "2026-11-10",
+  "overall": "PARTIAL",
+  "client": {
+    "package": "at.bitfire.davdroid",
+    "version": "4.5.21-ose",
+    "version_code": 405210002,
+    "apk_sha256": "8a41ae9d76484b86ce326e2002bae5ad5609aa5c4ea2179037287af676fd1b41",
+    "source": "https://github.com/bitfireAT/davx5-ose/releases/download/v4.5.21-ose/davx5-405210002-4.5.21-ose-release.apk",
+    "installed_matches_official_vendor_release": true
+  },
+  "TLS": "TLSv1.3; existing exact-site leaf and retained user CA; upstream CA+hostname verification",
+  "routing": "DAVx5 app HTTP proxy localhost:9050 -> owned adb reverse tcp:9050/tcp:19050 -> allowlisted CONNECT kith.test:8444 -> private TLS observation edge127.0.0.1:18444 -> verified upstream8444; restored System default and removed reverse",
+  "criteria": [
+    {
+      "criterion": "client_source_version",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "verified_TLS_and_device_scoped_routing",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "OIDC_local_MFA_and_independent_named_A_B_creation",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "actual_independent_DAVx5_A_B_discovery_and_sync",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "Android_create_edit_delete_received_by_Kith",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "Kith_create_edit_delete_received_by_Android",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "viewer_read_only_discovery_and_write_denial",
+      "password_true": "NOT RUN",
+      "password_false": "NOT RUN"
+    },
+    {
+      "criterion": "cross_account_denial_in_actual_client",
+      "password_true": "NOT RUN",
+      "password_false": "NOT RUN"
+    },
+    {
+      "criterion": "revoke_A_after_fresh_OIDC_and_local_MFA",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "explicit_A_new_request_401_after_revocation",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "native_revoked_A_authentication_error_display",
+      "password_true": "NOT RUN",
+      "password_false": "NOT RUN"
+    },
+    {
+      "criterion": "independent_B_receives_new_contact_after_A_revocation",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "ordinary_account_password_policy_boundary",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "app_password_web_login_rejected",
+      "password_true": "PASS",
+      "password_false": "NOT RUN"
+    },
+    {
+      "criterion": "app_password_API_token_rejected",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    },
+    {
+      "criterion": "owned_resource_cleanup_and_restoration",
+      "password_true": "PASS",
+      "password_false": "PASS"
+    }
+  ],
+  "requests": [
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/roles/admin/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/roles/admin",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "OPTIONS",
+      "path": "/dav/principals/",
+      "status": 200
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "OPTIONS",
+      "path": "/dav/principals/",
+      "status": 200
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/roles/admin/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/roles/admin",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PUT",
+      "path": "/dav/addressbooks/default/10802f96-6e44-4df8-b7fe-9cb54fc1e709.vcf",
+      "status": 201
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PUT",
+      "path": "/dav/addressbooks/default/10802f96-6e44-4df8-b7fe-9cb54fc1e709.vcf",
+      "status": 204
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "DELETE",
+      "path": "/dav/addressbooks/default/10802f96-6e44-4df8-b7fe-9cb54fc1e709.vcf",
+      "status": 204
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 401
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 401
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "OPTIONS",
+      "path": "/dav/principals/",
+      "status": 200
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "OPTIONS",
+      "path": "/dav/principals/",
+      "status": 200
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/roles/admin/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/roles/admin",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "OPTIONS",
+      "path": "/dav/principals/",
+      "status": 200
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "OPTIONS",
+      "path": "/dav/principals/",
+      "status": 200
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/roles/admin/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/roles/admin",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "OPTIONS",
+      "path": "/dav/principals/",
+      "status": 200
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "OPTIONS",
+      "path": "/dav/principals/",
+      "status": 200
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 401
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 401
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/roles/admin/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/principals/roles/admin",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PUT",
+      "path": "/dav/addressbooks/default/953106d6-7fdf-4bef-abaf-88c464c5d50a.vcf",
+      "status": 201
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PUT",
+      "path": "/dav/addressbooks/default/953106d6-7fdf-4bef-abaf-88c464c5d50a.vcf",
+      "status": 204
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "DELETE",
+      "path": "/dav/addressbooks/default/f52f8d72-6698-457b-93ae-533735014919.vcf",
+      "status": 204
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "DELETE",
+      "path": "/dav/addressbooks/default/f52f8d72-6698-457b-93ae-533735014919.vcf",
+      "status": 404
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 401
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 401
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 401
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 401
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 401
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 401
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "true",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 401
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 401
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 401
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/principals/",
+      "status": 401
+    },
+    {
+      "policy": "false",
+      "method": "PROPFIND",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    },
+    {
+      "policy": "false",
+      "method": "REPORT",
+      "path": "/dav/addressbooks/default/",
+      "status": 207
+    }
+  ],
+  "API_checks": [
+    {
+      "method": "POST",
+      "path": "/api/auth/token",
+      "status": 401
+    },
+    {
+      "method": "POST",
+      "path": "/api/auth/token",
+      "status": 403
+    }
+  ],
+  "cleanup": {
+    "all_four_owned_credentials_revoked": true,
+    "all_five_owned_contacts_soft_deleted": true,
+    "all_five_owned_DAVx5_profiles_removed": true,
+    "proxy_restored": true,
+    "binding_released": true,
+    "chrome_pid_preserved": 17109,
+    "original_tab_and_provider_context_preserved": true,
+    "provider_cookie_count": 4,
+    "final_app_pid": 23695,
+    "final_policy": "false",
+    "fixture_pid_retained": 94030
+  },
+  "limitations": [
+    "Viewer and cross-account actual-client cases remain unexecuted; no new viewer/outsider was provisioned.",
+    "Revoked-A native authentication-error notification was not captured. The explicit actual-client request returned401.",
+    "Disabled web password form is unavailable by policy; no fresh secret submission to that web path was executed.",
+    "Request attribution uses explicit named-profile UI actions and temporal windows. Logs intentionally contain no Authorization values or credential tags. Background401s during mode switches and duplicate DELETE404 remain in evidence; do not attribute all logged failures to the foreground profile.",
+    "Normal soft-delete tombstones and revoked credential audit rows remain in the retained dedicated databases. Root final cleanup review remains pending."
+  ]
+}

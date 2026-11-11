@@ -64,6 +64,10 @@ defmodule KithWeb.MetricsEndpointTest do
 
     start_supervised!(Kith.PromEx)
 
+    # Manual metrics are emitted in a startup continuation. Synchronize with
+    # that process before scraping, rather than racing its initial collection.
+    :sys.get_state(Kith.PromEx.__manual_metrics_name__())
+
     conn = conn |> put_req_header("authorization", "Bearer test-metrics-token") |> get("/metrics")
     body = response(conn, 200)
     assert get_resp_header(conn, "content-type") == ["text/plain; charset=utf-8"]

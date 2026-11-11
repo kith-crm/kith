@@ -10,6 +10,8 @@ defmodule Kith.Accounts do
   alias Kith.Workers.AccountResetWorker
   alias Kith.Workers.DisplayNameRecomputeWorker
 
+  alias Kith.Accounts.OIDC
+
   alias Kith.Accounts.{
     Account,
     AccountInvitation,
@@ -456,10 +458,10 @@ defmodule Kith.Accounts do
   recovery codes. Returns `{:ok, user, raw_recovery_codes}` or `{:error, reason}`.
   """
   def enable_totp(user, secret, code) do
-    if valid_totp_code?(secret, code) do
-      do_enable_totp(user, secret)
-    else
-      {:error, :invalid_code}
+    with :ok <- KithWeb.Authentication.require_recent(user) do
+      if valid_totp_code?(secret, code),
+        do: do_enable_totp(user, secret),
+        else: {:error, :invalid_code}
     end
   end
 
@@ -637,27 +639,12 @@ defmodule Kith.Accounts do
   no login method (no password and no other WebAuthn credentials and no OAuth).
   """
   def delete_webauthn_credential(user, credential_id) do
-    case get_webauthn_credential(user, credential_id) do
-      nil ->
-        {:error, :not_found}
-
-      credential ->
-        other_cred_count =
-          Repo.aggregate(
-            from(wc in WebauthnCredential,
-              where: wc.user_id == ^user.id and wc.id != ^credential.id
-            ),
-            :count
-          )
-
-        has_password = is_binary(user.hashed_password) and user.hashed_password != ""
-
-        if other_cred_count == 0 and not has_password do
-          {:error, :last_credential}
-        else
-          Repo.delete(credential)
-        end
-    end
+    OIDC.delete_login_method(
+      user,
+      WebauthnCredential,
+      credential_id,
+      :last_credential
+    )
   end
 
   @doc """
@@ -674,21 +661,7 @@ defmodule Kith.Accounts do
   (password, WebAuthn credentials, or OAuth links).
   """
   def has_login_method?(user) do
-    has_password = is_binary(user.hashed_password) and user.hashed_password != ""
-
-    webauthn_count =
-      Repo.aggregate(
-        from(wc in WebauthnCredential, where: wc.user_id == ^user.id),
-        :count
-      )
-
-    oauth_count =
-      Repo.aggregate(
-        from(ui in UserIdentity, where: ui.user_id == ^user.id),
-        :count
-      )
-
-    has_password or webauthn_count > 0 or oauth_count > 0
+    user |> then(&Repo.get!(User, &1.id)) |> OIDC.usable_login_method?()
   end
 
   ## OAuth Identities
@@ -818,32 +791,7 @@ defmodule Kith.Accounts do
   Deletes an OAuth identity. Returns error if it would leave user with no login method.
   """
   def delete_identity(user, identity_id) do
-    case Repo.get_by(UserIdentity, id: identity_id, user_id: user.id) do
-      nil ->
-        {:error, :not_found}
-
-      identity ->
-        # Check if user would still have a login method
-        other_identity_count =
-          Repo.aggregate(
-            from(ui in UserIdentity, where: ui.user_id == ^user.id and ui.id != ^identity.id),
-            :count
-          )
-
-        has_password = is_binary(user.hashed_password) and user.hashed_password != ""
-
-        webauthn_count =
-          Repo.aggregate(
-            from(wc in WebauthnCredential, where: wc.user_id == ^user.id),
-            :count
-          )
-
-        if has_password or other_identity_count > 0 or webauthn_count > 0 do
-          Repo.delete(identity)
-        else
-          {:error, :last_login_method}
-        end
-    end
+    OIDC.delete_login_method(user, UserIdentity, identity_id, :last_login_method)
   end
 
   @doc """

@@ -28,8 +28,11 @@ if monica_limit = System.get_env("MONICA_RATE_LIMIT_PER_MINUTE") do
 end
 
 # Feature flags
+auth = Kith.Auth.Config.from_env!(System.get_env())
+config :kith, :auth, auth
+
 config :kith,
-  disable_signup: System.get_env("DISABLE_SIGNUP") == "true",
+  disable_signup: not auth.registration_enabled,
   require_tos_acceptance: System.get_env("REQUIRE_TOS_ACCEPTANCE") == "true",
   max_upload_size_kb: String.to_integer(System.get_env("MAX_UPLOAD_SIZE_KB", "5120")),
   max_storage_size_mb: String.to_integer(System.get_env("MAX_STORAGE_SIZE_MB", "1024"))
@@ -269,6 +272,7 @@ if config_env() == :prod do
            rescue_after: :timer.minutes(oban_lifeline_rescue_after_minutes)},
           {Oban.Plugins.Cron,
            crontab: [
+             {"*/5 * * * *", Kith.Workers.PurgeAuthFlowsWorker},
              {"0 * * * *", Kith.Workers.ReminderDispatcher},
              {"0 3 * * *", Kith.Workers.ContactPurgeWorker},
              {"0 4 * * 0", Kith.Workers.DuplicateDetectionWorker},
@@ -328,7 +332,7 @@ if config_env() == :prod do
       },
       client: Kith.SentryReqClient,
       filter: Kith.SentryFilter,
-      before_send: {Kith.SentryEventHandler, :before_send},
+      before_send: {Kith.SentryScrubber, :before_send},
       enable_source_code_context: true
   else
     # Sentry re-reads this variable when validating partial runtime updates;

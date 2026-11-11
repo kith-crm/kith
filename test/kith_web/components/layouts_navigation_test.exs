@@ -59,6 +59,7 @@ defmodule KithWeb.LayoutsNavigationTest do
           "/users/settings",
           "/users/settings/confirm-email/token",
           "/settings/account",
+          "/settings/security",
           "/settings/tags"
         ] do
       dom = render_navigation(path)

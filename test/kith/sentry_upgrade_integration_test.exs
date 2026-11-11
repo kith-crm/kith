@@ -41,7 +41,7 @@ defmodule Kith.SentryUpgradeIntegrationTest do
         dsn: "http://public-key@127.0.0.1:#{port}/1",
         client: Kith.SentryReqClient,
         filter: Kith.SentryFilter,
-        before_send: {SentryEventHandler, :before_send},
+        before_send: {Kith.SentryScrubber, :before_send},
         before_send_metric: {SentryEventHandler, :before_send_metric},
         telemetry_processor_categories: [:error],
         logs: nil,
@@ -57,6 +57,61 @@ defmodule Kith.SentryUpgradeIntegrationTest do
 
     Sentry.Config.persist(config)
     :ok
+  end
+
+  test "actual envelope scrubs OIDC callback credentials and diagnostic strings" do
+    assert {:ok, _} =
+             Sentry.capture_exception(
+               %RuntimeError{message: "Callback failed code=CODEMARK&state=STATEMARK"},
+               request: %{
+                 url: "https://kith.test/auth/oidc/callback?code=CODEMARK&state=STATEMARK",
+                 query_string: "code=CODEMARK",
+                 headers: [{"Cookie", "COOKIESECRET"}]
+               },
+               extra: %{
+                 code_verifier: "VERIFIERMARK",
+                 nonce: "NONCEMARK",
+                 auth_challenge_binding: "BINDINGMARK"
+               }
+             )
+
+    assert :ok = Sentry.flush(timeout: 5_000)
+    assert_receive {:sentry_envelope, body, _, "/api/1/envelope/"}, 1_000
+
+    for marker <- ~w(CODEMARK STATEMARK COOKIESECRET VERIFIERMARK NONCEMARK BINDINGMARK),
+        do: refute(body =~ marker)
+  end
+
+  test "actual envelope filters complete provider diagnostics and retains the event" do
+    query =
+      URI.encode_query(%{
+        "error" => "access_denied",
+        "error_description" => "Rejected credential CREDENTIALMARK",
+        "error_uri" => "https://issuer.test/diagnostics/URICREDENTIALMARK"
+      })
+
+    assert {:ok, _} =
+             Sentry.capture_exception(%RuntimeError{message: "Provider denied authorization"},
+               request: %{
+                 url: "https://kith.test/auth/oidc/callback?" <> query,
+                 query_string: query
+               },
+               extra: %{
+                 provider: %{
+                   error_description: "Rejected credential NESTEDMARK",
+                   error_uri: "https://issuer.test/NESTEDURIMARK"
+                 },
+                 diagnostic:
+                   "error_description=Rejected credential SERIALIZEDMARK&error=access_denied"
+               }
+             )
+
+    assert :ok = Sentry.flush(timeout: 5_000)
+    assert_receive {:sentry_envelope, body, _, "/api/1/envelope/"}, 1_000
+    assert body =~ "Provider denied authorization"
+
+    for marker <- ~w(CREDENTIALMARK URICREDENTIALMARK NESTEDMARK NESTEDURIMARK SERIALIZEDMARK),
+        do: refute(body =~ marker)
   end
 
   test "actual envelope redacts request, URL, nested context and enriches user identity" do

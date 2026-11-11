@@ -3,10 +3,17 @@ defmodule Kith.Application do
 
   use Application
 
+  alias Kith.Auth.Config
+
   require Logger
 
   @impl true
   def start(_type, _args) do
+    Config.validate_runtime!(Application.fetch_env!(:kith, :auth), %{
+      oauth_providers: Application.get_env(:kith, :oauth_providers, %{}),
+      passkeys_enabled: Application.get_env(:kith, :passkeys_enabled, false)
+    })
+
     Kith.Vault.validate_key!()
     :ok = Kith.Accounts.init_verified_password_key()
     log_oban_pruner_retention()

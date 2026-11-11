@@ -20,6 +20,7 @@ defmodule Kith.Accounts.User do
     field :tos_accepted_at, :utc_datetime
     field :tos_accepted, :boolean, virtual: true
     field :authenticated_at, :utc_datetime, virtual: true
+    field :mfa_authenticated_at, :utc_datetime, virtual: true
 
     # Profile preferences
     field :display_name, :string
@@ -41,10 +42,12 @@ defmodule Kith.Accounts.User do
     field :webauthn_enabled, :boolean, default: false
 
     belongs_to :account, Kith.Accounts.Account
+    has_many :dav_app_passwords, Kith.Accounts.DavAppPassword
     has_many :user_tokens, Kith.Accounts.UserToken
     has_many :user_recovery_codes, Kith.Accounts.UserRecoveryCode
     has_many :webauthn_credentials, Kith.Accounts.WebauthnCredential
     has_many :user_identities, Kith.Accounts.UserIdentity
+    has_many :oidc_identities, Kith.Accounts.OIDCIdentity
 
     timestamps(type: :utc_datetime)
   end
@@ -68,6 +71,17 @@ defmodule Kith.Accounts.User do
     |> validate_email(opts)
     |> validate_password(opts)
     |> maybe_require_tos()
+  end
+
+  @doc "Registers a verified OIDC user without creating a local password."
+  def oidc_registration_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:email, :display_name, :tos_accepted])
+    |> validate_email([])
+    |> update_change(:display_name, &(&1 |> HtmlSanitizeEx.strip_tags() |> String.trim()))
+    |> validate_length(:display_name, max: 255)
+    |> maybe_require_tos()
+    |> put_change(:confirmed_at, DateTime.utc_now(:second))
   end
 
   @doc """

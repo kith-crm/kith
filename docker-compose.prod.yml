@@ -6,6 +6,19 @@
 #   2. chmod 600 .env
 #   3. docker build -t kith:latest .
 
+x-auth-environment: &auth-environment
+  # Unset values are omitted so runtime defaults and legacy signup policy apply.
+  OIDC_ENABLED:
+  OIDC_ISSUER:
+  OIDC_CLIENT_ID:
+  OIDC_CLIENT_SECRET:
+  # Mount this path inside each release service when using a secret file.
+  OIDC_CLIENT_SECRET_FILE:
+  OIDC_DISPLAY_NAME:
+  PASSWORD_LOGIN_ENABLED:
+  REGISTRATION_ENABLED:
+  DISABLE_SIGNUP:
+
 services:
   # ---------------------------------------------------------------------------
   # PostgreSQL — all application data
@@ -42,6 +55,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      <<: *auth-environment
       DATABASE_URL: ${DATABASE_URL}
       SECRET_KEY_BASE: ${SECRET_KEY_BASE}
       CLOAK_KEY: ${CLOAK_KEY}
@@ -73,6 +87,7 @@ services:
     tmpfs:
       - /tmp:size=64M
     environment:
+      <<: *auth-environment
       # ── BEAM distribution / clustering (libcluster Epmd strategy) ──
       RELEASE_COOKIE: ${RELEASE_COOKIE}
       RELEASE_DISTRIBUTION: sname
@@ -111,7 +126,6 @@ services:
       AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
       AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
       # Features
-      DISABLE_SIGNUP: ${DISABLE_SIGNUP:-false}
       SIGNUP_DOUBLE_OPTIN: ${SIGNUP_DOUBLE_OPTIN:-true}
       MAX_UPLOAD_SIZE_KB: ${MAX_UPLOAD_SIZE_KB:-5120}
       MAX_STORAGE_SIZE_MB: ${MAX_STORAGE_SIZE_MB:-0}
@@ -160,6 +174,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
+      <<: *auth-environment
       # ── BEAM distribution / clustering (libcluster Epmd strategy) ──
       RELEASE_COOKIE: ${RELEASE_COOKIE}
       RELEASE_DISTRIBUTION: sname

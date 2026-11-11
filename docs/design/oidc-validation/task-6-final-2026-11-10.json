@@ -1,0 +1,149 @@
+{
+  "date": "2026-11-10",
+  "status": "QUALIFIED acceptance of local validation and owned cleanup; final independent review complete; full feature acceptance withheld",
+  "sources": {
+    "task-4-android-matrix.json": {
+      "sha256": "752e349e063c39395a94f9909eedf76d10566b10682bd87c1b538a2437008575"
+    },
+    "task-4-android-freshness-2026-11-10.json": {
+      "sha256": "1b01d93e4d98af7bcab99f70236c33f598833cbfa8b21d22e689228099142450"
+    },
+    "task-5-davx5-2026-11-10.json": {
+      "sha256": "5372717e21a7b530a7d806a9b4d5e42d969b15a24586f7477b526844975b88f4",
+      "criteria_counts": {
+        "password_true": {
+          "PASS": 13,
+          "NOT RUN": 3
+        },
+        "password_false": {
+          "PASS": 12,
+          "NOT RUN": 4
+        }
+      }
+    },
+    "task-5-followup-2026-11-10.json": {
+      "sha256": "8a25c3fd5dec9c2da953aeb9419a96c25a75cf12adf013ea7f2e1f5b30a75f11",
+      "criteria_counts": {
+        "password_true": {
+          "PASS": 8,
+          "FAIL": 1,
+          "NOT RUN": 1
+        },
+        "password_false": {
+          "PASS": 8,
+          "FAIL": 1,
+          "NOT RUN": 1
+        }
+      }
+    }
+  },
+  "historical_android_counts": {
+    "live_true": {
+      "PASS": 19,
+      "FAIL": 2
+    },
+    "live_false": {
+      "PASS": 17,
+      "FAIL": 2
+    },
+    "fixture_true": {
+      "PASS": 15,
+      "FAIL": 0
+    },
+    "fixture_false": {
+      "PASS": 14,
+      "FAIL": 0
+    }
+  },
+  "qualifications": [
+    "Configured always-authenticate profile delayed baseline plus two >66s repeats PASS each policy; stock profile historical failure preserved",
+    "Enabled explicit link PASS; disabled explicit link PASS only qualified same-dataset policy-cutover preparation",
+    "Native full copy, clipboard contents/original restoration, external keyboard and unchanged standard runner NOT RUN; supported controls exhausted",
+    "DAVx5 authentication-specific notification FAIL both policies; generic native failure PASS",
+    "Historical diagnostic booleans unknown at 2614 positions across 135 files; unreconstructed"
+  ],
+  "cleanup": {
+    "status": "PASS for verified owned teardown/restoration; clipboard exact baseline unavailable",
+    "technical_clearance": "Explicit controller clearance after task-5-recheck.md on 2026-11-10",
+    "device": {
+      "command_line_exact": true,
+      "command_line_mode": "666",
+      "reverse": "host-14 tcp:4000 tcp:4000\n\n",
+      "ime": "com.android.inputmethod.latin/.LatinIME",
+      "private_dns_mode": "null",
+      "private_dns_specifier": "null",
+      "global_proxy": "null",
+      "microsoft_packages": "",
+      "test_ime_enabled": false,
+      "CA_removed_exact_fingerprint": true,
+      "original_standard_tab": "localhost:4000/contacts/1",
+      "own_incognito_closed": true
+    },
+    "runtime": {
+      "containers": [
+        "lamma-t3-c713e77f-0c641f-postgres-1 Up 14 hours (healthy) 127.0.0.1:20150->5432/tcp",
+        "kith-mobile-audit-app-1 Up 37 hours 0.0.0.0:4000->4000/tcp, [::]:4000->4000/tcp",
+        "kith-mobile-audit-postgres-1 Up 37 hours (healthy) 0.0.0.0:5434->5432/tcp, [::]:5434->5432/tcp",
+        "kith-mobile-audit-mailpit-1 Up 37 hours (healthy) 0.0.0.0:1025->1025/tcp, [::]:1025->1025/tcp, 0.0.0.0:8025->8025/tcp, [::]:8025->8025/tcp"
+      ],
+      "volumes": [
+        "kith-mobile-audit_build",
+        "kith-mobile-audit_deps",
+        "kith-mobile-audit_node_modules",
+        "kith-mobile-audit_postgres_dev_data",
+        "lamma-t3-c713e77f-0c641f_pgdata"
+      ],
+      "networks": [
+        "bridge",
+        "host",
+        "kith-mobile-audit_default",
+        "lamma-t3-c713e77f-0c641f_default",
+        "none"
+      ]
+    },
+    "verification": {
+      "recorded_owned_pids_alive": [],
+      "owned_ports_listener_output": "",
+      "owned_port_lsof_status": 1,
+      "audit_http_status": "200",
+      "user_jdk_symlink_absent": true
+    },
+    "secret_audit": {
+      "files_scanned": 18,
+      "known_sensitive_values": 13,
+      "known_value_matches": 0,
+      "removed_files": 305,
+      "scope": "Known credential fields from private JSON; retained allowlist has no raw logs/traces/key material. Not a universal arbitrary-secret detector."
+    },
+    "retained": [
+      ".oidc-local/task6 restricted sanitized inventories, file-hash removal manifest and health diagnostics; no raw logs/traces/private keys/credential state",
+      "Homebrew openjdk@17 17.0.21.0.3 and installed formula dependencies intentionally retained; no unsafe autoremove",
+      "Preexisting shared browser/Playwright host artifact caches retained; task-local APK/artifact copies deleted",
+      "Integration helper/IME packages retained because preexistence unknown; test IME disabled, AOSP default",
+      "Plan .superpowers/sdd/2026-11-10-local-oidc-device-validation workspace/ledger retained for final review",
+      "Original booted emulator, browser standard tab/data, original two DAVx5 profiles, reverse4000 and unrelated trust/resources preserved"
+    ],
+    "removed": [
+      "Exact USER CA fingerprint08:4F:54:51:D3:16:34:A0:58:3E:0F:15:0B:E7:69:74:4F:5E:A7:EA:D3:DD:40:7B:62:69:A9:90:78:F8:D4:B4 via Settings USER only",
+      "Task Incognito tab/context; no browser data clear; original standard tab survived supported relaunch",
+      "Only com.microsoft.playwright.androiddriver and .test",
+      "Only created user JDK symlink",
+      "Provider original saved flow references/callbacks restored before project teardown",
+      "Exact fixture PID94030; ownership-gated Kith60034/proxy7926; owned compose containers, two volumes, network and all contained dedicated DBs",
+      "305 transient task-private files including CA/leaf/fixture keys, credential/MFA states, raw logs/captures, runtime.env/run.json and task-local artifacts"
+    ],
+    "constraints": [
+      "Original clipboard contents unavailable; cannot certify exact clipboard restoration",
+      "No emulator shutdown/wipe, host trust/DNS mutation, global cleanup/prune or shared database reset",
+      "Final independent whole-change review remains controller responsibility"
+    ]
+  },
+  "verification": {
+    "ownership_check": "PASS before teardown",
+    "full_mix": "Controller reported final mix test 2779/0 failures135.4s; /tmp/kith-local-validation-final-test.log",
+    "ci_audit": "Controller exit0; Hex no advisories, root/assets npm0, Sobelow32 reviewed none unreviewed; /tmp/kith-local-validation-final-audit.log",
+    "diff_check": "PASS",
+    "final_independent_review": "QUALIFIED ACCEPTANCE; no blocking correctness/security findings; two minor restart-documentation and safe-inventory-permission findings resolved by controller",
+    "commits_by_task6": []
+  }
+}

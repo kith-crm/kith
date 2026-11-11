@@ -1,0 +1,176 @@
+{
+  "date": "2026-11-10",
+  "scope": "Android configured provider freshness supplemental evidence; historical baseline preserved",
+  "provider": "Authentik 2026.8.5",
+  "profile": "kith-local-always-authenticate",
+  "profile_independent_review": "PASS spec and quality/security",
+  "upstream_stock_freshness_failure_preserved": true,
+  "baseline_matrix_sha256": "752e349e063c39395a94f9909eedf76d10566b10682bd87c1b538a2437008575",
+  "chrome": "org.chromium.chrome 159.0.8152.0",
+  "chrome_pid": 17109,
+  "same_existing_incognito_context": true,
+  "provider_cookie_count_final": 4,
+  "provider_cookies_cleared": false,
+  "principal_switched": false,
+  "pool_size": 16,
+  "ownership_timeout_ms": 600000,
+  "policy_results": [
+    {
+      "password": true,
+      "sensitive_baseline": "PASS",
+      "delayed_repeats": "PASS",
+      "rounds": [
+        {
+          "case": "configured sensitive baseline",
+          "wait_seconds": null,
+          "seconds_since_previous_success": null,
+          "fresh_request": true,
+          "identifications": 1,
+          "password_submissions": 1,
+          "local_mfa_completed": true,
+          "return_path": "/settings/security",
+          "original_owner": true,
+          "same_provider_jar": true,
+          "chrome_pid_preserved": true
+        },
+        {
+          "case": "delayed repeat1",
+          "wait_seconds": 66.004,
+          "seconds_since_previous_success": 92.446,
+          "fresh_request": true,
+          "identifications": 1,
+          "password_submissions": 1,
+          "local_mfa_completed": true,
+          "return_path": "/settings/security",
+          "original_owner": true,
+          "same_provider_jar": true,
+          "chrome_pid_preserved": true
+        },
+        {
+          "case": "delayed repeat2",
+          "wait_seconds": 66.003,
+          "seconds_since_previous_success": 92.035,
+          "fresh_request": true,
+          "identifications": 1,
+          "password_submissions": 1,
+          "local_mfa_completed": true,
+          "return_path": "/settings/security",
+          "original_owner": true,
+          "same_provider_jar": true,
+          "chrome_pid_preserved": true
+        }
+      ],
+      "provider_challenge_cancellation": "PASS",
+      "copy_success_feedback": "PASS",
+      "new_copy_test_credential_revoked": true,
+      "native_full_copy": "NOT RUN: full selection and Copy controls not exposed by supported native controls",
+      "clipboard_content_verification": "NOT RUN: supported clipboard command unavailable"
+    },
+    {
+      "password": false,
+      "sensitive_baseline": "PASS",
+      "delayed_repeats": "PASS",
+      "rounds": [
+        {
+          "case": "configured sensitive baseline",
+          "wait_seconds": null,
+          "seconds_since_previous_success": null,
+          "fresh_request": true,
+          "identifications": 1,
+          "password_submissions": 1,
+          "local_mfa_completed": true,
+          "return_path": "/settings/security",
+          "original_owner": true,
+          "same_provider_jar": true,
+          "chrome_pid_preserved": true
+        },
+        {
+          "case": "delayed repeat1",
+          "wait_seconds": 66.002,
+          "seconds_since_previous_success": 99.154,
+          "fresh_request": true,
+          "identifications": 1,
+          "password_submissions": 1,
+          "local_mfa_completed": true,
+          "return_path": "/settings/security",
+          "original_owner": true,
+          "same_provider_jar": true,
+          "chrome_pid_preserved": true
+        },
+        {
+          "case": "delayed repeat2",
+          "wait_seconds": 66.002,
+          "seconds_since_previous_success": 93.749,
+          "fresh_request": true,
+          "identifications": 1,
+          "password_submissions": 1,
+          "local_mfa_completed": true,
+          "return_path": "/settings/security",
+          "original_owner": true,
+          "same_provider_jar": true,
+          "chrome_pid_preserved": true
+        },
+        {
+          "case": "post-cancellation recovery",
+          "wait_seconds": null,
+          "seconds_since_previous_success": 34.342,
+          "fresh_request": true,
+          "identifications": 1,
+          "password_submissions": 1,
+          "local_mfa_completed": true,
+          "return_path": "/settings/security",
+          "original_owner": true,
+          "same_provider_jar": true,
+          "chrome_pid_preserved": true
+        }
+      ],
+      "provider_challenge_cancellation": "PASS",
+      "copy_success_feedback": "PASS",
+      "new_copy_test_credential_revoked": true,
+      "native_full_copy": "NOT RUN: full selection and Copy controls not exposed by supported native controls",
+      "clipboard_content_verification": "NOT RUN: supported clipboard command unavailable"
+    }
+  ],
+  "final_policy": false,
+  "device_binding_released": true,
+  "ca_driver_network_retained": true,
+  "explicit_links": [
+    {
+      "policy": true,
+      "status": "PASS",
+      "scope": "delayed original-owner explicit link after true-policy password fallback and visible unlink",
+      "wait_seconds": 66.005,
+      "genuine_provider_password_submission_guard": "PASS (>=1); exact count not persisted",
+      "original_owner_mfa": "PASS (current-code retry after invalid code)",
+      "original_owner": true
+    },
+    {
+      "policy": false,
+      "status": "PASS",
+      "scope": "FALSE policy-cutover explicit link; not steady-false unlink",
+      "preconditions": [
+        "steady false last-method guard rejected unlink",
+        "temporary true on same owned disabled-policy database",
+        "normal UI account-password fallback added; visible unlink",
+        "genuine local password plus original-owner MFA refresh under true",
+        "same database restarted false preserving genuine RP session and existing provider jar"
+      ],
+      "wait_seconds": 67.004,
+      "provider_password_submissions": 1,
+      "identifications": 1,
+      "original_owner_mfa": "PASS",
+      "original_owner": true,
+      "post_link_last_method_guard": "PASS",
+      "account_password_dav_status": 401,
+      "final_policy_verified": true,
+      "final_password_policy": false
+    }
+  ],
+  "attempt_history": [
+    "Earlier stock-profile freshness FAIL remains in baseline; this supplement validates a reviewed nonproduction provider profile, not an upstream correction.",
+    "Earlier pre-provider 500 classified as harness connection checkout timeout; pool 16 and ownership timeout 600000 used for completed runs.",
+    "Enabled initial cancellation/adapter attempts and password-form collapse attempts failed before corrected normal UI execution.",
+    "Enabled link first MFA code rejected; genuine current-code retry completed.",
+    "First false cutover precondition expired sensitive recency; refreshed genuine password+MFA under true and repeated false cutover. No guard weakened."
+  ]
+}

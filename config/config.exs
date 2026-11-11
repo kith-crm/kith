@@ -7,6 +7,20 @@
 # General application configuration
 import Config
 
+# Authentication handles, OTPs and provider callback credentials must never reach logs.
+config :phoenix, :filter_parameters, [
+  "password",
+  "secret",
+  "token",
+  "code",
+  "state",
+  "binding",
+  "nonce",
+  "verifier",
+  "error_description",
+  "error_uri"
+]
+
 # Register .vcf (vCard) MIME type for LiveView uploads
 config :mime, :types, %{"text/vcard" => ["vcf"], "application/json" => ["json"]}
 
@@ -35,6 +49,13 @@ config :kith, :scopes,
 config :kith,
   ecto_repos: [Kith.Repo],
   generators: [timestamp_type: :utc_datetime],
+  auth: %{
+    oidc_enabled: false,
+    password_login_enabled: true,
+    registration_enabled: true,
+    oidc: nil
+  },
+  passkeys_enabled: false,
   disable_signup: false,
   require_tos_acceptance: false,
   signup_double_optin: true
@@ -68,6 +89,7 @@ config :kith, Oban,
        )},
     {Oban.Plugins.Cron,
      crontab: [
+       {"*/5 * * * *", Kith.Workers.PurgeAuthFlowsWorker},
        {"0 * * * *", Kith.Workers.ReminderDispatcher},
        {"0 3 * * *", Kith.Workers.ContactPurgeWorker},
        {"0 4 * * 0", Kith.Workers.DuplicateDetectionWorker},
@@ -127,6 +149,18 @@ config :kith, :oauth_providers, %{}
 # not disable metric capture; the explicit callback drops those events.
 config :sentry,
   telemetry_processor_categories: [:error],
+  before_send: {Kith.SentryScrubber, :before_send},
+  scrubber: [
+    param_keys: [
+      "code",
+      "state",
+      "nonce",
+      "verifier",
+      "binding",
+      "error_description",
+      "error_uri"
+    ]
+  ],
   before_send_metric: {Kith.SentryEventHandler, :before_send_metric},
   logs: nil,
   traces_sample_rate: nil,

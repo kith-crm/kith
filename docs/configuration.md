@@ -21,7 +21,7 @@ Variables are grouped by the implementation phase that introduces them. The "Pha
 | `PORT` | integer | `4000` | 01 | No | HTTP port the Phoenix endpoint listens on. |
 | `POOL_SIZE` | integer | `10` | 01 | No | Ecto database connection pool size. Increase for high-concurrency deployments. |
 | `PHX_HOST` | string | `localhost` | 01 | No | Phoenix endpoint host header. Overridden by `KITH_HOSTNAME` in production. |
-| `DISABLE_SIGNUP` | boolean | `false` | 01 | No | When `true`, the registration endpoint returns 403. Existing users can still log in. |
+| `DISABLE_SIGNUP` | boolean | `false` | 01 | No | Legacy inverse of `REGISTRATION_ENABLED`; disabled public registration redirects to login. Existing users can still log in. |
 
 ### Authentication
 
@@ -275,3 +275,80 @@ SMTP_PASSWORD=
 # Default "From" address for outbound email.
 MAIL_FROM=noreply@kith.app
 ```
+
+
+## Authentication policy
+
+`OIDC_ENABLED` (default `false`), `PASSWORD_LOGIN_ENABLED` (default `true`), and
+`REGISTRATION_ENABLED` (default `true`) are independent policies. Supplied boolean
+values must be exactly `true` or `false`; empty values are invalid. If only
+`DISABLE_SIGNUP` is supplied, registration is its inverse. If both registration
+variables are supplied, they must agree or startup fails. Existing legacy social
+login configuration and passkey behavior are retained.
+
+Enabled OIDC requires `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`.
+The issuer must be an exact HTTPS URL, including any path, without userinfo,
+query or fragment. Private-network HTTPS issuers are allowed. The client secret
+supports `OIDC_CLIENT_SECRET_FILE`, which takes precedence and trims surrounding
+whitespace. Missing, blank or unreadable credentials fail startup without exposing
+credential values or secret-file paths. Unused OIDC credentials are ignored when
+OIDC is disabled. `OIDC_DISPLAY_NAME` defaults to `OpenID Connect` and is intended
+as an escaped operator label.
+
+Disabling passwords blocks web password login (including a pending password TOTP
+challenge), password-authenticated API token issuance, password recovery requests
+and outstanding reset-token redemption. It hides password login/recovery controls.
+Existing authenticated sessions and API bearer tokens keep their existing validity;
+this policy does not revoke credentials. Public password signup also requires
+password login to be enabled, even when registration is permitted. When OIDC is
+enabled, password-disabled signup starts provider authentication and then requires
+completion at `/users/oidc/register`. Registration policy and configured terms are
+checked again before creating the account.
+
+Startup validates local configuration without contacting discovery endpoints or
+inspecting users' credentials. When passwords are disabled, configure OIDC, a
+legacy external provider with client ID and secret, or explicitly declare passkey
+capability with application configuration `config :kith, :passkeys_enabled, true`.
+This declaration counts a deployment capability; it does not prove every user owns
+a passkey. It does not alter the existing passkey routes. The default declaration
+is `false`. DAV credentials and existing sessions do not count as interactive
+login mechanisms. Restore environment/application configuration and restart to
+recover from an unusable login setup; do not reset the database. Discovery network
+availability is separate from local configuration validation.
+
+DAV account passwords are accepted only while password login is enabled. Active
+DAV app passwords remain usable independently of password login. Disabling a user
+at an external issuer does not itself revoke existing Kith sessions, API tokens,
+or DAV credentials.
+
+
+### OIDC browser callbacks and log privacy
+
+Register exactly `https://YOUR_KITH_HOST/auth/oidc/callback` at the issuer. Kith
+accepts code/query GET callbacks, uses a signed `__Host-kith_oidc` cookie with
+Secure, HttpOnly, Path=/ and SameSite=Lax, and retains SameSite=Strict for its
+main session cookie. Each transaction expires after five minutes and is single
+use. Parallel tabs share a cancellation binding; completing one does not cancel
+another, while explicit Kith logout cancels pending login, linking, terms and MFA
+flows for that browser. Link and reauthentication start through CSRF-protected
+POSTs in Security/login, never through callback ownership parameters.
+
+Configure every reverse proxy, load balancer, CDN and access-log collector to omit
+query strings for `/auth/oidc/callback` (prefer the path alone for all auth routes).
+For example, an nginx access-log format must use `$uri`, not `$request` or
+`$request_uri`, for this endpoint. Do not record Cookie/Set-Cookie/Authorization
+headers or response Location headers on authentication routes. Disable analytics,
+request-body capture and tracing on these routes; provider errors may contain
+credentials. Application parameter filtering and the Sentry `before_send`
+scrubber cannot sanitize logs already collected outside the application.
+Callbacks redirect immediately to clean local URLs with generic errors. Kith's
+Sentry configuration keeps logs/traces disabled and scrubs code, state, nonce,
+verifier, binding and token fields, including callback URLs and diagnostic strings.
+
+
+### Authentication operator guides
+
+See [OIDC deployment and recovery](deployment/oidc.md), [DAV client setup and
+revocation](deployment/dav-app-passwords.md), and the [release acceptance
+map](design/oidc-validation/acceptance.md). Provider logout/deprovisioning is not
+automatic; migration rollback has a passwordless-user NOT NULL constraint.

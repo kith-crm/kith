@@ -46,7 +46,13 @@ defmodule Kith.AccountsTotpTest do
       secret = Accounts.generate_totp_secret()
       code = :pot.totp(secret)
 
-      assert {:ok, {updated_user, recovery_codes}} = Accounts.enable_totp(user, secret, code)
+      assert {:ok, {updated_user, recovery_codes}} =
+               Accounts.enable_totp(
+                 %{user | authenticated_at: DateTime.utc_now(:second)},
+                 secret,
+                 code
+               )
+
       assert updated_user.totp_enabled == true
       assert updated_user.totp_secret == secret
       assert length(recovery_codes) == 8
@@ -57,7 +63,12 @@ defmodule Kith.AccountsTotpTest do
       user = user_fixture()
       secret = Accounts.generate_totp_secret()
 
-      assert {:error, :invalid_code} = Accounts.enable_totp(user, secret, "000000")
+      assert {:error, :invalid_code} =
+               Accounts.enable_totp(
+                 %{user | authenticated_at: DateTime.utc_now(:second)},
+                 secret,
+                 "000000"
+               )
 
       # User should NOT have TOTP enabled
       reloaded = Accounts.get_user!(user.id)
@@ -70,7 +81,9 @@ defmodule Kith.AccountsTotpTest do
       user = user_fixture()
       secret = Accounts.generate_totp_secret()
       code = :pot.totp(secret)
-      {:ok, {user, _codes}} = Accounts.enable_totp(user, secret, code)
+
+      {:ok, {user, _codes}} =
+        Accounts.enable_totp(%{user | authenticated_at: DateTime.utc_now(:second)}, secret, code)
 
       assert {:ok, updated_user} = Accounts.disable_totp(user)
       refute updated_user.totp_enabled
@@ -84,7 +97,10 @@ defmodule Kith.AccountsTotpTest do
       user = user_fixture()
       secret = Accounts.generate_totp_secret()
       code = :pot.totp(secret)
-      {:ok, {user, recovery_codes}} = Accounts.enable_totp(user, secret, code)
+
+      {:ok, {user, recovery_codes}} =
+        Accounts.enable_totp(%{user | authenticated_at: DateTime.utc_now(:second)}, secret, code)
+
       %{user: user, recovery_codes: recovery_codes}
     end
 
@@ -121,7 +137,9 @@ defmodule Kith.AccountsTotpTest do
       user = user_fixture()
       secret = Accounts.generate_totp_secret()
       code = :pot.totp(secret)
-      {:ok, {user, _codes}} = Accounts.enable_totp(user, secret, code)
+
+      {:ok, {user, _codes}} =
+        Accounts.enable_totp(%{user | authenticated_at: DateTime.utc_now(:second)}, secret, code)
 
       # Read raw value from DB — should NOT equal the plaintext secret
       raw =

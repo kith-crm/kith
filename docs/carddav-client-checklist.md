@@ -310,3 +310,12 @@ Contacts/DAVx5 workflow test. Its recorded failures and skips in
 The missed seam here was a real client using collection permissions before PUT,
 not birthday parsing. Keep discovery assertions alongside field round-trip tests
 and real-client checks. The Apple runner was not rerun for this change.
+
+## OIDC and DAV app passwords on actual Android (2026-11-09)
+
+**NOT RUN:** prior DAVx5/Contacts results above do not validate OIDC login or new
+app-password credential flows. Follow the [DAVx5 app-password runbook](../scripts/carddav-e2e/oidc-app-passwords-android.md)
+for both password policies, existing user permissions, immediate revocation and
+an unaffected second client. The [sanitized matrix](design/oidc-validation/task-10-acceptance.md)
+tracks outstanding device/provider acceptance; fixture imports and protocol
+probes cannot substitute for an actual DAVx5 request.

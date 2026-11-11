@@ -22,9 +22,30 @@ export default defineConfig({
   reporter: "list",
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:4000",
-    trace: "retain-on-failure",
+    // Auth fixtures and generated credentials must not enter retained traces.
+    trace: "off",
   },
   projects: [
+    {
+      name: "oidc",
+      testDir: "./test/playwright",
+      testMatch: /(?:oidc|dav-app-passwords|settings-navigation)\.spec\.ts/,
+      use: {
+        ...chromium,
+        // Authentication and one-time credentials must never enter artifacts.
+        trace: "off",
+        screenshot: "off",
+        video: "off",
+        launchOptions: {
+          ...chromium.launchOptions,
+          args: [
+            "--host-resolver-rules=MAP kith.test 127.0.0.1, MAP issuer.test 127.0.0.1",
+            "--no-proxy-server",
+            `--ignore-certificate-errors-spki-list=${process.env.KITH_OIDC_SPKI ?? ""}`,
+          ],
+        },
+      },
+    },
     {
       name: "smoke",
       testDir: "./e2e",
@@ -34,6 +55,7 @@ export default defineConfig({
       name: "e2e",
       testDir: "./test/playwright",
       testMatch: "**/*.spec.ts",
+      testIgnore: /(?:oidc|dav-app-passwords|settings-navigation)\.spec\.ts/,
       use: chromium,
     },
   ],
