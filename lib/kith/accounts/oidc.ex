@@ -149,8 +149,9 @@ defmodule Kith.Accounts.OIDC do
   end
 
   defp usable_passkey?(user) do
-    Application.get_env(:kith, :passkeys_enabled, false) == true and
-      Repo.exists?(from(c in WebauthnCredential, where: c.user_id == ^user.id))
+    # The capability flag is a startup declaration; WebAuthn authentication remains
+    # available to existing credentials regardless of that declaration.
+    Repo.exists?(from(c in WebauthnCredential, where: c.user_id == ^user.id))
   end
 
   defp usable_legacy?(user) do

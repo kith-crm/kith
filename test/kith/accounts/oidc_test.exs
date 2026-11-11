@@ -236,7 +236,7 @@ defmodule Kith.Accounts.OIDCTest do
     assert [] = OIDC.list(user)
   end
 
-  test "only configured issuer, legacy providers and enabled passkeys count as alternatives" do
+  test "configured issuers, legacy providers and existing passkeys count as alternatives" do
     {:ok, user} = OIDC.register(principal(), %{})
     [identity] = OIDC.list(user)
     {:ok, legacy} = Accounts.upsert_identity(user, "github", "legacy", %{})
@@ -264,10 +264,31 @@ defmodule Kith.Accounts.OIDCTest do
       })
 
     Application.put_env(:kith, :passkeys_enabled, false)
-    assert {:error, :last_login_method} = OIDC.unlink(fresh(user), hd(OIDC.list(user)).id)
-    Application.put_env(:kith, :passkeys_enabled, true)
     assert :ok = OIDC.unlink(fresh(user), hd(OIDC.list(user)).id)
     assert {:error, :last_credential} = Accounts.delete_webauthn_credential(user, credential.id)
+  end
+
+  test "passwordless users can remove one of two passkeys without the startup capability flag" do
+    Application.put_env(:kith, :passkeys_enabled, false)
+    user = user_fixture() |> change(hashed_password: nil) |> Repo.update!()
+
+    credentials =
+      for id <- [1, 2] do
+        Repo.insert!(%Accounts.WebauthnCredential{
+          user_id: user.id,
+          credential_id: <<id>>,
+          public_key: :erlang.term_to_binary(%{}),
+          name: "key #{id}"
+        })
+      end
+
+    [first, remaining] = credentials
+    assert {:ok, _} = Accounts.delete_webauthn_credential(user, first.id)
+    assert [%{id: id}] = Accounts.list_webauthn_credentials(user)
+    assert id == remaining.id
+    assert Accounts.has_login_method?(user)
+    assert {:error, :last_credential} = Accounts.delete_webauthn_credential(user, remaining.id)
+    assert [%{id: ^id}] = Accounts.list_webauthn_credentials(user)
   end
 
   test "app passwords do not count and identity rows cascade on user deletion" do

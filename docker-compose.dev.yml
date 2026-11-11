@@ -65,6 +65,17 @@ services:
     ports:
       - "${APP_PORT:-4000}:4000"
     environment:
+      # Unset values are omitted so runtime defaults and legacy signup policy apply.
+      OIDC_ENABLED:
+      OIDC_ISSUER:
+      OIDC_CLIENT_ID:
+      OIDC_CLIENT_SECRET:
+      # Mount this path inside each release service when using a secret file.
+      OIDC_CLIENT_SECRET_FILE:
+      OIDC_DISPLAY_NAME:
+      PASSWORD_LOGIN_ENABLED:
+      REGISTRATION_ENABLED:
+      DISABLE_SIGNUP:
       DB_HOST: postgres
       DB_PORT: "5432"
       SMTP_HOST: mailpit

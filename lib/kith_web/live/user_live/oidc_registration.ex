@@ -54,37 +54,15 @@ defmodule KithWeb.UserLive.OIDCRegistration do
   @impl true
   def render(assigns) do
     ~H"""
-    <Layouts.auth flash={@flash}>
-      <h1 class="text-xl font-semibold">Complete your account</h1>
-      <p class="mt-3 text-sm">Create your personal account using {@email}.</p>
-      <.form
-        for={@form}
-        id="oidc-registration-form"
-        action={~p"/users/oidc/register"}
-        method="post"
-        phx-submit="complete"
-        phx-trigger-action={@trigger_submit}
-        class="mt-6"
-      >
-        <input type="hidden" name="registration_token" value={@registration_token} />
-        <UI.input
-          :if={Application.get_env(:kith, :require_tos_acceptance, false)}
-          field={@form[:tos_accepted]}
-          type="checkbox"
-          label="I accept the Terms of Service"
-        />
-        <.link href="/terms" target="_blank" class="text-sm underline">Read the Terms of Service</.link>
-        <p :if={@terms_error} role="alert" class="mt-2 text-sm text-[var(--color-error)]">
-          {@terms_error}
-        </p>
-        <UI.button class="mt-4 w-full" phx-disable-with="Creating account...">Create account</UI.button>
-      </.form>
-      <.form for={%{}} action={~p"/users/oidc/register"} method="post" class="mt-4">
-        <input type="hidden" name="registration_token" value={@registration_token} />
-        <input type="hidden" name="cancel" value="true" />
-        <UI.button>Cancel</UI.button>
-      </.form>
-    </Layouts.auth>
+    <KithWeb.AuthComponents.oidc_registration
+      flash={@flash}
+      email={@email}
+      form={@form}
+      trigger_submit={@trigger_submit}
+      registration_token={@registration_token}
+      require_tos_acceptance={Application.get_env(:kith, :require_tos_acceptance, false)}
+      terms_error={@terms_error}
+    />
     """
   end
 end
