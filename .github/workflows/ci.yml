@@ -117,7 +117,8 @@ jobs:
 
   browser-regressions:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Includes four sequential OIDC policy modes on the emulated local runner.
+    timeout-minutes: 45
     env:
       MIX_TEST_PARTITION: browser_regressions
       ERL_FLAGS: "+S 4:4 +JMsingle true"
