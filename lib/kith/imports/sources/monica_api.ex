@@ -586,6 +586,9 @@ defmodule Kith.Imports.Sources.MonicaApi do
       Repo.all(
         from(i in Imports.Import,
           where: i.account_id == ^ctx.account_id and i.source == ^ctx.import_job.source,
+          where:
+            fragment("rtrim(?, '/')", i.api_url) ==
+              fragment("rtrim(?, '/')", type(^ctx.import_job.api_url, :string)),
           where: i.id < ^ctx.import_job.id,
           where:
             not is_nil(

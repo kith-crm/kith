@@ -22,38 +22,16 @@ defmodule KithWeb.FeatureUnavailableLive do
 
   @impl true
   def render(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :available,
-        OptionalFeatures.enabled?(assigns.current_scope.account, assigns.feature)
-      )
-
     ~H"""
-    <Layouts.app
+    <KithWeb.FeatureComponents.unavailable
       flash={@flash}
       current_scope={@current_scope}
       current_path={@current_path}
       pending_duplicates_count={@pending_duplicates_count}
-    >
-      <h1 class="text-2xl font-semibold">
-        {@label} is {if @available, do: "available", else: "unavailable"}
-      </h1>
-      <p :if={!@available} class="mt-2">
-        This feature is turned off for your workspace. Any saved records are kept.
-      </p>
-      <div class="mt-4 flex flex-wrap gap-4">
-        <.link :if={@available} navigate={@path} class="underline">Open {@label}</.link>
-        <.link navigate={~p"/dashboard"} class="underline">Back to dashboard</.link>
-        <.link
-          :if={!@available && Kith.Policy.can?(@current_scope.user, :manage, :account)}
-          href={~p"/settings/account" <> "#optional-features"}
-          class="underline"
-        >
-          Optional features
-        </.link>
-      </div>
-    </Layouts.app>
+      feature={@feature}
+      label={@label}
+      path={@path}
+    />
     """
   end
 end

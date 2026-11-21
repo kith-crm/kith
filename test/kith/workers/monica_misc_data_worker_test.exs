@@ -87,9 +87,49 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     assert Imports.get_import!(first.id).summary["misc"]["calls_feature_disabled"] == 1
   end
 
+  test "skipped history recovery stays on the same Monica server",
+       %{user: user, account_id: account_id} do
+    remote = Kith.MonicaApiFixtures.contact_json(id: 42, statistics: %{"number_of_calls" => 1})
+
+    Req.Test.stub(@stub_name, fn conn ->
+      assert conn.request_path == "/api/contacts"
+      Req.Test.json(conn, Kith.MonicaApiFixtures.contacts_page_json([remote]))
+    end)
+
+    first = api_import(account_id, user.id)
+    [entry] = crawl_call_plan(first, user)
+    {:ok, first} = Imports.update_import_status(first, "completed")
+    contact_id = entry.local_id
+    assert {:ok, _} = Kith.Accounts.set_optional_feature(user, "calls", false)
+    assert :ok = perform_job(MonicaMiscDataWorker, build_args(first, [entry]))
+    assert {:ok, _} = Kith.Accounts.set_optional_feature(user, "calls", true)
+
+    other_server =
+      import_fixture(account_id, user.id, %{
+        source: "monica_api",
+        api_url: "https://other-monica.test",
+        api_key_encrypted: "test-key",
+        status: "completed"
+      })
+
+    assert [] = crawl_call_plan(other_server, user)
+    {:ok, _} = Imports.update_import_status(other_server, "completed")
+    assert [] = Kith.Activities.list_calls(contact_id)
+
+    same_server =
+      import_fixture(account_id, user.id, %{
+        source: "monica_api",
+        api_url: "https://monica.test/",
+        api_key_encrypted: "test-key",
+        status: "completed"
+      })
+
+    assert [%{local_id: ^contact_id, endpoints: ["calls"]}] = crawl_call_plan(same_server, user)
+  end
+
   defp crawl_call_plan(import, user) do
     credential = %{
-      url: "https://monica.test",
+      url: String.trim_trailing(import.api_url, "/"),
       api_key: "test-key",
       req_options: [plug: {Req.Test, @stub_name}, retry: false]
     }
