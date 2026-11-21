@@ -356,6 +356,11 @@ test("a real UI snooze stays snoozed while archived and wakes only once after un
 test("import preserves identical opposite-direction messages and remains stable on retry", async ({ page, request }) => {
   const account = control("prepare", { scenario: "import" });
   await login(page, account);
+  await page.goto("/settings/account");
+  await connected(page);
+  const conversations = page.getByRole("switch", { name: "Conversations" });
+  await conversations.click();
+  await expect(conversations).toBeChecked();
   const imported = await startImport(page, account);
   expect(imported.messages.map((message: any) => message.direction)).toEqual(["received", "sent"]);
   expect(imported.messages.map((message: any) => message.body)).toEqual(["OK", "OK"]);

@@ -29,6 +29,7 @@ defmodule KithWeb.SettingsLive.AuditLog do
     "invitation_accepted" => "Invitation accepted",
     "account_data_reset" => "Account data reset",
     "account_deleted" => "Account deleted",
+    "optional_feature_changed" => "Optional feature changed",
     "immich_linked" => "Immich linked",
     "immich_unlinked" => "Immich unlinked",
     "data_exported" => "Data exported",

@@ -8,6 +8,8 @@ defmodule KithWeb.API.JournalController do
 
   use KithWeb, :controller
 
+  plug KithWeb.Plugs.RequireOptionalFeature, "journal"
+
   alias Kith.Journal.Entry
   alias Kith.{Policy, Repo}
   alias Kith.Scope, as: TenantScope

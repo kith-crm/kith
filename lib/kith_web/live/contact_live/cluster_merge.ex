@@ -288,7 +288,10 @@ defmodule KithWeb.ContactLive.ClusterMerge do
     socket
     |> assign(:primary_id, primary_id)
     |> assign(:resolution, MergeResolution.resolve(selected, primary_id))
-    |> assign(:summary, MergeSummary.build(selected))
+    |> assign(
+      :summary,
+      MergeSummary.build(socket.assigns.current_scope, selected, primary_id)
+    )
     # A merge error describes the resolution that was submitted. Anything that
     # changes the resolution makes it stale, so it never outlives one.
     |> assign(:error, nil)
@@ -933,6 +936,21 @@ defmodule KithWeb.ContactLive.ClusterMerge do
 
   # Nothing detection proposed is a "possible duplicate", and the manual path
   # routinely lands on a single member.
+  defp history_label(:retained_history), do: "Retained history"
+  defp history_label(key), do: String.replace(to_string(key), "_", " ")
+
+  @impl true
+  def handle_info({:optional_feature_changed, _key, _value}, socket) do
+    summary =
+      MergeSummary.build(
+        socket.assigns.current_scope,
+        selected_members(socket),
+        socket.assigns.primary_id
+      )
+
+    {:noreply, assign(socket, :summary, summary)}
+  end
+
   defp member_count_label(assigns) do
     count = length(assigns.members)
     noun = if assigns.synthetic?, do: "contact", else: "possible duplicate"
@@ -1370,7 +1388,7 @@ defmodule KithWeb.ContactLive.ClusterMerge do
               :if={count > 0}
               class="rounded-[var(--radius-sm)] border border-[var(--color-border-subtle)] bg-[var(--color-surface-sunken)] px-2.5 py-1 text-xs"
             >
-              <strong>{count}</strong> {String.replace(to_string(key), "_", " ")}
+              <strong>{count}</strong> {history_label(key)}
             </span>
           </div>
         </details>

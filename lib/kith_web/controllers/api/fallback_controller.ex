@@ -48,6 +48,17 @@ defmodule KithWeb.API.FallbackController do
     )
   end
 
+  def call(conn, {:error, :feature_disabled, feature}) do
+    problem =
+      ErrorJSON.render(403, "This feature is disabled for this workspace.", conn.request_path)
+      |> Map.merge(%{code: "feature_disabled", feature: feature})
+
+    conn
+    |> put_status(403)
+    |> put_resp_content_type("application/problem+json")
+    |> json(problem)
+  end
+
   # Conflict → 409
   def call(conn, {:error, :conflict, detail}) do
     conn

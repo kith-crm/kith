@@ -79,7 +79,7 @@ test.describe("Import Data Type Toggles", () => {
     }
   });
 
-  test("photos default off, data types default on", async ({ page }) => {
+  test("photos are off and workspace switches govern optional categories", async ({ page }) => {
     await goToImportWizard(page);
 
     await page.locator('input[value="monica_api"]').click();
@@ -103,29 +103,20 @@ test.describe("Import Data Type Toggles", () => {
     );
     await expect(photosCheckbox).not.toBeChecked();
 
-    // Auto-merge should be OFF
+    // Auto-merge keeps its existing opt-out default.
     const mergeCheckbox = page.locator(
       'input[phx-value-option="auto_merge_duplicates"]',
     );
-    await expect(mergeCheckbox).not.toBeChecked();
+    await expect(mergeCheckbox).toBeChecked();
 
-    // Data types should be ON
-    const defaultOnTypes = [
-      "pets",
-      "calls",
-      "activities",
-      "gifts",
-      "debts",
-      "tasks",
-      "reminders",
-      "conversations",
-    ];
+    for (const type of ["pets", "debts", "reminders"]) {
+      await expect(page.locator(`input[phx-value-option="${type}"]`)).toBeChecked();
+    }
 
-    for (const type of defaultOnTypes) {
-      const checkbox = page.locator(
-        `input[phx-value-option="${type}"]`,
-      );
-      await expect(checkbox).toBeChecked();
+    for (const type of ["calls", "activities", "gifts", "tasks", "conversations"]) {
+      const checkbox = page.locator(`input[phx-value-option="${type}"]`);
+      await expect(checkbox).not.toBeChecked();
+      await expect(checkbox).toBeDisabled();
     }
   });
 

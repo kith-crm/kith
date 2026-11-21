@@ -16,6 +16,7 @@ defmodule Kith.Workers.MonicaHTTPCallersTest do
 
   setup do
     user = user_fixture()
+    enable_optional_features(user, ["calls"])
     host = "caller-#{System.unique_integer([:positive])}.example"
     Kith.TestEnv.put_env_restoring(:kith, :monica_rate_limit, 10)
     Kith.TestEnv.put_env_restoring(:kith, :monica_rate_limit_scale_ms, @controlled_scale_ms)

@@ -8,6 +8,7 @@ defmodule Kith.Contacts.MergeSummary do
 
   import Ecto.Query, warn: false
 
+  alias Kith.Accounts.{OptionalFeatures, Scope}
   alias Kith.Contacts.{Address, ContactField, Document, Note, Photo}
   alias Kith.Repo
 
@@ -42,13 +43,61 @@ defmodule Kith.Contacts.MergeSummary do
   def build(members) do
     ids = Enum.map(members, & &1.id)
 
+    summary(members, ids, history(ids))
+  end
+
+  @doc "Builds the merge preview with history that will move to the primary."
+  def build(%Scope{account: account}, members, primary_id) do
+    members = Enum.filter(members, &(&1.account_id == account.id))
+    ids = Enum.map(members, & &1.id)
+    loser_ids = List.delete(ids, primary_id)
+    summary(members, ids, moving_history(loser_ids, primary_id, account))
+  end
+
+  defp summary(members, ids, history) do
     %{
       contact_fields: contact_fields(ids),
       addresses: addresses(ids),
       tags: tags(ids),
       aliases: aliases(members),
-      history: history(ids)
+      history: history
     }
+  end
+
+  defp moving_history([], _primary_id, _account), do: %{}
+
+  defp moving_history(ids, primary_id, account) do
+    primary_activities =
+      from(ac in "activity_contacts",
+        join: a in Kith.Activities.Activity,
+        on: a.id == ac.activity_id,
+        where: ac.contact_id == ^primary_id and a.account_id == ^account.id,
+        select: ac.activity_id
+      )
+
+    activities =
+      Repo.one(
+        from(ac in "activity_contacts",
+          join: a in Kith.Activities.Activity,
+          on: a.id == ac.activity_id,
+          where: a.account_id == ^account.id and ac.contact_id in ^ids,
+          where: ac.activity_id not in subquery(primary_activities),
+          select: count(ac.activity_id, :distinct)
+        )
+      )
+
+    {visible, retained} =
+      ids
+      |> history_counts(account.id)
+      |> Map.put(:activities, activities)
+      |> Enum.split_with(fn {key, _count} ->
+        feature = Atom.to_string(key)
+        not OptionalFeatures.known?(feature) or OptionalFeatures.enabled?(account, feature)
+      end)
+
+    visible = Map.new(visible)
+    retained_count = Enum.sum_by(retained, &elem(&1, 1))
+    if retained_count > 0, do: Map.put(visible, :retained_history, retained_count), else: visible
   end
 
   defp contact_fields(ids) do
@@ -142,31 +191,38 @@ defmodule Kith.Contacts.MergeSummary do
     |> Enum.reject(& &1.duplicate?)
   end
 
+  defp history_counts(ids, account_id) do
+    Map.new(@history, fn
+      # Relationships are the one history table a member can be on either end
+      # of, and `Merge`'s `remap_relationships/4` rewrites both `contact_id`
+      # and `related_contact_id`. Counting only the first endpoint reports 0
+      # for a member that is purely the *target* of relationships, which
+      # understates what the merge moves. A row with both endpoints in the
+      # cluster is still one row, so `or` counts it once.
+      {:relationships, schema} ->
+        {:relationships,
+         Repo.aggregate(
+           schema
+           |> where([r], r.contact_id in ^ids or r.related_contact_id in ^ids)
+           |> scope_history(account_id),
+           :count
+         )}
+
+      {key, schema} ->
+        query = from(r in schema, where: r.contact_id in ^ids)
+        {key, Repo.aggregate(scope_history(query, account_id), :count)}
+    end)
+  end
+
+  defp scope_history(query, nil), do: query
+  defp scope_history(query, account_id), do: Kith.Scope.scope_to_account(query, account_id)
+
   defp history(ids) do
-    counts =
-      Map.new(@history, fn
-        # Relationships are the one history table a member can be on either end
-        # of, and `Merge`'s `remap_relationships/4` rewrites both `contact_id`
-        # and `related_contact_id`. Counting only the first endpoint reports 0
-        # for a member that is purely the *target* of relationships, which
-        # understates what the merge moves. A row with both endpoints in the
-        # cluster is still one row, so `or` counts it once.
-        {:relationships, schema} ->
-          {:relationships,
-           Repo.aggregate(
-             from(r in schema, where: r.contact_id in ^ids or r.related_contact_id in ^ids),
-             :count
-           )}
-
-        {key, schema} ->
-          {key, Repo.aggregate(from(r in schema, where: r.contact_id in ^ids), :count)}
-      end)
-
     activities =
       from(ac in "activity_contacts", where: ac.contact_id in ^ids, select: count())
       |> Repo.one()
 
-    Map.put(counts, :activities, activities)
+    Map.put(history_counts(ids, nil), :activities, activities)
   end
 
   # The first occurrence of a key wins; later ones are what the merge collapses.

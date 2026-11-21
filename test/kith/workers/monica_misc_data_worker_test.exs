@@ -17,6 +17,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
   setup do
     seed_reference_data!()
     user = user_fixture()
+    enable_optional_features(user, Kith.Accounts.OptionalFeatures.monica_keys())
 
     Kith.TestEnv.put_env_restoring(
       :kith,
@@ -44,6 +45,67 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
       api_options: api_options,
       status: "completed"
     })
+  end
+
+  test "a queued category disabled before execution is skipped, then recovered by a new crawl",
+       %{user: user, account_id: account_id} do
+    remote = Kith.MonicaApiFixtures.contact_json(id: 42, statistics: %{"number_of_calls" => 1})
+    owner = self()
+
+    Req.Test.stub(@stub_name, fn conn ->
+      case conn.request_path do
+        "/api/contacts" ->
+          Req.Test.json(conn, Kith.MonicaApiFixtures.contacts_page_json([remote]))
+
+        "/api/contacts/42/calls" ->
+          send(owner, :fetched_calls)
+          Req.Test.json(conn, %{"data" => [%{"id" => 7, "called_at" => "2024-01-01T12:00:00Z"}]})
+      end
+    end)
+
+    first = api_import(account_id, user.id)
+    [entry] = crawl_call_plan(first, user)
+    {:ok, first} = Imports.update_import_status(first, "completed")
+    contact_id = entry.local_id
+    assert {:ok, _} = Kith.Accounts.set_optional_feature(user, "calls", false)
+    assert :ok = perform_job(MonicaMiscDataWorker, build_args(first, [entry]))
+    refute_received :fetched_calls
+    assert Imports.get_import!(first.id).summary["misc"]["calls_feature_disabled"] == 1
+
+    assert {:ok, _} = Kith.Accounts.set_optional_feature(user, "calls", true)
+    assert :ok = perform_job(MonicaMiscDataWorker, build_args(first, [entry]))
+    refute_received :fetched_calls
+
+    second = api_import(account_id, user.id)
+    assert [%{local_id: ^contact_id} = retry_entry] = crawl_call_plan(second, user)
+    {:ok, second} = Imports.update_import_status(second, "completed")
+    assert :ok = perform_job(MonicaMiscDataWorker, build_args(second, [retry_entry]))
+    assert_received :fetched_calls
+    assert :ok = perform_job(MonicaMiscDataWorker, build_args(second, [retry_entry]))
+    refute_received :fetched_calls
+    assert [_call] = Kith.Activities.list_calls(contact_id)
+    assert Imports.get_import!(first.id).summary["misc"]["calls_feature_disabled"] == 1
+  end
+
+  defp crawl_call_plan(import, user) do
+    credential = %{
+      url: "https://monica.test",
+      api_key: "test-key",
+      req_options: [plug: {Req.Test, @stub_name}, retry: false]
+    }
+
+    opts = Map.new(~w(pets activities gifts debts tasks reminders conversations), &{&1, false})
+
+    assert {:ok, summary} =
+             Kith.Imports.Sources.MonicaApi.crawl(
+               user.account_id,
+               user.id,
+               credential,
+               import,
+               opts
+             )
+
+    summary.misc_data_plan
   end
 
   describe "perform/1 — progress logging" do

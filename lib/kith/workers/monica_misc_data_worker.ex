@@ -57,6 +57,8 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   import Ecto.Query, warn: false
 
+  alias Kith.Accounts
+  alias Kith.Accounts.OptionalFeatures
   alias Kith.Activities.{Activity, Call}
   alias Kith.Contacts
   alias Kith.Contacts.{Debt, Gift}
@@ -512,13 +514,41 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
     case get_in(import.summary || %{}, ["misc_progress", source_id, key]) do
       nil ->
-        {:ok, body} = api_get_json(credential, url, params)
-
-        persist_response(import.id, source_id, key, body, contact, import_response)
+        fetch_new_category(
+          import,
+          source_id,
+          key,
+          {credential, url, params},
+          contact,
+          import_response
+        )
 
       outcome ->
         outcome
     end
+  end
+
+  defp fetch_new_category(
+         import,
+         source_id,
+         key,
+         {credential, url, params},
+         contact,
+         import_response
+       ) do
+    if feature_disabled?(import.account_id, key) do
+      persist_response(import.id, source_id, key, nil, contact, fn _, _ ->
+        %{OptionalFeatures.monica_skip_key(key) => 1}
+      end)
+    else
+      {:ok, body} = api_get_json(credential, url, params)
+      persist_response(import.id, source_id, key, body, contact, import_response)
+    end
+  end
+
+  defp feature_disabled?(account_id, key) do
+    key in OptionalFeatures.monica_keys() and
+      not OptionalFeatures.enabled?(Accounts.get_account!(account_id), key)
   end
 
   defp persist_response(import_id, source_id, key, body, contact, import_response) do

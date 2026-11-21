@@ -5,6 +5,24 @@ defmodule KithWeb.ImportWizardLiveTest do
 
   setup :register_and_log_in_user
 
+  test "Monica offers only enabled workspace categories and explains the disabled ones", %{
+    conn: conn,
+    user: user
+  } do
+    {:ok, view, _} = live(conn, ~p"/settings/import")
+    render_click(view, "set_source", %{"source" => "monica_api"})
+    render_blur(view, "update_api_url", %{"value" => "https://monica.test"})
+    render_blur(view, "update_api_key", %{"value" => "test-key"})
+
+    assert has_element?(view, "input[phx-value-option='calls'][disabled]")
+    assert render(view) =~ "Skipped while disabled"
+    assert has_element?(view, "input[phx-value-option='photos']:not([checked])")
+
+    {:ok, _} = Kith.Accounts.set_optional_feature(user, "calls", true)
+    assert has_element?(view, "input[phx-value-option='calls'][checked]:not([disabled])")
+    assert has_element?(view, "input[phx-value-option='tasks'][disabled]")
+  end
+
   describe "handle_info/2" do
     test "does not crash on :sync_complete broadcast", %{conn: conn} do
       {:ok, view, _html} = live(conn, ~p"/settings/import")

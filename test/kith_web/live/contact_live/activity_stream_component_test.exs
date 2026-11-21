@@ -7,6 +7,11 @@ defmodule KithWeb.ContactLive.ActivityStreamComponentTest do
   setup :register_and_log_in_user
 
   setup %{user: user} do
+    Kith.AccountsFixtures.enable_optional_features(
+      user,
+      ~w(calls life_events activities tasks gifts conversations)
+    )
+
     contact = contact_fixture(user.account_id)
     %{contact: contact, account_id: user.account_id}
   end

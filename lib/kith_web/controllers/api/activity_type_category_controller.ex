@@ -1,6 +1,8 @@
 defmodule KithWeb.API.ActivityTypeCategoryController do
   use KithWeb, :controller
 
+  plug KithWeb.Plugs.RequireOptionalFeature, "activities"
+
   alias Kith.{Contacts, Policy}
   alias Kith.Contacts.ActivityTypeCategory
 

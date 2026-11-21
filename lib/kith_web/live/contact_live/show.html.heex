@@ -607,6 +607,7 @@
       <main class="flex-1 min-w-0 w-full overflow-x-clip overflow-y-visible">
         <.live_component
           module={KithWeb.ContactLive.ActivityStreamComponent}
+          account={@current_scope.account}
           id={"activity-stream-#{@contact.id}"}
           contact_id={@contact.id}
           account_id={@account_id}

@@ -30,6 +30,7 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
   import Ecto.Query, warn: false
 
+  alias Kith.Accounts.OptionalFeatures
   alias Kith.Contacts
   alias Kith.Contacts.FieldProtocol
   alias Kith.Contacts.PhoneFormatter
@@ -575,7 +576,40 @@ defmodule Kith.Imports.Sources.MonicaApi do
           "[MonicaApi] Skipping #{api_contact_display_name(api_contact)}: already imported by an earlier import"
         )
 
+        deferred = retry_skipped_features(ctx, deferred, source_id, contact)
         {add_skipped(acc, source_id), deferred}
+    end
+  end
+
+  defp retry_skipped_features(ctx, deferred, source_id, contact) do
+    prior_progress =
+      Repo.all(
+        from(i in Imports.Import,
+          where: i.account_id == ^ctx.account_id and i.source == ^ctx.import_job.source,
+          where: i.id < ^ctx.import_job.id,
+          where:
+            not is_nil(
+              fragment("jsonb_extract_path(?, 'misc_progress', ?)", i.summary, ^source_id)
+            ),
+          order_by: [asc: i.id],
+          select: fragment("jsonb_extract_path(?, 'misc_progress', ?)", i.summary, ^source_id)
+        )
+      )
+      |> Enum.reduce(%{}, fn progress, acc -> Map.merge(acc, progress) end)
+
+    endpoints =
+      Enum.filter(OptionalFeatures.monica_keys(), fn key ->
+        skip_key = OptionalFeatures.monica_skip_key(key)
+        ctx.opts[key] != false and match?(%{^skip_key => 1}, prior_progress[key])
+      end)
+
+    case endpoints do
+      [] ->
+        deferred
+
+      endpoints ->
+        entry = %{source_id: source_id, local_id: contact.id, endpoints: endpoints}
+        %{deferred | misc_data: [entry | deferred.misc_data]}
     end
   end
 

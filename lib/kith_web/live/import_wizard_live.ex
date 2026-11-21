@@ -11,6 +11,7 @@ defmodule KithWeb.ImportWizardLive do
 
   use KithWeb, :live_view
 
+  alias Kith.Accounts.OptionalFeatures
   alias Kith.Contacts.PhoneFormatter
   alias Kith.Imports
   alias Kith.Imports.Sources.MonicaApi
@@ -388,6 +389,22 @@ defmodule KithWeb.ImportWizardLive do
 
   @impl true
   def render(assigns) do
+    disabled =
+      Enum.reject(
+        OptionalFeatures.monica_keys(),
+        &OptionalFeatures.enabled?(assigns.current_scope.account, &1)
+      )
+
+    skipped = Enum.filter(disabled, &(assigns.api_options[&1] != false))
+    options = Map.drop(assigns.api_options, disabled)
+
+    assigns =
+      assign(assigns,
+        disabled_monica_features: disabled,
+        skipped_monica_labels: Enum.map_join(skipped, ", ", &OptionalFeatures.label/1),
+        api_sync_description: api_sync_description(options)
+      )
+
     ~H"""
     <Layouts.app
       flash={@flash}
@@ -643,12 +660,19 @@ defmodule KithWeb.ImportWizardLive do
                       >
                         <input
                           type="checkbox"
-                          checked={@api_options[key] != false}
+                          checked={
+                            @api_options[key] != false &&
+                              key not in @disabled_monica_features
+                          }
+                          disabled={key in @disabled_monica_features}
                           phx-click="toggle_option"
                           phx-value-option={key}
                           class="rounded border-[var(--color-border)]"
                         />
-                        <span class="text-sm text-[var(--color-text-primary)]">{label}</span>
+                        <span class="text-sm text-[var(--color-text-primary)]">{label}
+                        <span :if={key in @disabled_monica_features}>
+                          · Skipped while disabled
+                        </span></span>
                       </label>
                     </div>
                   </div>
@@ -703,17 +727,23 @@ defmodule KithWeb.ImportWizardLive do
               >
                 <dt class="text-[var(--color-text-secondary)]">Options</dt>
                 <dd class="font-medium text-[var(--color-text-primary)]">
-                  {api_sync_description(@api_options)}
+                  {@api_sync_description}
                 </dd>
               </div>
             </dl>
           </div>
 
+          <p :if={@source == "monica_api" && @skipped_monica_labels != ""} class="mb-4 text-sm">
+            Disabled categories will be skipped: {@skipped_monica_labels}.
+          </p>
+
           <div class="bg-[var(--color-warning-subtle)] border border-[var(--color-warning)]/30 rounded-[var(--radius-lg)] p-4 mb-6">
             <p class="text-[var(--color-warning)] font-medium text-sm">Before you import</p>
             <p class="text-[var(--color-text-secondary)] text-sm mt-1">
-              Import creates new contacts. Existing contacts are not updated.
-              Review for duplicates after import.
+              Import creates new contacts. Review for duplicates after import.
+              <%= if @source == "monica_api" do %>
+                A later import can add previously skipped history to existing contacts after you enable the feature.
+              <% end %>
             </p>
           </div>
 

@@ -40,6 +40,13 @@ defmodule Kith.AccountsFixtures do
     end
   end
 
+  def enable_optional_features(user, keys) do
+    account = Accounts.get_account!(user.account_id)
+    flags = Enum.reduce(keys, account.feature_flags || %{}, &Map.put(&2, &1, true))
+    {:ok, updated} = Accounts.update_account(account, %{feature_flags: flags})
+    updated
+  end
+
   def user_scope_fixture do
     user = user_fixture()
     user_scope_fixture(user)

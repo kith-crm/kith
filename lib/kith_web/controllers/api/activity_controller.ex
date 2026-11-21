@@ -9,6 +9,8 @@ defmodule KithWeb.API.ActivityController do
 
   use KithWeb, :controller
 
+  plug KithWeb.Plugs.RequireOptionalFeature, "activities"
+
   alias Kith.{Activities, Contacts, Policy, Repo}
   alias Kith.Activities.Activity
   alias Kith.Scope, as: TenantScope

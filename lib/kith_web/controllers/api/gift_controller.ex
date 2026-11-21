@@ -5,6 +5,8 @@ defmodule KithWeb.API.GiftController do
 
   use KithWeb, :controller
 
+  plug KithWeb.Plugs.RequireOptionalFeature, "gifts"
+
   alias Kith.{Contacts, Gifts, Policy, Repo}
   alias Kith.Contacts.Gift
   alias Kith.Scope, as: TenantScope

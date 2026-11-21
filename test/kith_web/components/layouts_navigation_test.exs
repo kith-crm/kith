@@ -8,7 +8,10 @@ defmodule KithWeb.LayoutsNavigationTest do
 
   defp render_navigation(path, role \\ "admin") do
     render_component(&Layouts.app/1,
-      current_scope: %{user: %User{email: "navigation@example.com", role: role}},
+      current_scope: %{
+        user: %User{email: "navigation@example.com", role: role},
+        account: %Kith.Accounts.Account{feature_flags: %{"journal" => true}}
+      },
       current_path: path,
       flash: %{},
       inner_block: []

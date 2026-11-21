@@ -5,6 +5,7 @@ defmodule KithWeb.API.StatisticsControllerTest do
   import Kith.ContactsFixtures
 
   defp authed_conn(conn, user) do
+    Kith.AccountsFixtures.enable_optional_features(user, ~w(activities calls))
     {raw_token, _} = Kith.Accounts.generate_api_token(user)
     put_req_header(conn, "authorization", "Bearer #{raw_token}")
   end

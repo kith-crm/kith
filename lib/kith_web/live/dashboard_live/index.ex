@@ -43,6 +43,12 @@ defmodule KithWeb.DashboardLive.Index do
     {:noreply, assign(socket, :immich_dismissed, true)}
   end
 
+  @impl true
+  def handle_info({:optional_feature_changed, _key, _value}, socket) do
+    {:noreply,
+     assign(socket, :activity_feed, load_activity_feed(socket.assigns.current_scope.account.id))}
+  end
+
   defp load_activity_feed(account_id) do
     Contacts.recent_activity(account_id, 10)
   rescue

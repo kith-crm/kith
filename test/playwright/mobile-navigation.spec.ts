@@ -21,6 +21,18 @@ async function authenticate(page: Page) {
   }
 }
 
+async function enableOptionalFeatures(page: Page, names: string[]) {
+  await page.goto("/settings/account");
+  await connected(page);
+  for (const name of names) {
+    const feature = page.locator("#optional-features").getByRole("switch", { name, exact: true });
+    if (!(await feature.isChecked())) await feature.click();
+    await expect(feature).toBeChecked();
+  }
+  await page.goto("/dashboard");
+  await connected(page);
+}
+
 async function connected(page: Page) {
   await expect(page.locator("[data-phx-main]")).toHaveClass(/phx-connected/);
 }
@@ -74,6 +86,7 @@ test.describe("Mobile navigation", () => {
     test(`four primary destinations and accessible More menu fit at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 844 });
       await authenticate(page);
+      await enableOptionalFeatures(page, ["Journal"]);
       const nav = mobileNavigation(page);
       await expect(nav.getByRole("link")).toHaveText(["Home", "Contacts", "Settings"]);
       await expect(nav.getByText("Jobs", { exact: true })).toHaveCount(0);
@@ -161,6 +174,7 @@ test.describe("Mobile navigation", () => {
   test("contact actions, section tabs and mood filters remain reachable at 320px", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 844 });
     await authenticate(page);
+    await enableOptionalFeatures(page, ["Journal", "Calls", "Life Events", "Tasks"]);
     await createContact(page, { firstName: "Mobile", lastName: "Regression" });
     const stream = page.locator("#activity-stream");
     const filterMenu = stream.getByRole("button", { name: "Filter", exact: true });
@@ -218,6 +232,7 @@ for (const width of [1366, 1440]) {
   test(`desktop navigation and responsive round trip at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await authenticate(page);
+    await enableOptionalFeatures(page, ["Journal", "Calls", "Life Events", "Tasks"]);
     const sidebar = page.locator("aside").first();
     await expect(sidebar).toBeVisible();
     const jobsVisible = await sidebar.getByRole("link", { name: "Jobs", exact: true }).isVisible();

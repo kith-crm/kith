@@ -1,6 +1,7 @@
 defmodule KithWeb.API.StatisticsController do
   use KithWeb, :controller
 
+  alias Kith.Accounts.OptionalFeatures
   alias Kith.Repo
   alias Kith.Scope, as: TenantScope
 
@@ -14,13 +15,24 @@ defmodule KithWeb.API.StatisticsController do
     stats = %{
       total_contacts: count(Kith.Contacts.Contact, account_id),
       total_notes: count(Kith.Contacts.Note, account_id),
-      total_activities: count(Kith.Activities.Activity, account_id),
-      total_calls: count(Kith.Activities.Call, account_id),
       storage_used_bytes: storage_used(account_id),
       account_created_at: account.inserted_at
     }
 
+    stats =
+      stats
+      |> maybe_count(account, "activities", :total_activities, Kith.Activities.Activity)
+      |> maybe_count(account, "calls", :total_calls, Kith.Activities.Call)
+
     json(conn, %{data: stats})
+  end
+
+  defp maybe_count(stats, account, feature, key, schema) do
+    if OptionalFeatures.enabled?(account, feature) do
+      Map.put(stats, key, count(schema, account.id))
+    else
+      stats
+    end
   end
 
   defp count(schema, account_id) do

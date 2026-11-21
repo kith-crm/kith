@@ -5,6 +5,8 @@ defmodule KithWeb.SettingsLive.SettingsLayout do
 
   use KithWeb, :html
 
+  alias Kith.Accounts.OptionalFeatures
+
   @doc "Settings destinations shared by the sidebar and mobile selector."
   def destinations(scope) do
     admin? = authorized?(scope.user, :manage, :account)
@@ -32,9 +34,15 @@ defmodule KithWeb.SettingsLive.SettingsLayout do
           %{
             path: "/settings/activity-types",
             label: "Activity Types",
+            feature: "activities",
             icon: "hero-rectangle-group"
           },
-          %{path: "/settings/life-event-types", label: "Life Event Types", icon: "hero-star"},
+          %{
+            path: "/settings/life-event-types",
+            label: "Life Event Types",
+            icon: "hero-star",
+            feature: "life_events"
+          },
           %{
             path: "/settings/integrations",
             label: "Integrations",
@@ -68,7 +76,12 @@ defmodule KithWeb.SettingsLive.SettingsLayout do
         group
         | items:
             Enum.filter(group.items, fn item ->
-              allowed = admin? or !Map.get(item, :admin, false)
+              feature = Map.get(item, :feature)
+
+              available =
+                is_nil(feature) or OptionalFeatures.enabled?(scope.account, feature)
+
+              allowed = available and (admin? or !Map.get(item, :admin, false))
 
               case Map.get(item, :permission) do
                 {action, resource} -> allowed and authorized?(scope.user, action, resource)

@@ -8,6 +8,8 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
 
   import KithWeb.NoteComponents
 
+  alias Kith.Accounts
+  alias Kith.Accounts.OptionalFeatures
   alias Kith.Activities
   alias Kith.Contacts
   alias Kith.Contacts.ActivityStream
@@ -28,6 +30,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
      |> assign(:modal_entry_id, nil)
      |> assign(:modal_record, nil)
      |> assign(:modal_error, nil)
+     |> assign(:feature_notice, nil)
      |> allow_upload(:photo,
        accept: ~w(.jpg .jpeg .png .gif .webp),
        max_entries: 5,
@@ -44,22 +47,48 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
          else: socket
 
     socket = assign(socket, assigns)
-    {:ok, load_entries(socket)}
+    {:ok, socket |> apply_available_types(assigns.account) |> load_entries()}
   end
+
+  defp apply_available_types(socket, account) do
+    types = OptionalFeatures.available_types(account, ActivityStream.all_types())
+    filters = MapSet.intersection(socket.assigns.active_filters, MapSet.new(types))
+    socket = assign(socket, all_types: types, active_filters: filters)
+
+    if socket.assigns.modal_type && socket.assigns.modal_type not in types do
+      type = socket.assigns.modal_type
+      {:noreply, socket} = handle_event("close-modal", %{}, socket)
+
+      assign(socket, :feature_notice, "#{type_label(type)} was turned off for this workspace.")
+    else
+      socket
+    end
+  end
+
+  defp with_available_type(socket, type, action) do
+    account = Accounts.get_account!(socket.assigns.account_id)
+    socket = apply_available_types(socket, account)
+
+    if type in socket.assigns.all_types do
+      action.(socket)
+    else
+      notice =
+        socket.assigns.feature_notice || "#{type_label(type)} is unavailable for this workspace."
+
+      {:noreply, socket |> assign(:feature_notice, notice) |> load_entries()}
+    end
+  end
+
+  defp entry_type(value),
+    do: Enum.find(ActivityStream.all_types(), &(Atom.to_string(&1) == value))
 
   # --- Filter events ---
 
   @impl true
   def handle_event("filter-toggle", %{"type" => type_str}, socket) do
-    type = String.to_existing_atom(type_str)
-    filters = socket.assigns.active_filters
+    type = entry_type(type_str)
 
-    filters =
-      if MapSet.member?(filters, type),
-        do: MapSet.delete(filters, type),
-        else: MapSet.put(filters, type)
-
-    {:noreply, socket |> assign(:active_filters, filters) |> load_entries()}
+    with_available_type(socket, type, &toggle_filter(type, &1))
   end
 
   def handle_event("filter-clear", _params, socket) do
@@ -78,26 +107,23 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   # --- Modal events ---
 
   def handle_event("open-entry-modal", %{"type" => type_str}, socket) do
-    type = String.to_existing_atom(type_str)
+    type = entry_type(type_str)
 
-    {:noreply,
-     socket
-     |> assign(:modal_type, type)
-     |> assign(:modal_entry_id, nil)
-     |> assign(:modal_record, nil)
-     |> assign(:modal_error, nil)}
+    if socket.assigns.can_edit do
+      with_available_type(socket, type, &open_entry(type, &1))
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("edit-entry", %{"type" => type_str, "id" => id_str}, socket) do
-    type = String.to_existing_atom(type_str)
-    id = String.to_integer(id_str)
+    type = entry_type(type_str)
 
-    {:noreply,
-     socket
-     |> assign(:modal_type, type)
-     |> assign(:modal_entry_id, id)
-     |> assign(:modal_record, load_record(type, id, socket.assigns))
-     |> assign(:modal_error, nil)}
+    if socket.assigns.can_edit do
+      with_available_type(socket, type, &edit_entry(type, id_str, &1))
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_event("close-modal", _params, socket) do
@@ -110,55 +136,22 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   end
 
   def handle_event("save-entry", params, socket) do
-    %{modal_type: type, modal_entry_id: entry_id} = socket.assigns
+    type = socket.assigns.modal_type
 
-    result =
-      if entry_id,
-        do: update_entry(type, entry_id, params, socket.assigns),
-        else: create_entry(type, params, socket.assigns)
-
-    case result do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> assign(:modal_type, nil)
-         |> assign(:modal_entry_id, nil)
-         |> assign(:modal_record, nil)
-         |> assign(:modal_error, nil)
-         |> load_entries()}
-
-      {:error, message} ->
-        socket =
-          if type == :note do
-            note_params = params["entry"] || %{}
-
-            assign(socket, :modal_record, %{
-              body: note_params["body"] || "",
-              is_private: note_params["is_private"] in [true, "true"]
-            })
-          else
-            socket
-          end
-
-        {:noreply, assign(socket, :modal_error, message)}
+    if socket.assigns.can_edit do
+      with_available_type(socket, type, &save_entry(type, params, &1))
+    else
+      {:noreply, socket}
     end
   end
 
   def handle_event("delete-entry", %{"type" => type_str, "id" => id_str}, socket) do
-    type = String.to_existing_atom(type_str)
-    id = String.to_integer(id_str)
+    type = entry_type(type_str)
 
-    case delete_entry(type, id, socket.assigns) do
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> assign(:modal_type, nil)
-         |> assign(:modal_entry_id, nil)
-         |> assign(:modal_record, nil)
-         |> load_entries()}
-
-      {:error, _} ->
-        {:noreply, socket}
+    if socket.assigns.can_edit do
+      with_available_type(socket, type, &remove_entry(type, id_str, &1))
+    else
+      {:noreply, socket}
     end
   end
 
@@ -205,6 +198,91 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   end
 
   # --- CRUD helpers ---
+
+  defp toggle_filter(type, socket) do
+    filters = socket.assigns.active_filters
+
+    filters =
+      if MapSet.member?(filters, type),
+        do: MapSet.delete(filters, type),
+        else: MapSet.put(filters, type)
+
+    {:noreply, socket |> assign(:active_filters, filters) |> load_entries()}
+  end
+
+  defp open_entry(type, socket) do
+    {:noreply,
+     socket
+     |> assign(:feature_notice, nil)
+     |> assign(:modal_type, type)
+     |> assign(:modal_entry_id, nil)
+     |> assign(:modal_record, nil)
+     |> assign(:modal_error, nil)}
+  end
+
+  defp edit_entry(type, id_str, socket) do
+    id = String.to_integer(id_str)
+
+    {:noreply,
+     socket
+     |> assign(:feature_notice, nil)
+     |> assign(:modal_type, type)
+     |> assign(:modal_entry_id, id)
+     |> assign(:modal_record, load_record(type, id, socket.assigns))
+     |> assign(:modal_error, nil)}
+  end
+
+  defp save_entry(type, params, socket) do
+    entry_id = socket.assigns.modal_entry_id
+
+    result =
+      if entry_id,
+        do: update_entry(type, entry_id, params, socket.assigns),
+        else: create_entry(type, params, socket.assigns)
+
+    case result do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> assign(:modal_type, nil)
+         |> assign(:modal_entry_id, nil)
+         |> assign(:modal_record, nil)
+         |> assign(:modal_error, nil)
+         |> load_entries()}
+
+      {:error, message} ->
+        socket =
+          if type == :note do
+            note_params = params["entry"] || %{}
+
+            assign(socket, :modal_record, %{
+              body: note_params["body"] || "",
+              is_private: note_params["is_private"] in [true, "true"]
+            })
+          else
+            socket
+          end
+
+        {:noreply, assign(socket, :modal_error, message)}
+    end
+  end
+
+  defp remove_entry(type, id_str, socket) do
+    id = String.to_integer(id_str)
+
+    case delete_entry(type, id, socket.assigns) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> assign(:modal_type, nil)
+         |> assign(:modal_entry_id, nil)
+         |> assign(:modal_record, nil)
+         |> load_entries()}
+
+      {:error, _} ->
+        {:noreply, socket}
+    end
+  end
 
   defp load_record(:note, id, a), do: Contacts.get_note!(a.account_id, id, a.current_user_id)
   defp load_record(:call, id, a), do: Activities.get_call!(a.account_id, id)
@@ -407,6 +485,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               + Note
             </button>
             <button
+              :if={:call in @all_types}
               phx-click="open-entry-modal"
               phx-value-type="call"
               phx-target={@myself}
@@ -431,6 +510,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
               >
                 <button
                   :for={type <- [:life_event, :task, :gift, :conversation, :activity, :photo]}
+                  :if={type in @all_types}
                   phx-click="open-entry-modal"
                   phx-value-type={type}
                   phx-target={@myself}
@@ -443,6 +523,9 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
             </div>
           </div>
         </div>
+        <p :if={@feature_notice} role="status" class="mt-2 text-sm">
+          {@feature_notice}
+        </p>
         <div :if={MapSet.size(@active_filters) > 0} class="mt-2.5">
           <.filter_chips active_filters={@active_filters} target={@myself} />
         </div>
@@ -525,7 +608,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
           <.icon name="hero-clock" class="size-8 text-[var(--color-text-disabled)] mx-auto mb-2" />
           <p class="text-sm text-[var(--color-text-tertiary)]">No activity yet</p>
           <p class="text-xs text-[var(--color-text-disabled)] mt-1">
-            Add a note, log a call, or record an event to get started.
+            Add a note or photo to get started.
           </p>
         </div>
 
@@ -737,7 +820,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   end
 
   defp entry_modal_content(%{type: :life_event} = assigns) do
-    life_event_types = Kith.Repo.all(Kith.Contacts.LifeEventType)
+    life_event_types = Contacts.list_life_event_types(assigns.account_id)
     assigns = assign(assigns, :life_event_types, life_event_types)
 
     ~H"""

@@ -5,6 +5,8 @@ defmodule KithWeb.API.TaskController do
 
   use KithWeb, :controller
 
+  plug KithWeb.Plugs.RequireOptionalFeature, "tasks"
+
   alias Kith.{Contacts, Policy, Repo}
   alias Kith.Scope, as: TenantScope
   alias Kith.Tasks.Task

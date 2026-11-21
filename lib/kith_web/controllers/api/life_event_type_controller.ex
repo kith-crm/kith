@@ -1,6 +1,8 @@
 defmodule KithWeb.API.LifeEventTypeController do
   use KithWeb, :controller
 
+  plug KithWeb.Plugs.RequireOptionalFeature, "life_events"
+
   alias Kith.{Contacts, Policy}
   alias Kith.Contacts.LifeEventType
 

@@ -21,9 +21,15 @@ defmodule KithWeb.SettingsLive.SettingsLayoutTest do
   ]
   @admin_paths ["/settings/account", "/settings/integrations", "/settings/audit-log"]
 
+  defp settings_scope(user) do
+    account = enable_optional_features(user, ~w(activities life_events))
+    %{user_scope_fixture(user) | account: account}
+  end
+
   test "groups preserve destinations allowed by each role" do
     for role <- ["admin", "editor", "viewer"] do
-      scope = user_scope_fixture(user_fixture(%{role: role}))
+      user = user_fixture(%{role: role})
+      scope = settings_scope(user)
       groups = SettingsLayout.destinations(scope)
       assert Enum.map(groups, & &1.label) == ["Personal", "Workspace", "Data"]
       assert Enum.all?(groups, &(&1.items != []))
@@ -67,7 +73,7 @@ defmodule KithWeb.SettingsLive.SettingsLayoutTest do
   end
 
   test "every destination and nested import history select their current location" do
-    scope = user_scope_fixture()
+    scope = settings_scope(user_fixture())
 
     for path <- @paths ++ ["/settings/imports/123"] do
       html =

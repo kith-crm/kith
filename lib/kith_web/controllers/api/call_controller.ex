@@ -5,6 +5,8 @@ defmodule KithWeb.API.CallController do
 
   use KithWeb, :controller
 
+  plug KithWeb.Plugs.RequireOptionalFeature, "calls"
+
   alias Kith.{Activities, Contacts, Policy, Repo}
   alias Kith.Activities.Call
   alias Kith.Scope, as: TenantScope

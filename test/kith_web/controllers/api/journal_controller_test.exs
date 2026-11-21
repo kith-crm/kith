@@ -6,6 +6,7 @@ defmodule KithWeb.API.JournalControllerTest do
   alias Kith.Accounts
 
   defp authed_conn(conn, user) do
+    Kith.AccountsFixtures.enable_optional_features(user, ~w(journal))
     {raw_token, _} = Accounts.generate_api_token(user)
     put_req_header(conn, "authorization", "Bearer #{raw_token}")
   end

@@ -8,6 +8,7 @@ defmodule KithWeb.SettingsLive.Account do
   use KithWeb, :live_view
 
   alias Kith.Accounts
+  alias Kith.Accounts.OptionalFeatures
   alias Kith.Reminders
 
   import KithWeb.SettingsLive.SettingsLayout
@@ -49,7 +50,7 @@ defmodule KithWeb.SettingsLive.Account do
 
   @impl true
   def handle_event("save-account", %{"account" => params}, socket) do
-    case Accounts.update_account(socket.assigns.account, params) do
+    case Accounts.update_account(socket.assigns.account, Map.delete(params, "feature_flags")) do
       {:ok, updated} ->
         {:noreply,
          socket
@@ -62,22 +63,29 @@ defmodule KithWeb.SettingsLive.Account do
     end
   end
 
+  def handle_event("set-optional-feature", %{"feature" => key, "enabled" => value}, socket)
+      when value in ["true", "false"] do
+    scope = socket.assigns.current_scope
+
+    case Accounts.set_optional_feature(scope.user, key, value == "true") do
+      {:ok, account} ->
+        {:noreply, assign(socket, :current_scope, %{scope | account: account})}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Could not update optional feature.")}
+    end
+  end
+
+  def handle_event("set-optional-feature", _params, socket) do
+    {:noreply, put_flash(socket, :error, "Invalid optional feature setting.")}
+  end
+
   def handle_event("toggle-feature", %{"feature" => feature}, socket) do
-    account = socket.assigns.account
-    user = socket.assigns.current_scope.user
-    flags = socket.assigns.feature_flags
-    new_flags = Map.update(flags, feature, true, &(!&1))
-
-    case Accounts.update_account(account, %{feature_flags: new_flags}) do
+    case Accounts.toggle_legacy_module(socket.assigns.current_scope.user, feature) do
       {:ok, updated} ->
-        maybe_log_immich_toggle(account, user, feature, new_flags)
+        {:noreply, assign(socket, :feature_flags, updated.feature_flags || %{})}
 
-        {:noreply,
-         socket
-         |> assign(:account, updated)
-         |> assign(:feature_flags, updated.feature_flags || %{})}
-
-      {:error, _changeset} ->
+      {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to update feature toggle")}
     end
   end
@@ -145,20 +153,10 @@ defmodule KithWeb.SettingsLive.Account do
     end
   end
 
-  defp maybe_log_immich_toggle(account, user, "immich", new_flags) do
-    event = if Map.get(new_flags, "immich"), do: :immich_linked, else: :immich_unlinked
-    Kith.AuditLogs.log_event(account.id, user, event)
-  end
-
-  defp maybe_log_immich_toggle(_account, _user, _feature, _flags), do: :ok
-
   @feature_modules [
     {"reminders", "Reminders", "Enable birthday and event reminders"},
-    {"activities", "Activities", "Track activities with contacts"},
-    {"calls", "Phone Calls", "Log phone calls with contacts"},
     {"documents", "Documents", "Attach documents to contacts"},
-    {"photos", "Photos", "Manage contact photos"},
-    {"life_events", "Life Events", "Track important life events"}
+    {"photos", "Photos", "Manage contact photos"}
   ]
 
   @impl true
@@ -219,6 +217,22 @@ defmodule KithWeb.SettingsLive.Account do
               </:actions>
             </UI.simple_form>
           </div>
+
+          <section
+            id="optional-features"
+            class="mt-6 bg-[var(--color-surface-elevated)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-6"
+          >
+            <h2 class="text-lg font-semibold mb-1">Optional features</h2>
+            <div class="divide-y divide-[var(--color-border-subtle)]">
+              <.optional_feature_switch
+                :for={{key, label, description} <- OptionalFeatures.definitions()}
+                key={key}
+                label={label}
+                description={description}
+                enabled={OptionalFeatures.enabled?(@current_scope.account, key)}
+              />
+            </div>
+          </section>
 
           <%!-- Feature module toggles --%>
           <div class="mt-6 bg-[var(--color-surface-elevated)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-6">
@@ -369,4 +383,45 @@ defmodule KithWeb.SettingsLive.Account do
   defp format_rule_label(0), do: "On the day"
   defp format_rule_label(1), do: "1 day before"
   defp format_rule_label(days), do: "#{days} days before"
+
+  attr :key, :string, required: true
+  attr :label, :string, required: true
+  attr :description, :string, required: true
+  attr :enabled, :boolean, required: true
+
+  defp optional_feature_switch(assigns) do
+    ~H"""
+    <div class="flex items-center justify-between gap-4 py-3">
+      <div>
+        <span id={"optional-label-#{@key}"} class="text-sm font-medium">{@label}</span>
+        <p
+          id={"optional-description-#{@key}"}
+          class="text-xs text-[var(--color-text-tertiary)]"
+        >
+          {@description}
+        </p>
+      </div>
+      <button
+        id={"optional-feature-#{@key}"}
+        type="button"
+        role="switch"
+        aria-labelledby={"optional-label-#{@key}"}
+        aria-describedby={"optional-description-#{@key}"}
+        aria-checked={to_string(@enabled)}
+        phx-click="set-optional-feature"
+        phx-value-feature={@key}
+        phx-value-enabled={to_string(!@enabled)}
+        class={[
+          "inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent focus-visible:outline",
+          if(@enabled,
+            do: "bg-[var(--color-accent)] justify-end",
+            else: "bg-[var(--color-border)] justify-start"
+          )
+        ]}
+      >
+        <span class="size-5 rounded-full bg-white shadow" />
+      </button>
+    </div>
+    """
+  end
 end

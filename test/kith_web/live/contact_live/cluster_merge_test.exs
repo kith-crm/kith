@@ -47,6 +47,35 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
   defp cluster_path(a, b), do: "/contacts/duplicates/cluster/#{min(a.id, b.id)}"
 
+  test "retained history counts only disabled records that move", ctx do
+    {:ok, _} = Kith.Activities.create_call(ctx.a, %{occurred_at: DateTime.utc_now(:second)})
+    {:ok, view, _} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+    render_click(view, "set-primary", %{"id" => to_string(ctx.a.id)})
+    refute has_element?(view, "#section-history span", "Retained history")
+
+    {:ok, moved} = Kith.Activities.create_call(ctx.b, %{occurred_at: DateTime.utc_now(:second)})
+    render_click(view, "set-primary", %{"id" => to_string(ctx.a.id)})
+    assert has_element?(view, "#section-history span", "1 Retained history")
+    assert has_element?(view, "#section-history summary", "1 records move")
+
+    {:ok, _} = Kith.Accounts.set_optional_feature(ctx.user, "calls", true)
+    assert has_element?(view, "#section-history span", "1 calls")
+    refute has_element?(view, "#section-history span", "Retained history")
+
+    {:ok, _} = Kith.Accounts.set_optional_feature(ctx.user, "calls", false)
+
+    assert {:error, {:redirect, %{to: path}}} =
+             view |> element("button[phx-click='merge']") |> render_click()
+
+    export = Kith.Exports.build_json_export(ctx.account_id)
+    primary = Enum.find(export.contacts, &(&1.id == ctx.a.id))
+    assert Enum.any?(primary.calls, &(&1.id == moved.id))
+
+    {:ok, _} = Kith.Accounts.set_optional_feature(ctx.user, "calls", true)
+    {:ok, merged, _} = live(ctx.conn, path)
+    assert has_element?(merged, "#activity-call-#{moved.id}")
+  end
+
   test "renders every member with a checkbox", ctx do
     {:ok, _live, html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
