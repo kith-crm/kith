@@ -11,7 +11,7 @@ env:
   ELIXIR_VERSION: "1.19.5"
   OTP_VERSION: "28.5"
   # Erlang JIT requires single-mapped memory on the local x86 runner under ARM emulation.
-  ERL_FLAGS: "+JMsingle true"
+  ERL_FLAGS: "+S 4:4 +JMsingle true"
   DB_PORT: "5432"
 
 jobs:

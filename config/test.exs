@@ -11,7 +11,7 @@ config :pbkdf2_elixir, :rounds, 1
 config :kith, Kith.Repo,
   username: "postgres",
   password: "postgres",
-  hostname: "localhost",
+  hostname: System.get_env("DB_HOST", "localhost"),
   port: String.to_integer(System.get_env("DB_PORT", "5434")),
   database: "kith_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
