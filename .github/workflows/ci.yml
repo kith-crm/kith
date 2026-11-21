@@ -16,7 +16,7 @@ env:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
 
     services:
       postgres:
@@ -116,7 +116,7 @@ jobs:
           retention-days: 7
 
   browser-regressions:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     # Includes four sequential OIDC policy modes on the emulated local runner.
     timeout-minutes: 45
     env:
@@ -180,7 +180,7 @@ jobs:
           retention-days: 7
 
   dialyzer:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
 
     env:
       MIX_ENV: dev
@@ -225,7 +225,7 @@ jobs:
         run: mix dialyzer
 
   docker-build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     needs: test
 
     steps:
@@ -254,7 +254,7 @@ jobs:
           [ "$uid" = "1000" ] || exit 1
 
   publish:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     needs: [test, docker-build]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
