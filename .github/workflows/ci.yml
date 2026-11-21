@@ -10,6 +10,8 @@ env:
   MIX_ENV: test
   ELIXIR_VERSION: "1.19.5"
   OTP_VERSION: "28.5"
+  # Erlang JIT requires single-mapped memory on the local x86 runner under ARM emulation.
+  ERL_FLAGS: "+JMsingle true"
   DB_PORT: "5432"
 
 jobs:
@@ -118,7 +120,7 @@ jobs:
     timeout-minutes: 20
     env:
       MIX_TEST_PARTITION: browser_regressions
-      ERL_FLAGS: "+S 4:4"
+      ERL_FLAGS: "+S 4:4 +JMsingle true"
     services:
       postgres:
         # CI-only local socket trust; host connections require the password.
