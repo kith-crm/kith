@@ -16,7 +16,7 @@ defmodule KithWeb.ImportWizardLive do
   alias Kith.Imports.Sources.MonicaApi
   alias Kith.Policy
   alias Kith.Storage
-  alias Kith.Workers.{ImportSourceWorker, MonicaApiCrawlWorker}
+  alias Kith.Workers.ImportSourceWorker
 
   import KithWeb.SettingsLive.SettingsLayout
 
@@ -293,20 +293,14 @@ defmodule KithWeb.ImportWizardLive do
   end
 
   defp do_start_api_import(socket, scope) do
-    account_id = scope.account.id
-    user_id = scope.user.id
-
     import_attrs = %{
-      source: "monica_api",
       api_url: String.trim(socket.assigns.api_url),
       api_key_encrypted: String.trim(socket.assigns.api_key),
       api_options: build_api_options(socket)
     }
 
-    case Imports.create_import(account_id, user_id, import_attrs) do
+    case Imports.schedule_monica_import(scope, import_attrs) do
       {:ok, import_job} ->
-        %{import_id: import_job.id} |> MonicaApiCrawlWorker.new() |> Oban.insert()
-
         socket =
           socket
           |> assign(:current_import, import_job)

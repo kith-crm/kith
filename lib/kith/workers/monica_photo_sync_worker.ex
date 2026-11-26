@@ -27,7 +27,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"import_id" => import_id, "credential_url" => credential_url}}) do
-    import_job = Imports.get_import!(import_id)
+    import_job = Imports.load_monica_import_for_job!(import_id)
     Logger.metadata(import_id: import_id, worker: "MonicaPhotoSync")
 
     if is_nil(import_job.api_key_encrypted) do

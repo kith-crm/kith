@@ -1868,16 +1868,14 @@ defmodule Kith.Imports.Sources.MonicaApi do
 
       case api_get_json(credential, url, []) do
         {:ok, %{"data" => docs}} when is_list(docs) and docs != [] ->
-          %{
+          Imports.enqueue_monica_followup(MonicaDocumentImportWorker, %{
             "account_id" => account_id,
             "user_id" => user_id,
             "contact_id" => local_id,
             "import_id" => import_job.id,
             "credential_url" => credential.url,
             "documents" => docs
-          }
-          |> MonicaDocumentImportWorker.new()
-          |> Oban.insert()
+          })
 
         _ ->
           :ok

@@ -7,6 +7,7 @@ defmodule Kith.Imports do
   alias Kith.Accounts.Scope
   alias Kith.Imports.{Import, ImportRecord}
   alias Kith.Repo
+  alias Kith.Workers.{ImportApiKeySweepWorker, MonicaApiCrawlWorker}
 
   @sources %{
     "monica_api" => Kith.Imports.Sources.MonicaApi,
@@ -14,6 +15,26 @@ defmodule Kith.Imports do
   }
 
   ## Import Jobs
+
+  def schedule_monica_import(%Scope{} = scope, attrs) do
+    attrs =
+      attrs
+      |> Map.take([:api_url, :api_key_encrypted, :api_options])
+      |> Map.put(:source, "monica_api")
+
+    Repo.transact(fn ->
+      scheduled_at = DateTime.utc_now()
+
+      with {:ok, import} <- create_import(scope.account.id, scope.user.id, attrs),
+           {:ok, _crawl} <-
+             Oban.insert(
+               MonicaApiCrawlWorker.new(%{import_id: import.id}, scheduled_at: scheduled_at)
+             ),
+           {:ok, _sweep} <- ImportApiKeySweepWorker.schedule(import.id, scheduled_at) do
+        {:ok, import}
+      end
+    end)
+  end
 
   def create_import(account_id, user_id, attrs) do
     if has_active_import?(account_id) do
@@ -158,52 +179,157 @@ defmodule Kith.Imports do
   # has finished. `Kith.Workers.MonicaApiKeyReleaseWorker` wipes it then;
   # `Kith.Workers.ImportApiKeySweepWorker` is the time-based safety net.
 
-  # Oban worker names of the jobs that run after the crawl and read the key.
-  @monica_followup_workers ~w[
-    Kith.Workers.MonicaPhotoSyncWorker
-    Kith.Workers.MonicaMiscDataWorker
+  # Jobs that run after the crawl and read the key.
+  @monica_followup_modules [
+    Kith.Workers.MonicaPhotoSyncWorker,
+    Kith.Workers.MonicaMiscDataWorker,
     Kith.Workers.MonicaDocumentImportWorker
   ]
+  @monica_followup_workers Enum.map(@monica_followup_modules, &Oban.Worker.to_string/1)
 
-  @pending_job_states ~w[available scheduled executing retryable]
+  @terminal_job_states ~w[completed discarded cancelled]
 
   def monica_followup_workers, do: @monica_followup_workers
 
   def wipe_api_key(%Import{} = import) do
     import
-    |> Ecto.Changeset.change(api_key_encrypted: nil)
+    |> Ecto.Changeset.change(api_key_encrypted: nil, api_key_cleanup_eligible_at: nil)
     |> Repo.update()
   end
 
   @doc """
   Returns true while any Monica follow-up job (photo sync, misc data,
-  documents) for the import can still run — i.e. is available, scheduled,
-  executing, or waiting to retry. Completed, discarded, and cancelled jobs
-  don't count.
+  documents) for the import can still run or be resumed. Completed,
+  discarded, and cancelled jobs don't count.
   """
   def monica_followups_pending?(import_id) do
-    Oban.Job
-    |> where([j], j.worker in ^@monica_followup_workers)
-    |> where([j], j.state in ^@pending_job_states)
-    |> where([j], fragment("(?->>'import_id')::bigint", j.args) == ^import_id)
+    import_jobs(import_id, @monica_followup_workers)
+    |> where([j], j.state not in ^@terminal_job_states)
     |> Repo.exists?()
   end
 
   @doc """
-  Safety net: wipes the API key of every import that finished (or, if it
-  never finished, was last updated) more than `max_age_seconds` ago.
-  System-wide by design — it runs from cron, not on behalf of an account.
-  Returns the number of imports wiped.
+  Loads the import for a credential consumer and clears any previous sweep
+  eligibility. A manually retried job must acquire the key again.
   """
-  def wipe_stale_api_keys(max_age_seconds) do
-    cutoff = DateTime.utc_now() |> DateTime.add(-max_age_seconds, :second)
+  def load_monica_import_for_job!(import_id) do
+    {:ok, import} =
+      with_locked_import(import_id, fn
+        nil -> raise Ecto.NoResultsError, queryable: Import
+        import -> reset_key_cleanup_eligibility(import)
+      end)
 
-    {count, _} =
-      Import
-      |> where([i], not is_nil(i.api_key_encrypted))
-      |> where([i], coalesce(i.completed_at, i.updated_at) < ^cutoff)
-      |> Repo.update_all(set: [api_key_encrypted: nil])
+    import
+  end
 
-    count
+  @doc """
+  Inserts follow-up work while the import still has a key. Serializes
+  insertion with key cleanup, including when the parent job was cancelled.
+  """
+  def enqueue_monica_followup(worker, %{"import_id" => import_id} = args)
+      when worker in @monica_followup_modules do
+    with_locked_import(import_id, fn
+      %Import{api_key_encrypted: key} = import when not is_nil(key) ->
+        with {:ok, _} <- reset_key_cleanup_eligibility(import), do: Oban.insert(worker.new(args))
+
+      _ ->
+        {:error, :api_key_unavailable}
+    end)
+  end
+
+  @doc """
+  Clears the key once all credential consumers are terminal. A positive
+  grace period starts at the first observation of that state.
+  """
+  def release_monica_api_key(import_id, grace_seconds) do
+    with_locked_import(import_id, fn
+      nil -> {:ok, :done}
+      %Import{api_key_encrypted: nil} -> {:ok, :done}
+      import -> release_key_when_idle(import, grace_seconds)
+    end)
+  end
+
+  defp release_key_when_idle(import, grace_seconds) do
+    # Lock terminal rows too. Oban's manual retry updates the same rows, so
+    # it either becomes visible here or the retried job loads the cleared key.
+    jobs =
+      import_jobs(import.id, [
+        Oban.Worker.to_string(MonicaApiCrawlWorker) | @monica_followup_workers
+      ])
+      |> order_by([j], j.id)
+      |> lock("FOR UPDATE")
+      |> select([j], struct(j, [:state, :worker, :attempted_at, :cancelled_at]))
+      |> Repo.all()
+
+    now = DateTime.utc_now(:second)
+
+    if Enum.any?(jobs, &credential_job_busy?(&1, now)) do
+      with {:ok, _} <- reset_key_cleanup_eligibility(import), do: {:ok, :busy}
+    else
+      release_key_after_grace(import, grace_seconds)
+    end
+  end
+
+  # Oban records cancellation before signalling the executing process.
+  # Allow the full execution timeout for a cancelled job that was started.
+  defp credential_job_busy?(
+         %Oban.Job{state: "cancelled", attempted_at: %DateTime{}, cancelled_at: %DateTime{} = at} =
+           job,
+         now
+       ) do
+    {:ok, worker} = Oban.Worker.from_string(job.worker)
+    DateTime.before?(now, DateTime.add(at, worker.timeout(job), :millisecond))
+  end
+
+  defp credential_job_busy?(job, _now), do: job.state not in @terminal_job_states
+
+  defp release_key_after_grace(import, 0) do
+    with {:ok, _} <- wipe_api_key(import), do: {:ok, :done}
+  end
+
+  defp release_key_after_grace(import, grace_seconds) do
+    now = DateTime.utc_now(:second)
+    eligible_at = import.api_key_cleanup_eligible_at
+
+    cond do
+      is_nil(eligible_at) ->
+        import
+        |> Ecto.Changeset.change(api_key_cleanup_eligible_at: DateTime.add(now, grace_seconds))
+        |> Repo.update()
+        |> case do
+          {:ok, _} -> {:ok, {:wait, grace_seconds}}
+          error -> error
+        end
+
+      DateTime.after?(eligible_at, now) ->
+        {:ok, {:wait, DateTime.diff(eligible_at, now)}}
+
+      true ->
+        release_key_after_grace(import, 0)
+    end
+  end
+
+  defp reset_key_cleanup_eligibility(%Import{api_key_cleanup_eligible_at: nil} = import),
+    do: {:ok, import}
+
+  defp reset_key_cleanup_eligibility(import) do
+    import
+    |> Ecto.Changeset.change(api_key_cleanup_eligible_at: nil)
+    |> Repo.update()
+  end
+
+  defp with_locked_import(import_id, fun) do
+    Repo.transact(fn ->
+      import = Repo.one(from(i in Import, where: i.id == ^import_id, lock: "FOR UPDATE"))
+      fun.(import)
+    end)
+  end
+
+  defp import_jobs(import_id, workers) do
+    id = to_string(import_id)
+
+    from(j in Oban.Job,
+      where: j.worker in ^workers and fragment("?->>'import_id' = ?", j.args, ^id)
+    )
   end
 end

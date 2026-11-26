@@ -166,54 +166,6 @@ defmodule Kith.ImportsTest do
     end
   end
 
-  describe "wipe_stale_api_keys/1" do
-    @day 24 * 60 * 60
-
-    test "wipes keys of imports that finished longer ago than max age",
-         %{account_id: account_id, user: user} do
-      import = key_import!(account_id, user.id)
-      backdate!(import, completed_at: hours_ago(25))
-
-      assert Imports.wipe_stale_api_keys(@day) == 1
-      assert is_nil(Imports.get_import!(import.id).api_key_encrypted)
-    end
-
-    test "keeps keys of recently finished imports", %{account_id: account_id, user: user} do
-      import = key_import!(account_id, user.id)
-      backdate!(import, completed_at: hours_ago(1), updated_at: hours_ago(30))
-
-      assert Imports.wipe_stale_api_keys(@day) == 0
-      assert Imports.get_import!(import.id).api_key_encrypted == "test-key"
-    end
-
-    test "wipes imports that never finished once untouched past max age",
-         %{account_id: account_id, user: user} do
-      import = key_import!(account_id, user.id)
-      backdate!(import, updated_at: hours_ago(25))
-
-      assert Imports.wipe_stale_api_keys(@day) == 1
-      assert is_nil(Imports.get_import!(import.id).api_key_encrypted)
-    end
-  end
-
-  defp key_import!(account_id, user_id) do
-    {:ok, import} =
-      Imports.create_import(account_id, user_id, %{
-        source: "monica_api",
-        api_url: "https://monica.test",
-        api_key_encrypted: "test-key"
-      })
-
-    import
-  end
-
-  defp hours_ago(hours),
-    do: DateTime.utc_now() |> DateTime.add(-hours * 3600, :second) |> DateTime.truncate(:second)
-
-  defp backdate!(import, fields) do
-    Repo.update_all(from(i in Import, where: i.id == ^import.id), set: fields)
-  end
-
   defp insert_job!(worker, args, state \\ "available") do
     {:ok, job} = args |> worker.new() |> Oban.insert()
     set_job_state!(job, state)

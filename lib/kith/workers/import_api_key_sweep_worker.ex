@@ -1,34 +1,36 @@
 defmodule Kith.Workers.ImportApiKeySweepWorker do
   @moduledoc """
-  Hourly safety net that wipes import API keys left behind for more than
-  24 hours after the import finished.
-
-  Normally `MonicaApiKeyReleaseWorker` (or the crawl itself) wipes the key as
-  soon as the last follow-up job is done. This sweep guarantees a key is
-  never kept indefinitely when that doesn't happen — e.g. the release job was
-  cancelled, a node died mid-job, or the crawl crashed on its final attempt.
+  Delayed fallback for one Monica import. Normal cleanup releases the key
+  sooner. The fallback keeps the key until no credential consumer can run
+  and a grace period has elapsed.
   """
 
-  use Oban.Worker, queue: :default, max_attempts: 3
-
-  require Logger
+  use Oban.Worker,
+    queue: :default,
+    max_attempts: 3,
+    unique: [period: :infinity, fields: [:worker, :args], keys: [:import_id], states: :incomplete]
 
   alias Kith.Imports
 
-  # Comfortably longer than any follow-up job can legitimately run
-  # (30-minute timeout × 3 attempts plus backoff).
-  @max_age_seconds 24 * 60 * 60
+  @grace_seconds 24 * 60 * 60
+  @poll_seconds 15 * 60
 
-  def max_age_seconds, do: @max_age_seconds
+  def schedule(import_id, crawl_scheduled_at) do
+    %{import_id: import_id}
+    |> new(scheduled_at: DateTime.add(crawl_scheduled_at, @grace_seconds))
+    |> Oban.insert()
+  end
 
   @impl Oban.Worker
-  def perform(_job) do
-    count = Imports.wipe_stale_api_keys(@max_age_seconds)
-
-    if count > 0 do
-      Logger.info("[ImportApiKeySweep] wiped #{count} stale import API key(s)")
+  def perform(%Oban.Job{args: %{"import_id" => import_id}}) when is_integer(import_id) do
+    case Imports.release_monica_api_key(import_id, @grace_seconds) do
+      {:ok, :done} -> :ok
+      {:ok, :busy} -> {:snooze, @poll_seconds}
+      {:ok, {:wait, seconds}} -> {:snooze, seconds}
+      {:error, _} = error -> error
     end
-
-    :ok
   end
+
+  # Jobs queued by the old cron schedule had no import_id.
+  def perform(%Oban.Job{}), do: :ok
 end
