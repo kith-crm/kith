@@ -153,6 +153,67 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     assert [%{local_id: ^contact_id, endpoints: ["calls"]}] = crawl_call_plan(same_server, user)
   end
 
+  test "gap-scan recovery carries skipped Calls into the worker plan", %{
+    user: user,
+    account_id: account_id
+  } do
+    remote = Kith.MonicaApiFixtures.contact_json(id: 42, statistics: %{"number_of_calls" => 1})
+    anchor = Kith.MonicaApiFixtures.contact_json(id: 41)
+
+    Req.Test.stub(@stub_name, fn conn ->
+      Req.Test.json(conn, Kith.MonicaApiFixtures.contacts_page_json([anchor, remote]))
+    end)
+
+    first = api_import(account_id, user.id)
+    [entry] = crawl_call_plan(first, user)
+    contact_id = entry.local_id
+    {:ok, first} = Imports.update_import_status(first, "completed")
+    assert {:ok, _} = Kith.Accounts.set_optional_feature(user_scope_fixture(user), "calls", false)
+    assert :ok = perform_job(MonicaMiscDataWorker, build_args(first, [entry]))
+    assert Imports.get_import!(first.id).summary["misc"]["calls_feature_disabled"] == 1
+    assert {:ok, _} = Kith.Accounts.set_optional_feature(user_scope_fixture(user), "calls", true)
+
+    # Give a second workspace its own mapping without a skipped outcome.
+    other = user_fixture()
+    enable_optional_features(other, ["calls"])
+    other_import = api_import(other.account_id, other.id)
+    [_] = crawl_call_plan(other_import, other)
+    {:ok, _} = Imports.update_import_status(other_import, "completed")
+
+    Req.Test.stub(@stub_name, fn conn ->
+      case conn.request_path do
+        "/api/contacts" ->
+          Req.Test.json(conn, Kith.MonicaApiFixtures.contacts_page_json([anchor], 1, 1, 2))
+
+        "/api/contacts/42" ->
+          Req.Test.json(conn, %{"data" => remote})
+
+        "/api/contacts/42/calls" ->
+          Req.Test.json(conn, %{"data" => [%{"id" => 7, "called_at" => "2024-01-01T12:00:00Z"}]})
+      end
+    end)
+
+    other_server =
+      import_fixture(account_id, user.id, %{
+        source: "monica_api",
+        api_url: "https://other-monica.test",
+        api_key_encrypted: "test-key",
+        status: "completed"
+      })
+
+    assert [] = crawl_call_plan(other_server, user)
+    {:ok, _} = Imports.update_import_status(other_server, "completed")
+    assert [] = crawl_call_plan(api_import(other.account_id, other.id), other)
+
+    import = api_import(account_id, user.id)
+    assert [%{local_id: ^contact_id, endpoints: ["calls"]}] = plan = crawl_call_plan(import, user)
+    {:ok, import} = Imports.update_import_status(import, "completed")
+    assert :ok = perform_job(MonicaMiscDataWorker, build_args(import, plan))
+    assert :ok = perform_job(MonicaMiscDataWorker, build_args(import, plan))
+    assert [] = crawl_call_plan(api_import(account_id, user.id), user)
+    assert [_call] = Kith.Activities.list_calls(contact_id)
+  end
+
   defp crawl_call_plan(import, user) do
     credential = %{
       url: String.trim_trailing(import.api_url, "/"),
