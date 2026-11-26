@@ -36,7 +36,7 @@ defmodule KithWeb.API.ExportController do
         })
       else
         # Generate inline
-        export = Exports.build_json_export(account_id)
+        export = Exports.build_json_export(user)
 
         conn
         |> put_resp_content_type("application/json")

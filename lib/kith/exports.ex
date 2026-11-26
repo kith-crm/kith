@@ -3,15 +3,39 @@ defmodule Kith.Exports do
   Functions for building export data structures.
   """
 
+  import Ecto.Query
+
+  alias Kith.Accounts.User
+  alias Kith.Activities.Activity
   alias Kith.Contacts
+  alias Kith.Conversations.{Conversation, Message}
   alias Kith.Repo
 
-  @doc """
-  Builds the full JSON export structure for an account.
-  """
-  def build_json_export(account_id) do
-    import Ecto.Query
+  @history_fields [
+    journal_entries:
+      {Kith.Journal.Entry, :author_id, ~w(title content occurred_at mood is_private author_id)a},
+    tasks:
+      {Kith.Tasks.Task, :creator_id,
+       ~w(title description due_date priority status completed_at is_private contact_id creator_id)a},
+    gifts:
+      {Contacts.Gift, :creator_id,
+       ~w(name description occasion date amount direction status purchase_url is_private contact_id creator_id currency_id)a},
+    conversations:
+      {Conversation, :creator_id, ~w(subject platform status is_private contact_id creator_id)a}
+  ]
 
+  @doc """
+  Builds the workspace JSON export.
+
+  Pass the requesting user to apply access rules to optional history. A bare
+  account ID is for trusted account operations.
+  """
+  def build_json_export(account_id) when is_integer(account_id), do: build_export(account_id, nil)
+
+  def build_json_export(%User{account_id: account_id, id: user_id}),
+    do: build_export(account_id, user_id)
+
+  defp build_export(account_id, user_id) do
     account = Repo.get!(Kith.Accounts.Account, account_id)
     contacts = Contacts.list_contacts_with_all(account_id)
 
@@ -49,7 +73,68 @@ defmodule Kith.Exports do
       relationship_types: Enum.map(relationship_types, &serialize_relationship_type/1),
       contact_field_types: Enum.map(contact_field_types, &serialize_contact_field_type/1)
     }
+    |> Map.merge(export_history(account_id, user_id))
   end
+
+  defp export_history(account_id, user_id) do
+    conversations = history_query(Conversation, account_id, :creator_id, user_id)
+
+    messages =
+      Message
+      |> Kith.Scope.scope_to_account(account_id)
+      |> where([m], m.conversation_id in subquery(select(conversations, [c], c.id)))
+      |> export_rows(~w(body direction sent_at conversation_id)a)
+
+    Map.new(@history_fields, fn {key, {schema, owner_field, fields}} ->
+      {key, schema |> history_query(account_id, owner_field, user_id) |> export_rows(fields)}
+    end)
+    |> Map.put(:messages, messages)
+    |> Map.put(:activities, export_activities(account_id))
+  end
+
+  defp history_query(schema, account_id, owner_field, user_id) do
+    query = Kith.Scope.scope_to_account(schema, account_id)
+
+    if user_id do
+      where(query, [row], row.is_private == false or field(row, ^owner_field) == ^user_id)
+    else
+      query
+    end
+  end
+
+  defp export_rows(query, fields) do
+    query
+    |> order_by([row], row.id)
+    |> Repo.all()
+    |> Enum.map(&serialize_row(&1, fields))
+  end
+
+  defp export_activities(account_id) do
+    contacts = Contacts.Contact |> Kith.Scope.scope_active(account_id) |> order_by([c], c.id)
+
+    Activity
+    |> Kith.Scope.scope_to_account(account_id)
+    |> order_by([activity], activity.id)
+    |> preload(
+      contacts: ^contacts,
+      emotions:
+        ^from(e in Contacts.Emotion,
+          where: is_nil(e.account_id) or e.account_id == ^account_id,
+          order_by: e.id
+        )
+    )
+    |> Repo.all()
+    |> Enum.map(fn activity ->
+      activity
+      |> serialize_row(
+        ~w(title description occurred_at is_private activity_type_category_id creator_id)a
+      )
+      |> Map.put(:contact_ids, Enum.map(activity.contacts, & &1.id))
+      |> Map.put(:emotion_ids, Enum.map(activity.emotions, & &1.id))
+    end)
+  end
+
+  defp serialize_row(row, fields), do: Map.take(row, [:id, :inserted_at, :updated_at | fields])
 
   defp serialize_contact(contact) do
     serialize_contact_fields(contact)

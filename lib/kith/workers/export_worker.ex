@@ -15,7 +15,14 @@ defmodule Kith.Workers.ExportWorker do
   def perform(%Oban.Job{args: %{"account_id" => account_id, "user_id" => user_id}}) do
     Logger.info("Starting JSON export for account #{account_id}, user #{user_id}")
 
-    export = Kith.Exports.build_json_export(account_id)
+    case Kith.Repo.get_by(Kith.Accounts.User, id: user_id, account_id: account_id) do
+      nil -> {:cancel, :invalid_export_requester}
+      user -> export_for_user(user)
+    end
+  end
+
+  defp export_for_user(%{account_id: account_id} = user) do
+    export = Kith.Exports.build_json_export(user)
     json_data = Jason.encode_to_iodata!(export)
 
     # Generate a signed download token (24-hour expiry)
