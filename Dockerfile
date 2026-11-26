@@ -10,10 +10,6 @@ ARG ALPINE_VERSION=3.23.5
 # =============================================================================
 FROM hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-alpine-${ALPINE_VERSION} AS builder
 
-# Build-only workaround for amd64 Erlang JIT under ARM Docker emulation.
-# Never carry single-mapped writable/executable JIT memory into the runner.
-ENV ERL_FLAGS="+JMsingle true"
-
 RUN apk add --no-cache git build-base nodejs npm vips-dev pkgconf
 ENV VIX_COMPILATION_MODE=PLATFORM_PROVIDED_LIBVIPS
 
@@ -54,9 +50,6 @@ RUN mix release
 # Stage 2: Runner
 # =============================================================================
 FROM alpine:${ALPINE_VERSION} AS runner
-
-# Explicitly retain dual-mapped JIT memory in the deployed release.
-ENV ERL_FLAGS="+JMsingle false"
 
 RUN apk add --no-cache \
     libssl3 \
