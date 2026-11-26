@@ -238,6 +238,94 @@ defmodule Kith.Workers.MonicaHTTPCallersTest do
     end
   end
 
+  test "disabling Calls during admission prevents dispatch", ctx do
+    Application.put_env(:kith, :monica_rate_limit, 1)
+    MonicaApi.RateLimiter.wait!("https://#{ctx.host}")
+    contact = contact_fixture(ctx.user.account_id)
+    owner = self()
+
+    configure_transport(fn conn ->
+      send(owner, :unexpected_dispatch)
+      Req.Test.json(conn, call_response())
+    end)
+
+    task = Task.async(fn -> perform_job(MonicaMiscDataWorker, misc_args(ctx, contact)) end)
+
+    try do
+      wait_for_denial(ctx.host)
+
+      assert {:ok, _} =
+               Kith.Accounts.set_optional_feature(user_scope_fixture(ctx.user), "calls", false)
+
+      Kith.RateLimiter.reset("monica_api:#{ctx.host}", @controlled_scale_ms)
+      assert :ok = Task.await(task)
+      refute_received :unexpected_dispatch
+      assert_skipped_and_recovers(ctx, contact)
+    after
+      Task.shutdown(task, :brutal_kill)
+    end
+  end
+
+  test "disabling Calls while the response is in flight prevents the write", ctx do
+    contact = contact_fixture(ctx.user.account_id)
+    owner = self()
+
+    configure_transport(fn conn ->
+      send(owner, {:calls_in_flight, self()})
+
+      receive do
+        :return_calls -> Req.Test.json(conn, call_response())
+      after
+        5_000 -> flunk("test did not release the response")
+      end
+    end)
+
+    task = Task.async(fn -> perform_job(MonicaMiscDataWorker, misc_args(ctx, contact)) end)
+
+    try do
+      assert_receive {:calls_in_flight, request_pid}, 5_000
+
+      assert {:ok, _} =
+               Kith.Accounts.set_optional_feature(user_scope_fixture(ctx.user), "calls", false)
+
+      send(request_pid, :return_calls)
+      assert :ok = Task.await(task)
+      assert_skipped_and_recovers(ctx, contact)
+    after
+      Task.shutdown(task, :brutal_kill)
+    end
+  end
+
+  defp call_response, do: %{"data" => [%{"id" => 42, "called_at" => "2024-01-01T12:00:00Z"}]}
+
+  defp assert_skipped_and_recovers(ctx, contact) do
+    assert [] = Kith.Activities.list_calls(contact.id)
+    import = Imports.get_import!(ctx.import_job.id)
+
+    assert get_in(import.summary, ["misc_progress", "42", "calls"]) == %{
+             "calls_feature_disabled" => 1
+           }
+
+    assert {:ok, _} =
+             Kith.Accounts.set_optional_feature(user_scope_fixture(ctx.user), "calls", true)
+
+    Application.put_env(:kith, :monica_rate_limit, 10)
+    configure_transport(&Req.Test.json(&1, call_response()))
+    {:ok, _} = Imports.update_import_status(import, "completed")
+
+    recovered =
+      import_fixture(ctx.user.account_id, ctx.user.id, %{
+        source: "monica_api",
+        api_url: import.api_url,
+        api_key_encrypted: "fixture-key"
+      })
+
+    args = misc_args(%{ctx | import_job: recovered}, contact)
+    assert :ok = perform_job(MonicaMiscDataWorker, args)
+    assert :ok = perform_job(MonicaMiscDataWorker, args)
+    assert [_call] = Kith.Activities.list_calls(contact.id)
+  end
+
   @tag capture_log: true
   test "oversized photo listings and document downloads preserve response limits", ctx do
     oversized = String.duplicate("x", 20 * 1024 * 1024 + 1)
