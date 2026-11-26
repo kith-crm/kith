@@ -12,6 +12,8 @@ defmodule Kith.Contacts.MergeSummary do
   alias Kith.Contacts.{Address, ContactField, Document, Note, Photo}
   alias Kith.Repo
 
+  @relationship_schema Kith.Contacts.Relationship
+
   @history [
     notes: Note,
     documents: Document,
@@ -23,8 +25,7 @@ defmodule Kith.Contacts.MergeSummary do
     debts: Kith.Contacts.Debt,
     pets: Kith.Contacts.Pet,
     tasks: Kith.Tasks.Task,
-    conversations: Kith.Conversations.Conversation,
-    relationships: Kith.Contacts.Relationship
+    conversations: Kith.Conversations.Conversation
   ]
 
   @doc """
@@ -90,6 +91,7 @@ defmodule Kith.Contacts.MergeSummary do
       ids
       |> history_counts(account.id)
       |> Map.put(:activities, activities)
+      |> Map.put(:relationships, moving_relationship_count(ids, primary_id, account.id))
       |> Enum.split_with(fn {key, _count} ->
         feature = Atom.to_string(key)
         not OptionalFeatures.known?(feature) or OptionalFeatures.enabled?(account, feature)
@@ -98,6 +100,56 @@ defmodule Kith.Contacts.MergeSummary do
     visible = Map.new(visible)
     retained_count = Enum.sum_by(retained, &elem(&1, 1))
     if retained_count > 0, do: Map.put(visible, :retained_history, retained_count), else: visible
+  end
+
+  defp moving_relationship_count(loser_ids, primary_id, account_id) do
+    cluster_ids = [primary_id | loser_ids]
+
+    # Group the external rows by their post-merge endpoints and type. A group
+    # moves only when none of its rows already belong to the primary.
+    groups =
+      from(r in @relationship_schema,
+        where: r.account_id == ^account_id,
+        where:
+          (r.contact_id in ^cluster_ids and r.related_contact_id not in ^cluster_ids) or
+            (r.related_contact_id in ^cluster_ids and r.contact_id not in ^cluster_ids),
+        select: %{
+          owner:
+            selected_as(
+              fragment(
+                "CASE WHEN ? = ANY(?) THEN ? ELSE ? END",
+                r.contact_id,
+                type(^cluster_ids, {:array, :integer}),
+                type(^primary_id, :integer),
+                r.contact_id
+              ),
+              :owner
+            ),
+          target:
+            selected_as(
+              fragment(
+                "CASE WHEN ? = ANY(?) THEN ? ELSE ? END",
+                r.related_contact_id,
+                type(^cluster_ids, {:array, :integer}),
+                type(^primary_id, :integer),
+                r.related_contact_id
+              ),
+              :target
+            ),
+          type: r.relationship_type_id
+        },
+        group_by: [selected_as(:owner), selected_as(:target), r.relationship_type_id],
+        having:
+          fragment(
+            "bool_and(? <> ? AND ? <> ?)",
+            r.contact_id,
+            ^primary_id,
+            r.related_contact_id,
+            ^primary_id
+          )
+      )
+
+    Repo.aggregate(subquery(groups), :count)
   end
 
   defp contact_fields(ids) do
@@ -192,25 +244,9 @@ defmodule Kith.Contacts.MergeSummary do
   end
 
   defp history_counts(ids, account_id) do
-    Map.new(@history, fn
-      # Relationships are the one history table a member can be on either end
-      # of, and `Merge`'s `remap_relationships/4` rewrites both `contact_id`
-      # and `related_contact_id`. Counting only the first endpoint reports 0
-      # for a member that is purely the *target* of relationships, which
-      # understates what the merge moves. A row with both endpoints in the
-      # cluster is still one row, so `or` counts it once.
-      {:relationships, schema} ->
-        {:relationships,
-         Repo.aggregate(
-           schema
-           |> where([r], r.contact_id in ^ids or r.related_contact_id in ^ids)
-           |> scope_history(account_id),
-           :count
-         )}
-
-      {key, schema} ->
-        query = from(r in schema, where: r.contact_id in ^ids)
-        {key, Repo.aggregate(scope_history(query, account_id), :count)}
+    Map.new(@history, fn {key, schema} ->
+      query = from(r in schema, where: r.contact_id in ^ids)
+      {key, Repo.aggregate(scope_history(query, account_id), :count)}
     end)
   end
 
@@ -222,7 +258,18 @@ defmodule Kith.Contacts.MergeSummary do
       from(ac in "activity_contacts", where: ac.contact_id in ^ids, select: count())
       |> Repo.one()
 
-    Map.put(history_counts(ids, nil), :activities, activities)
+    relationships =
+      Repo.aggregate(
+        from(r in @relationship_schema,
+          where: r.contact_id in ^ids or r.related_contact_id in ^ids
+        ),
+        :count
+      )
+
+    ids
+    |> history_counts(nil)
+    |> Map.put(:activities, activities)
+    |> Map.put(:relationships, relationships)
   end
 
   # The first occurrence of a key wins; later ones are what the merge collapses.
