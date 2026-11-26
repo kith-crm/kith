@@ -77,11 +77,11 @@
     "review_by": "2026-11-29"
   },
   {
-    "line": 265,
+    "line": 269,
     "type": "Traversal.FileModule: Directory Traversal in `File.read!`",
     "file": "lib/kith_web/live/import_wizard_live.ex",
     "variable": "path",
-    "source_sha256": "1f1658fc1a049d0b08c612f63b636f57ddd10349d3163fbb8682c21676598540",
+    "source_sha256": "3ae4a96a1f060cb6aca085d055f65fbfddf63777a1f441ec887a0748da042065",
     "reason": "Path comes exclusively from consume_uploaded_entries Phoenix temporary-file metadata; upload extension/size checks precede this read.",
     "evidence": "test/kith_web/live/import_wizard_live_test.exs",
     "owner": "kith-crm maintainers",

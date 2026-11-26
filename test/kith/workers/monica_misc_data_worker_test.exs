@@ -67,12 +67,25 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     [entry] = crawl_call_plan(first, user)
     {:ok, first} = Imports.update_import_status(first, "completed")
     contact_id = entry.local_id
-    assert {:ok, _} = Kith.Accounts.set_optional_feature(user, "calls", false)
+
+    assert {:ok, _} =
+             Kith.Accounts.set_optional_feature(
+               Kith.AccountsFixtures.user_scope_fixture(user),
+               "calls",
+               false
+             )
+
     assert :ok = perform_job(MonicaMiscDataWorker, build_args(first, [entry]))
     refute_received :fetched_calls
     assert Imports.get_import!(first.id).summary["misc"]["calls_feature_disabled"] == 1
 
-    assert {:ok, _} = Kith.Accounts.set_optional_feature(user, "calls", true)
+    assert {:ok, _} =
+             Kith.Accounts.set_optional_feature(
+               Kith.AccountsFixtures.user_scope_fixture(user),
+               "calls",
+               true
+             )
+
     assert :ok = perform_job(MonicaMiscDataWorker, build_args(first, [entry]))
     refute_received :fetched_calls
 
@@ -100,9 +113,22 @@ defmodule Kith.Workers.MonicaMiscDataWorkerTest do
     [entry] = crawl_call_plan(first, user)
     {:ok, first} = Imports.update_import_status(first, "completed")
     contact_id = entry.local_id
-    assert {:ok, _} = Kith.Accounts.set_optional_feature(user, "calls", false)
+
+    assert {:ok, _} =
+             Kith.Accounts.set_optional_feature(
+               Kith.AccountsFixtures.user_scope_fixture(user),
+               "calls",
+               false
+             )
+
     assert :ok = perform_job(MonicaMiscDataWorker, build_args(first, [entry]))
-    assert {:ok, _} = Kith.Accounts.set_optional_feature(user, "calls", true)
+
+    assert {:ok, _} =
+             Kith.Accounts.set_optional_feature(
+               Kith.AccountsFixtures.user_scope_fixture(user),
+               "calls",
+               true
+             )
 
     other_server =
       import_fixture(account_id, user.id, %{

@@ -9,28 +9,90 @@ defmodule Kith.AccountsOptionalFeaturesTest do
   test "validates keys and booleans, authorizes current roles, and audits effective changes once" do
     admin = user_fixture()
     viewer = user_fixture(%{role: "viewer"})
+    admin_scope = user_scope_fixture(admin)
+    viewer_scope = user_scope_fixture(viewer)
     account = Accounts.get_account!(admin.account_id)
     {:ok, _} = Accounts.update_account(account, %{feature_flags: %{"immich" => true}})
-    assert {:error, :forbidden} = Accounts.set_optional_feature(viewer, "journal", true)
-    assert {:error, :invalid_feature} = Accounts.set_optional_feature(admin, "immich", false)
-    assert {:error, :invalid_feature} = Accounts.set_optional_feature(admin, "journal", "true")
-    assert {:ok, _} = Accounts.set_optional_feature(admin, "journal", false)
+
+    assert {:error, :forbidden} =
+             Accounts.set_optional_feature(
+               viewer_scope,
+               "journal",
+               true
+             )
+
+    assert {:error, :invalid_feature} =
+             Accounts.set_optional_feature(
+               admin_scope,
+               "immich",
+               false
+             )
+
+    assert {:error, :invalid_feature} =
+             Accounts.set_optional_feature(
+               admin_scope,
+               "journal",
+               "true"
+             )
+
+    assert {:ok, _} =
+             Accounts.set_optional_feature(
+               admin_scope,
+               "journal",
+               false
+             )
+
     assert {[], _} = AuditLogs.list_audit_logs(admin.account_id)
 
-    assert {:ok, _} = Accounts.set_optional_feature(admin, "journal", true)
-    assert {:ok, _} = Accounts.set_optional_feature(admin, "journal", true)
+    assert {:ok, _} =
+             Accounts.set_optional_feature(
+               admin_scope,
+               "journal",
+               true
+             )
+
+    assert {:ok, _} =
+             Accounts.set_optional_feature(
+               admin_scope,
+               "journal",
+               true
+             )
 
     assert {[%{user_id: actor_id, metadata: %{"feature" => "journal", "enabled" => true}}], _} =
              AuditLogs.list_audit_logs(admin.account_id)
 
     assert actor_id == admin.id
-    assert {:ok, account} = Accounts.set_optional_feature(admin, "journal", false)
+
+    assert {:ok, account} =
+             Accounts.set_optional_feature(
+               admin_scope,
+               "journal",
+               false
+             )
+
     assert account.feature_flags == %{"immich" => true, "journal" => false}
     refute Accounts.module_enabled?(Accounts.get_account!(viewer.account_id), "journal")
   end
 
+  test "both settings mutations reload the actor and enforce workspace membership" do
+    admin = user_fixture()
+    scope = user_scope_fixture(admin)
+    unrelated = user_scope_fixture()
+
+    assert {:error, :forbidden} =
+             Accounts.toggle_legacy_module(%{scope | account: unrelated.account}, "photos")
+
+    assert {:ok, account} = Accounts.toggle_legacy_module(scope, "photos")
+    assert account.feature_flags["photos"] != (scope.account.feature_flags || %{})["photos"]
+
+    admin |> Ecto.Changeset.change(role: "viewer") |> Repo.update!()
+    assert {:error, :forbidden} = Accounts.toggle_legacy_module(scope, "photos")
+    assert {:error, :forbidden} = Accounts.set_optional_feature(scope, "journal", true)
+  end
+
   test "concurrent writers using separate connections preserve both switches" do
     admin = Sandbox.unboxed_run(Repo, &user_fixture/0)
+    admin_scope = user_scope_fixture(admin)
 
     on_exit(fn ->
       Sandbox.unboxed_run(Repo, fn ->
@@ -43,7 +105,13 @@ defmodule Kith.AccountsOptionalFeaturesTest do
         Task.async(fn ->
           receive do
             :start ->
-              Sandbox.unboxed_run(Repo, fn -> Accounts.set_optional_feature(admin, key, true) end)
+              Sandbox.unboxed_run(Repo, fn ->
+                Accounts.set_optional_feature(
+                  admin_scope,
+                  key,
+                  true
+                )
+              end)
           end
         end)
       end

@@ -79,46 +79,49 @@ test.describe("Import Data Type Toggles", () => {
     }
   });
 
-  test("photos are off and workspace switches govern optional categories", async ({ page }) => {
-    await goToImportWizard(page);
+  for (const width of [1280, 390]) {
+    test(`photos are off and workspace switches govern optional categories at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await goToImportWizard(page);
 
-    await page.locator('input[value="monica_api"]').click();
-    await page.waitForTimeout(300);
+      await page.locator('input[value="monica_api"]').click();
+      await page.waitForTimeout(300);
 
-    await fillLiveViewBlurInput(
-      page,
-      'input[type="url"]',
-      "https://monica.example.com",
-    );
-    await fillLiveViewBlurInput(
-      page,
-      'input[type="password"]',
-      "test-key",
-    );
-    await page.waitForTimeout(500);
+      await fillLiveViewBlurInput(
+        page,
+        'input[type="url"]',
+        "https://monica.example.com",
+      );
+      await fillLiveViewBlurInput(
+        page,
+        'input[type="password"]',
+        "test-key",
+      );
+      await page.waitForTimeout(500);
 
-    // Photos should be OFF
-    const photosCheckbox = page.locator(
-      'input[phx-value-option="photos"]',
-    );
-    await expect(photosCheckbox).not.toBeChecked();
+      // Photos should be OFF
+      const photosCheckbox = page.locator(
+        'input[phx-value-option="photos"]',
+      );
+      await expect(photosCheckbox).not.toBeChecked();
 
-    // Auto-merge keeps its existing opt-out default.
-    const mergeCheckbox = page.locator(
-      'input[phx-value-option="auto_merge_duplicates"]',
-    );
-    await expect(mergeCheckbox).toBeChecked();
+      // Auto-merge keeps its existing opt-out default.
+      const mergeCheckbox = page.locator(
+        'input[phx-value-option="auto_merge_duplicates"]',
+      );
+      await expect(mergeCheckbox).toBeChecked();
 
-    for (const type of ["pets", "debts", "reminders"]) {
-      await expect(page.locator(`input[phx-value-option="${type}"]`)).toBeChecked();
-    }
+      for (const type of ["pets", "debts", "reminders"]) {
+        await expect(page.locator(`input[phx-value-option="${type}"]`)).toBeChecked();
+      }
 
-    for (const type of ["calls", "activities", "gifts", "tasks", "conversations"]) {
-      const checkbox = page.locator(`input[phx-value-option="${type}"]`);
-      await expect(checkbox).not.toBeChecked();
-      await expect(checkbox).toBeDisabled();
-    }
-  });
+      for (const type of ["calls", "activities", "gifts", "tasks", "conversations"]) {
+        const checkbox = page.locator(`input[phx-value-option="${type}"]`);
+        await expect(checkbox).not.toBeChecked();
+        await expect(checkbox).toBeDisabled();
+      }
+    });
+  }
 
   test("toggling a data type off unchecks it", async ({ page }) => {
     await goToImportWizard(page);

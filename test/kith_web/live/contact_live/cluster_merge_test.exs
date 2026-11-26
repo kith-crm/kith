@@ -58,11 +58,22 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     assert has_element?(view, "#section-history span", "1 Retained history")
     assert has_element?(view, "#section-history summary", "1 records move")
 
-    {:ok, _} = Kith.Accounts.set_optional_feature(ctx.user, "calls", true)
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(ctx.user),
+        "calls",
+        true
+      )
+
     assert has_element?(view, "#section-history span", "1 calls")
     refute has_element?(view, "#section-history span", "Retained history")
 
-    {:ok, _} = Kith.Accounts.set_optional_feature(ctx.user, "calls", false)
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(ctx.user),
+        "calls",
+        false
+      )
 
     assert {:error, {:redirect, %{to: path}}} =
              view |> element("button[phx-click='merge']") |> render_click()
@@ -71,7 +82,13 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     primary = Enum.find(export.contacts, &(&1.id == ctx.a.id))
     assert Enum.any?(primary.calls, &(&1.id == moved.id))
 
-    {:ok, _} = Kith.Accounts.set_optional_feature(ctx.user, "calls", true)
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(ctx.user),
+        "calls",
+        true
+      )
+
     {:ok, merged, _} = live(ctx.conn, path)
     assert has_element?(merged, "#activity-call-#{moved.id}")
   end

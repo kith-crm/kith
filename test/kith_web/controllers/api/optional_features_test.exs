@@ -32,7 +32,14 @@ defmodule KithWeb.API.OptionalFeaturesTest do
     test "#{method} #{path} checks #{feature} independently of other switches", %{conn: conn} do
       user = user_fixture()
       enable_optional_features(user, Accounts.OptionalFeatures.keys())
-      {:ok, _} = Accounts.set_optional_feature(user, @feature, false)
+
+      {:ok, _} =
+        Accounts.set_optional_feature(
+          Kith.AccountsFixtures.user_scope_fixture(user),
+          @feature,
+          false
+        )
+
       {token, _} = Accounts.generate_api_token(user)
 
       result =
@@ -58,7 +65,8 @@ defmodule KithWeb.API.OptionalFeaturesTest do
       assert %{"code" => "feature_disabled", "feature" => ^feature} = json_response(result, 403)
     end
 
-    {:ok, _} = Accounts.set_optional_feature(user, "calls", true)
+    {:ok, _} =
+      Accounts.set_optional_feature(Kith.AccountsFixtures.user_scope_fixture(user), "calls", true)
 
     assert %{"data" => %{"calls" => []}} =
              conn |> get(~p"/api/contacts/#{contact.id}?include=calls") |> json_response(200)

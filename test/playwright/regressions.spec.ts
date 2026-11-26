@@ -353,27 +353,30 @@ test("a real UI snooze stays snoozed while archived and wakes only once after un
   await expect.poll(async () => (await mailbox(request, account.email)).length).toBe(1);
 });
 
-test("import preserves identical opposite-direction messages and remains stable on retry", async ({ page, request }) => {
-  const account = control("prepare", { scenario: "import" });
-  await login(page, account);
-  await page.goto("/settings/account");
-  await connected(page);
-  const conversations = page.getByRole("switch", { name: "Conversations" });
-  await conversations.click();
-  await expect(conversations).toBeChecked();
-  const imported = await startImport(page, account);
-  expect(imported.messages.map((message: any) => message.direction)).toEqual(["received", "sent"]);
-  expect(imported.messages.map((message: any) => message.body)).toEqual(["OK", "OK"]);
-  const retried = control("retry_misc", { ...account, import_id: imported.import_id });
-  expect(retried.messages).toEqual(imported.messages);
-  const conversationId = imported.messages[0].conversation_id;
-  const response = await api(request, account, `/api/conversations/${conversationId}/messages`);
-  expect(response.data).toHaveLength(2);
-  expect(response.data.map((message: any) => message.direction).sort()).toEqual(["received", "sent"]);
-  await page.goto(`/contacts/${imported.contacts[0].id}`);
-  await connected(page);
-  await expect(page.getByText("Fixture exchange", { exact: true }).first()).toBeVisible();
-});
+for (const width of [1280, 390]) {
+  test(`import preserves identical opposite-direction messages and remains stable on retry at ${width}px`, async ({ page, request }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const account = control("prepare", { scenario: "import" });
+    await login(page, account);
+    await page.goto("/settings/account");
+    await connected(page);
+    const conversations = page.getByRole("switch", { name: "Conversations" });
+    await conversations.click();
+    await expect(conversations).toBeChecked();
+    const imported = await startImport(page, account);
+    expect(imported.messages.map((message: any) => message.direction)).toEqual(["received", "sent"]);
+    expect(imported.messages.map((message: any) => message.body)).toEqual(["OK", "OK"]);
+    const retried = control("retry_misc", { ...account, import_id: imported.import_id });
+    expect(retried.messages).toEqual(imported.messages);
+    const conversationId = imported.messages[0].conversation_id;
+    const response = await api(request, account, `/api/conversations/${conversationId}/messages`);
+    expect(response.data).toHaveLength(2);
+    expect(response.data.map((message: any) => message.direction).sort()).toEqual(["received", "sent"]);
+    await page.goto(`/contacts/${imported.contacts[0].id}`);
+    await connected(page);
+    await expect(page.getByText("Fixture exchange", { exact: true }).first()).toBeVisible();
+  });
+}
 
 test("shipped contact editor rejects paste/drop injection and persists sanitized formatting", async ({ page, request }) => {
   const account = control("prepare", { scenario: "editor" });

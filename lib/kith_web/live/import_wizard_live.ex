@@ -34,7 +34,7 @@ defmodule KithWeb.ImportWizardLive do
      |> assign(:source, "vcard")
      |> assign(:api_url, "")
      |> assign(:api_key, "")
-     |> assign(:api_options, default_api_options(socket))
+     |> assign_api_options(default_api_options(socket))
      |> assign(:phone_regions, build_phone_regions(locale))
      |> assign(:api_testing, false)
      |> assign(:current_import, nil)
@@ -112,7 +112,7 @@ defmodule KithWeb.ImportWizardLive do
   def handle_event("toggle_option", %{"option" => option}, socket) do
     options = socket.assigns.api_options
     updated = Map.update(options, option, true, &(!&1))
-    {:noreply, assign(socket, :api_options, updated)}
+    {:noreply, assign_api_options(socket, updated)}
   end
 
   def handle_event("next_step", _params, socket) do
@@ -162,7 +162,7 @@ defmodule KithWeb.ImportWizardLive do
      |> assign(:source, "vcard")
      |> assign(:api_url, "")
      |> assign(:api_key, "")
-     |> assign(:api_options, default_api_options(socket))
+     |> assign_api_options(default_api_options(socket))
      |> assign(:api_testing, false)
      |> assign(:current_import, nil)
      |> assign(:progress, nil)
@@ -172,12 +172,16 @@ defmodule KithWeb.ImportWizardLive do
 
   def handle_event("set_phone_region", %{"region" => region}, socket) do
     options = Map.put(socket.assigns.api_options, "phone_default_region", region)
-    {:noreply, assign(socket, :api_options, options)}
+    {:noreply, assign_api_options(socket, options)}
   end
 
   # ── PubSub handlers ────────────────────────────────────────────────────────
 
   @impl true
+  def handle_info({:optional_feature_changed, _, _}, socket) do
+    {:noreply, assign_api_options(socket, socket.assigns.api_options)}
+  end
+
   def handle_info({:import_progress, progress}, socket) do
     {:noreply, assign(socket, :progress, progress)}
   end
@@ -385,26 +389,28 @@ defmodule KithWeb.ImportWizardLive do
   defp phone_off_label("pt"), do: "Não normalizar números sem prefixo"
   defp phone_off_label(_), do: "Don't normalize bare numbers"
 
+  defp assign_api_options(socket, options) do
+    disabled =
+      Enum.reject(
+        OptionalFeatures.monica_keys(),
+        &OptionalFeatures.enabled?(socket.assigns.current_scope.account, &1)
+      )
+
+    skipped = Enum.filter(disabled, &(options[&1] != false))
+    enabled_options = Map.drop(options, disabled)
+
+    assign(socket,
+      api_options: options,
+      disabled_monica_features: disabled,
+      skipped_monica_labels: Enum.map_join(skipped, ", ", &OptionalFeatures.label/1),
+      api_sync_description: api_sync_description(enabled_options)
+    )
+  end
+
   # ── Render ──────────────────────────────────────────────────────────────────
 
   @impl true
   def render(assigns) do
-    disabled =
-      Enum.reject(
-        OptionalFeatures.monica_keys(),
-        &OptionalFeatures.enabled?(assigns.current_scope.account, &1)
-      )
-
-    skipped = Enum.filter(disabled, &(assigns.api_options[&1] != false))
-    options = Map.drop(assigns.api_options, disabled)
-
-    assigns =
-      assign(assigns,
-        disabled_monica_features: disabled,
-        skipped_monica_labels: Enum.map_join(skipped, ", ", &OptionalFeatures.label/1),
-        api_sync_description: api_sync_description(options)
-      )
-
     ~H"""
     <Layouts.app
       flash={@flash}

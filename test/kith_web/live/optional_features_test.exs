@@ -39,7 +39,13 @@ defmodule KithWeb.OptionalFeaturesTest do
   end
 
   test "a stale Journal submit checks persisted flags before writing", %{conn: conn, user: user} do
-    {:ok, enabled} = Accounts.set_optional_feature(user, "journal", true)
+    {:ok, enabled} =
+      Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(user),
+        "journal",
+        true
+      )
+
     {:ok, journal, _} = live(conn, ~p"/journal")
 
     # Simulate a submit arriving before the socket processes a change notification.
@@ -52,7 +58,9 @@ defmodule KithWeb.OptionalFeaturesTest do
   end
 
   test "disabling Calls clears its filter and closes its open form", %{conn: conn, user: user} do
-    {:ok, _} = Accounts.set_optional_feature(user, "calls", true)
+    {:ok, _} =
+      Accounts.set_optional_feature(Kith.AccountsFixtures.user_scope_fixture(user), "calls", true)
+
     contact = contact_fixture(user.account_id)
     {:ok, _} = Kith.Activities.create_call(contact, %{occurred_at: DateTime.utc_now(:second)})
     note_fixture(contact, user.id, %{"body" => "Visible note"})
@@ -62,13 +70,21 @@ defmodule KithWeb.OptionalFeaturesTest do
     timeline |> element("[phx-click='open-entry-modal'][phx-value-type='call']") |> render_click()
     assert has_element?(timeline, "#entry-modal")
 
-    {:ok, _} = Accounts.set_optional_feature(user, "calls", false)
+    {:ok, _} =
+      Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(user),
+        "calls",
+        false
+      )
+
     refute has_element?(timeline, "#entry-modal")
     refute has_element?(timeline, "[phx-value-type='call']")
     assert render(timeline) =~ "Call was turned off for this workspace."
     assert render(timeline) =~ "Visible note"
 
-    {:ok, _} = Accounts.set_optional_feature(user, "calls", true)
+    {:ok, _} =
+      Accounts.set_optional_feature(Kith.AccountsFixtures.user_scope_fixture(user), "calls", true)
+
     assert has_element?(timeline, "[id^='activity-call-']")
   end
 
@@ -87,11 +103,19 @@ defmodule KithWeb.OptionalFeaturesTest do
       call |> Ecto.Changeset.change(inserted_at: ~U[2030-01-01 00:00:00Z]) |> Kith.Repo.update!()
     end
 
-    {:ok, _} = Accounts.set_optional_feature(user, "calls", true)
+    {:ok, _} =
+      Accounts.set_optional_feature(Kith.AccountsFixtures.user_scope_fixture(user), "calls", true)
+
     {:ok, dashboard, html} = live(conn, ~p"/dashboard")
     refute html =~ "Visible feed note"
 
-    {:ok, _} = Accounts.set_optional_feature(user, "calls", false)
+    {:ok, _} =
+      Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(user),
+        "calls",
+        false
+      )
+
     html = render(dashboard)
 
     for number <- 1..10, do: assert(html =~ "Visible feed note #{number}")
@@ -114,7 +138,13 @@ defmodule KithWeb.OptionalFeaturesTest do
     assert {:error, {:redirect, %{to: "/features/life_events/unavailable"}}} =
              live(conn, ~p"/settings/life-event-types")
 
-    {:ok, _} = Accounts.set_optional_feature(user, "life_events", true)
+    {:ok, _} =
+      Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(user),
+        "life_events",
+        true
+      )
+
     {:ok, types, _} = live(conn, ~p"/settings/life-event-types")
     assert render(types) =~ "Graduation"
     assert has_element?(timeline, "#activity-life_event-#{event.id}")

@@ -67,7 +67,7 @@ defmodule KithWeb.SettingsLive.Account do
       when value in ["true", "false"] do
     scope = socket.assigns.current_scope
 
-    case Accounts.set_optional_feature(scope.user, key, value == "true") do
+    case Accounts.set_optional_feature(scope, key, value == "true") do
       {:ok, account} ->
         {:noreply, assign(socket, :current_scope, %{scope | account: account})}
 
@@ -81,7 +81,7 @@ defmodule KithWeb.SettingsLive.Account do
   end
 
   def handle_event("toggle-feature", %{"feature" => feature}, socket) do
-    case Accounts.toggle_legacy_module(socket.assigns.current_scope.user, feature) do
+    case Accounts.toggle_legacy_module(socket.assigns.current_scope, feature) do
       {:ok, updated} ->
         {:noreply, assign(socket, :feature_flags, updated.feature_flags || %{})}
 
@@ -412,7 +412,7 @@ defmodule KithWeb.SettingsLive.Account do
         phx-value-feature={@key}
         phx-value-enabled={to_string(!@enabled)}
         class={[
-          "inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent focus-visible:outline",
+          "inline-flex h-6 w-11 shrink-0 items-center rounded-full border-2 border-transparent focus-visible:outline motion-safe:transition-transform motion-safe:duration-200 motion-safe:active:scale-[0.98]",
           if(@enabled,
             do: "bg-[var(--color-accent)] justify-end",
             else: "bg-[var(--color-border)] justify-start"

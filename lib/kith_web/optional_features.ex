@@ -52,7 +52,11 @@ defmodule KithWeb.OptionalFeatures do
       disabled?(socket, feature) ->
         {:halt, push_navigate(socket, to: unavailable_path(feature))}
 
-      socket.view in [KithWeb.DashboardLive.Index, KithWeb.ContactLive.ClusterMerge] ->
+      socket.view in [
+        KithWeb.DashboardLive.Index,
+        KithWeb.ContactLive.ClusterMerge,
+        KithWeb.ImportWizardLive
+      ] ->
         {:cont, socket}
 
       true ->

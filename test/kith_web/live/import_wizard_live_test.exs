@@ -18,7 +18,13 @@ defmodule KithWeb.ImportWizardLiveTest do
     assert render(view) =~ "Skipped while disabled"
     assert has_element?(view, "input[phx-value-option='photos']:not([checked])")
 
-    {:ok, _} = Kith.Accounts.set_optional_feature(user, "calls", true)
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(user),
+        "calls",
+        true
+      )
+
     assert has_element?(view, "input[phx-value-option='calls'][checked]:not([disabled])")
     assert has_element?(view, "input[phx-value-option='tasks'][disabled]")
   end

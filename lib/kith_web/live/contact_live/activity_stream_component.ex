@@ -79,6 +79,14 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
     end
   end
 
+  defp with_editable_type(socket, type, action) do
+    if socket.assigns.can_edit do
+      with_available_type(socket, type, action)
+    else
+      {:noreply, socket}
+    end
+  end
+
   defp entry_type(value),
     do: Enum.find(ActivityStream.all_types(), &(Atom.to_string(&1) == value))
 
@@ -109,21 +117,13 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   def handle_event("open-entry-modal", %{"type" => type_str}, socket) do
     type = entry_type(type_str)
 
-    if socket.assigns.can_edit do
-      with_available_type(socket, type, &open_entry(type, &1))
-    else
-      {:noreply, socket}
-    end
+    with_editable_type(socket, type, &open_entry(type, &1))
   end
 
   def handle_event("edit-entry", %{"type" => type_str, "id" => id_str}, socket) do
     type = entry_type(type_str)
 
-    if socket.assigns.can_edit do
-      with_available_type(socket, type, &edit_entry(type, id_str, &1))
-    else
-      {:noreply, socket}
-    end
+    with_editable_type(socket, type, &edit_entry(type, id_str, &1))
   end
 
   def handle_event("close-modal", _params, socket) do
@@ -138,21 +138,13 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   def handle_event("save-entry", params, socket) do
     type = socket.assigns.modal_type
 
-    if socket.assigns.can_edit do
-      with_available_type(socket, type, &save_entry(type, params, &1))
-    else
-      {:noreply, socket}
-    end
+    with_editable_type(socket, type, &save_entry(type, params, &1))
   end
 
   def handle_event("delete-entry", %{"type" => type_str, "id" => id_str}, socket) do
     type = entry_type(type_str)
 
-    if socket.assigns.can_edit do
-      with_available_type(socket, type, &remove_entry(type, id_str, &1))
-    else
-      {:noreply, socket}
-    end
+    with_editable_type(socket, type, &remove_entry(type, id_str, &1))
   end
 
   # --- Photo upload events ---
@@ -210,26 +202,28 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
     {:noreply, socket |> assign(:active_filters, filters) |> load_entries()}
   end
 
-  defp open_entry(type, socket) do
-    {:noreply,
-     socket
-     |> assign(:feature_notice, nil)
-     |> assign(:modal_type, type)
-     |> assign(:modal_entry_id, nil)
-     |> assign(:modal_record, nil)
-     |> assign(:modal_error, nil)}
-  end
+  defp open_entry(type, socket), do: show_entry_modal(socket, type, nil, nil)
 
   defp edit_entry(type, id_str, socket) do
     id = String.to_integer(id_str)
+    show_entry_modal(socket, type, id, load_record(type, id, socket.assigns))
+  end
+
+  defp show_entry_modal(socket, type, id, record) do
+    life_event_types =
+      if type == :life_event,
+        do: Contacts.list_life_event_types(socket.assigns.account_id),
+        else: []
 
     {:noreply,
-     socket
-     |> assign(:feature_notice, nil)
-     |> assign(:modal_type, type)
-     |> assign(:modal_entry_id, id)
-     |> assign(:modal_record, load_record(type, id, socket.assigns))
-     |> assign(:modal_error, nil)}
+     assign(socket,
+       feature_notice: nil,
+       modal_type: type,
+       modal_entry_id: id,
+       modal_record: record,
+       modal_error: nil,
+       life_event_types: life_event_types
+     )}
   end
 
   defp save_entry(type, params, socket) do
@@ -542,6 +536,7 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
           type={@modal_type}
           entry_id={@modal_entry_id}
           record={@modal_record}
+          life_event_types={@life_event_types}
           error={@modal_error}
           myself={@myself}
           account_id={@account_id}
@@ -820,9 +815,6 @@ defmodule KithWeb.ContactLive.ActivityStreamComponent do
   end
 
   defp entry_modal_content(%{type: :life_event} = assigns) do
-    life_event_types = Contacts.list_life_event_types(assigns.account_id)
-    assigns = assign(assigns, :life_event_types, life_event_types)
-
     ~H"""
     <div>
       <h3 class="text-lg font-semibold mb-4">

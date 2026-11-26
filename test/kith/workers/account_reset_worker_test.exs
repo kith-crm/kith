@@ -35,8 +35,21 @@ defmodule Kith.Workers.AccountResetWorkerTest do
 
   test "reset clears optional history and preserves workspace choices", ctx do
     actor = Kith.Accounts.get_user!(ctx.target_user)
-    {:ok, _} = Kith.Accounts.set_optional_feature(actor, "journal", true)
-    {:ok, _} = Kith.Accounts.set_optional_feature(actor, "calls", false)
+
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(actor),
+        "journal",
+        true
+      )
+
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(actor),
+        "calls",
+        false
+      )
+
     insert(:journal_entry, account: actor.account, author: actor)
 
     assert :ok = perform_job(AccountResetWorker, %{account_id: ctx.target_account})

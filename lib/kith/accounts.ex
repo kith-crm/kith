@@ -16,6 +16,7 @@ defmodule Kith.Accounts do
     Account,
     AccountInvitation,
     CoseKey,
+    Scope,
     User,
     UserNotifier,
     UserRecoveryCode,
@@ -1126,10 +1127,10 @@ defmodule Kith.Accounts do
   alias Kith.Accounts.OptionalFeatures
 
   @doc "Sets one optional workspace feature and audits effective changes."
-  def set_optional_feature(%User{id: actor_id, account_id: account_id}, key, enabled)
+  def set_optional_feature(%Scope{} = scope, key, enabled)
       when is_boolean(enabled) do
     if OptionalFeatures.known?(key) do
-      change_optional_feature(actor_id, account_id, key, enabled)
+      change_optional_feature(scope, key, enabled)
     else
       {:error, :invalid_feature}
     end
@@ -1137,16 +1138,9 @@ defmodule Kith.Accounts do
 
   def set_optional_feature(_actor, _key, _enabled), do: {:error, :invalid_feature}
 
-  defp change_optional_feature(actor_id, account_id, key, enabled) do
+  defp change_optional_feature(scope, key, enabled) do
     result =
-      Repo.transaction(fn ->
-        account = Repo.one!(from(a in Account, where: a.id == ^account_id, lock: "FOR UPDATE"))
-        actor = Repo.get_by(User, id: actor_id, account_id: account_id)
-
-        unless actor && Kith.Policy.can?(actor, :manage, :account) do
-          Repo.rollback(:forbidden)
-        end
-
+      with_account_admin(scope, fn account, actor ->
         persist_optional_feature(account, actor, key, enabled)
       end)
 
@@ -1155,7 +1149,7 @@ defmodule Kith.Accounts do
         if changed? do
           Phoenix.PubSub.broadcast(
             Kith.PubSub,
-            OptionalFeatures.topic(account_id),
+            OptionalFeatures.topic(account.id),
             {:optional_feature_changed, key, enabled}
           )
         end
@@ -1221,21 +1215,26 @@ defmodule Kith.Accounts do
   def disable_module(_account, _module_name), do: {:error, :unknown_module}
 
   @doc "Toggles an existing Account settings module without replacing other flags."
-  def toggle_legacy_module(%User{id: id, account_id: account_id}, key)
-      when key in ~w(reminders documents photos) do
+  def toggle_legacy_module(%Scope{} = scope, key) when key in ~w(reminders documents photos) do
+    with_account_admin(scope, fn account, _actor ->
+      put_feature_flag!(account, key, !Map.get(account.feature_flags || %{}, key, false))
+    end)
+  end
+
+  def toggle_legacy_module(_scope, _key), do: {:error, :invalid_feature}
+
+  defp with_account_admin(%Scope{user: %User{id: id}, account: %Account{id: account_id}}, fun) do
     Repo.transaction(fn ->
       account = Repo.one!(from(a in Account, where: a.id == ^account_id, lock: "FOR UPDATE"))
       actor = Repo.get_by(User, id: id, account_id: account_id)
 
-      if actor && Kith.Policy.can?(actor, :manage, :account) do
-        put_feature_flag!(account, key, !Map.get(account.feature_flags || %{}, key, false))
-      else
-        Repo.rollback(:forbidden)
-      end
+      unless actor && Kith.Policy.can?(actor, :manage, :account), do: Repo.rollback(:forbidden)
+
+      fun.(account, actor)
     end)
   end
 
-  def toggle_legacy_module(_actor, _key), do: {:error, :invalid_feature}
+  defp with_account_admin(_scope, _fun), do: {:error, :forbidden}
 
   defp store_module_flag(account_id, key, value) do
     Repo.transaction(fn ->
