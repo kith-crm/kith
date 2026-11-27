@@ -288,6 +288,7 @@ defmodule Kith.OIDCFixture do
         },
         state.claims
       )
+      |> Map.drop(state[:omit_claims] || [])
 
     signing_opts =
       if state[:omit_kid], do: [], else: [private_key_id: state[:kid] || state.jwk["kid"]]

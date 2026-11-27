@@ -36,6 +36,7 @@ defmodule KithWeb.OIDCController do
 
       attrs = %{
         intent: intent,
+        remember_me: get_session(conn, :user_remember_me) == true,
         issuer: config()[:issuer],
         redirect_uri: KithWeb.Endpoint.url() <> "/auth/oidc/callback",
         return_to: return_to(conn, intent),
@@ -85,6 +86,16 @@ defmodule KithWeb.OIDCController do
   defp commit_browser_origin(%{status: status} = conn) when status in [302, 303] do
     case get_resp_header(conn, "location") do
       ["/" <> _ = destination] ->
+        {conn, destination} =
+          case Phoenix.Flash.get(conn.assigns.flash, :error) do
+            message when is_binary(message) ->
+              feedback = Phoenix.Token.sign(KithWeb.Endpoint, "oidc-failure", message)
+              {configure_session(conn, ignore: true), ~p"/auth/oidc/failure?feedback=#{feedback}"}
+
+            _ ->
+              {conn, destination}
+          end
+
         token =
           Phoenix.Token.sign(
             KithWeb.Endpoint,
@@ -113,9 +124,18 @@ defmodule KithWeb.OIDCController do
          {:ok, principal} <- OIDC.callback(flow, params, config()) do
       dispatch(conn, flow, principal, binding)
     else
+      _ -> conn |> configure_session(ignore: true) |> redirect(to: ~p"/auth/oidc/failure")
+    end
+  end
+
+  def failure(conn, %{"feedback" => token}) do
+    case Phoenix.Token.verify(KithWeb.Endpoint, "oidc-failure", token, max_age: 60) do
+      {:ok, message} -> conn |> put_flash(:error, message) |> redirect(to: ~p"/users/log-in")
       _ -> failed(conn)
     end
   end
+
+  def failure(conn, _params), do: failed(conn)
 
   defp dispatch(conn, %{intent: :login} = flow, principal, binding) do
     case Accounts.OIDC.resolve(principal) do
@@ -136,7 +156,7 @@ defmodule KithWeb.OIDCController do
         Authentication.begin_oidc(conn, user, flow, principal, browser_binding: binding)
 
       _ ->
-        failed(conn)
+        conn |> configure_session(ignore: true) |> redirect(to: ~p"/auth/oidc/failure")
     end
   end
 

@@ -39,7 +39,6 @@ defmodule KithWeb.UserAuth do
   or falls back to the `signed_in_path/1`.
   """
   def log_in_user(conn, user, params \\ %{}) do
-    user = %{user | authenticated_at: user.authenticated_at || DateTime.utc_now(:second)}
     user_return_to = get_session(conn, :user_return_to)
 
     conn

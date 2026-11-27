@@ -442,6 +442,7 @@ defmodule KithWeb.Router do
 
     get "/oidc", OIDCController, :request
     get "/oidc/callback", OIDCController, :callback
+    get "/oidc/failure", OIDCController, :failure
     get "/oidc/complete", OIDCController, :complete
   end
 

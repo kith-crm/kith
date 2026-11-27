@@ -15,6 +15,7 @@ defmodule Kith.Auth.OIDC.Transactions do
         "nonce" => nonce,
         "code_verifier" => verifier,
         "redirect_uri" => attrs.redirect_uri,
+        "remember_me" => attrs[:remember_me] == true,
         "return_to" => attrs.return_to,
         "session_token" => encode_session(attrs[:session_token]),
         "principal" => attrs[:principal]
@@ -104,6 +105,7 @@ defmodule Kith.Auth.OIDC.Transactions do
         nonce: payload["nonce"],
         code_verifier: payload["code_verifier"],
         redirect_uri: payload["redirect_uri"],
+        remember_me: payload["remember_me"] == true,
         return_to: payload["return_to"],
         session_token: decode_session(payload["session_token"]),
         principal: payload["principal"]

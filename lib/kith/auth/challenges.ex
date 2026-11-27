@@ -9,7 +9,6 @@ defmodule Kith.Auth.Challenges do
   def issue(%User{} = user, attrs) do
     with true <- is_binary(attrs[:browser_binding]) and byte_size(attrs.browser_binding) >= 16,
          true <- attrs[:intent] in [:login, :reauth, :link],
-         %DateTime{} <- attrs[:authenticated_at],
          :ok <- validate_origin(user, attrs) do
       handle = Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 

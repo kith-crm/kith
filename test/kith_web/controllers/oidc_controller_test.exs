@@ -26,7 +26,10 @@ defmodule KithWeb.OIDCControllerTest do
 
     refute get_session(callback, :user_token)
 
-    assert Phoenix.Flash.get(callback.assigns.flash, :error) ==
+    assert final_destination(callback) == "/users/log-in"
+    feedback = get(build_conn(), "/auth/oidc/failure")
+
+    assert Phoenix.Flash.get(feedback.assigns.flash, :error) ==
              "OpenID Connect is unavailable. Please try again."
   end
 
@@ -103,12 +106,27 @@ defmodule KithWeb.OIDCControllerTest do
       assert {resolved, _} =
                Kith.Accounts.get_user_by_session_token(get_session(callback, :user_token))
 
+      assert is_nil(resolved.authenticated_at)
       assert resolved.id == user.id
       assert final_destination(callback) == "/dashboard"
       assert get_resp_header(callback, "cache-control") == ["no-store"]
       assert get_resp_header(callback, "referrer-policy") == ["no-referrer"]
       replay = callback_conn(start) |> get("/auth/oidc/callback", params)
       refute get_session(replay, :user_token)
+    end
+
+    test "SSO retains the age of the provider authentication", %{conn: conn, fixture: fixture} do
+      known_user(fixture)
+
+      for age <- [3600, 3] do
+        time = System.os_time(:second) - age
+        Kith.OIDCFixture.update(fixture, %{claims: %{"auth_time" => time}})
+        start = get(conn, "/auth/oidc")
+        callback = callback_conn(start) |> get("/auth/oidc/callback", authorize(start, fixture))
+        {user, _} = Kith.Accounts.get_user_by_session_token(get_session(callback, :user_token))
+        assert DateTime.to_unix(user.authenticated_at) == time
+        assert KithWeb.Authentication.require_recent(user) == :ok == (age == 3)
+      end
     end
 
     test "unknown identity requires terms completion and ignores injected identity", %{
@@ -164,7 +182,10 @@ defmodule KithWeb.OIDCControllerTest do
       Kith.OIDCFixture.update(fixture, %{claims: %{"auth_time" => System.os_time(:second)}})
       start = conn |> log_in_user(user) |> post("/users/oidc/link", %{"user_id" => "999"})
       assert URI.decode_query(URI.parse(final_destination(start)).query)["max_age"] == "0"
+      token = get_session(start, :user_token)
+      KithWeb.Endpoint.subscribe("users_sessions:#{Base.url_encode64(token)}")
       result = callback_conn(start) |> get("/auth/oidc/callback", authorize(start, fixture))
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
 
       assert {resolved, _} =
                Kith.Accounts.get_user_by_session_token(get_session(result, :user_token))
@@ -227,6 +248,11 @@ defmodule KithWeb.OIDCControllerTest do
       assert get_session(pending, :auth_challenge_binding) ==
                get_session(start, :auth_challenge_binding)
 
+      # Simulate a challenge issued by an older instance that used callback time.
+      Kith.Repo.update_all(Kith.Auth.Challenge,
+        set: [authenticated_at: DateTime.utc_now(:second)]
+      )
+
       done =
         recycle(pending)
         |> post("/users/totp-verify", %{
@@ -234,10 +260,55 @@ defmodule KithWeb.OIDCControllerTest do
           "totp" => %{"code" => :pot.totp(secret)}
         })
 
-      assert get_session(done, :user_token)
+      {session, _} = Kith.Accounts.get_user_by_session_token(get_session(done, :user_token))
+      assert is_nil(session.authenticated_at)
+      assert %DateTime{} = session.mfa_authenticated_at
 
       assert get_session(done, :auth_challenge_binding) ==
                get_session(start, :auth_challenge_binding)
+    end
+
+    for change <- [:unlink, :transfer] do
+      @identity_change change
+      test "pending MFA rejects #{change} of the authenticating identity", %{
+        conn: conn,
+        fixture: fixture
+      } do
+        user = known_user(fixture)
+        secret = Kith.Accounts.generate_totp_secret()
+
+        {:ok, _} =
+          Kith.Accounts.enable_totp(
+            %{user | authenticated_at: DateTime.utc_now(:second)},
+            secret,
+            :pot.totp(secret)
+          )
+
+        start = get(conn, "/auth/oidc")
+        pending = callback_conn(start) |> get("/auth/oidc/callback", authorize(start, fixture))
+        assert final_destination(pending) == "/users/two-factor"
+
+        [identity] = Kith.Accounts.OIDC.list(user)
+
+        case @identity_change do
+          :unlink ->
+            Kith.Repo.delete!(identity)
+
+          :transfer ->
+            other = Kith.AccountsFixtures.user_fixture()
+            Kith.Repo.update!(Ecto.Changeset.change(identity, user_id: other.id))
+        end
+
+        done =
+          recycle(pending)
+          |> post("/users/totp-verify", %{
+            "totp_token" => get_session(pending, :totp_token),
+            "totp" => %{"code" => :pot.totp(secret)}
+          })
+
+        refute get_session(done, :user_token)
+        assert redirected_to(done) == "/users/log-in"
+      end
     end
 
     test "reauthentication cannot switch user and fresh same-user flow succeeds", %{
@@ -616,7 +687,10 @@ defmodule KithWeb.OIDCControllerTest do
       assert html_response(bridge, 200) =~ "Continue to Kith"
       assert get_resp_header(bridge, "cache-control") == ["no-store"]
       assert get_resp_header(bridge, "referrer-policy") == ["no-referrer"]
-      destination
+
+      if String.starts_with?(destination, "/auth/oidc/failure"),
+        do: redirected_to(get(build_conn(), destination)),
+        else: destination
     else
       location
     end

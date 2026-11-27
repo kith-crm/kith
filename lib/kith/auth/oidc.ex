@@ -48,13 +48,13 @@ defmodule Kith.Auth.OIDC do
          {:ok, key} <- Metadata.key(metadata, header["kid"], config),
          {:ok, %{verified?: true, claims: claims}} <- Assent.JWTAdapter.verify(token, key),
          true <- valid_claims?(claims, config),
-         :ok <- userinfo(metadata, tokens, claims, config) do
+         {:ok, profile} <- userinfo(metadata, tokens, claims, config) do
       {:ok,
        %Principal{
          issuer: config[:issuer],
          subject: claims["sub"],
-         email: claims["email"],
-         email_verified: claims["email_verified"],
+         email: profile["email"],
+         email_verified: profile["email_verified"],
          name: claims["name"],
          auth_time: claims["auth_time"]
        }}
@@ -182,14 +182,14 @@ defmodule Kith.Auth.OIDC do
              [{"authorization", "Bearer " <> access}],
              config
            ),
-         {:ok, %{"sub" => sub}} <- Jason.decode(body),
+         {:ok, %{"sub" => sub} = info} <- Jason.decode(body),
          true <- sub == claims["sub"] do
-      :ok
+      {:ok, if(Map.has_key?(info, "email"), do: info, else: claims)}
     else
       _ -> {:error, :invalid_token}
     end
   end
 
-  defp userinfo(_, _, _, _), do: :ok
+  defp userinfo(_, _, claims, _), do: {:ok, claims}
   defp challenge(verifier), do: Base.url_encode64(:crypto.hash(:sha256, verifier), padding: false)
 end

@@ -89,9 +89,11 @@ defmodule KithWeb.UserSessionController do
         |> put_flash(:info, info)
         |> Authentication.begin(user, %{
           method: :password,
+          authenticated_at: DateTime.utc_now(:second),
           intent: if(current, do: :reauth, else: :login),
           session_token: get_session(conn, :user_token),
-          remember_me: user_params["remember_me"] == "true",
+          remember_me:
+            get_session(conn, :user_remember_me) == true or user_params["remember_me"] == "true",
           return_to:
             get_session(conn, :user_return_to) ||
               if(current, do: "/users/settings", else: "/dashboard")

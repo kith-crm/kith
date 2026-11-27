@@ -167,6 +167,26 @@ defmodule Kith.Auth.OIDCTest do
     end
   end
 
+  test "UserInfo verification applies only to the accompanying email", %{
+    fixture: fixture,
+    config: config
+  } do
+    for verified <- [true, false, nil] do
+      info = %{"sub" => "subject", "email" => "profile@example.test"}
+      info = if is_nil(verified), do: info, else: Map.put(info, "email_verified", verified)
+
+      OIDCFixture.update(fixture, %{
+        metadata: %{"userinfo_endpoint" => config[:issuer] <> "/userinfo"},
+        omit_claims: if(verified == true, do: ["email", "email_verified"], else: []),
+        userinfo: info
+      })
+
+      assert {:ok, principal} = callback(fixture, flow(config), config)
+      assert principal.email == info["email"]
+      assert principal.email_verified == verified
+    end
+  end
+
   test "UserInfo must preserve the verified subject", %{fixture: fixture, config: config} do
     OIDCFixture.update(fixture, %{
       metadata: %{"userinfo_endpoint" => config[:issuer] <> "/userinfo"},

@@ -18,6 +18,7 @@ defmodule Kith.Auth.OIDC.Transaction do
     field :code_verifier, :string, virtual: true
     field :session_token, :binary, virtual: true
     field :redirect_uri, :string, virtual: true
+    field :remember_me, :boolean, virtual: true, default: false
     field :return_to, :string, virtual: true
     field :principal, :map, virtual: true
   end

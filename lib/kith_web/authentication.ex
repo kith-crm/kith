@@ -51,12 +51,22 @@ defmodule KithWeb.Authentication do
         principal: principal,
         session_token: flow.session_token,
         return_to: flow.return_to,
-        authenticated_at: DateTime.utc_now(:second)
+        remember_me: flow.remember_me,
+        authenticated_at: provider_time(principal.auth_time)
       })
     else
       invalid(conn)
     end
   end
+
+  defp provider_time(time) when is_integer(time) do
+    case DateTime.from_unix(time) do
+      {:ok, timestamp} -> Enum.min([timestamp, DateTime.utc_now(:second)], DateTime)
+      _ -> nil
+    end
+  end
+
+  defp provider_time(_), do: nil
 
   defp verified_binding?(_flow, nil), do: true
 
@@ -98,7 +108,7 @@ defmodule KithWeb.Authentication do
       Map.merge(
         %{
           intent: :login,
-          authenticated_at: DateTime.utc_now(:second),
+          authenticated_at: nil,
           method: :oidc,
           return_to: get_session(conn, :user_return_to),
           remember_me: false,
@@ -135,19 +145,23 @@ defmodule KithWeb.Authentication do
 
     user = %{
       user
-      | authenticated_at: completion.authenticated_at,
+      | authenticated_at: completion_time(completion),
         mfa_authenticated_at: completion[:mfa_authenticated_at]
     }
 
     with true <- method_enabled?(completion),
          :ok <- Challenges.validate_origin(user, completion),
-         :ok <- require_recent(user),
+         :ok <- completion_evidence(user, completion),
          :ok <- complete_intent(user, completion) do
       # This browser may have other pending MFA flows. Retain their cancellation
       # identity across rotation so logout can revoke them without breaking tabs.
       binding = completion[:browser_binding] || get_session(conn, :auth_challenge_binding)
       token = completion[:session_token] || get_session(conn, :user_token)
-      if token, do: Accounts.delete_user_session_token(token)
+
+      if token do
+        Accounts.delete_user_session_token(token)
+        UserAuth.disconnect_sessions([%{token: token}])
+      end
 
       conn
       |> configure_session(renew: true)
@@ -162,6 +176,23 @@ defmodule KithWeb.Authentication do
       _ -> invalid(conn)
     end
   end
+
+  # Older pending OIDC challenges stored the callback time even when the
+  # provider supplied no authentication time. The verified principal survives
+  # the upgrade in the encrypted challenge payload.
+  defp completion_time(%{method: method, principal: %Kith.Auth.Principal{} = principal})
+       when method in [:oidc, "oidc"], do: provider_time(principal.auth_time)
+
+  defp completion_time(completion), do: completion.authenticated_at
+
+  defp completion_evidence(user, %{intent: :login, method: method})
+       when method in [:oidc, "oidc"] do
+    if not user.totp_enabled or fresh?(user.mfa_authenticated_at, 600),
+      do: :ok,
+      else: {:error, :reauthentication_required}
+  end
+
+  defp completion_evidence(user, _completion), do: require_recent(user)
 
   defp method_enabled?(%{method: method}) when method in [:password, "password"],
     do: Policy.password_login_enabled?()
@@ -179,6 +210,10 @@ defmodule KithWeb.Authentication do
   end
 
   defp method_enabled?(_completion), do: true
+
+  defp complete_intent(user, %{intent: :login, principal: %Kith.Auth.Principal{} = principal}) do
+    if same_identity?(user, principal), do: :ok, else: {:error, :invalid}
+  end
 
   defp complete_intent(_user, %{intent: :login}), do: :ok
   defp complete_intent(_user, %{intent: :reauth, principal: nil}), do: :ok

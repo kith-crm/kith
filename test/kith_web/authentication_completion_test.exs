@@ -477,6 +477,12 @@ defmodule KithWeb.AuthenticationCompletionTest do
     binding = get_session(sibling, :auth_challenge_binding)
     principal = %Kith.Auth.Principal{issuer: "https://issuer.example", subject: "subject"}
 
+    Kith.Repo.insert!(%Accounts.OIDCIdentity{
+      user_id: user.id,
+      issuer: principal.issuer,
+      subject: principal.subject
+    })
+
     flow = %Kith.Auth.OIDC.Transaction{
       intent: :login,
       issuer: principal.issuer,

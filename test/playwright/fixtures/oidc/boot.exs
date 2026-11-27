@@ -15,6 +15,8 @@ Application.put_env(
 )
 
 Application.put_env(:kith, Kith.PromEx, disabled: true)
+Application.put_env(:wax_, :origin, "https://kith.test:#{System.fetch_env!("PORT")}")
+Application.put_env(:wax_, :rp_id, "kith.test")
 Application.put_env(:kith, :require_tos_acceptance, true)
 Application.put_env(:kith, :signup_double_optin, false)
 

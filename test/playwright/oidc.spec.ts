@@ -1,4 +1,7 @@
 import { test, expect } from "@playwright/test";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createHmac } from "node:crypto";
 import { prepare, selectIdentity, beginOidcLogin, authorize, loginOidc, connected, control, logout, noOverflow, protocolStatus, type Viewer } from "./helpers/oidc";
 import { passwordLogin } from "./helpers/password-login";
@@ -251,8 +254,8 @@ test("a different identity already owned by another user cannot be linked", asyn
   await authorize(page, /\/users\/log-in$/);
   expect((await control("snapshot", { user_id: owner.user_id })).identities).toBe(1);
   expect((await control("snapshot", { user_id: attacker.user_id })).identities).toBe(1);
-  await page.goto("/dashboard");
-  await expect(page).toHaveURL(/\/users\/log-in$/);
+  await page.goto("/settings/contact-sync");
+  await expect(page.locator("#dav-connection").getByText(attacker.email, { exact: true })).toBeVisible();
 });
 
 test("unknown unverified identity cannot register and unavailable discovery can be retried", async ({ page }) => {
@@ -288,4 +291,118 @@ test("cancelled registration cannot be resumed", async ({ page }) => {
 test("fixture controls reject missing and incorrect run tokens", async () => {
   expect(await protocolStatus("POST", "/__fixture__", { "content-type": "application/json" }, JSON.stringify({ action: "expire", args: {} }))).toBe(404);
   expect(await protocolStatus("POST", "/__fixture__", { authorization: "Bearer incorrect", "content-type": "application/json" }, JSON.stringify({ action: "expire", args: {} }))).toBe(404);
+});
+
+test("cancelled provider reauthentication keeps the originating session", async ({ page }) => {
+  const viewer = await prepare();
+  await loginOidc(page, viewer);
+  await control("stale", { user_id: viewer.user_id });
+  await page.goto("/settings/security");
+  await connected(page);
+  await page.locator("#oidc-reauth-form").getByRole("button").click();
+  await expect.poll(() => new URL(page.url()).hostname).toBe("issuer.test");
+  const query = new URL(page.url()).searchParams;
+  const redirect = query.get("redirect_uri")! + "?" + new URLSearchParams({ error: "access_denied", state: query.get("state")! });
+  await control("behavior", { mode: "deny", redirect });
+  await authorize(page, /\/users\/log-in$/);
+  await expect(page.getByRole("alert").filter({ hasText: "OpenID Connect is unavailable" })).toBeVisible();
+  await page.goto("/dashboard");
+  await expect(page).toHaveURL(/\/dashboard$/);
+});
+
+test("remembered session survives provider rotation, MFA and browser restart", async ({ playwright }, testInfo) => {
+  test.skip(process.env.KITH_OIDC_PASSWORD === "false", "Remember-me is selected at password login");
+  const viewer = await prepare({ mfa: true });
+  await selectIdentity(viewer);
+  const profile = await fs.mkdtemp(path.join(os.tmpdir(), "kith-remember-"));
+  const launch = () => playwright.chromium.launchPersistentContext(profile, {
+    ...testInfo.project.use.launchOptions,
+    channel: "chromium",
+    baseURL: process.env.PLAYWRIGHT_BASE_URL,
+  });
+  let context = await launch();
+  try {
+    const page = await context.newPage();
+    await page.goto("/users/log-in");
+    await connected(page);
+    await page.getByLabel("Email", { exact: true }).fill(viewer.email);
+    await page.getByLabel("Password", { exact: true }).fill("ValidP@ssword123!");
+    await page.getByLabel("Remember me").check();
+    await page.getByRole("button", { name: /log in/i }).click();
+    await page.getByLabel("Authentication code", { exact: true }).fill(totp(viewer.secret!));
+    await expect(page).toHaveURL(/\/dashboard$/);
+    const sibling = await context.newPage();
+    await sibling.goto("/dashboard");
+    await connected(sibling);
+
+    await control("stale", {user_id: viewer.user_id});
+    await page.goto("/settings/security");
+    await connected(page);
+    await page.locator("#oidc-reauth-form").getByRole("button").click();
+    await authorize(page, /\/users\/two-factor$/);
+    await page.getByLabel("Authentication code", { exact: true }).fill(totp(viewer.secret!));
+    await expect(page).toHaveURL(/\/settings\/security$/);
+    await expect(sibling.locator("[data-phx-main].phx-connected")).toHaveCount(0);
+    await context.close();
+    context = await launch();
+    const restored = await context.newPage();
+    await restored.goto("/dashboard");
+    await expect(restored).toHaveURL(/\/dashboard$/);
+    const second = await context.newPage();
+    await second.goto("/dashboard");
+    await connected(second);
+    await logout(restored);
+    await second.reload();
+    await expect(second).toHaveURL(/\/users\/log-in$/);
+  } finally {
+    await context.close();
+    await fs.rm(profile, {recursive: true, force: true});
+  }
+});
+
+test("passkey button signs in using a registered browser credential", async ({ page, context }) => {
+  const viewer = await prepare();
+  await loginOidc(page, viewer);
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", { options: {
+    protocol: "ctap2", transport: "internal", hasResidentKey: true,
+    hasUserVerification: true, isUserVerified: true,
+  }});
+  const registered = await page.evaluate(async () => {
+    const post = (path: string, body: object) => fetch("/auth/webauthn/register/" + path, {
+      method: "POST", headers: {"content-type": "application/json", accept: "application/json",
+        "x-csrf-token": document.querySelector('meta[name="csrf-token"]')!.getAttribute("content")!},
+      body: JSON.stringify(body),
+    });
+    const options = await (await post("challenge", {})).json();
+    const credential = await navigator.credentials.create({
+      publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options.publicKey),
+    }) as PublicKeyCredential;
+    const attestation = credential.toJSON().response;
+    return (await post("complete", attestation)).status;
+  });
+  expect(registered).toBe(200);
+  await logout(page);
+  await connected(page);
+  await page.getByRole("button", {name: "Sign in with passkey"}).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+});
+
+test("cancelled linking returns an authenticated user to Kith", async ({ page }) => {
+  test.skip(process.env.KITH_OIDC_PASSWORD === "false", "Starts with a local unlinked user");
+  const viewer = await prepare({ linked: false });
+  await passwordLogin(page, viewer.email, "ValidP@ssword123!");
+  await selectIdentity(viewer);
+  await page.goto("/settings/security");
+  await connected(page);
+  await page.getByRole("button", { name: "Connect account", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).hostname).toBe("issuer.test");
+  const query = new URL(page.url()).searchParams;
+  const redirect = query.get("redirect_uri")! + "?" + new URLSearchParams({ error: "access_denied", state: query.get("state")! });
+  await control("behavior", { mode: "deny", redirect });
+  await authorize(page, /\/users\/log-in$/);
+  await expect(page.getByRole("alert").filter({ hasText: "OpenID Connect is unavailable" })).toBeVisible();
+  await page.goto("/settings/security");
+  await expect(page.locator("#oidc-status")).toHaveText("Not connected");
 });
