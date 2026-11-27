@@ -9,6 +9,7 @@ defmodule KithWeb.API.PhotoControllerTest do
   @tag :tmp_dir
   test "repeated multipart uploads return the original photo", %{conn: conn, tmp_dir: root} do
     Kith.TestEnv.put_env_restoring(:kith, Storage, backend: :local, path: root)
+    on_exit(fn -> File.rm_rf!(root) end)
     user = user_fixture()
     {token, _} = Accounts.generate_api_token(user)
     conn = put_req_header(conn, "authorization", "Bearer #{token}")

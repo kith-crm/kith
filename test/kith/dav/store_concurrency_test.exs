@@ -1,7 +1,8 @@
 defmodule Kith.DAV.StoreConcurrencyTest do
   use Kith.DataCase, async: false
   alias Ecto.Adapters.SQL.Sandbox
-  alias Kith.{Repo, DAV.Store}
+  alias Kith.{AvatarFixtures, Contacts, Repo, Storage, DAV.Store}
+  alias Kith.Contacts.Write
   import Ecto.Query
 
   setup do
@@ -120,6 +121,60 @@ defmodule Kith.DAV.StoreConcurrencyTest do
     send(deletion.pid, :delete)
     assert {:error, :probe} = Task.await(deletion, 15_000)
     assert {:ok, _} = Task.await(merge, 15_000)
+  end
+
+  @tag :tmp_dir
+  test "concurrent writes of the same photo commit one original", %{
+    account: account,
+    tmp_dir: root
+  } do
+    Kith.TestEnv.put_env_restoring(:kith, Storage, backend: :local, path: root)
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    contact =
+      Sandbox.unboxed_run(Repo, fn -> Kith.ContactsFixtures.contact_fixture(account) end)
+
+    parent = self()
+    bytes = AvatarFixtures.image_binary(suffix: ".jpg")
+    attrs = %{file_name: "photo.jpg", content_type: "image/jpeg"}
+
+    first =
+      Task.async(fn ->
+        Sandbox.unboxed_run(Repo, fn ->
+          Write.transaction(account, fn ->
+            assert {:ok, {:created, photo}} = Contacts.store_photo(contact, bytes, attrs)
+            send(parent, :photo_staged)
+
+            receive do
+              :commit -> photo
+            after
+              10_000 -> Repo.rollback(:timeout)
+            end
+          end)
+        end)
+      end)
+
+    assert_receive :photo_staged, 5_000
+
+    second =
+      Task.async(fn ->
+        Sandbox.unboxed_run(Repo, fn ->
+          %{rows: [[pid]]} = Repo.query!("SELECT pg_backend_pid()")
+          send(parent, {:photo_backend, pid})
+          Contacts.store_photo(contact, bytes, attrs)
+        end)
+      end)
+
+    assert_receive {:photo_backend, pid}, 5_000
+    Sandbox.unboxed_run(Repo, fn -> wait_for_lock(pid, 250) end)
+    send(first.pid, :commit)
+    assert {:ok, original} = Task.await(first)
+    assert {:ok, {:existing, reused}} = Task.await(second)
+    assert reused.id == original.id
+
+    assert [stored] = Sandbox.unboxed_run(Repo, fn -> Contacts.list_photos(contact.id) end)
+    assert stored.id == original.id
+    assert Path.wildcard(Path.join(root, "*/photos/*")) == [Path.join(root, original.storage_key)]
   end
 
   defp wait_for_lock(pid, tries) do
