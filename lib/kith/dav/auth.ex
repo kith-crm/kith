@@ -13,6 +13,8 @@ defmodule Kith.DAV.Auth do
 
   import Plug.Conn
   alias Kith.Accounts
+  alias Kith.Accounts.{DavAppPasswords, User}
+  alias Kith.Auth.Policy
   alias KithWeb.Plugs.RateLimiter
 
   @max_failures 10
@@ -24,8 +26,19 @@ defmodule Kith.DAV.Auth do
   Returns `{:ok, user}` on success or `{:error, :unauthorized}` on failure.
   """
   def authenticate(conn) do
-    with {:ok, email, password} <- credentials(conn),
-         %Kith.Accounts.User{confirmed_at: confirmed_at} = user
+    case credentials(conn) do
+      {:ok, email, password} -> authenticate_credential(email, password)
+      _ -> {:error, :unauthorized}
+    end
+  end
+
+  defp authenticate_credential(email, "kith_dav_" <> _ = credential) do
+    DavAppPasswords.authenticate(email, credential)
+  end
+
+  defp authenticate_credential(email, password) do
+    with true <- Policy.password_login_enabled?(),
+         %User{confirmed_at: confirmed_at} = user
          when not is_nil(confirmed_at) <-
            Accounts.get_user_by_email_and_verified_password(email, password) do
       {:ok, user}

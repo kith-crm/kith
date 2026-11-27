@@ -1,11 +1,110 @@
 defmodule KithWeb.DAV.AuthTest do
   @moduledoc "RFC 7617 — HTTP Basic Authentication for CardDAV."
-  use KithWeb.ConnCase, async: true
+  use KithWeb.ConnCase, async: false
 
   import Ecto.Query
   import KithWeb.DAV.TestHelpers
 
   setup :setup_dav_user
+
+  test "app passwords authorize DAV methods, isolate accounts, and revoke immediately", %{
+    user: user
+  } do
+    user = %{user | authenticated_at: DateTime.utc_now(:second)}
+    {:ok, row, credential} = Kith.Accounts.DavAppPasswords.create(user, %{name: "DAVx5"})
+
+    request = fn method, path, body ->
+      build_conn() |> basic_auth(user.email, credential) |> dav_request(method, path, body)
+    end
+
+    assert request.("PROPFIND", "/dav/", "").status == 207
+    path = "/dav/addressbooks/default/app-password-test.vcf"
+
+    assert request.(
+             "PUT",
+             path,
+             build_vcard("App", "Password", uid: "e1f3f223-99e0-42cc-b99c-0a0102030405")
+           ).status ==
+             201
+
+    assert request.("GET", path, "").status == 200
+    assert request.("REPORT", "/dav/addressbooks/default/", sync_collection_body()).status == 207
+    other = Kith.AccountsFixtures.user_fixture()
+    contact = Kith.ContactsFixtures.contact_fixture(other.account_id, %{first_name: "SecretData"})
+    foreign = contact_path(contact)
+
+    for method <- ["GET", "DELETE", "PROPFIND"] do
+      assert request.(method, foreign, "").status in [403, 404]
+    end
+
+    denied_write =
+      build_conn()
+      |> basic_auth(user.email, credential)
+      |> put_req_header("if-match", "*")
+      |> dav_request("PUT", foreign, build_vcard("Hacked", "Contact"))
+
+    assert denied_write.status == 412
+    assert Kith.Repo.get!(Kith.Contacts.Contact, contact.id).first_name == "SecretData"
+
+    report = request.("REPORT", "/dav/addressbooks/default/", multiget_body([foreign]))
+    assert report.status == 207
+    assert report.resp_body =~ "404 Not Found"
+    refute report.resp_body =~ "SecretData"
+    assert request.("DELETE", path, "").status == 204
+    assert :ok = Kith.Accounts.DavAppPasswords.revoke(user, row.id)
+    assert request.("PROPFIND", "/dav/", "").status == 401
+  end
+
+  test "disabled passwords preserve app access and deny cached account passwords", %{user: user} do
+    old = Application.fetch_env!(:kith, :auth)
+    on_exit(fn -> Application.put_env(:kith, :auth, old) end)
+    user = %{user | authenticated_at: DateTime.utc_now(:second)}
+    {:ok, _, credential} = Kith.Accounts.DavAppPasswords.create(user, %{name: "DAV"})
+    assert propfind_as(user.email, dav_password()).status == 207
+    Application.put_env(:kith, :auth, %{old | password_login_enabled: false})
+    assert propfind_as(user.email, dav_password()).status == 401
+    assert propfind_as(user.email, credential).status == 207
+  end
+
+  test "app format never falls back even if it is the actual account password", %{user: user} do
+    password = "kith_dav_malformed-account-password"
+
+    Kith.Repo.update_all(from(u in Kith.Accounts.User, where: u.id == ^user.id),
+      set: [hashed_password: Pbkdf2.hash_pwd_salt(password)]
+    )
+
+    assert propfind_as(user.email, password).status == 401
+    for _ <- 1..9, do: assert(propfind_as(user.email, "kith_dav_bad").status == 401)
+    assert propfind_as(user.email, "kith_dav_bad").status == 429
+  end
+
+  test "app passwords preserve viewer write restrictions and current roles", %{
+    user: user,
+    account_id: aid
+  } do
+    user = %{user | authenticated_at: DateTime.utc_now(:second)}
+    {:ok, _, credential} = Kith.Accounts.DavAppPasswords.create(user, %{name: "Viewer"})
+    contact = Kith.ContactsFixtures.contact_fixture(aid)
+    path = contact_path(contact)
+
+    request = fn method, body ->
+      build_conn() |> basic_auth(user.email, credential) |> dav_request(method, path, body)
+    end
+
+    Kith.Repo.update_all(from(u in Kith.Accounts.User, where: u.id == ^user.id),
+      set: [role: "viewer"]
+    )
+
+    assert request.("GET", "").status == 200
+    assert request.("PUT", build_vcard("Updated", "Contact")).status == 403
+    assert request.("DELETE", "").status == 403
+
+    Kith.Repo.update_all(from(u in Kith.Accounts.User, where: u.id == ^user.id),
+      set: [role: "admin"]
+    )
+
+    assert request.("DELETE", "").status == 204
+  end
 
   describe "RFC 7617 §2 — Basic authentication scheme" do
     test "MUST return 401 when no Authorization header is present", %{conn: conn} do

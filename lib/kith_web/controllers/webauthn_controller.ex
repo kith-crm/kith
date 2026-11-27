@@ -15,7 +15,7 @@ defmodule KithWeb.WebauthnController do
 
   alias Kith.Accounts
   alias Kith.Accounts.CoseKey
-  alias KithWeb.UserAuth
+  alias KithWeb.Authentication
 
   # ── Registration ──────────────────────────────────────────────────
 
@@ -234,10 +234,24 @@ defmodule KithWeb.WebauthnController do
       Accounts.touch_webauthn_credential(db_credential, auth_data.sign_count)
       user = Accounts.get_user!(db_credential.user_id)
 
-      conn
-      |> delete_session(:webauthn_auth_challenge)
-      |> delete_session(:webauthn_auth_user_id)
-      |> UserAuth.log_in_user(user, %{"remember_me" => "false"})
+      current = conn.assigns[:current_scope] && conn.assigns.current_scope.user
+
+      conn =
+        conn |> delete_session(:webauthn_auth_challenge) |> delete_session(:webauthn_auth_user_id)
+
+      if current && current.id != user.id do
+        conn |> put_status(403) |> json(%{error: "Authenticate with your current account."})
+      else
+        conn
+        |> fetch_flash()
+        |> Authentication.begin(user, %{
+          method: :passkey,
+          authenticated_at: DateTime.utc_now(:second),
+          intent: if(current, do: :reauth, else: :login),
+          remember_me: get_session(conn, :user_remember_me) == true,
+          session_token: get_session(conn, :user_token)
+        })
+      end
     else
       {:error, :invalid_key} ->
         conn

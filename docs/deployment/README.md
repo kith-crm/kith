@@ -188,3 +188,13 @@ docker compose -f docker-compose.prod.yml exec app curl -s http://localhost:4000
 
 - [Volume Management](volumes.md) — backup and restore procedures
 - [Scaling Notes](scaling.md) — how to scale beyond a single node
+
+
+## Authentication upgrades
+
+Follow [OIDC registration, TLS, proxy privacy and operator recovery](oidc.md)
+before enabling external login or disabling passwords. Back up and test restore
+before migration; passwordless users prevent a naive NOT NULL downgrade.
+[DAV app passwords](dav-app-passwords.md) cover personal client setup and revocation.
+The [acceptance map](../design/oidc-validation/acceptance.md) records validation and
+explicit Android/DAVx5/live-provider gaps; phone viewport tests are not device proof.

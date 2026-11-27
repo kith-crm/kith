@@ -79,6 +79,16 @@ defmodule KithWeb.WebauthnControllerTest do
     test "a real signed assertion authenticates with a stored key and valid CSRF token", %{
       conn: conn
     } do
+      policy = Application.fetch_env!(:kith, :auth)
+
+      Application.put_env(:kith, :auth, %{
+        policy
+        | password_login_enabled: false,
+          oidc_enabled: false
+      })
+
+      on_exit(fn -> Application.put_env(:kith, :auth, policy) end)
+      assert html_response(get(build_conn(), "/users/log-in"), 200) =~ "Sign in with passkey"
       user = user_fixture()
       credential = create_credential(user)
 

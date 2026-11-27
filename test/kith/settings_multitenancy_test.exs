@@ -22,6 +22,19 @@ defmodule Kith.SettingsMultitenancyTest do
     %{user: user, account_id: account_id, account: account}
   end
 
+  test "DAV credentials belong to a person even within a shared account", %{
+    user: user,
+    account_id: account_id
+  } do
+    {:ok, teammate} = create_user_in_account(account_id, "dav-teammate@example.com", "viewer")
+    owner = %{user | authenticated_at: DateTime.utc_now(:second)}
+    teammate = %{teammate | authenticated_at: DateTime.utc_now(:second)}
+    {:ok, row, _secret} = Accounts.DavAppPasswords.create(owner, %{name: "Private phone"})
+    assert Accounts.DavAppPasswords.list(teammate) == []
+    assert {:error, :not_found} = Accounts.DavAppPasswords.revoke(teammate, row.id)
+    assert hd(Accounts.DavAppPasswords.list(owner)).revoked_at == nil
+  end
+
   # ── TASK-08-01: User Settings ──────────────────────────────────────────
 
   describe "update_user_profile/2 with validations" do

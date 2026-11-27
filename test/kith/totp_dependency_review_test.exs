@@ -171,7 +171,11 @@ defmodule Kith.TOTPIntegrationBoundaryReviewTest do
     secret = Base.encode32("12345678901234567890", padding: false)
 
     assert {:ok, {user, recovery_codes}} =
-             Accounts.enable_totp(user, secret, Reference.next_code(secret))
+             Accounts.enable_totp(
+               %{user | authenticated_at: DateTime.utc_now(:second)},
+               secret,
+               Reference.next_code(secret)
+             )
 
     %{user: user, secret: secret, recovery_codes: recovery_codes, ip: unique_ip()}
   end
@@ -215,7 +219,7 @@ defmodule Kith.TOTPIntegrationBoundaryReviewTest do
     refute get_session(denied, :user_token)
   end
 
-  test "missing, malformed and invalid signed challenges expire without sessions", %{ip: ip} do
+  test "missing, malformed and invalid opaque challenges expire without sessions", %{ip: ip} do
     for params <- [
           %{},
           %{"totp_token" => [], "totp" => %{"code" => "123456"}},
@@ -280,6 +284,7 @@ defmodule Kith.TOTPIntegrationBoundaryReviewTest do
     assert %{"token" => _} = api_attempt(user, Enum.at(codes, 0), ip) |> json_response(201)
     assert api_attempt(user, Enum.at(codes, 0), ip).status == 401
 
+    challenge = browser_challenge(user, ip)
     recovered = browser_attempt(challenge, Enum.at(codes, 1), ip)
     assert redirected_to(recovered) == "/dashboard"
     assert get_session(recovered, :user_token)
@@ -312,11 +317,11 @@ defmodule Kith.TOTPIntegrationBoundaryReviewTest do
 
     assert redirected_to(conn) == "/users/two-factor"
     refute get_session(conn, :user_token)
-    get_session(conn, :totp_token)
+    conn
   end
 
   defp browser_attempt(challenge, code, ip, forged_identity \\ 1) do
-    build_conn()
+    recycle(challenge)
     |> Map.put(:remote_ip, ip)
     |> Plug.Test.put_peer_data(%{address: ip, port: 12345, ssl_cert: nil})
     |> put_req_header("x-forwarded-for", "203.0.113.#{forged_identity}")
@@ -324,7 +329,10 @@ defmodule Kith.TOTPIntegrationBoundaryReviewTest do
     |> put_req_header("content-type", "application/json")
     |> post(
       "/users/totp-verify",
-      Jason.encode!(%{"totp_token" => challenge, "totp" => %{"code" => code}})
+      Jason.encode!(%{
+        "totp_token" => get_session(challenge, :totp_token),
+        "totp" => %{"code" => code}
+      })
     )
   end
 

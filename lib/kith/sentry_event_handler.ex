@@ -14,7 +14,8 @@ defmodule Kith.SentryEventHandler do
                  proxy_authorization cookie set_cookie x_api_key cloak_key totp_secret
                  immich_api_key api_key_encrypted hashed_password secret_key_base userinfo
                  aws_secret_access_key smtp_password recovery_codes access_token_secret
-                 hashed_code token_hash hashed_token x_kith_client_ip)
+                 hashed_code token_hash hashed_token x_kith_client_ip code totp_code totp_token state
+                 auth_challenge_binding)
 
   @doc "Attaches telemetry handlers for Oban + Sentry integration."
   def attach do

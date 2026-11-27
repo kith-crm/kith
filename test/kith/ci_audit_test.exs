@@ -86,7 +86,7 @@ defmodule Mix.Tasks.Ci.AuditTest do
         {"AUDIT_FAILURES", Enum.join(failures, ",")},
         {"HEX_IGNORE_ADVISORIES", "EEF-CVE-inherited"},
         {"HEX_IGNORE_RETIREMENTS", "inherited-package"},
-        {"ERL_FLAGS", "+S 2:2"}
+        {"ERL_FLAGS", System.get_env("ERL_FLAGS", "") <> " +S 2:2"}
       ],
       stderr_to_stdout: true
     )

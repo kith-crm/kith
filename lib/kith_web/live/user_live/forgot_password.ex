@@ -1,6 +1,8 @@
 defmodule KithWeb.UserLive.ForgotPassword do
   use KithWeb, :live_view
 
+  alias Kith.Auth.Policy
+
   alias Kith.Accounts
 
   @impl true
@@ -46,12 +48,28 @@ defmodule KithWeb.UserLive.ForgotPassword do
   end
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(params, session, socket) do
+    if Policy.password_login_enabled?() do
+      mount_enabled(params, session, socket)
+    else
+      {:ok, disabled(socket)}
+    end
+  end
+
+  defp mount_enabled(_params, _session, socket) do
     {:ok, assign(socket, form: to_form(%{}, as: "user"))}
   end
 
   @impl true
   def handle_event("send_email", %{"user" => %{"email" => email}}, socket) do
+    if Policy.password_login_enabled?() do
+      perform_event(socket, email)
+    else
+      {:noreply, disabled(socket)}
+    end
+  end
+
+  defp perform_event(socket, email) do
     if user = Accounts.get_user_by_email(email) do
       Accounts.deliver_user_reset_password_instructions(
         user,
@@ -66,5 +84,11 @@ defmodule KithWeb.UserLive.ForgotPassword do
      socket
      |> put_flash(:info, info)
      |> push_navigate(to: ~p"/users/log-in")}
+  end
+
+  defp disabled(socket) do
+    socket
+    |> put_flash(:error, "Password recovery is disabled.")
+    |> redirect(to: ~p"/users/log-in")
   end
 end

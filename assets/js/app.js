@@ -6,6 +6,9 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/kith"
 import topbar from "../vendor/topbar"
 
+import PasskeyLogin from "./hooks/passkey_login"
+import SettingsNavigation from "./hooks/settings_navigation"
+
 // Custom hooks
 import TrixEditor from "./hooks/trix_editor"
 import CommandPalette from "./hooks/command_palette"
@@ -28,6 +31,8 @@ Alpine.start()
 
 const Hooks = {
   ...colocatedHooks,
+  PasskeyLogin,
+  SettingsNavigation,
   TrixEditor,
   CommandPalette,
   ImgFallback,
@@ -43,9 +48,10 @@ const liveSocket = new LiveSocket("/live", Socket, {
   hooks: Hooks,
   dom: {
     onBeforeElUpdated(from, to) {
-      // Preserve Alpine.js state during LiveView patches
-      if (from._x_dataStack) {
-        window.Alpine.clone(from, to)
+      // Preserve scoped directives without initializing newly inserted descendants
+      // while Alpine is cloning. LiveView invokes this for each existing node.
+      if (window.Alpine.closestDataStack(from).length > 0) {
+        window.Alpine.cloneNode(from, to)
       }
     }
   }
