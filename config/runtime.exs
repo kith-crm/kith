@@ -28,8 +28,18 @@ if monica_limit = System.get_env("MONICA_RATE_LIMIT_PER_MINUTE") do
 end
 
 # Feature flags
-auth = Kith.Auth.Config.from_env!(System.get_env())
+auth_env = System.get_env()
+
+auth_env =
+  if auth_env["KITH_MODE"] == "worker",
+    do: Map.put(auth_env, "OIDC_ENABLED", "false"),
+    else: auth_env
+
+auth = Kith.Auth.Config.from_env!(auth_env)
 config :kith, :auth, auth
+
+if Map.has_key?(auth_env, "PASSKEYS_ENABLED"),
+  do: config(:kith, :passkeys_enabled, auth.passkeys_enabled)
 
 config :kith,
   disable_signup: not auth.registration_enabled,
@@ -98,39 +108,6 @@ if config_env() == :prod do
   config :wax_,
     origin: "https://#{host}",
     rp_id: host
-
-  # OAuth providers (optional — only enabled when env vars are set)
-  oauth_providers = %{}
-
-  oauth_providers =
-    case {System.get_env("GITHUB_CLIENT_ID"), System.get_env("GITHUB_CLIENT_SECRET")} do
-      {id, secret} when is_binary(id) and is_binary(secret) ->
-        Map.put(oauth_providers, "github",
-          client_id: id,
-          client_secret: secret,
-          strategy: Assent.Strategy.Github
-        )
-
-      _ ->
-        oauth_providers
-    end
-
-  oauth_providers =
-    case {System.get_env("GOOGLE_CLIENT_ID"), System.get_env("GOOGLE_CLIENT_SECRET")} do
-      {id, secret} when is_binary(id) and is_binary(secret) ->
-        Map.put(oauth_providers, "google",
-          client_id: id,
-          client_secret: secret,
-          strategy: Assent.Strategy.Google
-        )
-
-      _ ->
-        oauth_providers
-    end
-
-  if oauth_providers != %{} do
-    config :kith, :oauth_providers, oauth_providers
-  end
 
   config :kith, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 

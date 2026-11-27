@@ -121,10 +121,11 @@ defmodule Kith.Auth.ConfigTest do
       Config.validate_runtime!(config, %{oauth_providers: %{}, passkeys_enabled: false})
     end
 
-    assert :ok =
-             Config.validate_runtime!(config, %{
-               oauth_providers: %{"github" => [client_id: "id", client_secret: "secret"]}
-             })
+    assert_raise ArgumentError, fn ->
+      Config.validate_runtime!(config, %{
+        oauth_providers: %{"github" => [client_id: "id", client_secret: "secret"]}
+      })
+    end
 
     assert :ok = Config.validate_runtime!(config, %{passkeys_enabled: true})
     assert :ok = Config.validate_runtime!(Config.from_env!(@oidc), %{})

@@ -9,10 +9,11 @@ defmodule Kith.Application do
 
   @impl true
   def start(_type, _args) do
-    Config.validate_runtime!(Application.fetch_env!(:kith, :auth), %{
-      oauth_providers: Application.get_env(:kith, :oauth_providers, %{}),
-      passkeys_enabled: Application.get_env(:kith, :passkeys_enabled, false)
-    })
+    unless System.get_env("KITH_MODE") == "worker" do
+      Config.validate_runtime!(Application.fetch_env!(:kith, :auth), %{
+        passkeys_enabled: Application.get_env(:kith, :passkeys_enabled, false)
+      })
+    end
 
     Kith.Vault.validate_key!()
     :ok = Kith.Accounts.init_verified_password_key()

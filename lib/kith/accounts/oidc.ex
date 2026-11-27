@@ -2,8 +2,7 @@ defmodule Kith.Accounts.OIDC do
   @moduledoc "Issuer-bound identity ownership and atomic personal-account provisioning."
   import Ecto.Query
   alias Ecto.Multi
-  alias Kith.Accounts
-  alias Kith.Accounts.{Account, OIDCIdentity, User, UserIdentity, WebauthnCredential}
+  alias Kith.Accounts.{Account, OIDCIdentity, User, WebauthnCredential}
   alias Kith.Auth.{Policy, Principal}
   alias Kith.Repo
 
@@ -140,7 +139,7 @@ defmodule Kith.Accounts.OIDC do
 
   @doc false
   def usable_login_method?(%User{} = user) do
-    usable_password?(user) or usable_passkey?(user) or usable_legacy?(user) or usable_oidc?(user)
+    usable_password?(user) or usable_passkey?(user) or usable_oidc?(user)
   end
 
   defp usable_password?(user) do
@@ -152,17 +151,6 @@ defmodule Kith.Accounts.OIDC do
     # The capability flag is a startup declaration; WebAuthn authentication remains
     # available to existing credentials regardless of that declaration.
     Repo.exists?(from(c in WebauthnCredential, where: c.user_id == ^user.id))
-  end
-
-  defp usable_legacy?(user) do
-    providers =
-      for {provider, opts} <- Accounts.oauth_providers(),
-          present?(opts[:client_id]) and present?(opts[:client_secret]),
-          do: to_string(provider)
-
-    Repo.exists?(
-      from(i in UserIdentity, where: i.user_id == ^user.id and i.provider in ^providers)
-    )
   end
 
   defp usable_oidc?(user) do
@@ -202,7 +190,6 @@ defmodule Kith.Accounts.OIDC do
     do: Repo.exists?(from(u in User, where: u.email == ^email))
 
   defp email_collision?(_), do: false
-  defp present?(value), do: is_binary(value) and String.trim(value) != ""
 
   defp lock_identity(principal) do
     # Parameterized, transaction-scoped lock serializes first signup/link for the

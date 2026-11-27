@@ -15,6 +15,7 @@ x-auth-environment: &auth-environment
   # Mount this path inside each release service when using a secret file.
   OIDC_CLIENT_SECRET_FILE:
   OIDC_DISPLAY_NAME:
+  PASSKEYS_ENABLED:
   PASSWORD_LOGIN_ENABLED:
   REGISTRATION_ENABLED:
   DISABLE_SIGNUP:
@@ -107,11 +108,6 @@ services:
       AUTH_TOKEN_SALT: ${AUTH_TOKEN_SALT}
       TOTP_ISSUER: ${TOTP_ISSUER:-Kith}
       CLOAK_KEY: ${CLOAK_KEY}
-      # OAuth (optional)
-      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
-      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       # Email
       MAILER_ADAPTER: ${MAILER_ADAPTER:-smtp}
       SMTP_HOST: ${SMTP_HOST:-}

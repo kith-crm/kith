@@ -283,8 +283,7 @@ MAIL_FROM=noreply@kith.app
 `REGISTRATION_ENABLED` (default `true`) are independent policies. Supplied boolean
 values must be exactly `true` or `false`; empty values are invalid. If only
 `DISABLE_SIGNUP` is supplied, registration is its inverse. If both registration
-variables are supplied, they must agree or startup fails. Existing legacy social
-login configuration and passkey behavior are retained.
+variables are supplied, they must agree or startup fails. Dedicated social provider settings are ignored.
 
 Enabled OIDC requires `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET`.
 The issuer must be an exact HTTPS URL, including any path, without userinfo,
@@ -306,9 +305,8 @@ completion at `/users/oidc/register`. Registration policy and configured terms a
 checked again before creating the account.
 
 Startup validates local configuration without contacting discovery endpoints or
-inspecting users' credentials. When passwords are disabled, configure OIDC, a
-legacy external provider with client ID and secret, or explicitly declare passkey
-capability with application configuration `config :kith, :passkeys_enabled, true`.
+inspecting users' credentials. When passwords are disabled on web instances, configure OIDC or set
+`PASSKEYS_ENABLED=true` for passkey-only sign-in. Workers can run without web credentials.
 This declaration counts a deployment capability; it does not prove every user owns
 a passkey. It does not alter the existing passkey routes. The default declaration
 is `false`. DAV credentials and existing sessions do not count as interactive

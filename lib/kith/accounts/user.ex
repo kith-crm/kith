@@ -46,7 +46,6 @@ defmodule Kith.Accounts.User do
     has_many :user_tokens, Kith.Accounts.UserToken
     has_many :user_recovery_codes, Kith.Accounts.UserRecoveryCode
     has_many :webauthn_credentials, Kith.Accounts.WebauthnCredential
-    has_many :user_identities, Kith.Accounts.UserIdentity
     has_many :oidc_identities, Kith.Accounts.OIDCIdentity
 
     timestamps(type: :utc_datetime)

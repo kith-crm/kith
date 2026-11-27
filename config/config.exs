@@ -142,9 +142,6 @@ config :tailwind,
 # Weather (OpenWeatherMap) — API key set per-environment via env vars
 config :kith, :weather_api_key, nil
 
-# OAuth providers — configured per-environment via env vars
-config :kith, :oauth_providers, %{}
-
 # Preserve error-only reporting across SDK upgrades. Processing categories do
 # not disable metric capture; the explicit callback drops those events.
 config :sentry,

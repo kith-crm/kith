@@ -8,6 +8,12 @@ defmodule KithWeb.OIDCControllerTest do
     :ok
   end
 
+  test "retired provider paths return 404", %{conn: conn} do
+    for provider <- ["google", "github"], suffix <- ["", "/callback"] do
+      assert get(conn, "/auth/#{provider}#{suffix}").status == 404
+    end
+  end
+
   test "disabled OIDC rejects direct starts and callbacks", %{conn: conn} do
     conn = get(conn, "/auth/oidc")
     refute final_destination(conn) =~ "issuer.test"

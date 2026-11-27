@@ -14,6 +14,7 @@ defmodule Kith.Auth.Config do
 
     %{
       oidc_enabled: oidc_enabled,
+      passkeys_enabled: boolean!(env, "PASSKEYS_ENABLED", false),
       password_login_enabled: password_enabled,
       registration_enabled: registration_enabled,
       oidc: if(oidc_enabled, do: oidc!(env), else: nil)
@@ -21,14 +22,7 @@ defmodule Kith.Auth.Config do
   end
 
   def validate_runtime!(config, capabilities) do
-    providers = Map.get(capabilities, :oauth_providers, %{})
-
-    external? =
-      Enum.any?(providers, fn {_provider, opts} ->
-        present?(opts[:client_id]) and present?(opts[:client_secret])
-      end)
-
-    unless config.password_login_enabled or config.oidc_enabled or external? or
+    unless config.password_login_enabled or config.oidc_enabled or
              Map.get(capabilities, :passkeys_enabled, false) == true do
       raise ArgumentError,
             "No configured interactive login mechanism; restore authentication configuration"

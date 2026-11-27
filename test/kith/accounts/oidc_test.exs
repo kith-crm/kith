@@ -8,7 +8,6 @@ defmodule Kith.Accounts.OIDCTest do
   setup do
     auth = Application.fetch_env!(:kith, :auth)
     tos = Application.get_env(:kith, :require_tos_acceptance)
-    providers = Application.get_env(:kith, :oauth_providers)
     passkeys = Application.get_env(:kith, :passkeys_enabled)
 
     Application.put_env(:kith, :auth, %{
@@ -21,7 +20,6 @@ defmodule Kith.Accounts.OIDCTest do
     on_exit(fn ->
       Application.put_env(:kith, :auth, auth)
       Application.put_env(:kith, :require_tos_acceptance, tos)
-      Application.put_env(:kith, :oauth_providers, providers)
       Application.put_env(:kith, :passkeys_enabled, passkeys)
     end)
 
@@ -236,24 +234,10 @@ defmodule Kith.Accounts.OIDCTest do
     assert [] = OIDC.list(user)
   end
 
-  test "configured issuers, legacy providers and existing passkeys count as alternatives" do
+  test "configured issuers and existing passkeys count as alternatives" do
     {:ok, user} = OIDC.register(principal(), %{})
     [identity] = OIDC.list(user)
-    {:ok, legacy} = Accounts.upsert_identity(user, "github", "legacy", %{})
-    Application.put_env(:kith, :oauth_providers, %{})
     assert {:error, :last_login_method} = OIDC.unlink(fresh(user), identity.id)
-
-    Application.put_env(:kith, :oauth_providers, %{
-      github: [client_id: "id", client_secret: "secret"]
-    })
-
-    assert :ok = OIDC.unlink(fresh(user), identity.id)
-    assert {:error, :last_login_method} = Accounts.delete_identity(user, legacy.id)
-    {:ok, _} = OIDC.link(fresh(user), principal())
-    policy(%{oidc: [issuer: "https://changed.test"]})
-    assert {:error, :last_login_method} = Accounts.delete_identity(user, legacy.id)
-    policy(%{oidc: [issuer: "https://issuer.test"]})
-    assert {:ok, _} = Accounts.delete_identity(user, legacy.id)
 
     credential =
       Repo.insert!(%Accounts.WebauthnCredential{
@@ -313,7 +297,6 @@ defmodule Kith.Accounts.OIDCConcurrencyTest do
 
   setup do
     auth = Application.fetch_env!(:kith, :auth)
-    providers = Application.get_env(:kith, :oauth_providers)
     passkeys = Application.get_env(:kith, :passkeys_enabled)
     suffix = Ecto.UUID.generate()
     email = "oidc-race-#{suffix}@example.test"
@@ -333,10 +316,6 @@ defmodule Kith.Accounts.OIDCConcurrencyTest do
         oidc: [issuer: p.issuer]
     })
 
-    Application.put_env(:kith, :oauth_providers, %{
-      github: [client_id: "id", client_secret: "secret"]
-    })
-
     Application.put_env(:kith, :passkeys_enabled, true)
 
     on_exit(fn ->
@@ -346,7 +325,6 @@ defmodule Kith.Accounts.OIDCConcurrencyTest do
       end)
 
       Application.put_env(:kith, :auth, auth)
-      Application.put_env(:kith, :oauth_providers, providers)
       Application.put_env(:kith, :passkeys_enabled, passkeys)
     end)
 
@@ -408,7 +386,7 @@ defmodule Kith.Accounts.OIDCConcurrencyTest do
     end)
   end
 
-  for alternate <- [:oidc, :legacy, :passkey] do
+  for alternate <- [:oidc, :passkey] do
     @alternate alternate
     test "concurrent OIDC and #{@alternate} removals cannot remove both final methods", %{
       principal: p
@@ -424,10 +402,6 @@ defmodule Kith.Accounts.OIDCConcurrencyTest do
               :oidc ->
                 {:ok, second} = OIDC.link(user, %{p | subject: p.subject <> "-second"})
                 fn -> OIDC.unlink(user, second.id) end
-
-              :legacy ->
-                {:ok, legacy} = Accounts.upsert_identity(user, "github", p.subject, %{})
-                fn -> Accounts.delete_identity(user, legacy.id) end
 
               :passkey ->
                 key =

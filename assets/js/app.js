@@ -6,6 +6,7 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/kith"
 import topbar from "../vendor/topbar"
 
+import PasskeyLogin from "./hooks/passkey_login"
 import SettingsNavigation from "./hooks/settings_navigation"
 
 // Custom hooks
@@ -30,6 +31,7 @@ Alpine.start()
 
 const Hooks = {
   ...colocatedHooks,
+  PasskeyLogin,
   SettingsNavigation,
   TrixEditor,
   CommandPalette,

@@ -436,15 +436,13 @@ defmodule KithWeb.Router do
     post "/authenticate/complete", WebauthnController, :authenticate_complete
   end
 
-  # OAuth routes (browser-based, public)
+  # OpenID Connect routes (browser-based, public)
   scope "/auth", KithWeb do
     pipe_through [:browser]
 
     get "/oidc", OIDCController, :request
     get "/oidc/callback", OIDCController, :callback
     get "/oidc/complete", OIDCController, :complete
-    get "/:provider", OAuthController, :request
-    get "/:provider/callback", OAuthController, :callback
   end
 
   # Public auth routes — may or may not be logged in
