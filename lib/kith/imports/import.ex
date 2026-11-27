@@ -12,6 +12,7 @@ defmodule Kith.Imports.Import do
     field :file_storage_key, :string
     field :api_url, :string
     field :api_key_encrypted, Kith.Vault.EncryptedBinary
+    field :api_key_cleanup_eligible_at, :utc_datetime
     field :api_options, :map
     field :summary, :map
     field :sync_summary, :map

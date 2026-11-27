@@ -30,7 +30,7 @@ defmodule Kith.Workers.MonicaDocumentImportWorker do
           "documents" => documents
         }
       }) do
-    import_job = Imports.get_import!(import_id)
+    import_job = Imports.load_monica_import_for_job!(import_id)
 
     if is_nil(import_job.api_key_encrypted) do
       Logger.error("[MonicaDocImport] API key already wiped for import #{import_id}; cancelling")
@@ -47,6 +47,9 @@ defmodule Kith.Workers.MonicaDocumentImportWorker do
       import_documents(credential, account_id, user_id, contact_id, documents, import_job)
     end
   end
+
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.minutes(30)
 
   defp import_documents(credential, account_id, user_id, contact_id, documents, import_job) do
     Enum.each(documents, fn doc_data ->

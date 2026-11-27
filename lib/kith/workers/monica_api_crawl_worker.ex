@@ -24,7 +24,7 @@ defmodule Kith.Workers.MonicaApiCrawlWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"import_id" => import_id}} = job) do
-    import_job = Imports.get_import!(import_id)
+    import_job = Imports.load_monica_import_for_job!(import_id)
 
     if is_nil(import_job.api_key_encrypted) do
       cancel_without_api_key(import_job)
@@ -113,7 +113,7 @@ defmodule Kith.Workers.MonicaApiCrawlWorker do
     })
 
     # Earlier attempts keep the key so Oban's retry can still crawl.
-    if final_attempt?(job), do: Imports.wipe_api_key(import_job)
+    if final_attempt?(job), do: MonicaApiKeyReleaseWorker.release(import_job)
 
     {:error, reason}
   end
@@ -147,22 +147,21 @@ defmodule Kith.Workers.MonicaApiCrawlWorker do
   defp maybe_enqueue_photo_sync(import_job) do
     if get_in(import_job.api_options || %{}, ["photos"]) do
       # No key in args — the worker reads it from the Import row.
-      %{"import_id" => import_job.id, "credential_url" => import_job.api_url}
-      |> MonicaPhotoSyncWorker.new()
-      |> Oban.insert()
+      Imports.enqueue_monica_followup(MonicaPhotoSyncWorker, %{
+        "import_id" => import_job.id,
+        "credential_url" => import_job.api_url
+      })
     end
   end
 
   defp maybe_enqueue_misc_data_worker(_import_job, []), do: :ok
 
   defp maybe_enqueue_misc_data_worker(import_job, plan) do
-    %{
+    Imports.enqueue_monica_followup(MonicaMiscDataWorker, %{
       "import_id" => import_job.id,
       "credential_url" => import_job.api_url,
       "plan" => plan
-    }
-    |> MonicaMiscDataWorker.new()
-    |> Oban.insert()
+    })
   end
 
   # The misc-data plan is built by MonicaApi.crawl/5 and returned in the

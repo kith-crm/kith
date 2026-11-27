@@ -302,6 +302,25 @@ defmodule Kith.Workers.MonicaApiCrawlWorkerTest do
     end
 
     @tag :capture_log
+    test "the final failed crawl keeps its key for pending documents",
+         %{user: user, account_id: account_id} do
+      import_job = api_import_fixture_with_stub(account_id, user.id)
+      args = %{"import_id" => import_job.id}
+      {:ok, document} = Oban.insert(MonicaDocumentImportWorker.new(args))
+
+      assert {:error, :boom} =
+               MonicaApiCrawlWorker.fail_attempt(import_job, attempt_job(3), :boom)
+
+      assert {:snooze, _} = perform_job(MonicaApiKeyReleaseWorker, args)
+      assert Imports.get_import!(import_job.id).api_key_encrypted == "test-key"
+      assert_enqueued(worker: MonicaApiKeyReleaseWorker, args: args)
+
+      assert :ok = Oban.cancel_job(document.id)
+      assert :ok = perform_job(MonicaApiKeyReleaseWorker, args)
+      assert Imports.get_import!(import_job.id).api_key_encrypted == nil
+    end
+
+    @tag :capture_log
     test "regression: fail -> retry -> success completes and keeps the key for follow-ups",
          %{user: user, account_id: account_id} do
       # Previously attempt 1's failure wiped the key, and the successful

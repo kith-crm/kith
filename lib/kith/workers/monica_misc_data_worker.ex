@@ -88,7 +88,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: args} = job) do
-    import_job = Imports.get_import!(args["import_id"])
+    import_job = Imports.load_monica_import_for_job!(args["import_id"])
     Logger.metadata(import_id: import_job.id, worker: "MonicaMiscData")
 
     cond do
@@ -172,13 +172,13 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
   defp continue_slice(_args, _counts, []), do: :complete
 
   defp continue_slice(args, counts, remaining) do
-    {:ok, _} =
-      args
-      |> Map.merge(%{"plan" => remaining, "carried" => counts})
-      |> new()
-      |> Oban.insert()
+    args = Map.merge(args, %{"plan" => remaining, "carried" => counts})
 
-    :continued
+    case Imports.enqueue_monica_followup(__MODULE__, args) do
+      {:ok, _} -> :continued
+      {:error, :api_key_unavailable} -> :cancelled
+      {:error, reason} -> raise "Could not enqueue Monica continuation: #{inspect(reason)}"
+    end
   end
 
   @doc false
