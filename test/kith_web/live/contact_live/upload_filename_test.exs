@@ -116,6 +116,50 @@ defmodule KithWeb.ContactLive.UploadFilenameTest do
     stop_view(view)
   end
 
+  test "gallery uploads reuse the original and preserve its first filename", ctx do
+    {:ok, view, _} =
+      live_isolated(ctx.conn, ComponentsHost,
+        session: %{"contact_id" => ctx.contact.id, "account_id" => ctx.contact.account_id}
+      )
+
+    bytes = Kith.AvatarFixtures.image_binary()
+    selector = "#photo-upload-#{ctx.contact.id}"
+    upload(view, selector, :photo, "first.png", "image/png", bytes)
+    assert [original] = Contacts.list_photos(ctx.contact.id)
+
+    upload(view, selector, :photo, "second.png", "image/png", bytes)
+    assert [stored] = Contacts.list_photos(ctx.contact.id)
+    assert stored.id == original.id
+    assert stored.file_name == "first.png"
+    assert {:ok, ^bytes} = Storage.read(stored.storage_key)
+    stop_view(view)
+  end
+
+  test "an identical avatar upload can apply a new crop to the original", ctx do
+    {:ok, view, _} = live(ctx.conn, ~p"/contacts/#{ctx.contact.id}")
+    bytes = Kith.AvatarFixtures.image_binary()
+    picker = ~s|button[phx-click="toggle-avatar-picker"]|
+
+    view |> element(picker) |> render_click()
+    upload(view, "#avatar-upload-form", :avatar, "first.png", "image/png", bytes)
+    assert [original] = Contacts.list_photos(ctx.contact.id)
+
+    view |> element(picker) |> render_click()
+    crop = %{"x" => "0", "y" => "0", "width" => "240", "height" => "240"}
+    upload(view, "#avatar-upload-form", :avatar, "second.png", "image/png", bytes, crop)
+
+    assert [stored] = Contacts.list_photos(ctx.contact.id)
+    assert stored.id == original.id
+    assert {:ok, ^bytes} = Storage.read(stored.storage_key)
+    assert stored.avatar_storage_key != original.avatar_storage_key
+    assert stored.avatar_crop["width"] == 240
+
+    assert Contacts.get_contact!(ctx.contact.account_id, ctx.contact.id).avatar ==
+             stored.avatar_storage_key
+
+    stop_view(view)
+  end
+
   test "storage failure is reported and creates no document or photo", ctx do
     File.mkdir_p!(ctx.root)
     File.write!(Path.join(ctx.root, "blocked"), "a regular file")
@@ -180,16 +224,27 @@ defmodule KithWeb.ContactLive.UploadFilenameTest do
     stop_view(view)
   end
 
-  defp upload(view, selector, name, filename, type, contents) do
+  defp upload(
+         view,
+         selector,
+         name,
+         filename,
+         type,
+         contents,
+         crop \\ %{
+           "x" => "0",
+           "y" => "0",
+           "width" => "1",
+           "height" => "1"
+         }
+       ) do
     input = file_input(view, selector, name, [%{name: filename, content: contents, type: type}])
     render_upload(input, filename)
 
     if name == :avatar do
       view |> form(selector) |> render_submit()
 
-      render_submit(view, "upload-avatar", %{
-        "crop" => %{"x" => "0", "y" => "0", "width" => "1", "height" => "1"}
-      })
+      render_submit(view, "upload-avatar", %{"crop" => crop})
     else
       view |> form(selector) |> render_submit()
     end

@@ -1,7 +1,7 @@
 defmodule KithWeb.API.PhotoController do
   use KithWeb, :controller
 
-  alias Kith.{Contacts, Policy, Storage}
+  alias Kith.{Contacts, Policy}
   alias Kith.Contacts.Photo
   alias Kith.Scope, as: TenantScope
   alias KithWeb.API.Pagination
@@ -37,29 +37,23 @@ defmodule KithWeb.API.PhotoController do
 
     with true <- Policy.can?(user, :create, :photo),
          contact when not is_nil(contact) <- Contacts.get_contact(account_id, contact_id) do
-      upload_photo(conn, contact, account_id, params["file"])
+      upload_photo(conn, contact, params["file"])
     else
       false -> {:error, :forbidden}
       nil -> {:error, :not_found}
     end
   end
 
-  defp upload_photo(_conn, _contact, _account_id, nil) do
+  defp upload_photo(_conn, _contact, nil) do
     {:error, :bad_request, "Missing file upload."}
   end
 
-  defp upload_photo(conn, contact, account_id, %Plug.Upload{content_type: ct} = upload)
+  defp upload_photo(conn, contact, %Plug.Upload{content_type: ct} = upload)
        when ct in @allowed_image_types do
-    dest = Storage.generate_key(account_id, "photos", upload.filename)
+    attrs = %{file_name: upload.filename, content_type: ct}
 
-    with {:ok, storage_key} <- Storage.upload(upload.path, dest),
-         attrs = %{
-           "file_name" => upload.filename,
-           "file_size" => upload.path && File.stat!(upload.path).size,
-           "storage_key" => storage_key,
-           "content_type" => ct
-         },
-         {:ok, photo} <- Contacts.create_photo(contact, attrs) do
+    with {:ok, bytes} <- File.read(upload.path),
+         {:ok, {_disposition, photo}} <- Contacts.store_photo(contact, bytes, attrs) do
       conn |> put_status(201) |> json(%{data: photo_json(photo)})
     else
       {:error, %Ecto.Changeset{} = cs} -> {:error, cs}
@@ -67,7 +61,7 @@ defmodule KithWeb.API.PhotoController do
     end
   end
 
-  defp upload_photo(_conn, _contact, _account_id, %Plug.Upload{}) do
+  defp upload_photo(_conn, _contact, %Plug.Upload{}) do
     {:error, :bad_request,
      "Invalid image type. Accepted: #{Enum.join(@allowed_image_types, ", ")}"}
   end
