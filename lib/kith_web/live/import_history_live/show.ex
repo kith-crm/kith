@@ -30,6 +30,12 @@ defmodule KithWeb.ImportHistoryLive.Show do
   end
 
   @impl true
+  def handle_info({:import_misc_complete, _counts}, socket) do
+    scope = socket.assigns.current_scope
+    import = Imports.get_import(scope, socket.assigns.import.id)
+    {:noreply, if(import, do: assign(socket, :import, import), else: socket)}
+  end
+
   def handle_info({:sync_complete, summary}, socket) do
     scope = socket.assigns.current_scope
     import_record = Imports.get_import(scope, socket.assigns.import.id)
@@ -110,6 +116,12 @@ defmodule KithWeb.ImportHistoryLive.Show do
                     value={to_string(val)}
                   />
                 </dl>
+                <p
+                  :for={{label, count} <- skipped_features(@import.summary)}
+                  class="mt-2 text-sm"
+                >
+                  {label} skipped for {count} {if count == 1, do: "contact", else: "contacts"} because the feature was disabled.
+                </p>
               </div>
             <% end %>
           </div>
@@ -260,6 +272,18 @@ defmodule KithWeb.ImportHistoryLive.Show do
 
   defp format_date(nil), do: "—"
   defp format_date(datetime), do: Calendar.strftime(datetime, "%b %d, %Y %H:%M")
+
+  defp skipped_features(summary) do
+    alias Kith.Accounts.OptionalFeatures
+
+    progress = Map.values(summary["misc_progress"] || %{})
+
+    for key <- OptionalFeatures.monica_keys(),
+        skip_key = OptionalFeatures.monica_skip_key(key),
+        count = Enum.count(progress, &match?(%{^skip_key => 1}, &1[key])),
+        count > 0,
+        do: {OptionalFeatures.label(key), count}
+  end
 
   defp summary_items(summary) when is_map(summary) do
     summary

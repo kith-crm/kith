@@ -135,8 +135,10 @@ defmodule KithWeb.ContactLive.ShowTest do
 
     test "Note and Call are direct actions and Life Event is in the overflow menu", %{
       conn: conn,
-      contact: contact
+      contact: contact,
+      user: user
     } do
+      Kith.AccountsFixtures.enable_optional_features(user, ~w(calls life_events))
       {:ok, view, html} = live(conn, ~p"/contacts/#{contact.id}")
       assert has_element?(view, "#activity-stream button[phx-value-type='note']", "+ Note")
       assert has_element?(view, "#activity-stream button[phx-value-type='call']", "+ Call")

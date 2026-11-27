@@ -5,6 +5,8 @@ defmodule KithWeb.API.LifeEventController do
 
   use KithWeb, :controller
 
+  plug KithWeb.Plugs.RequireOptionalFeature, "life_events"
+
   alias Kith.Activities.LifeEvent
   alias Kith.{Contacts, Policy, Repo}
   alias Kith.Scope, as: TenantScope

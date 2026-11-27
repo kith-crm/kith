@@ -16,6 +16,7 @@ defmodule Kith.Accounts do
     Account,
     AccountInvitation,
     CoseKey,
+    Scope,
     User,
     UserNotifier,
     UserRecoveryCode,
@@ -1123,6 +1124,72 @@ defmodule Kith.Accounts do
 
   ## Feature Modules ────────────────────────────────────────────────────────
 
+  alias Kith.Accounts.OptionalFeatures
+
+  @doc "Sets one optional workspace feature and audits effective changes."
+  def set_optional_feature(%Scope{} = scope, key, enabled)
+      when is_boolean(enabled) do
+    if OptionalFeatures.known?(key) do
+      change_optional_feature(scope, key, enabled)
+    else
+      {:error, :invalid_feature}
+    end
+  end
+
+  def set_optional_feature(_actor, _key, _enabled), do: {:error, :invalid_feature}
+
+  defp change_optional_feature(scope, key, enabled) do
+    result =
+      with_account_admin(scope, fn account, actor ->
+        persist_optional_feature(account, actor, key, enabled)
+      end)
+
+    case result do
+      {:ok, {account, changed?}} ->
+        if changed? do
+          Phoenix.PubSub.broadcast(
+            Kith.PubSub,
+            OptionalFeatures.topic(account.id),
+            {:optional_feature_changed, key, enabled}
+          )
+        end
+
+        {:ok, account}
+
+      error ->
+        error
+    end
+  end
+
+  defp persist_optional_feature(account, actor, key, enabled) do
+    changed? = OptionalFeatures.enabled?(account, key) != enabled
+
+    updated =
+      if Map.get(account.feature_flags || %{}, key) == enabled,
+        do: account,
+        else: put_feature_flag!(account, key, enabled)
+
+    if changed? do
+      case Kith.AuditLogs.create_audit_log(account.id, %{
+             user_id: actor.id,
+             user_name: actor.display_name || actor.email,
+             event: "optional_feature_changed",
+             metadata: %{feature: key, enabled: enabled}
+           }) do
+        {:ok, _} -> :ok
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end
+
+    {updated, changed?}
+  end
+
+  defp put_feature_flag!(account, key, value) do
+    account
+    |> Ecto.Changeset.change(feature_flags: Map.put(account.feature_flags || %{}, key, value))
+    |> Repo.update!()
+  end
+
   @known_modules ~w(immich)
 
   @doc "Returns true if a feature module is enabled for the account."
@@ -1135,25 +1202,46 @@ defmodule Kith.Accounts do
 
   @doc "Enables a feature module for the account."
   def enable_module(%Account{} = account, module_name) when module_name in @known_modules do
-    new_flags = Map.put(account.feature_flags || %{}, module_name, true)
-
-    account
-    |> Ecto.Changeset.change(%{feature_flags: new_flags})
-    |> Repo.update()
+    store_module_flag(account.id, module_name, true)
   end
 
   def enable_module(_account, _module_name), do: {:error, :unknown_module}
 
   @doc "Disables a feature module for the account."
   def disable_module(%Account{} = account, module_name) when module_name in @known_modules do
-    new_flags = Map.put(account.feature_flags || %{}, module_name, false)
-
-    account
-    |> Ecto.Changeset.change(%{feature_flags: new_flags})
-    |> Repo.update()
+    store_module_flag(account.id, module_name, false)
   end
 
   def disable_module(_account, _module_name), do: {:error, :unknown_module}
+
+  @doc "Toggles an existing Account settings module without replacing other flags."
+  def toggle_legacy_module(%Scope{} = scope, key) when key in ~w(reminders documents photos) do
+    with_account_admin(scope, fn account, _actor ->
+      put_feature_flag!(account, key, !Map.get(account.feature_flags || %{}, key, false))
+    end)
+  end
+
+  def toggle_legacy_module(_scope, _key), do: {:error, :invalid_feature}
+
+  defp with_account_admin(%Scope{user: %User{id: id}, account: %Account{id: account_id}}, fun) do
+    Repo.transaction(fn ->
+      account = Repo.one!(from(a in Account, where: a.id == ^account_id, lock: "FOR UPDATE"))
+      actor = Repo.get_by(User, id: id, account_id: account_id)
+
+      unless actor && Kith.Policy.can?(actor, :manage, :account), do: Repo.rollback(:forbidden)
+
+      fun.(account, actor)
+    end)
+  end
+
+  defp with_account_admin(_scope, _fun), do: {:error, :forbidden}
+
+  defp store_module_flag(account_id, key, value) do
+    Repo.transaction(fn ->
+      account = Repo.one!(from(a in Account, where: a.id == ^account_id, lock: "FOR UPDATE"))
+      put_feature_flag!(account, key, value)
+    end)
+  end
 
   @doc "Returns all known modules with their enabled/disabled status."
   def list_modules(%Account{} = account) do

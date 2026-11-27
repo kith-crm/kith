@@ -22,6 +22,7 @@ defmodule KithWeb.Plugs.ApiRateLimiterTest do
     denied = ApiRateLimiter.call(request, opts)
     assert denied.status == 429
     assert denied.halted
+    assert get_resp_header(denied, "content-type") == ["application/problem+json; charset=utf-8"]
     assert get_resp_header(denied, "x-ratelimit-limit") == ["1"]
     assert get_resp_header(denied, "x-ratelimit-remaining") == ["0"]
     assert [retry_header] = get_resp_header(denied, "retry-after")

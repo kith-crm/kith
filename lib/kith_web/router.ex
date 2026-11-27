@@ -353,7 +353,8 @@ defmodule KithWeb.Router do
     get "/settings/contact-sync/reauth", UserSessionController, :contact_sync_reauth
 
     live_session :require_authenticated_user,
-      on_mount: [{KithWeb.UserAuth, :require_authenticated}] do
+      on_mount: [{KithWeb.UserAuth, :require_authenticated}, KithWeb.OptionalFeatures] do
+      live "/features/:feature/unavailable", FeatureUnavailableLive, :show
       live "/users/settings", UserLive.Settings, :edit
       live "/settings/security", SettingsLive.Security, :index
       live "/settings/contact-sync", SettingsLive.ContactSync, :index

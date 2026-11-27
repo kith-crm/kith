@@ -57,6 +57,8 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   import Ecto.Query, warn: false
 
+  alias Kith.Accounts
+  alias Kith.Accounts.OptionalFeatures
   alias Kith.Activities.{Activity, Call}
   alias Kith.Contacts
   alias Kith.Contacts.{Debt, Gift}
@@ -442,7 +444,7 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
   # ── HTTP wrapper ──────────────────────────────────────────────────────
 
-  defp api_get_json(credential, url, params) do
+  defp api_get_json(credential, url, params, account_id, key) do
     ensure_import_active!(credential.import_id)
     Process.put(:misc_request_wait_ms, 0)
 
@@ -476,10 +478,12 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       Keyword.put(options, :on_rate_limit, fn
         :before_wait, _ ->
           ensure_import_active!(credential.import_id)
+          ensure_category_enabled!(account_id, key)
 
         :after_wait, elapsed_ms ->
           Process.put(:misc_request_wait_ms, Process.get(:misc_request_wait_ms, 0) + elapsed_ms)
           ensure_import_active!(credential.import_id)
+          ensure_category_enabled!(account_id, key)
       end)
 
     {total_ms, result} = timed(fn -> HTTP.get(url, options) end)
@@ -491,16 +495,17 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
       {:ok, %{status: 200, body: %{"data" => data} = body}} when is_list(data) ->
         {:ok, Map.put_new(body, "meta", %{})}
 
-      {:ok, %{status: 200}} ->
-        raise FetchError, "Malformed Monica response for #{URI.parse(url).path}"
-
-      {:ok, %{status: status}} ->
-        raise FetchError, "Monica HTTP #{status} for #{URI.parse(url).path}"
-
-      {:error, reason} ->
-        raise FetchError, "Monica request failed for #{URI.parse(url).path}: #{inspect(reason)}"
+      failure ->
+        ensure_category_enabled!(account_id, key)
+        raise FetchError, fetch_error(failure, URI.parse(url).path)
     end
   end
+
+  defp fetch_error({:ok, %{status: 200}}, path), do: "Malformed Monica response for #{path}"
+  defp fetch_error({:ok, %{status: status}}, path), do: "Monica HTTP #{status} for #{path}"
+
+  defp fetch_error({:error, reason}, path),
+    do: "Monica request failed for #{path}: #{inspect(reason)}"
 
   # A completed response and its outcome are committed together. A crash cannot
   # leave imported rows without their count, and retries reuse the committed
@@ -512,18 +517,63 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
 
     case get_in(import.summary || %{}, ["misc_progress", source_id, key]) do
       nil ->
-        {:ok, body} = api_get_json(credential, url, params)
-
-        persist_response(import.id, source_id, key, body, contact, import_response)
+        fetch_new_category(
+          import,
+          source_id,
+          key,
+          {credential, url, params},
+          contact,
+          import_response
+        )
 
       outcome ->
         outcome
     end
   end
 
+  defp fetch_new_category(
+         import,
+         source_id,
+         key,
+         {credential, url, params},
+         contact,
+         import_response
+       ) do
+    body = fetch_category_body(credential, url, params, import.account_id, key)
+    persist_response(import.id, source_id, key, body, contact, import_response)
+  end
+
+  defp fetch_category_body(credential, url, params, account_id, key) do
+    ensure_category_enabled!(account_id, key)
+    {:ok, body} = api_get_json(credential, url, params, account_id, key)
+    body
+  catch
+    :monica_category_disabled -> nil
+  end
+
+  defp ensure_category_enabled!(account_id, key) do
+    if key in OptionalFeatures.monica_keys() and
+         not OptionalFeatures.enabled?(Accounts.get_account!(account_id), key) do
+      throw(:monica_category_disabled)
+    end
+  end
+
   defp persist_response(import_id, source_id, key, body, contact, import_response) do
     result =
       Repo.transaction(fn ->
+        # Serialize writes with settings updates while allowing unrelated foreign-key checks.
+        account =
+          if key in OptionalFeatures.monica_keys() do
+            Repo.one!(
+              from(a in Accounts.Account,
+                where: a.id == ^contact.account_id,
+                lock: "FOR NO KEY UPDATE"
+              )
+            )
+          end
+
+        body = if account && !OptionalFeatures.enabled?(account, key), do: nil, else: body
+
         current =
           Repo.one!(from(i in Imports.Import, where: i.id == ^import_id, lock: "FOR UPDATE"))
 
@@ -560,6 +610,9 @@ defmodule Kith.Workers.MonicaMiscDataWorker do
         outcome
     end
   end
+
+  defp apply_response(_current, _source_id, key, nil, _contact, _import_response),
+    do: %{OptionalFeatures.monica_skip_key(key) => 1}
 
   defp apply_response(current, source_id, key, body, contact, import_response) do
     case lock_current_contact(contact.id, source_id, current) do

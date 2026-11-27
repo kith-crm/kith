@@ -375,3 +375,18 @@ DELETE /api/notes/01J9K5P...
 POST   /api/auth/token
 DELETE /api/auth/token
 ```
+
+## Optional workspace features
+
+Authenticated `GET /api/account` includes `data.optional_features`, with
+boolean values for `journal`, `calls`, `life_events`, `activities`, `tasks`,
+`gifts`, and `conversations`. A missing saved value is reported as `false`.
+Admins configure these values in Settings → Account → Optional features.
+
+Requests to a disabled feature's endpoints, and explicit contact includes for
+disabled Calls, Activities, or Life Events, return HTTP 403 with
+`application/problem+json`. The problem includes `code: "feature_disabled"`
+and `feature` containing the corresponding settings key. Activity type
+categories, life event types, and conversation messages follow their parent
+features. `GET /api/statistics` omits `total_calls` and `total_activities` when
+their respective features are disabled.

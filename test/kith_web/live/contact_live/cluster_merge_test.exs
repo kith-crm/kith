@@ -47,6 +47,87 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
 
   defp cluster_path(a, b), do: "/contacts/duplicates/cluster/#{min(a.id, b.id)}"
 
+  test "retained history counts only disabled records that move", ctx do
+    loser = ContactsFixtures.contact_fixture(ctx.account_id)
+    external = ContactsFixtures.contact_fixture(ctx.account_id)
+    candidate!(ctx.account_id, ctx.b, loser)
+
+    {:ok, type} =
+      Kith.Contacts.create_relationship_type(ctx.account_id, %{
+        name: "Colleague",
+        reverse_name: "Coworker"
+      })
+
+    internal = ContactsFixtures.relationship_fixture(ctx.a, ctx.b, type.id)
+    between_losers = ContactsFixtures.relationship_fixture(ctx.b, loser, type.id)
+    outgoing = ContactsFixtures.relationship_fixture(loser, external, type.id)
+    ContactsFixtures.relationship_fixture(external, ctx.b, type.id)
+    ContactsFixtures.relationship_fixture(external, loser, type.id)
+
+    other_external = ContactsFixtures.contact_fixture(ctx.account_id)
+    primary_edge = ContactsFixtures.relationship_fixture(ctx.a, other_external, type.id)
+    covered_edge = ContactsFixtures.relationship_fixture(loser, other_external, type.id)
+
+    {:ok, _} = Kith.Activities.create_call(ctx.a, %{occurred_at: DateTime.utc_now(:second)})
+    {:ok, view, _} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
+    render_click(view, "set-primary", %{"id" => to_string(ctx.a.id)})
+    refute has_element?(view, "#section-history span", "Retained history")
+
+    {:ok, moved} = Kith.Activities.create_call(ctx.b, %{occurred_at: DateTime.utc_now(:second)})
+    render_click(view, "set-primary", %{"id" => to_string(ctx.a.id)})
+    assert has_element?(view, "#section-history span", "1 Retained history")
+    assert has_element?(view, "#section-history span", "2 relationships")
+    assert has_element?(view, "#section-history summary", "3 records move")
+
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(ctx.user),
+        "calls",
+        true
+      )
+
+    assert has_element?(view, "#section-history span", "1 calls")
+    refute has_element?(view, "#section-history span", "Retained history")
+
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(ctx.user),
+        "calls",
+        false
+      )
+
+    assert {:error, {:redirect, %{to: path}}} =
+             view |> element("button[phx-click='merge']") |> render_click()
+
+    assert Kith.Repo.get(Kith.Contacts.Relationship, primary_edge.id)
+    refute Kith.Repo.get(Kith.Contacts.Relationship, covered_edge.id)
+    refute Kith.Repo.get(Kith.Contacts.Relationship, internal.id)
+    refute Kith.Repo.get(Kith.Contacts.Relationship, between_losers.id)
+    assert Kith.Repo.get!(Kith.Contacts.Relationship, outgoing.id).contact_id == ctx.a.id
+
+    assert [%{related_contact_id: primary_id}] =
+             Kith.Repo.all(
+               from r in Kith.Contacts.Relationship,
+                 where: r.contact_id == ^external.id and r.relationship_type_id == ^type.id
+             )
+
+    assert primary_id == ctx.a.id
+
+    export = Kith.Exports.build_json_export(ctx.account_id)
+    primary = Enum.find(export.contacts, &(&1.id == ctx.a.id))
+    assert Enum.any?(primary.calls, &(&1.id == moved.id))
+
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(ctx.user),
+        "calls",
+        true
+      )
+
+    {:ok, merged, _} = live(ctx.conn, path)
+    assert has_element?(merged, "#activity-call-#{moved.id}")
+  end
+
   test "renders every member with a checkbox", ctx do
     {:ok, _live, html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 

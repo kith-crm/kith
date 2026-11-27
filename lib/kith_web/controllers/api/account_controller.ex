@@ -73,6 +73,7 @@ defmodule KithWeb.API.AccountController do
     base = %{
       id: account.id,
       name: account.name,
+      optional_features: Accounts.OptionalFeatures.effective(account),
       timezone: account.timezone,
       send_hour: account.send_hour,
       inserted_at: account.inserted_at,

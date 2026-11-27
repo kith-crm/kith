@@ -51,6 +51,7 @@ defmodule KithWeb.RichTextSecurityTest do
     user: user
   } do
     insert(:journal_entry, account: account, author: user, content: @payload)
+    Kith.AccountsFixtures.enable_optional_features(user, ["journal"])
     {:ok, view, _html} = live(conn, ~p"/journal")
     html = view |> element(".prose") |> render()
     assert_safe_rich_text(html)

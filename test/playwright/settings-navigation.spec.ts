@@ -24,8 +24,8 @@ for (const width of [1366, 1440, 320, 393]) {
     const nav = page.getByRole("navigation", { name: "Settings sections", exact: true });
     const destinations = [
       ["Profile", "/users/settings"], ["Security", "/settings/security"], ["Contact sync", "/settings/contact-sync"],
-      ["Tags", "/settings/tags"], ["Emotions", "/settings/emotions"], ["Activity Types", "/settings/activity-types"],
-      ["Life Event Types", "/settings/life-event-types"], ["Import History", "/settings/imports"], ["Export", "/settings/export"],
+      ["Tags", "/settings/tags"], ["Emotions", "/settings/emotions"],
+      ["Import History", "/settings/imports"], ["Export", "/settings/export"],
     ];
     for (const [label, path] of destinations) {
       if (width < 768) {

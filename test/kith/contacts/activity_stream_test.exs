@@ -9,6 +9,7 @@ defmodule Kith.Contacts.ActivityStreamTest do
   setup do
     seed_reference_data!()
     user = user_fixture()
+    enable_optional_features(user, ~w(calls life_events activities tasks gifts conversations))
     scope = user_scope_fixture(user)
     contact = contact_fixture(scope.account.id)
 

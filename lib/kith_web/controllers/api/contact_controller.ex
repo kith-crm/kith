@@ -53,15 +53,29 @@ defmodule KithWeb.API.ContactController do
     account_id = scope.account.id
 
     with {:ok, includes} <- Includes.parse_includes(params, :contact_show),
+         :ok <- require_enabled_includes(scope.account, includes),
          preloads = Includes.to_preloads(includes),
          contact when not is_nil(contact) <-
            Contacts.get_contact(account_id, id, preload: preloads) do
       data = format_contact_data(contact, includes)
       json(conn, %{data: data})
     else
+      {:error, :feature_disabled, _feature} = error -> error
       nil -> {:error, :not_found}
       {:error, detail} -> {:error, :bad_request, detail}
     end
+  end
+
+  defp require_enabled_includes(account, includes) do
+    alias Kith.Accounts.OptionalFeatures
+
+    disabled =
+      Enum.find_value(includes, fn include ->
+        key = Atom.to_string(include)
+        if OptionalFeatures.known?(key) and not OptionalFeatures.enabled?(account, key), do: key
+      end)
+
+    if disabled, do: {:error, :feature_disabled, disabled}, else: :ok
   end
 
   # ── Create contact ────────────────────────────────────────────────────

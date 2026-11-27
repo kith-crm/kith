@@ -5,6 +5,8 @@ defmodule Kith.Contacts.ActivityStream do
   into a single chronological timeline.
   """
 
+  alias Kith.Accounts
+  alias Kith.Accounts.OptionalFeatures
   alias Kith.Activities
   alias Kith.Contacts
   alias Kith.Conversations
@@ -42,7 +44,9 @@ defmodule Kith.Contacts.ActivityStream do
     limit = Keyword.get(opts, :limit, 20)
     current_user_id = Keyword.fetch!(opts, :current_user_id)
 
-    types
+    account_id
+    |> Accounts.get_account!()
+    |> OptionalFeatures.available_types(types)
     |> Enum.flat_map(&fetch_entries(&1, account_id, contact_id, current_user_id))
     |> Enum.sort_by(& &1.occurred_at, {:desc, DateTime})
     |> Enum.take(limit)

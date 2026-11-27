@@ -21,6 +21,7 @@ defmodule KithWeb.JournalLive.Index do
      |> assign(:page_title, "Journal")
      |> assign(:entries, [])
      |> assign(:show_form, false)
+     |> assign(:can_edit, Kith.Policy.can?(socket.assigns.current_scope.user, :create, :journal))
      |> assign(:editing_entry_id, nil)
      |> assign(:mood_filter, nil)
      |> assign(:form_errors, %{})}
@@ -167,6 +168,7 @@ defmodule KithWeb.JournalLive.Index do
         <div class="flex items-center justify-between mb-6">
           <h1 class="text-2xl font-bold text-[var(--color-text-primary)]">Journal</h1>
           <button
+            :if={@can_edit}
             phx-click="show-form"
             class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-accent-foreground)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-accent-hover)] transition-colors cursor-pointer"
           >
@@ -336,6 +338,7 @@ defmodule KithWeb.JournalLive.Index do
           >
             <:actions>
               <button
+                :if={@can_edit}
                 phx-click="show-form"
                 class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] bg-[var(--color-accent)] text-[var(--color-accent-foreground)] px-4 py-2 text-sm font-medium hover:bg-[var(--color-accent-hover)] transition-colors cursor-pointer"
               >
@@ -482,7 +485,7 @@ defmodule KithWeb.JournalLive.Index do
                         <%!-- Footer: date + actions --%>
                         <div class="flex items-center justify-between mt-3 text-xs text-[var(--color-text-tertiary)]">
                           <span>{format_entry_date(entry.occurred_at)}</span>
-                          <div class="flex gap-2">
+                          <div :if={@can_edit} class="flex gap-2">
                             <button
                               phx-click="edit-entry"
                               phx-value-id={entry.id}

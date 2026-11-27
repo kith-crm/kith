@@ -11,6 +11,7 @@ defmodule KithWeb.ImportWizardLive do
 
   use KithWeb, :live_view
 
+  alias Kith.Accounts.OptionalFeatures
   alias Kith.Contacts.PhoneFormatter
   alias Kith.Imports
   alias Kith.Imports.Sources.MonicaApi
@@ -33,7 +34,7 @@ defmodule KithWeb.ImportWizardLive do
      |> assign(:source, "vcard")
      |> assign(:api_url, "")
      |> assign(:api_key, "")
-     |> assign(:api_options, default_api_options(socket))
+     |> assign_api_options(default_api_options(socket))
      |> assign(:phone_regions, build_phone_regions(locale))
      |> assign(:api_testing, false)
      |> assign(:current_import, nil)
@@ -111,7 +112,7 @@ defmodule KithWeb.ImportWizardLive do
   def handle_event("toggle_option", %{"option" => option}, socket) do
     options = socket.assigns.api_options
     updated = Map.update(options, option, true, &(!&1))
-    {:noreply, assign(socket, :api_options, updated)}
+    {:noreply, assign_api_options(socket, updated)}
   end
 
   def handle_event("next_step", _params, socket) do
@@ -161,7 +162,7 @@ defmodule KithWeb.ImportWizardLive do
      |> assign(:source, "vcard")
      |> assign(:api_url, "")
      |> assign(:api_key, "")
-     |> assign(:api_options, default_api_options(socket))
+     |> assign_api_options(default_api_options(socket))
      |> assign(:api_testing, false)
      |> assign(:current_import, nil)
      |> assign(:progress, nil)
@@ -171,12 +172,16 @@ defmodule KithWeb.ImportWizardLive do
 
   def handle_event("set_phone_region", %{"region" => region}, socket) do
     options = Map.put(socket.assigns.api_options, "phone_default_region", region)
-    {:noreply, assign(socket, :api_options, options)}
+    {:noreply, assign_api_options(socket, options)}
   end
 
   # ── PubSub handlers ────────────────────────────────────────────────────────
 
   @impl true
+  def handle_info({:optional_feature_changed, _, _}, socket) do
+    {:noreply, assign_api_options(socket, socket.assigns.api_options)}
+  end
+
   def handle_info({:import_progress, progress}, socket) do
     {:noreply, assign(socket, :progress, progress)}
   end
@@ -383,6 +388,24 @@ defmodule KithWeb.ImportWizardLive do
   defp phone_off_label("es"), do: "No normalizar números sin prefijo"
   defp phone_off_label("pt"), do: "Não normalizar números sem prefixo"
   defp phone_off_label(_), do: "Don't normalize bare numbers"
+
+  defp assign_api_options(socket, options) do
+    disabled =
+      Enum.reject(
+        OptionalFeatures.monica_keys(),
+        &OptionalFeatures.enabled?(socket.assigns.current_scope.account, &1)
+      )
+
+    skipped = Enum.filter(disabled, &(options[&1] != false))
+    enabled_options = Map.drop(options, disabled)
+
+    assign(socket,
+      api_options: options,
+      disabled_monica_features: disabled,
+      skipped_monica_labels: Enum.map_join(skipped, ", ", &OptionalFeatures.label/1),
+      api_sync_description: api_sync_description(enabled_options)
+    )
+  end
 
   # ── Render ──────────────────────────────────────────────────────────────────
 
@@ -643,12 +666,19 @@ defmodule KithWeb.ImportWizardLive do
                       >
                         <input
                           type="checkbox"
-                          checked={@api_options[key] != false}
+                          checked={
+                            @api_options[key] != false &&
+                              key not in @disabled_monica_features
+                          }
+                          disabled={key in @disabled_monica_features}
                           phx-click="toggle_option"
                           phx-value-option={key}
                           class="rounded border-[var(--color-border)]"
                         />
-                        <span class="text-sm text-[var(--color-text-primary)]">{label}</span>
+                        <span class="text-sm text-[var(--color-text-primary)]">{label}
+                        <span :if={key in @disabled_monica_features}>
+                          · Skipped while disabled
+                        </span></span>
                       </label>
                     </div>
                   </div>
@@ -703,17 +733,23 @@ defmodule KithWeb.ImportWizardLive do
               >
                 <dt class="text-[var(--color-text-secondary)]">Options</dt>
                 <dd class="font-medium text-[var(--color-text-primary)]">
-                  {api_sync_description(@api_options)}
+                  {@api_sync_description}
                 </dd>
               </div>
             </dl>
           </div>
 
+          <p :if={@source == "monica_api" && @skipped_monica_labels != ""} class="mb-4 text-sm">
+            Disabled categories will be skipped: {@skipped_monica_labels}.
+          </p>
+
           <div class="bg-[var(--color-warning-subtle)] border border-[var(--color-warning)]/30 rounded-[var(--radius-lg)] p-4 mb-6">
             <p class="text-[var(--color-warning)] font-medium text-sm">Before you import</p>
             <p class="text-[var(--color-text-secondary)] text-sm mt-1">
-              Import creates new contacts. Existing contacts are not updated.
-              Review for duplicates after import.
+              Import creates new contacts. Review for duplicates after import.
+              <%= if @source == "monica_api" do %>
+                A later import can add previously skipped history to existing contacts after you enable the feature.
+              <% end %>
             </p>
           </div>
 

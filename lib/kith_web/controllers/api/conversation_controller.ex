@@ -5,6 +5,8 @@ defmodule KithWeb.API.ConversationController do
 
   use KithWeb, :controller
 
+  plug KithWeb.Plugs.RequireOptionalFeature, "conversations"
+
   alias Kith.{Contacts, Conversations, Policy, Repo}
   alias Kith.Conversations.Conversation
   alias Kith.Scope, as: TenantScope

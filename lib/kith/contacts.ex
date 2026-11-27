@@ -6,6 +6,7 @@ defmodule Kith.Contacts do
 
   import Ecto.Query, warn: false
   import Kith.Scope
+  alias Kith.Accounts.OptionalFeatures
   alias Kith.Cache.Invalidation
   alias Kith.Contacts.Write
   alias Kith.DAV.Document, as: DAVDocument
@@ -2431,10 +2432,18 @@ defmodule Kith.Contacts do
           inserted_at: c.inserted_at
         }
 
+    account = Kith.Accounts.get_account!(account_id)
+
     union_query =
-      notes_query
-      |> union_all(^activities_query)
-      |> union_all(^calls_query)
+      Enum.reduce(
+        [{"activities", activities_query}, {"calls", calls_query}],
+        notes_query,
+        fn {feature, query}, acc ->
+          if OptionalFeatures.enabled?(account, feature),
+            do: union_all(acc, ^query),
+            else: acc
+        end
+      )
 
     from(sub in subquery(union_query),
       order_by: [desc: sub.inserted_at],

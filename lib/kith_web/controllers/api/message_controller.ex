@@ -5,6 +5,8 @@ defmodule KithWeb.API.MessageController do
 
   use KithWeb, :controller
 
+  plug KithWeb.Plugs.RequireOptionalFeature, "conversations"
+
   alias Kith.{Conversations, Policy}
   alias KithWeb.API.Pagination
 

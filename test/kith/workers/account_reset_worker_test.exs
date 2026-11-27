@@ -33,6 +33,32 @@ defmodule Kith.Workers.AccountResetWorkerTest do
     }
   end
 
+  test "reset clears optional history and preserves workspace choices", ctx do
+    actor = Kith.Accounts.get_user!(ctx.target_user)
+
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(actor),
+        "journal",
+        true
+      )
+
+    {:ok, _} =
+      Kith.Accounts.set_optional_feature(
+        Kith.AccountsFixtures.user_scope_fixture(actor),
+        "calls",
+        false
+      )
+
+    insert(:journal_entry, account: actor.account, author: actor)
+
+    assert :ok = perform_job(AccountResetWorker, %{account_id: ctx.target_account})
+    assert Kith.Journal.list_entries(ctx.target_account, author_id: actor.id) == []
+
+    assert %{"journal" => true, "calls" => false} =
+             Kith.Accounts.get_account!(ctx.target_account).feature_flags
+  end
+
   describe "perform/1 — regression: re-import after reset" do
     test "re-import for same Monica contact id resolves to new local contact (no stale import_records)",
          ctx do

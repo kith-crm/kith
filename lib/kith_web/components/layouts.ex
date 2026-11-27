@@ -91,6 +91,7 @@ defmodule KithWeb.Layouts do
             match_prefix="/reminders"
           />
           <.sidebar_link
+            :if={Kith.Accounts.OptionalFeatures.enabled?(@current_scope.account, "journal")}
             path={~p"/journal"}
             current_path={@current_path}
             icon="hero-book-open"
@@ -280,6 +281,7 @@ defmodule KithWeb.Layouts do
                 label="Reminders"
               />
               <.mobile_more_link
+                :if={Kith.Accounts.OptionalFeatures.enabled?(@current_scope.account, "journal")}
                 path={~p"/journal"}
                 current_path={@current_path}
                 match_prefix="/journal"

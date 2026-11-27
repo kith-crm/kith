@@ -21,6 +21,7 @@ defmodule Kith.Workers.MonicaMiscDataWorkerLockTest do
     fixture =
       unboxed(fn ->
         user = user_fixture()
+        enable_optional_features(user, ["calls"])
         survivor = contact_fixture(user.account_id)
         loser = contact_fixture(user.account_id)
 

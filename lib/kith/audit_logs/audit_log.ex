@@ -8,7 +8,7 @@ defmodule Kith.AuditLogs.AuditLog do
     reminder_fired
     user_joined user_role_changed user_removed
     invitation_sent invitation_accepted
-    account_data_reset account_deleted
+    account_data_reset account_deleted optional_feature_changed
     immich_linked immich_unlinked
     data_exported data_imported
     trash_emptied
