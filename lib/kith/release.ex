@@ -16,6 +16,17 @@ defmodule Kith.Release do
     end
   end
 
+  def retire_user_identities do
+    load_app()
+    path = Application.app_dir(@app, "priv/repo/deferred_migrations")
+
+    {:ok, _, _} =
+      Ecto.Migrator.with_repo(
+        Kith.Repo,
+        &Ecto.Migrator.run(&1, path, :up, to: 20_261_127_000_001)
+      )
+  end
+
   def rollback(repo, version) do
     load_app()
     {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :down, to: version))

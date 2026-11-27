@@ -10,7 +10,7 @@
 
 Allow operators to opt into standards-based OpenID Connect login, independently disable account-password authentication, and control registration. Provide DAV app passwords so people using external login can sync contacts without enabling account passwords. Deliver backend, responsive UI, and meaningful desktop, mobile, and Android validation together.
 
-Kith acts as an OIDC relying party. Authentik is the user's provider, not a special implementation target. Support providers through standard discovery and a documented interoperability profile, with no provider-name branching. Existing Google/GitHub visibility and UI configuration work is explicitly excluded and tracked in [issue #62](https://github.com/kith-crm/kith/issues/62). Passkeys and existing social login retain their behavior.
+Kith acts as an OIDC relying party. Authentik is the user's provider, not a special implementation target. Support providers through standard discovery and a documented interoperability profile, with no provider-name branching. Dedicated Google and GitHub flows are retired. Passkeys remain supported.
 
 ## Approach and boundaries
 
@@ -32,11 +32,11 @@ Configuration validation owns operator settings. The OIDC boundary owns discover
 | `OIDC_CLIENT_SECRET` | Unset | Client credential. Required when enabled; never exposed to UI/logs. |
 | `OIDC_DISPLAY_NAME` | `OpenID Connect` | Escaped operator label for the login button. |
 
-Parse boolean variables strictly as `true` or `false`; reject invalid supplied values. Preserve `DISABLE_SIGNUP` compatibility: when only the legacy variable is supplied, registration is its inverse; when both registration variables are supplied, require agreement or fail startup. Resolve one registration policy for new registration/OIDC paths without altering existing Google/GitHub behavior.
+Parse boolean variables strictly as `true` or `false`; reject invalid supplied values. Preserve `DISABLE_SIGNUP` compatibility: when only the legacy variable is supplied, registration is its inverse; when both registration variables are supplied, require agreement or fail startup. Resolve one registration policy for new registration/OIDC paths.
 
 Password disabling blocks account-password login and password-authenticated API token issuance, hides/disables password recovery and rejects outstanding reset-token redemption while disabled. Existing API tokens and authenticated sessions remain valid under their existing policies; this switch is not global revocation. DAV app passwords remain usable. Ordinary account passwords remain usable for DAV only while password login is enabled.
 
-Fail startup for incomplete enabled OIDC settings, invalid booleans/URLs, contradictory registration settings, or no deployment-configured interactive login mechanism after disabling passwords. Count configured external providers or explicitly enabled passkey capability, not DAV credentials or existing sessions; do not claim this check proves every user has a usable credential. Document operator recovery by restoring environment configuration. Keep network discovery failures separate from malformed local configuration: time out safely and show temporary unavailability at login, never bypass validation or fall back to passwords when disabled.
+Fail startup for incomplete enabled OIDC settings, invalid booleans/URLs, contradictory registration settings, or no deployment-configured interactive login mechanism after disabling passwords. Count configured OIDC or explicitly enabled passkey capability, not DAV credentials or existing sessions; do not claim this check proves every user has a usable credential. Document operator recovery by restoring environment configuration. Keep network discovery failures separate from malformed local configuration: time out safely and show temporary unavailability at login, never bypass validation or fall back to passwords when disabled.
 
 ## OIDC interoperability and validation
 
@@ -68,7 +68,7 @@ Settings provide creation, one-time display/copy, list, and explicit revocation 
 
 Authenticate DAV Basic Auth with the existing email username plus app password, binding both to the same confirmed Kith user. App passwords grant that user's existing DAV permissions, never broader account access. Check revocation on every request; the next request after revocation fails. Reuse existing failed-authentication throttling and generic unauthorized responses. Do not require an interactive TOTP challenge per DAV request. Deleting a user invalidates/removes their credentials. App passwords must fail on web login, API token issuance, and other non-DAV authentication paths.
 
-When password login is enabled, preserve existing DAV account-password compatibility. When disabled, reject account passwords for DAV while accepting active app passwords. Do not change existing Google/GitHub or passkey behavior as a side effect.
+When password login is enabled, preserve existing DAV account-password compatibility. When disabled, reject account passwords for DAV while accepting active app passwords. Preserve passkey support.
 
 ## UI and lifecycle
 
@@ -104,7 +104,7 @@ Retain all existing destination permissions, especially Account, Integrations an
 
 **Profile (`/users/settings`):** retain email and its confirmation flow. Move the password form to Security rather than duplicating it. Keep email changes protected by recent authentication and preserve confirmation-token routes.
 
-**Security (`/settings/security`):** account password controls when enabled, OIDC linking/status, and local two-factor status with a link into the existing TOTP setup flow. Display an actionable reauthentication state for sensitive operations. Do not implement Google/GitHub or passkey management as part of this relocation; existing behavior remains unchanged. Use focused cards and short status summaries, not an always-expanded collection of setup forms. The mockup recovery-options button must expose only supported existing recovery behavior; it does not authorize a new recovery-code regeneration subsystem.
+**Security (`/settings/security`):** account password controls when enabled, OIDC linking/status, and local two-factor status with a link into the existing TOTP setup flow. Display an actionable reauthentication state for sensitive operations. Preserve existing passkey management. Use focused cards and short status summaries, not an always-expanded collection of setup forms. The mockup recovery-options button must expose only supported existing recovery behavior; it does not authorize a new recovery-code regeneration subsystem.
 
 **Contact sync (`/settings/contact-sync`):** server URL, username, client instructions and DAV app passwords in one personal destination. Keep the credential list as the default view; open creation and one-time secret display only on request, using existing modal primitives or a focused in-page step on small screens. Require recent authentication for credential mutations, not merely reading setup instructions. Retain owner checks on every event after LiveView mount/reconnect.
 
@@ -139,4 +139,4 @@ Report commands, results and exact environments. If Android, DAVx5 or live-provi
 
 ## Delivery boundary
 
-Implement configuration and policy, OIDC backend/UI, and DAV credentials backend/UI as reviewable slices with their tests. Include environment examples, deployment/migration notes, issuer registration/callback instructions, operator recovery and DAV setup documentation. Preserve legacy identities and credentials without a destructive backfill. Google/GitHub UI changes remain in issue #62. This design is the source for a subsequent detailed Superpowers implementation plan using subagent-driven development, as explicitly requested by the user.
+Implement configuration and policy, OIDC backend/UI, and DAV credentials backend/UI as reviewable slices with their tests. Include environment examples, deployment/migration notes, issuer registration/callback instructions, operator recovery and DAV setup documentation. Preserve legacy identities and credentials without a destructive backfill. Drop the legacy table separately after all older instances retire and deletion is authorized. This design is the source for a subsequent detailed Superpowers implementation plan using subagent-driven development, as explicitly requested by the user.

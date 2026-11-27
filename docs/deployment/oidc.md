@@ -30,12 +30,13 @@ The client needs authorization code/query responses, `client_secret_basic`, RS25
 ID tokens, S256 PKCE and scopes `openid email profile`. Unsupported advertised
 capabilities fail closed; no algorithm/authentication downgrade occurs. If a
 UserInfo endpoint is advertised it must return the same subject as the ID token.
+When UserInfo supplies an email, its own boolean verification flag governs signup.
 Do not claim compatibility with a provider until testing this profile.
 
 `OIDC_CLIENT_SECRET` can be supplied directly instead. `_FILE` takes precedence,
 reads a mounted file and trims surrounding whitespace. Missing, empty or unreadable
-secrets fail startup with a redacted error. Mount only the required secret into
-app/worker containers; never commit it. Other credentials are ignored when OIDC is
+secrets fail startup with a redacted error. Mount the secret in the app and migration containers. Workers can boot and
+process jobs without the issuer credentials. Other credentials are ignored when OIDC is
 disabled. All policy booleans require literal `true` or `false`; blank is invalid.
 See [configuration](../configuration.md#authentication-policy) for defaults,
 legacy registration agreement and passkey capability configuration.
@@ -62,7 +63,8 @@ only with registration enabled, a usable email and boolean `email_verified=true`
 and explicit configured terms acceptance. External roles/groups confer no membership
 or privilege. Changing issuer does not migrate old identities.
 
-Sensitive actions require completed authentication within 600 seconds, including
+Ordinary SSO accepts missing or old provider authentication times. Sensitive
+actions require evidence of authentication within 600 seconds, including
 local MFA where enabled. OIDC linking and reauthentication request `prompt=login` with `max_age=0` and validate
 `auth_time` against initiation (60 seconds skew); a remembered Kith session alone
 cannot satisfy it. Unlink refuses to remove the last usable interactive method under
@@ -118,6 +120,11 @@ migration command, then restart app/worker together. New tables are
 added. Existing hashes, tokens, legacy social identities and DAV data are preserved;
 no identity or credential backfill is performed. Old sessions have no manufactured
 recent-MFA evidence and must reauthenticate for sensitive operations.
+
+The runtime no longer reads or writes `user_identities`. Normal release migrations
+leave it available during the rolling upgrade. After the last old instance exits,
+follow the account inventory, alternate sign-in verification and separately authorized
+[table retirement procedure](../../README.md#retiring-legacy-social-login).
 
 The reverse of `20261109195100_allow_oidc_passwordless_users.exs` restores NOT NULL
 and **fails while any OIDC-only user has a NULL password hash**. This is an expected
