@@ -353,7 +353,12 @@ defmodule KithWeb.AuthenticationCompletionTest do
       |> Kith.Repo.update!()
 
     token = Accounts.generate_user_session_token(user)
-    principal = %Kith.Auth.Principal{issuer: "https://issuer.example", subject: "linked"}
+
+    principal = %Kith.Auth.Principal{
+      issuer: "https://issuer.example",
+      subject: "linked",
+      auth_time: System.os_time(:second)
+    }
 
     {:ok, handle} =
       Kith.Auth.Challenges.issue(user, %{
