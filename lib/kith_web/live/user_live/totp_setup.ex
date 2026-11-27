@@ -137,19 +137,8 @@ defmodule KithWeb.UserLive.TotpSetup do
     user = socket.assigns.current_scope.user
     secret = socket.assigns.secret
 
-    case Accounts.enable_totp(user, secret, code) do
+    case Accounts.enable_totp(user, secret, code, socket.assigns.session_token) do
       {:ok, {_user, raw_codes}} ->
-        import Ecto.Query
-
-        Kith.Repo.update_all(
-          from(t in Kith.Accounts.UserToken,
-            where:
-              t.token == ^socket.assigns.session_token and t.user_id == ^user.id and
-                t.context == "session"
-          ),
-          set: [mfa_authenticated_at: DateTime.utc_now(:second)]
-        )
-
         {:noreply,
          socket
          |> put_flash(:info, "Two-factor authentication has been enabled.")

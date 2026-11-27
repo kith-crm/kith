@@ -59,6 +59,22 @@ defmodule Kith.AccountsTotpTest do
       assert Enum.all?(recovery_codes, &(&1 =~ ~r/^[0-9a-f]{4}-[0-9a-f]{4}$/))
     end
 
+    test "session evidence and enrollment commit together" do
+      user = %{user_fixture() | authenticated_at: DateTime.utc_now(:second)}
+      secret = Accounts.generate_totp_secret()
+      code = :pot.totp(secret)
+
+      assert {:error, :reauthentication_required} =
+               Accounts.enable_totp(user, secret, code, "retired")
+
+      refute Accounts.get_user!(user.id).totp_enabled
+      token = Accounts.generate_user_session_token(user)
+      assert {:ok, {_, codes}} = Accounts.enable_totp(user, secret, code, token)
+      assert length(codes) == 8
+      {session, _} = Accounts.get_user_by_session_token(token)
+      assert %DateTime{} = session.mfa_authenticated_at
+    end
+
     test "returns error with invalid code" do
       user = user_fixture()
       secret = Accounts.generate_totp_secret()

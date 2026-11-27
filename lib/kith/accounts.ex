@@ -457,24 +457,41 @@ defmodule Kith.Accounts do
   Stores the encrypted secret, sets totp_enabled to true, and generates
   recovery codes. Returns `{:ok, user, raw_recovery_codes}` or `{:error, reason}`.
   """
-  def enable_totp(user, secret, code) do
+  def enable_totp(user, secret, code, session \\ :without_session) do
     with :ok <- KithWeb.Authentication.require_recent(user) do
       if valid_totp_code?(secret, code),
-        do: do_enable_totp(user, secret),
+        do: do_enable_totp(user, secret, session),
         else: {:error, :invalid_code}
     end
   end
 
-  defp do_enable_totp(user, secret) do
+  defp do_enable_totp(user, secret, session) do
     Repo.transact(fn ->
       changeset = Ecto.Changeset.change(user, %{totp_secret: secret, totp_enabled: true})
 
       with {:ok, user} <- Repo.update(changeset),
+           :ok <- record_enrollment(user, session),
            raw_codes <- generate_recovery_codes(user) do
         {:ok, {user, raw_codes}}
       end
     end)
   end
+
+  defp record_enrollment(_user, :without_session), do: :ok
+
+  defp record_enrollment(user, token) when is_binary(token) do
+    query =
+      from(t in UserToken,
+        where: t.user_id == ^user.id and t.context == "session" and t.token == ^token
+      )
+
+    case Repo.update_all(query, set: [mfa_authenticated_at: DateTime.utc_now(:second)]) do
+      {1, _} -> :ok
+      _ -> {:error, :reauthentication_required}
+    end
+  end
+
+  defp record_enrollment(_, _), do: {:error, :reauthentication_required}
 
   @doc """
   Disables TOTP for a user. Clears secret and deletes all recovery codes.
