@@ -247,6 +247,9 @@ jobs:
       - name: Verify image starts
         run: docker run --rm kith:ci version
 
+      - name: Verify runtime JIT memory protection
+        run: bash scripts/ci/jit-memory-check.sh kith:ci
+
       - name: Verify non-root user
         run: |
           uid=$(docker run --rm --entrypoint sh kith:ci -c 'id -u')
