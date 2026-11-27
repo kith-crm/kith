@@ -33,6 +33,10 @@ defmodule KithWeb.API.PhotoControllerTest do
              }
            } == first
 
+    conn
+    |> post(endpoint, %{"file" => %{upload | filename: " "}})
+    |> json_response(422)
+
     second =
       conn
       |> post(endpoint, %{"file" => %{upload | filename: "second.png"}})

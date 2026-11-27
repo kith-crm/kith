@@ -915,11 +915,24 @@ defmodule Kith.Contacts do
 
     Write.transaction(contact.account_id, fn ->
       case find_original_photo(contact, bytes, hash) do
-        {:ok, %Photo{} = photo} -> {:existing, photo}
+        {:ok, %Photo{} = photo} -> reuse_original_photo!(photo, attrs, byte_size(bytes))
         {:ok, nil} -> {:created, insert_original_photo!(contact, bytes, attrs, hash, opts)}
         {:error, reason} -> Repo.rollback(reason)
       end
     end)
+  end
+
+  defp reuse_original_photo!(photo, attrs, size) do
+    changeset =
+      Photo.changeset(
+        %Photo{storage_key: photo.storage_key, file_size: size},
+        Map.take(attrs, [:file_name, :content_type])
+      )
+
+    case Ecto.Changeset.apply_action(changeset, :insert) do
+      {:ok, _} -> {:existing, photo}
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
   end
 
   defp find_original_photo(contact, bytes, hash) do
@@ -963,7 +976,7 @@ defmodule Kith.Contacts do
 
     with :ok <- check_photo_quota(contact.account_id, size, opts),
          :ok <- Avatar.stage_created(key),
-         {:ok, _} <- Storage.upload_binary(bytes, key, content_type: attrs.content_type),
+         {:ok, _} <- Storage.upload_binary(bytes, key),
          {:ok, photo} <-
            create_photo(contact, %{
              file_name: attrs.file_name,
@@ -999,14 +1012,6 @@ defmodule Kith.Contacts do
   end
 
   defp invalidate_photo_usage(result, _account_id), do: result
-
-  def photo_exists_by_hash?(contact_id, content_hash) when is_binary(content_hash) do
-    Photo
-    |> where([p], p.contact_id == ^contact_id and p.content_hash == ^content_hash)
-    |> Repo.exists?()
-  end
-
-  def photo_exists_by_hash?(_contact_id, _content_hash), do: false
 
   def delete_photo(%Photo{} = photo) do
     Write.run(photo.account_id, [photo.contact_id], fn ->
