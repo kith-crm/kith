@@ -27,7 +27,10 @@ defmodule Kith.TLSTransportBoundaryTest do
       {output, status} =
         System.cmd(System.find_executable("elixir"), arguments,
           env:
-            [{"ERL_INETRC", Path.expand(inetrc)}, {"ERL_FLAGS", "+S 2:2"}] ++
+            [
+              {"ERL_INETRC", Path.expand(inetrc)},
+              {"ERL_FLAGS", System.get_env("ERL_FLAGS", "") <> " +S 2:2"}
+            ] ++
               Enum.map(
                 ~w(HTTP_PROXY HTTPS_PROXY http_proxy https_proxy ALL_PROXY all_proxy),
                 &{&1, nil}

@@ -29,7 +29,6 @@ defmodule KithWeb.UserLive.TotpChallenge do
         >
           <input type="hidden" name="_csrf_token" value={Plug.CSRFProtection.get_csrf_token()} />
           <input type="hidden" name="totp_token" value={@totp_token} />
-          <input type="hidden" name="remember_me" value={to_string(@remember_me)} />
 
           <div x-show="!recoveryMode">
             <div class="mb-3">
@@ -100,13 +99,11 @@ defmodule KithWeb.UserLive.TotpChallenge do
   @impl true
   def mount(_params, session, socket) do
     totp_token = session["totp_token"]
-    remember_me = session["remember_me"] || false
 
     if totp_token do
       {:ok,
        assign(socket,
          totp_token: totp_token,
-         remember_me: remember_me,
          form: to_form(%{"code" => ""}, as: "totp")
        )}
     else

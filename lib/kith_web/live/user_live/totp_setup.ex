@@ -1,6 +1,8 @@
 defmodule KithWeb.UserLive.TotpSetup do
   use KithWeb, :live_view
 
+  on_mount {KithWeb.UserAuth, :require_sudo_mode}
+
   alias Kith.Accounts
 
   @impl true
@@ -48,7 +50,7 @@ defmodule KithWeb.UserLive.TotpSetup do
             </button>
           </div>
 
-          <UI.button navigate={~p"/users/settings"} class="w-full">
+          <UI.button navigate={~p"/settings/security"} class="w-full">
             I've saved my recovery codes
           </UI.button>
         <% else %>
@@ -93,7 +95,7 @@ defmodule KithWeb.UserLive.TotpSetup do
 
           <p class="text-center text-sm text-[var(--color-text-tertiary)]">
             <.link
-              navigate={~p"/users/settings"}
+              navigate={~p"/settings/security"}
               class="font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors"
             >
               Cancel
@@ -106,14 +108,14 @@ defmodule KithWeb.UserLive.TotpSetup do
   end
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     user = socket.assigns.current_scope.user
 
     if user.totp_enabled do
       {:ok,
        socket
        |> put_flash(:info, "Two-factor authentication is already enabled.")
-       |> redirect(to: ~p"/users/settings")}
+       |> redirect(to: ~p"/settings/security")}
     else
       secret = Accounts.generate_totp_secret()
       uri = Accounts.totp_uri(secret, user.email)
@@ -121,6 +123,7 @@ defmodule KithWeb.UserLive.TotpSetup do
 
       {:ok,
        assign(socket,
+         session_token: session["user_token"],
          secret: secret,
          qr_data_url: qr_data_url,
          recovery_codes: nil,
@@ -134,12 +137,15 @@ defmodule KithWeb.UserLive.TotpSetup do
     user = socket.assigns.current_scope.user
     secret = socket.assigns.secret
 
-    case Accounts.enable_totp(user, secret, code) do
+    case Accounts.enable_totp(user, secret, code, socket.assigns.session_token) do
       {:ok, {_user, raw_codes}} ->
         {:noreply,
          socket
          |> put_flash(:info, "Two-factor authentication has been enabled.")
          |> assign(recovery_codes: raw_codes)}
+
+      {:error, :reauthentication_required} ->
+        {:noreply, redirect(socket, to: ~p"/users/reauth?return_to=totp")}
 
       {:error, :invalid_code} ->
         {:noreply,

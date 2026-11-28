@@ -55,6 +55,7 @@ erl_crash.dump
 /docs/playwright-report/
 /docs/screenshots/
 /tmp/browser-regressions/
+/tmp/oidc-browser/
 /tmp/security/
 
 # Git worktrees
@@ -77,3 +78,6 @@ erl_crash.dump
 
 # Isolated CardDAV live harness state, storage and artifacts.
 /.carddav-task10/
+
+# Throwaway local real-provider credentials, CA and restricted diagnostics.
+/.oidc-local/

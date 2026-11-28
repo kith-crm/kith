@@ -1759,6 +1759,10 @@ defmodule KithWeb.ContactLive.ClusterMergeTest do
     test "choose-field refuses a negative index instead of counting from the end", ctx do
       {:ok, live, _html} = live(ctx.conn, cluster_path(ctx.a, ctx.b))
 
+      # Candidate ordering can make the last value the initial selection.
+      # Start from the first value so accepting -1 would change the selection.
+      render_click(live, "choose-field", %{"field" => "company", "index" => "0"})
+
       # `Enum.at/2` reads -1 as the *last* candidate, so an unguarded handler
       # would select a value the user never clicked.
       render_click(live, "choose-field", %{"field" => "company", "index" => "-1"})

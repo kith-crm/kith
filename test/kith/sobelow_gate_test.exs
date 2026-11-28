@@ -96,7 +96,7 @@ defmodule Kith.SobelowGateTest do
         {"PATH", Path.join(directory, "bin") <> ":" <> System.get_env("PATH", "")},
         {"SCANNER_STATUS", to_string(scanner_status)},
         {"SCANNER_OUTPUT", scanner_output},
-        {"ERL_FLAGS", "+S 2:2"}
+        {"ERL_FLAGS", System.get_env("ERL_FLAGS", "") <> " +S 2:2"}
       ],
       stderr_to_stdout: true
     )

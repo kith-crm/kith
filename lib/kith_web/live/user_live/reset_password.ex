@@ -1,6 +1,8 @@
 defmodule KithWeb.UserLive.ResetPassword do
   use KithWeb, :live_view
 
+  alias Kith.Auth.Policy
+
   alias Kith.Accounts
 
   @impl true
@@ -47,7 +49,15 @@ defmodule KithWeb.UserLive.ResetPassword do
   end
 
   @impl true
-  def mount(%{"token" => token}, _session, socket) do
+  def mount(params, session, socket) do
+    if Policy.password_login_enabled?() do
+      mount_enabled(params, session, socket)
+    else
+      {:ok, disabled(socket)}
+    end
+  end
+
+  defp mount_enabled(%{"token" => token}, _session, socket) do
     if user = Accounts.get_user_by_reset_password_token(token) do
       changeset = Accounts.change_user_password(user, %{}, hash_password: false)
 
@@ -76,6 +86,14 @@ defmodule KithWeb.UserLive.ResetPassword do
   end
 
   def handle_event("reset", %{"user" => user_params}, socket) do
+    if Policy.password_login_enabled?() do
+      perform_event(socket, user_params)
+    else
+      {:noreply, disabled(socket)}
+    end
+  end
+
+  defp perform_event(socket, user_params) do
     case Accounts.reset_user_password(socket.assigns.user, user_params) do
       {:ok, _} ->
         {:noreply,
@@ -86,5 +104,11 @@ defmodule KithWeb.UserLive.ResetPassword do
       {:error, changeset} ->
         {:noreply, assign(socket, form: to_form(changeset, as: "user"))}
     end
+  end
+
+  defp disabled(socket) do
+    socket
+    |> put_flash(:error, "Password recovery is disabled.")
+    |> redirect(to: ~p"/users/log-in")
   end
 end

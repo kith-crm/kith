@@ -21,7 +21,7 @@ Kith helps you keep track of the people who matter most — their birthdays, how
 - **REST API** — bearer token auth, cursor pagination, compound documents
 - **Multi-account** — account-scoped multitenancy with full data isolation
 - **Background jobs** — powered by Oban with 9 queues and nightly cron tasks
-- **Security** — WebAuthn/passkeys, TOTP 2FA, OAuth (GitHub, Google), encrypted sensitive fields
+- **Security** — WebAuthn/passkeys, TOTP 2FA, OpenID Connect, encrypted sensitive fields
 
 ## Prerequisites
 
@@ -144,3 +144,27 @@ See `.env.example` for the full list. Key variables:
 | `KITH_MODE` | No | `web` (full app) or `worker` (Oban only) |
 | `MAILER_ADAPTER` | No | `smtp`, `mailgun`, `ses`, or `postmark` |
 | `IMMICH_ENABLED` | No | Enable Immich photo sync integration |
+
+### Retiring legacy social login
+
+The web process needs password login, generic OIDC, or an explicit
+`PASSKEYS_ENABLED=true` declaration for passkey-only installations. Existing
+passkeys remain available. Worker processes do not serve a login page.
+
+Deploy the runtime removal first. Normal release migrations leave
+`user_identities` available to older instances. After every old instance is
+retired, inventory affected accounts with the following read-only query.
+
+```sql
+SELECT u.account_id, i.user_id, i.provider, count(*)
+FROM user_identities i JOIN users u ON u.id = i.user_id
+GROUP BY u.account_id, i.user_id, i.provider;
+```
+
+Have each affected user demonstrate a working password, passkey or linked
+identity at the configured issuer. Legacy registration generated a random
+password, so the existence of a password hash does not establish access.
+Obtain separate deletion authorization and take a recoverable backup before
+running the deferred migration with
+`bin/kith eval "Kith.Release.retire_user_identities()"` in the release.
+The historical creation migration remains in the normal migration directory.

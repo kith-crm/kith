@@ -1,0 +1,350 @@
+{
+  "date": "2026-11-10",
+  "status": "PARTIAL; live delayed/repeated freshness FAIL in both policies",
+  "method": "All device UI via owning pinned agent-device CLI; CDP used only for data/layout/outcome observation. No browser cookies installed.",
+  "device": {
+    "model": "Android SDK built for arm64 (Pixel_4 emulator)",
+    "android": "10",
+    "api": 29,
+    "build": "QSR1.211112.002/7910984",
+    "patch": "2019-09-05",
+    "chromium": "159.0.8152.0",
+    "playwright": "1.64.1",
+    "driver_revision": 1001
+  },
+  "scopes": {
+    "live-password-true": {
+      "mode": {
+        "password": "true",
+        "database_suffix": "_android_enabled_01"
+      },
+      "results": [
+        {
+          "case": "running policy and dedicated database",
+          "status": "PASS"
+        },
+        {
+          "case": "real Authentik signup callback and terms",
+          "status": "PASS"
+        },
+        {
+          "case": "native Settings selector and Android history",
+          "status": "PASS"
+        },
+        {
+          "case": "native Device name keyboard and action visibility",
+          "status": "PASS"
+        },
+        {
+          "case": "credential DAV acceptance and web/API denial",
+          "status": "PASS"
+        },
+        {
+          "case": "one-time secret disappears after reload",
+          "status": "PASS"
+        },
+        {
+          "case": "revoke credential and next DAV denial",
+          "status": "PASS"
+        },
+        {
+          "case": "last usable identity unlink rejected",
+          "status": "PASS"
+        },
+        {
+          "case": "local MFA enrollment through pinned UI",
+          "status": "PASS"
+        },
+        {
+          "case": "MFA wrong code and native keyboard",
+          "status": "PASS"
+        },
+        {
+          "case": "real provider then local TOTP session continuity",
+          "status": "PASS"
+        },
+        {
+          "case": "real provider and recovery code completion",
+          "status": "PASS"
+        },
+        {
+          "case": "fresh provider authentication plus MFA returns Security",
+          "status": "FAIL",
+          "reason": "Error",
+          "path": "/users/log-in"
+        },
+        {
+          "case": "Create action touch size and keyboard occlusion",
+          "status": "PASS"
+        },
+        {
+          "case": "normal sign-in recovery after fresh-auth rejection",
+          "status": "PASS"
+        },
+        {
+          "case": "Copy control success or actionable fallback",
+          "status": "PASS"
+        },
+        {
+          "case": "native selectable one-time value copy fallback",
+          "status": "FAIL",
+          "reason": "Error (COMMAND_FAILED): find did not match any element",
+          "path": "/settings/contact-sync/new"
+        },
+        {
+          "case": "one-time reveal disappears after navigating away and back",
+          "status": "PASS"
+        },
+        {
+          "case": "active DAV app password rejected by actual web login UI",
+          "status": "PASS"
+        },
+        {
+          "case": "pending local MFA denies browser GET dashboard",
+          "status": "PASS"
+        },
+        {
+          "case": "native Settings Back and browser Forward",
+          "status": "PASS"
+        }
+      ]
+    },
+    "live-password-false": {
+      "mode": {
+        "password": "false",
+        "database_suffix": "_android_disabled_01"
+      },
+      "results": [
+        {
+          "case": "running policy and dedicated database",
+          "status": "PASS"
+        },
+        {
+          "case": "real Authentik signup callback and terms",
+          "status": "PASS"
+        },
+        {
+          "case": "native Settings selector and Android history",
+          "status": "PASS"
+        },
+        {
+          "case": "native Device name keyboard and action visibility",
+          "status": "PASS"
+        },
+        {
+          "case": "credential DAV acceptance and web/API denial",
+          "status": "PASS"
+        },
+        {
+          "case": "one-time secret disappears after reload",
+          "status": "PASS"
+        },
+        {
+          "case": "revoke credential and next DAV denial",
+          "status": "PASS"
+        },
+        {
+          "case": "last usable identity unlink rejected",
+          "status": "PASS"
+        },
+        {
+          "case": "local MFA enrollment through pinned UI",
+          "status": "PASS"
+        },
+        {
+          "case": "MFA wrong code and native keyboard",
+          "status": "PASS"
+        },
+        {
+          "case": "real provider then local TOTP session continuity",
+          "status": "PASS"
+        },
+        {
+          "case": "real provider and recovery code completion",
+          "status": "PASS"
+        },
+        {
+          "case": "fresh provider authentication plus MFA returns Security",
+          "status": "FAIL",
+          "reason": "Error",
+          "path": "/users/log-in"
+        },
+        {
+          "case": "pending local MFA denies browser GET dashboard",
+          "status": "PASS"
+        },
+        {
+          "case": "normal sign-in recovery after fresh-auth rejection",
+          "status": "PASS"
+        },
+        {
+          "case": "Create action touch size and keyboard occlusion",
+          "status": "PASS"
+        },
+        {
+          "case": "Copy control success or actionable fallback",
+          "status": "PASS"
+        },
+        {
+          "case": "native selectable one-time value copy fallback",
+          "status": "FAIL",
+          "reason": "assertion",
+          "path": "/settings/contact-sync/new"
+        },
+        {
+          "case": "one-time reveal disappears after full-origin navigation and Back",
+          "status": "PASS"
+        }
+      ]
+    },
+    "fixture-password-true": {
+      "mode": {
+        "password": "true",
+        "database_suffix": "fixture"
+      },
+      "results": [
+        {
+          "case": "fixture signed provider setup and Android cancellation",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture wrong TOTP rejection",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture pending MFA denies protected browser fetch",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture provider callback and TOTP completion",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture recovery code consumption",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture native Settings selector and Back",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture fresh provider max_age prompt plus MFA returns Security",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture native keyboard and credential creation",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture DAV and password policy probes",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture independently named peer credential",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture reload hides and revocation denies next request",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture stale auth_time signed token fails closed",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture fresh provider plus local MFA recovers sensitive access",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture explicit link after password and local MFA",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture unlink confirmation and relink with MFA",
+          "status": "PASS"
+        }
+      ]
+    },
+    "fixture-password-false": {
+      "mode": {
+        "password": "false",
+        "database_suffix": "fixture"
+      },
+      "results": [
+        {
+          "case": "fixture signed provider setup and Android cancellation",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture wrong TOTP rejection",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture pending MFA denies protected browser fetch",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture provider callback and TOTP completion",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture recovery code consumption",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture native Settings selector and Back",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture fresh provider max_age prompt plus MFA returns Security",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture native keyboard and credential creation",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture DAV and password policy probes",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture independently named peer credential",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture reload hides and revocation denies next request",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture stale auth_time signed token fails closed",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture fresh provider plus local MFA recovers sensitive access",
+          "status": "PASS"
+        },
+        {
+          "case": "fixture passwordless last-method unlink rejection",
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "restoration": {
+    "providerCookieCount": 4,
+    "providerCookiesUnchanged": true,
+    "originalStandardTabPreserved": true,
+    "ownStandardTestTabClosed": true,
+    "chromeStillRunning": true,
+    "bindingReleased": true,
+    "originalAospImeRestored": true,
+    "clipboard": "Native Copy-current-public-URL action issued; clipboard contents and original value unavailable through supported CLI"
+  },
+  "not_run": [
+    "External hardware keyboard/Tab traversal: no external keyboard available and pinned CLI has no Tab injection.",
+    "Independent clipboard-content verification: supported CLI reports UNSUPPORTED_OPERATION.",
+    "Live-provider explicit identity switching/link/unlink beyond last-method guard: preserved the existing provider session for delayed/repeated investigation; fixture enabled link/unlink/relink was executed.",
+    "Original scripts/android/oidc-chrome.mjs entry point: unmodified Playwright UI actions conflict with pinned-CLI-only UI requirement; equivalent/expanded actual-device checks used the private pinned adapters.",
+    "Second-policy live issuer-visible cancellation: NOT RUN while preserving the remembered provider session."
+  ]
+}

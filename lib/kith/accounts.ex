@@ -10,12 +10,13 @@ defmodule Kith.Accounts do
   alias Kith.Workers.AccountResetWorker
   alias Kith.Workers.DisplayNameRecomputeWorker
 
+  alias Kith.Accounts.OIDC
+
   alias Kith.Accounts.{
     Account,
     AccountInvitation,
     CoseKey,
     User,
-    UserIdentity,
     UserNotifier,
     UserRecoveryCode,
     UserToken,
@@ -455,24 +456,41 @@ defmodule Kith.Accounts do
   Stores the encrypted secret, sets totp_enabled to true, and generates
   recovery codes. Returns `{:ok, user, raw_recovery_codes}` or `{:error, reason}`.
   """
-  def enable_totp(user, secret, code) do
-    if valid_totp_code?(secret, code) do
-      do_enable_totp(user, secret)
-    else
-      {:error, :invalid_code}
+  def enable_totp(user, secret, code, session \\ :without_session) do
+    with :ok <- KithWeb.Authentication.require_recent(user) do
+      if valid_totp_code?(secret, code),
+        do: do_enable_totp(user, secret, session),
+        else: {:error, :invalid_code}
     end
   end
 
-  defp do_enable_totp(user, secret) do
+  defp do_enable_totp(user, secret, session) do
     Repo.transact(fn ->
       changeset = Ecto.Changeset.change(user, %{totp_secret: secret, totp_enabled: true})
 
       with {:ok, user} <- Repo.update(changeset),
+           :ok <- record_enrollment(user, session),
            raw_codes <- generate_recovery_codes(user) do
         {:ok, {user, raw_codes}}
       end
     end)
   end
+
+  defp record_enrollment(_user, :without_session), do: :ok
+
+  defp record_enrollment(user, token) when is_binary(token) do
+    query =
+      from(t in UserToken,
+        where: t.user_id == ^user.id and t.context == "session" and t.token == ^token
+      )
+
+    case Repo.update_all(query, set: [mfa_authenticated_at: DateTime.utc_now(:second)]) do
+      {1, _} -> :ok
+      _ -> {:error, :reauthentication_required}
+    end
+  end
+
+  defp record_enrollment(_, _), do: {:error, :reauthentication_required}
 
   @doc """
   Disables TOTP for a user. Clears secret and deletes all recovery codes.
@@ -634,30 +652,15 @@ defmodule Kith.Accounts do
   Deletes a WebAuthn credential, with safety check.
 
   Returns `{:error, :last_credential}` if removing would leave the user with
-  no login method (no password and no other WebAuthn credentials and no OAuth).
+  no login method (no password and no other WebAuthn credentials and no configured OIDC identity).
   """
   def delete_webauthn_credential(user, credential_id) do
-    case get_webauthn_credential(user, credential_id) do
-      nil ->
-        {:error, :not_found}
-
-      credential ->
-        other_cred_count =
-          Repo.aggregate(
-            from(wc in WebauthnCredential,
-              where: wc.user_id == ^user.id and wc.id != ^credential.id
-            ),
-            :count
-          )
-
-        has_password = is_binary(user.hashed_password) and user.hashed_password != ""
-
-        if other_cred_count == 0 and not has_password do
-          {:error, :last_credential}
-        else
-          Repo.delete(credential)
-        end
-    end
+    OIDC.delete_login_method(
+      user,
+      WebauthnCredential,
+      credential_id,
+      :last_credential
+    )
   end
 
   @doc """
@@ -671,201 +674,10 @@ defmodule Kith.Accounts do
 
   @doc """
   Checks if the user has any login method remaining
-  (password, WebAuthn credentials, or OAuth links).
+  (password, WebAuthn credentials, or configured OIDC links).
   """
   def has_login_method?(user) do
-    has_password = is_binary(user.hashed_password) and user.hashed_password != ""
-
-    webauthn_count =
-      Repo.aggregate(
-        from(wc in WebauthnCredential, where: wc.user_id == ^user.id),
-        :count
-      )
-
-    oauth_count =
-      Repo.aggregate(
-        from(ui in UserIdentity, where: ui.user_id == ^user.id),
-        :count
-      )
-
-    has_password or webauthn_count > 0 or oauth_count > 0
-  end
-
-  ## OAuth Identities
-
-  @doc """
-  Returns the configured OAuth providers.
-  """
-  def oauth_providers do
-    Application.get_env(:kith, :oauth_providers, %{})
-  end
-
-  @doc """
-  Returns the assent strategy config for a provider.
-  """
-  def oauth_provider_config(provider) when is_binary(provider) do
-    case Map.get(oauth_providers(), provider) do
-      nil -> {:error, :unknown_provider}
-      config -> {:ok, config}
-    end
-  end
-
-  @doc """
-  Finds a UserIdentity by provider and uid.
-  """
-  def get_identity_by_provider_uid(provider, uid) do
-    Repo.get_by(UserIdentity, provider: provider, uid: uid)
-    |> case do
-      nil -> nil
-      identity -> Repo.preload(identity, user: :account)
-    end
-  end
-
-  @doc """
-  Lists all OAuth identities for a user.
-  """
-  def list_user_identities(user) do
-    from(ui in UserIdentity, where: ui.user_id == ^user.id)
-    |> Repo.all()
-  end
-
-  @doc """
-  Creates or updates a UserIdentity from an OAuth callback.
-
-  If an identity with the same provider+uid exists, updates tokens.
-  Otherwise creates a new identity linked to the given user.
-  """
-  def upsert_identity(user, provider, uid, token_attrs) do
-    case get_identity_by_provider_uid(provider, uid) do
-      nil ->
-        attrs =
-          Map.merge(token_attrs, %{
-            provider: provider,
-            uid: uid,
-            user_id: user.id
-          })
-
-        %UserIdentity{}
-        |> UserIdentity.changeset(attrs)
-        |> Repo.insert()
-
-      existing ->
-        existing
-        |> UserIdentity.update_tokens_changeset(token_attrs)
-        |> Repo.update()
-    end
-  end
-
-  @doc """
-  Registers a new user via OAuth. Creates Account + User + UserIdentity atomically.
-
-  The user is auto-confirmed since the OAuth provider verified the email.
-  """
-  def register_oauth_user(provider, uid, user_info, token_attrs) do
-    email = user_info["email"]
-
-    account_name = user_info["name"] || email_to_account_name(email)
-
-    Ecto.Multi.new()
-    |> Ecto.Multi.insert(
-      :account,
-      Account.registration_changeset(%Account{}, %{name: account_name})
-    )
-    |> Ecto.Multi.insert(:user, fn %{account: account} ->
-      # OAuth users get a random password (they log in via OAuth, not password)
-      random_password = :crypto.strong_rand_bytes(32) |> Base.encode64()
-
-      %User{account_id: account.id}
-      |> User.registration_changeset(%{email: email, password: random_password})
-      |> Ecto.Changeset.put_change(:role, "admin")
-      |> Ecto.Changeset.put_change(:confirmed_at, DateTime.utc_now(:second))
-      |> Ecto.Changeset.put_change(
-        :display_name,
-        user_info["name"] || user_info["preferred_username"]
-      )
-    end)
-    |> Ecto.Multi.insert(:identity, fn %{user: user} ->
-      UserIdentity.changeset(%UserIdentity{}, %{
-        user_id: user.id,
-        provider: provider,
-        uid: uid,
-        access_token: token_attrs[:access_token],
-        refresh_token: token_attrs[:refresh_token],
-        expires_at: token_attrs[:expires_at]
-      })
-    end)
-    |> Ecto.Multi.run(:reminder_rules, fn _repo, %{account: account} ->
-      {count, _} = Kith.Reminders.seed_default_rules(account.id)
-      {:ok, count}
-    end)
-    |> Repo.transaction()
-    |> case do
-      {:ok, %{user: user, account: account}} ->
-        {:ok, %{user | account: account}}
-
-      {:error, :user, changeset, _} ->
-        {:error, changeset}
-
-      {:error, :account, changeset, _} ->
-        {:error, changeset}
-
-      {:error, :identity, changeset, _} ->
-        {:error, changeset}
-    end
-  end
-
-  @doc """
-  Deletes an OAuth identity. Returns error if it would leave user with no login method.
-  """
-  def delete_identity(user, identity_id) do
-    case Repo.get_by(UserIdentity, id: identity_id, user_id: user.id) do
-      nil ->
-        {:error, :not_found}
-
-      identity ->
-        # Check if user would still have a login method
-        other_identity_count =
-          Repo.aggregate(
-            from(ui in UserIdentity, where: ui.user_id == ^user.id and ui.id != ^identity.id),
-            :count
-          )
-
-        has_password = is_binary(user.hashed_password) and user.hashed_password != ""
-
-        webauthn_count =
-          Repo.aggregate(
-            from(wc in WebauthnCredential, where: wc.user_id == ^user.id),
-            :count
-          )
-
-        if has_password or other_identity_count > 0 or webauthn_count > 0 do
-          Repo.delete(identity)
-        else
-          {:error, :last_login_method}
-        end
-    end
-  end
-
-  @doc """
-  Extracts token attributes from an assent callback result.
-  """
-  def extract_token_attrs(token_map) do
-    expires_at =
-      case token_map["expires_in"] do
-        seconds when is_integer(seconds) ->
-          DateTime.utc_now() |> DateTime.add(seconds, :second) |> DateTime.truncate(:second)
-
-        _ ->
-          nil
-      end
-
-    %{
-      access_token: token_map["access_token"],
-      access_token_secret: token_map["access_token_secret"],
-      refresh_token: token_map["refresh_token"],
-      token_url: token_map["token_url"],
-      expires_at: expires_at
-    }
+    user |> then(&Repo.get!(User, &1.id)) |> OIDC.usable_login_method?()
   end
 
   ## Account CRUD

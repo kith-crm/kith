@@ -17,7 +17,9 @@ defmodule Kith.MixProject do
         ~r"^test/fixtures/rate_limiter_redis/probe\.ex$",
         ~r"^test/playwright/seed\.exs$",
         ~r"^test/playwright/fixtures/regressions/(?:boot|control|server)\.exs$",
-        ~r"^test/playwright/fixtures/s3/seed\.exs$"
+        ~r"^test/playwright/fixtures/s3/seed\.exs$",
+        ~r"^test/playwright/fixtures/oidc/(?:boot|control|server)\.exs$",
+        ~r"^test/playwright/carddav_seed\.exs$"
       ],
       listeners: [Phoenix.CodeReloader]
     ]

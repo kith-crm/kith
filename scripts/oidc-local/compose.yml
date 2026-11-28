@@ -1,0 +1,60 @@
+name: ${COMPOSE_PROJECT_NAME:?owned project required}
+x-owner: &owner
+  io.kith.test.run: ${KITH_RUN_ID:?run required}
+  io.kith.test.worktree: ${KITH_WORKTREE:?worktree required}
+x-auth: &auth
+  labels: *owner
+  image: ghcr.io/goauthentik/server:2026.8.5@sha256:602227a86455d6772e3d16b7d852713c4f864f40df5df894abd1285bb53979a5
+  env_file: ../../.oidc-local/runtime.env
+  environment:
+    AUTHENTIK_POSTGRESQL__HOST: postgresql
+    AUTHENTIK_POSTGRESQL__NAME: authentik
+    AUTHENTIK_POSTGRESQL__USER: authentik
+    AUTHENTIK_ERROR_REPORTING__ENABLED: 'false'
+    AUTHENTIK_DISABLE_UPDATE_CHECK: 'true'
+    AUTHENTIK_LOG_LEVEL: error
+  depends_on:
+    postgresql:
+      condition: service_healthy
+  volumes:
+    - type: volume
+      source: authentik-data
+      target: /data
+      volume:
+        nocopy: true
+    - ../../.oidc-local:/run/kith-test:ro
+  extra_hosts:
+    - 'authentik.test:host-gateway'
+services:
+  postgresql:
+    labels: *owner
+    image: postgres:16-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139
+    env_file: ../../.oidc-local/runtime.env
+    environment:
+      POSTGRES_USER: authentik
+      POSTGRES_DB: authentik
+    ports: ['127.0.0.1:15449:5432']
+    volumes: ['database:/var/lib/postgresql/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U authentik -d authentik']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+  server:
+    <<: *auth
+    command: server
+    ports: ['127.0.0.1:19049:9000']
+    shm_size: 128mb
+  worker:
+    <<: *auth
+    command: worker
+    shm_size: 128mb
+volumes:
+  database:
+    labels: *owner
+  authentik-data:
+    labels: *owner
+
+networks:
+  default:
+    labels: *owner

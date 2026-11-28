@@ -42,7 +42,7 @@
 | 13 | Immich Integration | Read-only; conservative exact-name auto-suggest; user confirms every link |
 | 14 | Data Export | vCard (.vcf), JSON |
 | 15 | Data Import | vCard — creates new contacts only; no upsert; no duplicate detection |
-| 16 | Authentication | Email/password, TOTP 2FA, social OAuth (PKCE), WebAuthn, recovery codes |
+| 16 | Authentication | Email/password, TOTP 2FA, generic OpenID Connect (PKCE), WebAuthn, recovery codes |
 | 17 | Account Settings | Timezone, locale, send hour, custom genders, relationship types |
 | 18 | Upcoming Reminders View | Top-level nav; 30/60/90-day window; all roles |
 | 19 | Audit Log | Contact created/edited/archived/deleted; reminder fired; filterable |
@@ -237,7 +237,7 @@ category display. CalDAV remains unimplemented on the roadmap.
 | Standard login | Email + password (Bcrypt via `phx_gen_auth`) |
 | Two-Factor Auth (TOTP) | Google Authenticator via `pot` library |
 | Passwordless / WebAuthn | FIDO2/U2F via `wax` library |
-| Social OAuth (login) | `assent` library (GitHub, Google, etc.) with PKCE |
+| OpenID Connect (login) | `assent` with a configured issuer and S256 PKCE |
 | API Bearer tokens | `phx_gen_auth`-issued tokens; no separate OAuth2 server in v1 |
 | Recovery codes | 2FA backup codes |
 | Email verification | Required on signup (configurable) |
@@ -505,7 +505,7 @@ Alpine.js handles **UI chrome only**: dropdown menus, tooltips, clipboard, keybo
 | Framework | Phoenix 1.7+ | Web + LiveView + REST API |
 | Database | PostgreSQL 15+ | Ecto ORM; Oban queue |
 | ORM | Ecto | Schema, migrations, queryable |
-| Auth | `phx_gen_auth` + `assent` | Base auth + social OAuth (PKCE) |
+| Auth | `phx_gen_auth` + `assent` | Base auth + generic OpenID Connect (PKCE) |
 | 2FA / TOTP | `pot` | TOTP library |
 | WebAuthn | `wax` | FIDO2/U2F |
 | API | Phoenix REST controllers | JSON serializers; no GraphQL in v1 |

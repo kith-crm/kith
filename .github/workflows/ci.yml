@@ -10,6 +10,8 @@ env:
   MIX_ENV: test
   ELIXIR_VERSION: "1.19.5"
   OTP_VERSION: "28.5"
+  # Erlang JIT requires single-mapped memory on the local x86 runner under ARM emulation.
+  ERL_FLAGS: "+S 4:4 +JMsingle true"
   DB_PORT: "5432"
 
 jobs:
@@ -115,10 +117,11 @@ jobs:
 
   browser-regressions:
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 20
+    # Includes four sequential OIDC policy modes on the emulated local runner.
+    timeout-minutes: 45
     env:
       MIX_TEST_PARTITION: browser_regressions
-      ERL_FLAGS: "+S 4:4"
+      ERL_FLAGS: "+S 4:4 +JMsingle true"
     services:
       postgres:
         # CI-only local socket trust; host connections require the password.
@@ -164,6 +167,8 @@ jobs:
       - run: mix assets.setup && mix assets.vendor && mix assets.build
       - name: Run deterministic browser regressions
         run: npm run test:regressions
+      - name: Run distinct-site HTTPS OIDC and DAV browser journeys
+        run: bash test/playwright/fixtures/oidc/run.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2; Node24 action runtime
         if: always()
         with:
@@ -171,6 +176,7 @@ jobs:
           path: |
             test-results/
             tmp/browser-regressions/
+            tmp/oidc-browser/
           retention-days: 7
 
   dialyzer:
@@ -240,6 +246,9 @@ jobs:
 
       - name: Verify image starts
         run: docker run --rm kith:ci version
+
+      - name: Verify runtime JIT memory protection
+        run: bash scripts/ci/jit-memory-check.sh kith:ci
 
       - name: Verify non-root user
         run: |

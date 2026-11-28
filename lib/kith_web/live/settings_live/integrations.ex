@@ -26,8 +26,7 @@ defmodule KithWeb.SettingsLive.Integrations do
      |> assign(:immich_contacts_scanned, 0)
      |> assign(:immich_matches_found, 0)
      |> assign(:test_result, nil)
-     |> assign(:saving, false)
-     |> assign(:carddav_url, KithWeb.Endpoint.url() <> "/dav/principals/")}
+     |> assign(:saving, false)}
   end
 
   @impl true
@@ -291,138 +290,11 @@ defmodule KithWeb.SettingsLive.Integrations do
           </div>
         </div>
 
-        <%!-- CardDAV Section --%>
-        <div class="mt-8 bg-[var(--color-surface-elevated)] border border-[var(--color-border)] rounded-[var(--radius-lg)] p-6">
-          <h2 class="text-lg font-semibold mb-1">CardDAV Contact Sync</h2>
-          <p class="text-sm text-[var(--color-text-tertiary)] mb-4">
-            Sync your Kith contacts with any CardDAV-compatible app. CardDAV is always enabled.
-          </p>
-
-          <div class="space-y-3">
-            <div>
-              <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
-                Server URL
-              </label>
-              <div
-                x-data="copyText"
-                data-copy-value={@carddav_url}
-                class="flex flex-wrap items-center gap-2"
-              >
-                <input
-                  id="carddav-url"
-                  type="text"
-                  value={@carddav_url}
-                  readonly
-                  class="flex-1 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-sunken)] px-3 py-2 text-sm text-[var(--color-text-primary)] font-mono select-all"
-                />
-                <button
-                  type="button"
-                  x-on:click="copy"
-                  class="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] px-3 py-2 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors duration-150"
-                >
-                  <span x-show="!copied">
-                    <.icon name="hero-clipboard" class="size-4" /> Copy
-                  </span>
-                  <span x-show="copied" x-cloak>
-                    <.icon name="hero-check" class="size-4 text-[var(--color-success)]" /> Copied!
-                  </span>
-                </button>
-                <p
-                  x-show="copyFailed"
-                  x-cloak
-                  role="status"
-                  aria-live="polite"
-                  class="w-full text-sm text-[var(--color-text-secondary)]"
-                >
-                  Could not copy automatically. Select the URL and copy it manually.
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
-                Username
-              </label>
-              <p class="text-sm text-[var(--color-text-secondary)] font-mono">
-                {@current_scope.user.email}
-              </p>
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
-                Password
-              </label>
-              <p class="text-sm text-[var(--color-text-tertiary)]">
-                Use your Kith account password
-              </p>
-            </div>
-          </div>
-
-          <%!-- Client setup instructions --%>
-          <div class="mt-6 pt-4 border-t border-[var(--color-border)]">
-            <h3 class="text-sm font-semibold text-[var(--color-text-primary)] mb-3">
-              Setup Instructions
-            </h3>
-
-            <details class="group mb-2">
-              <summary class="flex items-center gap-2 cursor-pointer text-sm font-medium text-[var(--color-text-primary)] hover:text-[var(--color-accent)] py-1.5">
-                <.icon
-                  name="hero-chevron-right"
-                  class="size-4 text-[var(--color-text-tertiary)] transition-transform duration-150 group-open:rotate-90"
-                /> Apple Contacts (macOS / iOS)
-              </summary>
-              <div class="ml-6 mt-1 text-sm text-[var(--color-text-secondary)] space-y-1">
-                <p>
-                  <strong>macOS:</strong>
-                  System Settings &rarr; Internet Accounts &rarr; Add Other Account &rarr; CardDAV account
-                </p>
-                <p>
-                  <strong>iOS:</strong>
-                  Settings &rarr; Contacts &rarr; Accounts &rarr; Add Account &rarr; Other &rarr; Add CardDAV Account
-                </p>
-                <p class="text-[var(--color-text-tertiary)]">
-                  Enter the server URL, your email, and password when prompted.
-                </p>
-              </div>
-            </details>
-
-            <details class="group mb-2">
-              <summary class="flex items-center gap-2 cursor-pointer text-sm font-medium text-[var(--color-text-primary)] hover:text-[var(--color-accent)] py-1.5">
-                <.icon
-                  name="hero-chevron-right"
-                  class="size-4 text-[var(--color-text-tertiary)] transition-transform duration-150 group-open:rotate-90"
-                /> DAVx5 (Android)
-              </summary>
-              <div class="ml-6 mt-1 text-sm text-[var(--color-text-secondary)] space-y-1">
-                <p>Install <strong>DAVx5</strong> from the Play Store or F-Droid.</p>
-                <p>Add account &rarr; Login with URL &rarr; paste the server URL above.</p>
-                <p class="text-[var(--color-text-tertiary)]">
-                  Enter your email and password when prompted.
-                </p>
-              </div>
-            </details>
-
-            <details class="group">
-              <summary class="flex items-center gap-2 cursor-pointer text-sm font-medium text-[var(--color-text-primary)] hover:text-[var(--color-accent)] py-1.5">
-                <.icon
-                  name="hero-chevron-right"
-                  class="size-4 text-[var(--color-text-tertiary)] transition-transform duration-150 group-open:rotate-90"
-                /> Thunderbird
-              </summary>
-              <div class="ml-6 mt-1 text-sm text-[var(--color-text-secondary)] space-y-1">
-                <p>
-                  Install the <strong>CardBook</strong>
-                  add-on, or use <strong>TbSync</strong>
-                  with the CalDAV &amp; CardDAV provider.
-                </p>
-                <p>Add a new CardDAV address book with the server URL above.</p>
-                <p class="text-[var(--color-text-tertiary)]">
-                  Enter your email and password when prompted.
-                </p>
-              </div>
-            </details>
-          </div>
-        </div>
+        <UI.card class="mt-8">
+          <:header>CardDAV Contact Sync</:header>
+          <.link navigate={~p"/settings/contact-sync"} class="text-[var(--color-accent)]">Contact sync</.link>
+          <p>Manage your personal app passwords and client setup instructions.</p>
+        </UI.card>
       </.settings_shell>
     </Layouts.app>
     """

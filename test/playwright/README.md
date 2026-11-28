@@ -181,3 +181,36 @@ test/playwright/
 | ExUnit (`mix test`) | ExUnit | Unit + integration | Ecto sandbox |
 | Smoke (`e2e/`) | Playwright | Unauthenticated pages | None (stateless) |
 | **E2E** (`test/playwright/`) | Playwright | Full user flows | Per-user registration |
+
+## OIDC and personal DAV credentials
+
+Run `bash test/playwright/fixtures/oidc/run.sh` for the mandatory, isolated HTTPS
+journeys. See [the fixture runbook](fixtures/oidc/README.md) for the four policy
+instances, runner-local certificate trust, safe artifacts and owned teardown.
+The `oidc` project is separate from ordinary `e2e`: calling its specs without the
+runner fails instead of silently skipping. It follows real provider redirects
+between distinct sites and checks the Lax binding and Strict session boundaries,
+local MFA, signup/link/reauth and credential lifecycle. Phone widths are viewport
+simulation; Android Chrome/DAVx5 and a live Authentik provider are not claimed.
+The ordinary regression runner also includes Settings and credential-copy specs.
+
+For actual devices run `node scripts/android/oidc-chrome.mjs` after preparing the
+[Android prerequisites](../../docs/design/oidc-android-validation.md). It requires
+exactly one authorized device and preinstalled driver, trusted distinct HTTPS
+sites and protected fixture controls; missing infrastructure fails. The automated
+subset does not certify native keyboard/copy behavior, DAVx5 or live Authentik.
+See the [outstanding acceptance matrix](../../docs/design/oidc-validation/task-10-acceptance.md).
+
+
+## Whole-feature release acceptance
+
+The [OIDC acceptance map](../../docs/design/oidc-validation/acceptance.md) maps
+protocol, policy, settings, MFA and DAV evidence to source/tests and review results.
+Run `bash test/playwright/fixtures/oidc/run.sh` for the four distinct-site policy
+modes, and `npm run test:regressions` for existing regressions. These runners own
+isolated databases and ports; do not use shared DB resets. Preserve a failing batch
+result even when focused rechecks pass. Do not retain traces, storage states, callback
+queries or revealed credentials. Only setup/revoked-state screenshots are safe.
+Actual Android/DAVx5 and live Authentik runs have separate prerequisites and remain
+NOT RUN until the [device acceptance record](../../docs/design/oidc-validation/task-10-acceptance.md)
+contains actual results. Final independent whole-branch review is also a release gate.

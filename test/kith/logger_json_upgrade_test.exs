@@ -87,7 +87,7 @@ defmodule Kith.LoggerJSONUpgradeTest do
         reason: %{
           account: %Kith.Accounts.Account{immich_api_key: "private-immich"},
           import: %Kith.Imports.Import{api_key_encrypted: "private-import"},
-          identity: %Kith.Accounts.UserIdentity{access_token_secret: "private-oauth"},
+          identity: %{access_token_secret: "private-oauth"},
           user: %Kith.Accounts.User{hashed_password: "private-password-hash"},
           recovery: %Kith.Accounts.UserRecoveryCode{hashed_code: "private-recovery"},
           invitation: %Kith.Accounts.AccountInvitation{token_hash: "private-invitation"}

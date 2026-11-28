@@ -1,6 +1,6 @@
 # ADR-003: PKCE OAuth via Assent
 
-**Status:** Accepted
+**Status:** Superseded for dedicated provider login by the [generic OIDC decision](../superpowers/specs/2026-11-09-oidc-dav-app-passwords-design.md). Assent and S256 PKCE remain in use.
 **Date:** 2026-03-17
 
 ## Context

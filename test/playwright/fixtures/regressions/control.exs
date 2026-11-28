@@ -15,7 +15,13 @@ defmodule Kith.RegressionControl do
     case args["scenario"] do
       "totp" ->
         secret = Accounts.generate_totp_secret()
-        {:ok, {_user, recovery_codes}} = Accounts.enable_totp(user, secret, :pot.totp(secret))
+
+        {:ok, {_user, recovery_codes}} =
+          Accounts.enable_totp(
+            %{user | authenticated_at: DateTime.utc_now(:second)},
+            secret,
+            :pot.totp(secret)
+          )
 
         Map.merge(base, %{
           secret_hex: secret |> Base.decode32!(padding: false) |> Base.encode16(case: :lower),

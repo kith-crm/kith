@@ -5,92 +5,126 @@ defmodule KithWeb.SettingsLive.SettingsLayout do
 
   use KithWeb, :html
 
+  @doc "Settings destinations shared by the sidebar and mobile selector."
+  def destinations(scope) do
+    admin? = authorized?(scope.user, :manage, :account)
+
+    [
+      %{
+        label: "Personal",
+        items: [
+          %{path: "/users/settings", label: "Profile", icon: "hero-user"},
+          %{path: "/settings/security", label: "Security", icon: "hero-shield-check"},
+          %{path: "/settings/contact-sync", label: "Contact sync", icon: "hero-arrow-path"}
+        ]
+      },
+      %{
+        label: "Workspace",
+        items: [
+          %{
+            path: "/settings/account",
+            label: "Account",
+            icon: "hero-building-office",
+            admin: true
+          },
+          %{path: "/settings/tags", label: "Tags", icon: "hero-tag"},
+          %{path: "/settings/emotions", label: "Emotions", icon: "hero-face-smile"},
+          %{
+            path: "/settings/activity-types",
+            label: "Activity Types",
+            icon: "hero-rectangle-group"
+          },
+          %{path: "/settings/life-event-types", label: "Life Event Types", icon: "hero-star"},
+          %{
+            path: "/settings/integrations",
+            label: "Integrations",
+            icon: "hero-puzzle-piece",
+            admin: true
+          }
+        ]
+      },
+      %{
+        label: "Data",
+        items: [
+          %{
+            path: "/settings/import",
+            label: "Import",
+            icon: "hero-arrow-up-tray",
+            permission: {:create, :import}
+          },
+          %{path: "/settings/imports", label: "Import History", icon: "hero-clock"},
+          %{path: "/settings/export", label: "Export", icon: "hero-arrow-down-tray"},
+          %{
+            path: "/settings/audit-log",
+            label: "Audit Log",
+            icon: "hero-clipboard-document-list",
+            admin: true
+          }
+        ]
+      }
+    ]
+    |> Enum.map(fn group ->
+      %{
+        group
+        | items:
+            Enum.filter(group.items, fn item ->
+              allowed = admin? or !Map.get(item, :admin, false)
+
+              case Map.get(item, :permission) do
+                {action, resource} -> allowed and authorized?(scope.user, action, resource)
+                nil -> allowed
+              end
+            end)
+      }
+    end)
+    |> Enum.reject(&(&1.items == []))
+  end
+
   attr :current_path, :string, required: true
   attr :current_scope, :map, required: true
   slot :inner_block, required: true
 
   def settings_shell(assigns) do
+    assigns = assign(assigns, :groups, destinations(assigns.current_scope))
+
     ~H"""
     <div class="flex flex-col md:flex-row gap-8">
-      <%!-- Settings sidebar --%>
-      <nav class="w-full md:w-56 shrink-0">
-        <ul class="space-y-0.5">
-          <.settings_nav_item
-            path={~p"/users/settings"}
-            current_path={@current_path}
-            icon="hero-user"
-            label="Profile"
-          />
-          <%= if authorized?(@current_scope.user, :manage, :account) do %>
+      <div class="md:hidden">
+        <label for="settings-destination" class="block mb-2 text-sm font-medium">Settings</label>
+        <select
+          id="settings-destination"
+          phx-hook="SettingsNavigation"
+          disabled
+          class="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] px-3 py-2"
+        >
+          <optgroup :for={group <- @groups} label={group.label}>
+            <option
+              :for={item <- group.items}
+              value={item.path}
+              data-allowed="true"
+              selected={current?(@current_path, item.path)}
+            >
+              {item.label}
+            </option>
+          </optgroup>
+        </select>
+      </div>
+      <nav aria-label="Settings sections" class="hidden md:block w-56 shrink-0 space-y-6">
+        <div :for={group <- @groups}>
+          <h2 class="px-3 mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-tertiary)]">
+            {group.label}
+          </h2>
+          <ul class="space-y-0.5">
             <.settings_nav_item
-              path={~p"/settings/account"}
+              :for={item <- group.items}
+              path={item.path}
               current_path={@current_path}
-              icon="hero-building-office"
-              label="Account"
+              icon={item.icon}
+              label={item.label}
             />
-          <% end %>
-          <.settings_nav_item
-            path={~p"/settings/tags"}
-            current_path={@current_path}
-            icon="hero-tag"
-            label="Tags"
-          />
-          <.settings_nav_item
-            path={~p"/settings/emotions"}
-            current_path={@current_path}
-            icon="hero-face-smile"
-            label="Emotions"
-          />
-          <.settings_nav_item
-            path={~p"/settings/activity-types"}
-            current_path={@current_path}
-            icon="hero-rectangle-group"
-            label="Activity Types"
-          />
-          <.settings_nav_item
-            path={~p"/settings/life-event-types"}
-            current_path={@current_path}
-            icon="hero-star"
-            label="Life Event Types"
-          />
-          <%= if authorized?(@current_scope.user, :manage, :account) do %>
-            <.settings_nav_item
-              path={~p"/settings/integrations"}
-              current_path={@current_path}
-              icon="hero-puzzle-piece"
-              label="Integrations"
-            />
-          <% end %>
-          <.settings_nav_item
-            path={~p"/settings/import"}
-            current_path={@current_path}
-            icon="hero-arrow-up-tray"
-            label="Import"
-          />
-          <.settings_nav_item
-            path={~p"/settings/imports"}
-            current_path={@current_path}
-            icon="hero-clock"
-            label="Import History"
-          />
-          <.settings_nav_item
-            path={~p"/settings/export"}
-            current_path={@current_path}
-            icon="hero-arrow-down-tray"
-            label="Export"
-          />
-          <%= if authorized?(@current_scope.user, :manage, :account) do %>
-            <.settings_nav_item
-              path={~p"/settings/audit-log"}
-              current_path={@current_path}
-              icon="hero-clipboard-document-list"
-              label="Audit Log"
-            />
-          <% end %>
-        </ul>
+          </ul>
+        </div>
       </nav>
-
-      <%!-- Settings content --%>
       <div class="flex-1 min-w-0">
         {render_slot(@inner_block)}
       </div>
@@ -98,13 +132,16 @@ defmodule KithWeb.SettingsLive.SettingsLayout do
     """
   end
 
+  defp current?(current_path, path),
+    do: current_path == path or String.starts_with?(current_path, path <> "/")
+
   attr :path, :string, required: true
   attr :current_path, :string, required: true
   attr :icon, :string, required: true
   attr :label, :string, required: true
 
   defp settings_nav_item(assigns) do
-    active = assigns.current_path == assigns.path
+    active = current?(assigns.current_path, assigns.path)
     assigns = assign(assigns, :active, active)
 
     ~H"""
