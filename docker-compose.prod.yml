@@ -47,7 +47,7 @@ services:
     # No exposed ports — internal network only
 
   # ---------------------------------------------------------------------------
-  # Migrate — one-shot service that runs Ecto migrations then exits
+  # Migrate — one-shot service that runs Ecto migrations and data migrations
   # ---------------------------------------------------------------------------
   migrate:
     image: kith:latest

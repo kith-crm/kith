@@ -8,10 +8,10 @@ defmodule KithWeb.ContactLive.Show do
   alias Kith.AuditLogs
   alias Kith.Contacts
   alias Kith.Contacts.Write
-  alias KithWeb.ContactUploads
   alias Kith.DuplicateDetection
   alias Kith.Repo
   alias Kith.Storage
+  alias KithWeb.ContactUploads
 
   @impl true
   def mount(_params, _session, socket) do

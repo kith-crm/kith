@@ -121,10 +121,11 @@ added. Existing hashes, tokens, legacy social identities and DAV data are preser
 no identity or credential backfill is performed. Old sessions have no manufactured
 recent-MFA evidence and must reauthenticate for sensitive operations.
 
-The runtime no longer reads or writes `user_identities`. Normal release migrations
-leave it available during the rolling upgrade. After the last old instance exits,
-follow the account inventory, alternate sign-in verification and separately authorized
-[table retirement procedure](../../README.md#retiring-legacy-social-login).
+The runtime no longer reads or writes `user_identities`. The release migration
+command runs regular Ecto migrations, then applies pending migrations from
+`priv/repo/data_migrations`. That directory drops the legacy table once per
+database. Back up the database before deploying, and retire old application
+instances as part of the upgrade.
 
 The reverse of `20261109195100_allow_oidc_passwordless_users.exs` restores NOT NULL
 and **fails while any OIDC-only user has a NULL password hash**. This is an expected

@@ -942,32 +942,36 @@ defmodule Kith.Contacts do
 
     case Repo.get_by(originals, content_hash: hash) do
       nil ->
-        originals
-        |> where([p], is_nil(p.content_hash) and p.file_size == ^byte_size(bytes))
-        |> order_by([p], asc: p.id)
-        |> Repo.all()
-        |> Enum.reduce_while({:ok, nil}, fn photo, acc ->
-          case Storage.read(photo.storage_key) do
-            {:ok, ^bytes} ->
-              {:halt, photo |> Ecto.Changeset.change(content_hash: hash) |> Repo.update()}
-
-            {:ok, _other_bytes} ->
-              {:cont, acc}
-
-            {:error, reason} when reason in [:not_found, :enoent] ->
-              {:cont, acc}
-
-            {:error, {:http_error, 404, _}} ->
-              {:cont, acc}
-
-            {:error, _reason} = error ->
-              {:halt, error}
-          end
-        end)
+        find_legacy_original_photo(originals, bytes, hash)
 
       photo ->
         {:ok, photo}
     end
+  end
+
+  defp find_legacy_original_photo(originals, bytes, hash) do
+    originals
+    |> where([p], is_nil(p.content_hash) and p.file_size == ^byte_size(bytes))
+    |> order_by([p], asc: p.id)
+    |> Repo.all()
+    |> Enum.reduce_while({:ok, nil}, fn photo, acc ->
+      case Storage.read(photo.storage_key) do
+        {:ok, ^bytes} ->
+          {:halt, Ecto.Changeset.change(photo, content_hash: hash) |> Repo.update()}
+
+        {:ok, _other_bytes} ->
+          {:cont, acc}
+
+        {:error, reason} when reason in [:not_found, :enoent] ->
+          {:cont, acc}
+
+        {:error, {:http_error, 404, _}} ->
+          {:cont, acc}
+
+        {:error, _reason} = error ->
+          {:halt, error}
+      end
+    end)
   end
 
   defp insert_original_photo!(contact, bytes, attrs, hash, opts) do

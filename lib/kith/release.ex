@@ -14,16 +14,12 @@ defmodule Kith.Release do
     for repo <- repos() do
       {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
     end
-  end
 
-  def retire_user_identities do
-    load_app()
-    path = Application.app_dir(@app, "priv/repo/deferred_migrations")
-
+    path = Application.app_dir(@app, "priv/repo/data_migrations")
     {:ok, _, _} =
       Ecto.Migrator.with_repo(
         Kith.Repo,
-        &Ecto.Migrator.run(&1, path, :up, to: 20_261_127_000_001)
+        &Ecto.Migrator.run(&1, path, :up, all: true)
       )
   end
 

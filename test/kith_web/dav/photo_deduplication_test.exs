@@ -13,7 +13,27 @@ defmodule KithWeb.DAV.PhotoDeduplicationTest do
     root = Path.join(System.tmp_dir!(), "kith-dav-photo-#{Ecto.UUID.generate()}")
     Kith.TestEnv.put_env_restoring(:kith, Storage, backend: :local, path: root)
     on_exit(fn -> File.rm_rf!(root) end)
-    %{contact: contact_fixture(account_id)}
+    %{contact: contact_fixture(account_id), storage_root: root}
+  end
+
+  test "repeated PUTs of the same photo store one original", ctx do
+    bytes = AvatarFixtures.image_binary(suffix: ".jpg")
+
+    assert put_photo(ctx, bytes).status == 204
+    assert [original] = Contacts.list_photos(ctx.contact.id)
+
+    for _ <- 1..3 do
+      assert put_photo(ctx, bytes).status == 204
+      assert [stored] = Contacts.list_photos(ctx.contact.id)
+      assert stored.id == original.id
+      assert stored.storage_key == original.storage_key
+    end
+
+    assert Path.wildcard(Path.join(ctx.storage_root, "*/photos/*")) ==
+             [Path.join(ctx.storage_root, original.storage_key)]
+
+    assert Storage.read(original.storage_key) == {:ok, bytes}
+    assert Contacts.avatar_photo?(Contacts.get_contact!(ctx.account_id, ctx.contact.id), original)
   end
 
   test "PUT selects the matching legacy original", ctx do

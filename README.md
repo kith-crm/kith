@@ -151,9 +151,12 @@ The web process needs password login, generic OIDC, or an explicit
 `PASSKEYS_ENABLED=true` declaration for passkey-only installations. Existing
 passkeys remain available. Worker processes do not serve a login page.
 
-Deploy the runtime removal first. Normal release migrations leave
-`user_identities` available to older instances. After every old instance is
-retired, inventory affected accounts with the following read-only query.
+The release migration command applies regular Ecto migrations first, then runs
+every pending migration in `priv/repo/data_migrations`. The data migration drops
+`user_identities` after the runtime no longer reads or writes it. This runs once
+per database through Ecto's migration tracking.
+
+Before upgrading, inventory affected accounts with the following read-only query.
 
 ```sql
 SELECT u.account_id, i.user_id, i.provider, count(*)
@@ -161,10 +164,6 @@ FROM user_identities i JOIN users u ON u.id = i.user_id
 GROUP BY u.account_id, i.user_id, i.provider;
 ```
 
-Have each affected user demonstrate a working password, passkey or linked
-identity at the configured issuer. Legacy registration generated a random
-password, so the existence of a password hash does not establish access.
-Obtain separate deletion authorization and take a recoverable backup before
-running the deferred migration with
-`bin/kith eval "Kith.Release.retire_user_identities()"` in the release.
-The historical creation migration remains in the normal migration directory.
+Back up the database before upgrading. Legacy registration generated a random
+password, so the existence of a password hash does not establish access. The
+historical table creation migration remains in the normal migration directory.
