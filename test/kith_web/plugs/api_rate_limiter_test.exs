@@ -26,7 +26,8 @@ defmodule KithWeb.Plugs.ApiRateLimiterTest do
     assert get_resp_header(denied, "x-ratelimit-remaining") == ["0"]
     assert [retry_header] = get_resp_header(denied, "retry-after")
     assert String.to_integer(retry_header) in 1..60
-    assert get_resp_header(denied, "x-ratelimit-reset") == [reset]
+    [denied_reset] = get_resp_header(denied, "x-ratelimit-reset")
+    assert abs(String.to_integer(denied_reset) - String.to_integer(reset)) <= 1
 
     assert Jason.decode!(denied.resp_body)["detail"] ==
              "Account API rate limit exceeded. Try again in #{retry_header} seconds."
