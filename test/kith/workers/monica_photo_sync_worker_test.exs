@@ -239,6 +239,35 @@ defmodule Kith.Workers.MonicaPhotoSyncWorkerTest do
       assert entry["status"] == "synced"
       assert entry["reason"] == "duplicate"
     end
+
+    test "matches a legacy original by downloaded bytes", %{user: user, account_id: account_id} do
+      import_job = api_import_fixture(account_id, user.id)
+      contact = contact_fixture(account_id, %{first_name: "Legacy"})
+      register_imported_contact!(import_job, contact, 301)
+      {original, bytes} = Kith.AvatarFixtures.stored_photo(contact)
+      assert is_nil(original.content_hash)
+
+      photo =
+        photo_json(
+          id: 301,
+          data_url: "data:image/png;base64,#{Base.encode64(bytes)}",
+          contact: contact_short_json(301, Ecto.UUID.generate(), "Legacy", "Person")
+        )
+
+      Req.Test.stub(@stub_name, fn conn ->
+        Req.Test.json(conn, photos_page_json([photo]))
+      end)
+
+      assert :ok = perform_job(MonicaPhotoSyncWorker, job_args(import_job))
+      assert [stored] = Contacts.list_photos(contact.id)
+      assert stored.id == original.id
+      assert stored.storage_key == original.storage_key
+      assert {:ok, ^bytes} = Kith.Storage.read(stored.storage_key)
+
+      summary = Imports.get_import!(import_job.id).sync_summary
+      assert summary["synced"] == 1
+      assert [%{"status" => "synced", "reason" => "duplicate"}] = summary["photos"]
+    end
   end
 
   describe "perform/1 — incremental progress" do

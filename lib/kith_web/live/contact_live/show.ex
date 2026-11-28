@@ -7,11 +7,11 @@ defmodule KithWeb.ContactLive.Show do
 
   alias Kith.AuditLogs
   alias Kith.Contacts
-  alias Kith.Contacts.Avatar
-  alias Kith.DAV.Store
+  alias Kith.Contacts.Write
   alias Kith.DuplicateDetection
   alias Kith.Repo
   alias Kith.Storage
+  alias KithWeb.ContactUploads
 
   @impl true
   def mount(_params, _session, socket) do
@@ -328,31 +328,14 @@ defmodule KithWeb.ContactLive.Show do
   defp save_avatar_crop(_socket, _crop), do: {:error, :missing_photo}
 
   defp save_uploaded_avatar(contact, path, entry, crop) do
-    key = Storage.generate_key(contact.account_id, "photos", entry.client_name)
-
-    Avatar.with_cleanup(fn ->
-      Store.transaction(contact.account_id, fn ->
-        insert_uploaded_avatar!(contact, path, entry, crop, key)
-      end)
+    Write.transaction(contact.account_id, fn ->
+      with {:ok, photo} <- ContactUploads.save_photo(contact, path, entry, check_quota: true),
+           {:ok, updated} <- Contacts.set_avatar(contact, photo, crop: crop) do
+        updated
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
     end)
-  end
-
-  defp insert_uploaded_avatar!(contact, path, entry, crop, key) do
-    with :ok <- Storage.check_storage_limit(contact.account_id, entry.client_size),
-         {:ok, _} <- Storage.upload(path, key),
-         :ok <- Avatar.stage_created(key),
-         {:ok, photo} <-
-           Contacts.create_photo(contact, %{
-             file_name: entry.client_name,
-             storage_key: key,
-             file_size: entry.client_size,
-             content_type: entry.client_type
-           }),
-         {:ok, updated} <- Contacts.set_avatar(contact, photo, crop: crop) do
-      updated
-    else
-      {:error, reason} -> Repo.rollback(reason)
-    end
   end
 
   defp avatar_crop_result({:ok, contact}, socket) do

@@ -19,7 +19,6 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
   alias Kith.Imports
   alias Kith.Imports.Sources.MonicaApi.HTTP
   alias Kith.Repo
-  alias Kith.Storage
 
   @page_limit 100
   @max_photos_in_summary 500
@@ -182,7 +181,7 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
   defp handle_decode(contact, photo, import_job, summary, uuid) do
     case decode_photo_data(photo) do
       {:ok, binary} ->
-        handle_dedup(contact, photo, binary, import_job, summary, uuid)
+        store_photo(contact, photo, binary, import_job, summary, uuid)
 
       {:error, reason} ->
         Logger.warning("#{@log_prefix} photo #{uuid}: failed (#{reason})")
@@ -198,58 +197,41 @@ defmodule Kith.Workers.MonicaPhotoSyncWorker do
     end
   end
 
-  defp handle_dedup(contact, photo, binary, import_job, summary, uuid) do
-    content_hash = :crypto.hash(:sha256, binary) |> Base.encode16(case: :lower)
-
-    if Contacts.photo_exists_by_hash?(contact.id, content_hash) do
-      Logger.debug(
-        "#{@log_prefix} photo #{uuid}: duplicate hash for contact #{contact.id}, skipping"
-      )
-
-      summary
-      |> record_photo(%{
-        "uuid" => uuid,
-        "contact_id" => contact.id,
-        "status" => "synced",
-        "reason" => "duplicate"
-      })
-      |> bump("synced")
-    else
-      do_upload(contact, photo, binary, content_hash, import_job, summary, uuid)
-    end
-  end
-
-  defp do_upload(contact, photo, binary, content_hash, import_job, summary, uuid) do
-    file_name = photo["original_filename"] || "photo.jpg"
-    key = Storage.generate_key(contact.account_id, "photos", file_name)
-
+  defp store_photo(contact, photo, binary, import_job, summary, uuid) do
     attrs = %{
-      "file_name" => file_name,
-      "storage_key" => key,
-      "file_size" => byte_size(binary),
-      "content_type" => photo["mime_type"] || "image/jpeg",
-      "content_hash" => content_hash
+      file_name: photo["original_filename"] || "photo.jpg",
+      content_type: photo["mime_type"] || "image/jpeg"
     }
 
-    with :ok <- Storage.check_storage_limit(contact.account_id, byte_size(binary), fresh: true),
-         {:ok, _} <- Storage.upload_binary(binary, key),
-         {:ok, photo_record} <- Contacts.create_photo(contact, attrs) do
-      maybe_record_entity(import_job, uuid, photo_record.id)
-      maybe_set_avatar(contact, photo_record)
+    case Contacts.store_photo(contact, binary, attrs, check_quota: true) do
+      {:ok, {:existing, _photo}} ->
+        Logger.debug(
+          "#{@log_prefix} photo #{uuid}: duplicate for contact #{contact.id}, skipping"
+        )
 
-      Logger.debug(
-        "#{@log_prefix} photo #{uuid} → contact #{contact.id}: synced " <>
-          "(hash #{String.slice(content_hash, 0, 8)})"
-      )
+        summary
+        |> record_photo(%{
+          "uuid" => uuid,
+          "contact_id" => contact.id,
+          "status" => "synced",
+          "reason" => "duplicate"
+        })
+        |> bump("synced")
 
-      summary
-      |> record_photo(%{
-        "uuid" => uuid,
-        "contact_id" => contact.id,
-        "status" => "synced"
-      })
-      |> bump("synced")
-    else
+      {:ok, {:created, photo_record}} ->
+        maybe_record_entity(import_job, uuid, photo_record.id)
+        maybe_set_avatar(contact, photo_record)
+
+        Logger.debug("#{@log_prefix} photo #{uuid} → contact #{contact.id}: synced")
+
+        summary
+        |> record_photo(%{
+          "uuid" => uuid,
+          "contact_id" => contact.id,
+          "status" => "synced"
+        })
+        |> bump("synced")
+
       {:error, reason} ->
         reason_str = inspect(reason)
         Logger.warning("#{@log_prefix} photo #{uuid}: failed (#{reason_str})")

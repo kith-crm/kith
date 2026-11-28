@@ -3,9 +3,12 @@ defmodule KithWeb.ContactUploads do
 
   alias Kith.{Contacts, Storage}
 
-  def save(contact, path, entry, kind) when kind in [:photo, :document] do
-    type = if kind == :photo, do: "photos", else: "documents"
-    key = Storage.generate_key(contact.account_id, type, entry.client_name)
+  def save(contact, path, entry, :photo) do
+    save_photo(contact, path, entry, [])
+  end
+
+  def save(contact, path, entry, :document) do
+    key = Storage.generate_key(contact.account_id, "documents", entry.client_name)
 
     case Storage.upload(path, key) do
       {:ok, storage_key} ->
@@ -16,13 +19,7 @@ defmodule KithWeb.ContactUploads do
           content_type: entry.client_type
         }
 
-        result =
-          case kind do
-            :photo -> Contacts.create_photo(contact, attrs)
-            :document -> Contacts.create_document(contact, attrs)
-          end
-
-        case result do
+        case Contacts.create_document(contact, attrs) do
           {:ok, record} ->
             {:ok, record}
 
@@ -33,6 +30,15 @@ defmodule KithWeb.ContactUploads do
 
       {:error, _} = error ->
         error
+    end
+  end
+
+  def save_photo(contact, path, entry, opts) do
+    attrs = %{file_name: entry.client_name, content_type: entry.client_type}
+
+    with {:ok, bytes} <- File.read(path),
+         {:ok, {_disposition, photo}} <- Contacts.store_photo(contact, bytes, attrs, opts) do
+      {:ok, photo}
     end
   end
 end

@@ -47,7 +47,7 @@ services:
     # No exposed ports — internal network only
 
   # ---------------------------------------------------------------------------
-  # Migrate — one-shot service that runs Ecto migrations then exits
+  # Migrate — one-shot service that runs Ecto migrations and data migrations
   # ---------------------------------------------------------------------------
   migrate:
     image: kith:latest
@@ -68,6 +68,15 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      STORAGE_PATH: /app/uploads
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-}
+      AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
+    volumes:
+      - uploads:/app/uploads:ro
     restart: "no"
 
   # ---------------------------------------------------------------------------
@@ -116,6 +125,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-}
       # Storage (S3 optional — if set, uploads volume is unused)
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_REGION: ${AWS_REGION:-us-east-1}
@@ -193,6 +203,7 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       MAIL_FROM: ${MAIL_FROM:-}
       # Storage
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_REGION: ${AWS_REGION:-us-east-1}

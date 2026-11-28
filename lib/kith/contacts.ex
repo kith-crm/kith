@@ -909,6 +909,98 @@ defmodule Kith.Contacts do
     Photo |> scope_to_account(account_id) |> Repo.get!(id)
   end
 
+  @doc "Stores source bytes or reuses the matching original for this contact."
+  def store_photo(%Contact{} = contact, bytes, attrs, opts \\ []) when is_binary(bytes) do
+    hash = Avatar.hash(bytes)
+
+    Write.transaction(contact.account_id, fn ->
+      case find_original_photo(contact, bytes, hash) do
+        {:ok, %Photo{} = photo} -> reuse_original_photo!(photo, attrs, byte_size(bytes))
+        {:ok, nil} -> {:created, insert_original_photo!(contact, bytes, attrs, hash, opts)}
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp reuse_original_photo!(photo, attrs, size) do
+    changeset =
+      Photo.changeset(
+        %Photo{storage_key: photo.storage_key, file_size: size},
+        Map.take(attrs, [:file_name, :content_type])
+      )
+
+    case Ecto.Changeset.apply_action(changeset, :insert) do
+      {:ok, _} -> {:existing, photo}
+      {:error, changeset} -> Repo.rollback(changeset)
+    end
+  end
+
+  defp find_original_photo(contact, bytes, hash) do
+    originals =
+      from p in Photo,
+        where: p.account_id == ^contact.account_id and p.contact_id == ^contact.id
+
+    case Repo.get_by(originals, content_hash: hash) do
+      nil ->
+        find_legacy_original_photo(originals, bytes, hash)
+
+      photo ->
+        {:ok, photo}
+    end
+  end
+
+  defp find_legacy_original_photo(originals, bytes, hash) do
+    originals
+    |> where([p], is_nil(p.content_hash) and p.file_size == ^byte_size(bytes))
+    |> order_by([p], asc: p.id)
+    |> Repo.all()
+    |> Enum.reduce_while({:ok, nil}, fn photo, acc ->
+      case Storage.read(photo.storage_key) do
+        {:ok, ^bytes} ->
+          {:halt, Ecto.Changeset.change(photo, content_hash: hash) |> Repo.update()}
+
+        {:ok, _other_bytes} ->
+          {:cont, acc}
+
+        {:error, reason} when reason in [:not_found, :enoent] ->
+          {:cont, acc}
+
+        {:error, {:http_error, 404, _}} ->
+          {:cont, acc}
+
+        {:error, _reason} = error ->
+          {:halt, error}
+      end
+    end)
+  end
+
+  defp insert_original_photo!(contact, bytes, attrs, hash, opts) do
+    size = byte_size(bytes)
+    key = Storage.generate_key(contact.account_id, "photos", attrs.file_name)
+
+    with :ok <- check_photo_quota(contact.account_id, size, opts),
+         :ok <- Avatar.stage_created(key),
+         {:ok, _} <- Storage.upload_binary(bytes, key),
+         {:ok, photo} <-
+           create_photo(contact, %{
+             file_name: attrs.file_name,
+             content_type: attrs.content_type,
+             storage_key: key,
+             file_size: size,
+             content_hash: hash
+           }) do
+      photo
+    else
+      {:error, reason} -> Repo.rollback(reason)
+    end
+  end
+
+  defp check_photo_quota(account_id, size, opts) do
+    if Keyword.get(opts, :check_quota, false),
+      do: Storage.check_storage_limit(account_id, size, fresh: true),
+      else: :ok
+  end
+
   def create_photo(%Contact{} = contact, attrs) do
     Write.run(contact.account_id, [contact.id], fn ->
       %Photo{contact_id: contact.id, account_id: contact.account_id}
@@ -924,14 +1016,6 @@ defmodule Kith.Contacts do
   end
 
   defp invalidate_photo_usage(result, _account_id), do: result
-
-  def photo_exists_by_hash?(contact_id, content_hash) when is_binary(content_hash) do
-    Photo
-    |> where([p], p.contact_id == ^contact_id and p.content_hash == ^content_hash)
-    |> Repo.exists?()
-  end
-
-  def photo_exists_by_hash?(_contact_id, _content_hash), do: false
 
   def delete_photo(%Photo{} = photo) do
     Write.run(photo.account_id, [photo.contact_id], fn ->
@@ -1730,7 +1814,7 @@ defmodule Kith.Contacts do
     end)
 
     if photo = Map.get(parsed, :photo) do
-      maybe_import_vcard_photo(contact, account_id, photo)
+      maybe_import_vcard_photo(contact, photo)
     end
 
     Store.touch(account_id, [contact.id])
@@ -1827,7 +1911,7 @@ defmodule Kith.Contacts do
       end
 
       # PHOTO replaces selection, never the private source photo collection.
-      replace_dav_avatar(contact, account_id, Map.get(nested_data, :photo))
+      replace_dav_avatar(contact, Map.get(nested_data, :photo))
 
       if raw = Map.get(nested_data, :dav_document) do
         current = Repo.reload!(contact)
@@ -1847,11 +1931,11 @@ defmodule Kith.Contacts do
     |> Invalidation.after_commit({:storage_usage, account_id})
   end
 
-  defp replace_dav_avatar(contact, account_id, photo) do
+  defp replace_dav_avatar(contact, photo) do
     case photo do
       %{url: _} -> clear_avatar(contact)
       nil -> if contact.avatar, do: clear_avatar(contact), else: :ok
-      photo -> maybe_import_vcard_photo(contact, account_id, photo)
+      photo -> maybe_import_vcard_photo(contact, photo)
     end
   end
 
@@ -1917,9 +2001,9 @@ defmodule Kith.Contacts do
 
   # ── Photo import (PHOTO) ───────────────────────────────────────────
 
-  defp maybe_import_vcard_photo(_contact, _account_id, nil), do: :ok
+  defp maybe_import_vcard_photo(_contact, nil), do: :ok
 
-  defp maybe_import_vcard_photo(contact, account_id, %{
+  defp maybe_import_vcard_photo(contact, %{
          data: b64_data,
          content_type: ct,
          encoding: :base64
@@ -1930,58 +2014,20 @@ defmodule Kith.Contacts do
          true <- byte_size(binary) <= max_bytes do
       if Avatar.current_bytes?(contact, binary),
         do: :ok,
-        else: import_avatar_bytes(contact, account_id, binary, ct)
+        else: import_avatar_bytes(contact, binary, ct)
     else
       _ -> Repo.rollback(:invalid_photo)
     end
   end
 
-  defp maybe_import_vcard_photo(_contact, _account_id, _photo),
+  defp maybe_import_vcard_photo(_contact, _photo),
     do: Repo.rollback(:unsupported_photo)
 
-  defp import_avatar_bytes(contact, account_id, binary, ct) do
-    hash = Avatar.hash(binary)
+  defp import_avatar_bytes(contact, binary, ct) do
+    attrs = %{file_name: "carddav-photo#{photo_extension(ct)}", content_type: ct}
 
-    photo =
-      Repo.one(
-        from p in Photo,
-          where:
-            p.contact_id == ^contact.id and p.account_id == ^account_id and
-              p.content_hash == ^hash
-      )
-
-    if photo do
-      case set_avatar(contact, photo) do
-        {:ok, _} -> :ok
-        {:error, reason} -> Repo.rollback(reason)
-      end
-    else
-      upload_and_set_avatar(contact, account_id, binary, ct, hash)
-    end
-  end
-
-  defp upload_and_set_avatar(contact, account_id, binary, ct, hash) do
-    # Validate before creating either an original photo row or a stored object.
-    case AvatarProcessor.prepare(binary) do
-      {:ok, _} -> :ok
-      {:error, reason} -> Repo.rollback(reason)
-    end
-
-    ext = photo_extension(ct)
-    key = Storage.generate_key(account_id, "photos", "carddav-import#{ext}")
-
-    with :ok <- Storage.check_storage_limit(account_id, byte_size(binary), fresh: true),
-         {:ok, _} <- Storage.upload_binary(binary, key),
-         :ok <- Avatar.stage_created(key),
-         {:ok, photo} <-
-           create_photo(contact, %{
-             "file_name" => "carddav-photo#{ext}",
-             "storage_key" => key,
-             "file_size" => byte_size(binary),
-             "content_type" => ct,
-             "content_hash" => hash,
-             "account_id" => account_id
-           }),
+    with {:ok, _} <- AvatarProcessor.prepare(binary),
+         {:ok, {_disposition, photo}} <- store_photo(contact, binary, attrs, check_quota: true),
          {:ok, _} <- set_avatar(contact, photo) do
       :ok
     else
