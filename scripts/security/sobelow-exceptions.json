@@ -306,7 +306,7 @@
       },
       {
         "file": "mix.lock",
-        "source_sha256": "d3f48b705f946c7c6ad2133c74488fc8bc1c39f564b663e504105edfe3b3bcd4"
+        "source_sha256": "593730b4ef3a059e4a6e0ed3a4a8aaa056ac88f3bff011722d30efe69287a63e"
       }
     ]
   },
@@ -327,7 +327,7 @@
       },
       {
         "file": "mix.lock",
-        "source_sha256": "d3f48b705f946c7c6ad2133c74488fc8bc1c39f564b663e504105edfe3b3bcd4"
+        "source_sha256": "593730b4ef3a059e4a6e0ed3a4a8aaa056ac88f3bff011722d30efe69287a63e"
       }
     ]
   },
@@ -352,7 +352,7 @@
       },
       {
         "file": "mix.lock",
-        "source_sha256": "d3f48b705f946c7c6ad2133c74488fc8bc1c39f564b663e504105edfe3b3bcd4"
+        "source_sha256": "593730b4ef3a059e4a6e0ed3a4a8aaa056ac88f3bff011722d30efe69287a63e"
       }
     ]
   },
@@ -377,7 +377,7 @@
       },
       {
         "file": "mix.lock",
-        "source_sha256": "d3f48b705f946c7c6ad2133c74488fc8bc1c39f564b663e504105edfe3b3bcd4"
+        "source_sha256": "593730b4ef3a059e4a6e0ed3a4a8aaa056ac88f3bff011722d30efe69287a63e"
       }
     ]
   },
@@ -400,6 +400,28 @@
     "source_sha256": "17cefa6aa86258b61761bf44723198fbff7d47572efb34691d876fe7fd7c8e8d",
     "reason": "MIME is one of two literals; HTML is static and JSON encoded from constants plus integer retry duration. Request text never reaches the body.",
     "evidence": "test/kith_web/plugs/rate_limiter_test.exs",
+    "owner": "kith-crm maintainers",
+    "review_by": "2026-11-29"
+  },
+  {
+    "line": 39,
+    "type": "Traversal.FileModule: Directory Traversal in `File.read`",
+    "file": "lib/kith_web/contact_uploads.ex",
+    "variable": "path",
+    "source_sha256": "3386fd28a239d79f952f1503506dda5ec4430fdc85fac81fdfc23c21e05bb38b",
+    "reason": "Path is supplied by Phoenix consume_uploaded_entries metadata for a validated upload; the caller does not accept a client filesystem path.",
+    "evidence": "test/kith_web/live/contact_live/upload_filename_test.exs; test/kith_web/live/contact_live/avatar_crop_test.exs",
+    "owner": "kith-crm maintainers",
+    "review_by": "2026-11-29"
+  },
+  {
+    "line": 55,
+    "type": "Traversal.FileModule: Directory Traversal in `File.read`",
+    "file": "lib/kith_web/controllers/api/photo_controller.ex",
+    "variable": "upload",
+    "source_sha256": "5fea4cefcfea5af26550271ec3bad46ea885cdc3573fd29587f81a88c3d2f6e2",
+    "reason": "The upload is pattern matched as %Plug.Upload{} from Plug multipart parsing; Plug creates and owns its temporary path, and JSON path maps do not match this clause.",
+    "evidence": "test/kith_web/controllers/api/photo_controller_test.exs",
     "owner": "kith-crm maintainers",
     "review_by": "2026-11-29"
   }

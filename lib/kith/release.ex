@@ -16,6 +16,7 @@ defmodule Kith.Release do
     end
 
     path = Application.app_dir(@app, "priv/repo/data_migrations")
+
     {:ok, _, _} =
       Ecto.Migrator.with_repo(
         Kith.Repo,
