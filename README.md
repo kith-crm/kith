@@ -145,6 +145,18 @@ See `.env.example` for the full list. Key variables:
 | `MAILER_ADAPTER` | No | `smtp`, `mailgun`, `ses`, or `postmark` |
 | `IMMICH_ENABLED` | No | Enable Immich photo sync integration |
 
+### Deduplicating existing contact photos
+
+The release migration consolidates gallery rows for byte-identical originals on
+the same contact. It keeps the selected avatar's row when present and preserves
+stored files. Back up the database before upgrading because a migration rollback
+cannot restore the removed rows.
+
+The migration process needs read access to the same storage as the app. The
+production Compose file mounts the uploads volume read-only for this process.
+For S3, set `STORAGE_BACKEND=s3` and configure the bucket and credentials for
+the release.
+
 ### Retiring legacy social login
 
 The web process needs password login, generic OIDC, or an explicit
